@@ -455,3 +455,14 @@ export function roughnessFromArm(src: PatternSource): PatternSource {
   ctx.putImageData(data, 0, 0)
   return { image: c, flipped: src.flipped }
 }
+
+/**
+ * Texture offset (in periods) that moves a laid pattern by (offsetX, offsetY) mm along the surface
+ * axes. three applies `offset` after `rotation`, so the shift has to be rotated as well, otherwise a
+ * diagonal or herringbone layout would slide along the tile edges instead of along the wall/floor.
+ */
+export function patternOffset(offsetX: number, offsetY: number, rotation: number, periodMm: [number, number]): [number, number] {
+  const c = Math.cos(rotation)
+  const s = Math.sin(rotation)
+  return [-(c * offsetX + s * offsetY) / periodMm[0], -(c * offsetY - s * offsetX) / periodMm[1]]
+}

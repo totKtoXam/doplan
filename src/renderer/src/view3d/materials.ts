@@ -23,6 +23,7 @@ import {
   createPatternCanvases,
   layoutPattern,
   paintPattern,
+  patternOffset,
   roughnessFromArm,
 } from './patterns'
 import { type SharedImage, type TexImage, TextureStore, applyTextureParams, makeTexture } from './textures'
@@ -237,8 +238,8 @@ export function createMaterialLibrary(ctx: EngineContext): MaterialLibrary {
       const mk = (canvas: HTMLCanvasElement, srgb: boolean): THREE.CanvasTexture => {
         const t = new THREE.CanvasTexture(canvas)
         applyTextureParams(t, { srgb, repeat, rotation, anisotropy })
-        // layout origin shift (mm along the surface) → texture offset in periods
-        if (pattern.offsetX || pattern.offsetY) t.offset.set(-(pattern.offsetX ?? 0) / layout.periodMm[0], -(pattern.offsetY ?? 0) / layout.periodMm[1])
+        // layout origin shift (mm along the wall/floor) → texture offset in periods
+        if (pattern.offsetX || pattern.offsetY) t.offset.set(...patternOffset(pattern.offsetX ?? 0, pattern.offsetY ?? 0, rotation, layout.periodMm))
         entry.textures.push(t)
         return t
       }

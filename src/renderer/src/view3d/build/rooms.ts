@@ -32,9 +32,21 @@ export interface RoomBuild {
 const UP = new THREE.Vector3(0, 1, 0)
 const DOWN = new THREE.Vector3(0, -1, 0)
 
-function flat(gb: GeoBuilder, poly: Vec2[], holes: Vec2[][], y: number, normal: THREE.Vector3): void {
+/** UV origin of a room's floor and ceiling: the corner of its bounding box, so that a laying pattern
+ *  (and its «Начало раскладки» shift) starts at the room corner, not at the plan origin */
+function roomUvOrigin(poly: Vec2[]): Vec2 {
+  let x = Infinity
+  let y = Infinity
+  for (const p of poly) {
+    x = Math.min(x, p.x)
+    y = Math.min(y, p.y)
+  }
+  return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : { x: 0, y: 0 }
+}
+
+function flat(gb: GeoBuilder, poly: Vec2[], holes: Vec2[][], y: number, normal: THREE.Vector3, origin: Vec2): void {
   const p3 = (p: Vec2): THREE.Vector3 => new THREE.Vector3(p.x * MM, y, p.y * MM)
-  const uv = (p: Vec2): P2 => [p.x * MM, p.y * MM]
+  const uv = (p: Vec2): P2 => [(p.x - origin.x) * MM, (p.y - origin.y) * MM]
   gb.addPolygon(
     poly.map(p3),
     poly.map(uv),
@@ -123,9 +135,11 @@ export function buildRoom(input: RoomInput, lib: MaterialLibraryEx): RoomBuild {
   let ceilingY = H
   if (poly.length < 3) return { group, ceiling, floor: null, ceilingY }
 
+  const origin = roomUvOrigin(poly)
+
   // ── floor ──
   const fb = new GeoBuilder()
-  flat(fb, poly, room.holes, 0, UP)
+  flat(fb, poly, room.holes, 0, UP, origin)
   const floor = fb.mesh(lib.get(rec.floor), ref, { surface: 'floor' })
   if (floor) group.add(floor)
 
@@ -145,13 +159,14 @@ export function buildRoom(input: RoomInput, lib: MaterialLibraryEx): RoomBuild {
     if (inner && inner.length >= 3) {
       const gb = new GeoBuilder()
       // lowered border ring, raised centre panel and the riser between them
-      flat(gb, poly, [inner], H - drop, DOWN)
+      flat(gb, poly, [inner], H - drop, DOWN, origin)
       flat(
         gb,
         inner,
         room.holes.filter((h) => h.length >= 3 && pointInPoly(h[0].x, h[0].y, inner)),
         H,
         DOWN,
+        origin,
       )
       riser(gb, inner, H - drop, H)
       addCeil(gb, baseMat)
@@ -178,7 +193,7 @@ export function buildRoom(input: RoomInput, lib: MaterialLibraryEx): RoomBuild {
   }
   if (!done) {
     const gb = new GeoBuilder()
-    flat(gb, poly, room.holes, H, DOWN)
+    flat(gb, poly, room.holes, H, DOWN, origin)
     addCeil(gb, baseMat)
     if (spec.kind === 'coffered' || spec.kind === 'beams') {
       let minX = Infinity

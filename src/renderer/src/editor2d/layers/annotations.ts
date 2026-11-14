@@ -3,7 +3,7 @@
  * automatic inner dimensions, manual dimensions and text labels. Text never scales with the
  * wall geometry and is always upright.
  */
-import { dimLabel, type EffectiveProvenance, itemClearances, itemGaps, type ItemGap, type Clearance, ROOM_TYPE_NAMES, roomEdgeRuns, roomMeasureStatus, runProvenance } from '@core'
+import { sizedCatalogName, dimLabel, type EffectiveProvenance, itemClearances, itemGaps, type ItemGap, type Clearance, ROOM_TYPE_NAMES, roomEdgeRuns, roomMeasureStatus, runProvenance } from '@core'
 import type { DerivedPlan, DerivedRoom, Doc, Item, Light, Vec2 } from '@core/types'
 import { t } from '@/i18n'
 import '@/ui/accuracyI18n'
@@ -184,7 +184,7 @@ export class AnnotationsLayer {
         }
         if (bw < 64 || bh < 26 || scale < 0.045) continue
         const asset = ui.getAsset(it.assetId)
-        let name = it.name || (lang === 'ru' ? asset?.nameRu || asset?.name : asset?.name || asset?.nameRu) || ''
+        let name = it.name || sizedCatalogName((lang === 'ru' ? asset?.nameRu || asset?.name : asset?.name || asset?.nameRu) || '', asset?.size.w ?? 0, it.size.w)
         const sizes = st.showItemSizes && bh >= 40 ? `${formatLen(it.size.w, st.units)} × ${formatLen(it.size.d, st.units)}` : ''
         if (!name && !sizes) continue
         const maxChars = Math.floor(bw / 6.4)

@@ -1,4 +1,5 @@
-import { CircleDot, Image, Ruler, Type } from 'lucide-react'
+import { useState } from 'react'
+import { CircleDot, Image, Ruler, Scan, Type } from 'lucide-react'
 import type { Id, Label, Underlay } from '@core/types'
 import { moveNode } from '@core'
 import { useDoc } from '@/store/document'
@@ -6,6 +7,7 @@ import { uiStore } from '@/store/ui'
 import { useT } from '@/i18n'
 import { Button, Input, NumberInput, Row, Section, Slider, Toggle, formatLength } from '@/ui/kit'
 import { tx } from '../common/catalog'
+import { PerspectiveDialog } from '../PerspectiveDialog'
 import { Hint, InspectorHeader, Pair, Stat } from './shared'
 
 export function NodeInspector({ id }: { id: Id }) {
@@ -85,6 +87,7 @@ export function LabelInspector({ id }: { id: Id }) {
 export function UnderlayInspector({ id }: { id: Id }) {
   const t = useT()
   const u = useDoc((s) => s.doc.underlays[id])
+  const [perspectiveOpen, setPerspectiveOpen] = useState(false)
   if (!u) return null
   const set = (label: string, fn: (x: Underlay) => void, merge?: string) =>
     tx(label, (d) => {
@@ -114,8 +117,13 @@ export function UnderlayInspector({ id }: { id: Id }) {
         <Button size="sm" onClick={() => uiStore.getState().setTool('calibrate')} disabled={u.locked}>
           {t('Калибровать по двум точкам')}
         </Button>
+        <Button size="sm" icon={<Scan className="size-3.5" />} onClick={() => setPerspectiveOpen(true)} disabled={u.locked}>
+          {t('Выровнять перспективу')}
+        </Button>
         <Hint>{t('Калибровка: щёлкните две точки известного размера на подложке и введите расстояние в мм.')}</Hint>
+        <Hint>{t('Фото снято под углом? «Выровнять перспективу»: отметьте 4 угла прямоугольника известного размера.')}</Hint>
       </Section>
+      {perspectiveOpen && <PerspectiveDialog open onClose={() => setPerspectiveOpen(false)} underlayId={id} />}
     </div>
   )
 }

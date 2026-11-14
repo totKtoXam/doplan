@@ -1,9 +1,10 @@
-import { Grid3x3, Magnet, Ruler, Armchair, Hash } from 'lucide-react'
+import { Grid3x3, Magnet, Ruler, Armchair, Hash, Info, ListChecks } from 'lucide-react'
 import { useEffect } from 'react'
 import type { DocSettings, OpeningKind, WallKind } from '@core/types'
 import { useT } from '@/i18n'
 import { docStore, useDoc } from '@/store/document'
 import { uiStore, useUi } from '@/store/ui'
+import { accuracyStore, useAccuracy } from '@/store/accuracy'
 import { MiniNumber, MiniSelect, MiniToggle, Sep } from './primitives'
 import { toolDef } from './ToolRail'
 
@@ -65,6 +66,8 @@ export function ToolOptionsBar() {
   const getAsset = useUi((s) => s.getAsset)
   const lang = useUi((s) => s.lang)
   const settings = useDoc((s) => s.doc.settings)
+  const legend = useAccuracy((s) => s.legend)
+  const checklist = useAccuracy((s) => s.checklist)
   // project-local materials/assets may change
   useDoc((s) => s.doc.materials)
 
@@ -163,6 +166,9 @@ export function ToolOptionsBar() {
       />
       <Sep />
       <MiniToggle label={<Ruler size={12} />} title={t('Размеры')} checked={settings.showDimensions} onChange={(v) => setSetting('showDimensions', v)} />
+      <MiniToggle label={t('W×D')} title={t('Размеры мебели')} checked={settings.showItemSizes} onChange={(v) => setSetting('showItemSizes', v)} />
+      <MiniToggle label={<Info size={12} />} title={t('Легенда: откуда размеры')} checked={legend} onChange={(v) => accuracyStore.getState().setLegend(v)} />
+      <MiniToggle label={<ListChecks size={12} />} title={t('Чек-лист обмера')} checked={checklist} onChange={(v) => accuracyStore.getState().setChecklist(v)} />
       <MiniToggle label={<Hash size={12} />} title={t('Площади комнат')} checked={settings.showAreas} onChange={(v) => setSetting('showAreas', v)} />
       <MiniToggle label={<Armchair size={12} />} title={t('Мебель на плане')} checked={settings.showFurniture2d} onChange={(v) => setSetting('showFurniture2d', v)} />
       <MiniSelect

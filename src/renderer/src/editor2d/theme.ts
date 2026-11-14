@@ -35,6 +35,8 @@ export interface Palette {
   hover: number
   danger: number
   ok: number
+  /** amber: needs checking (stale / unmeasured dimensions) */
+  warn: number
   guide: number
   badgeBg: number
   badgeText: number
@@ -80,6 +82,7 @@ export const DARK: Palette = {
   hover: 0x8fc2ff,
   danger: 0xff5d5d,
   ok: 0x4cd08a,
+  warn: 0xffb547,
   guide: 0xff4fd8,
   badgeBg: 0x10131a,
   badgeText: 0xffffff,
@@ -125,6 +128,7 @@ export const LIGHT: Palette = {
   hover: 0x5a9df0,
   danger: 0xe03131,
   ok: 0x1f9d57,
+  warn: 0xc76a00,
   guide: 0xd61fb0,
   badgeBg: 0x1d2129,
   badgeText: 0xffffff,

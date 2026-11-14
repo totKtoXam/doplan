@@ -2,6 +2,7 @@ import type { LucideIcon } from 'lucide-react'
 import {
   AppWindow,
   BrickWall,
+  ClipboardCheck,
   CopyPlus,
   DoorOpen,
   Hand,
@@ -46,6 +47,7 @@ export const TOOLS: (ToolDef | 'sep')[] = [
   'sep',
   { id: 'dimension', icon: RulerDimensionLine, label: 'Размер', hint: 'Укажите две точки размерной линии, затем её отступ' },
   { id: 'measure', icon: Ruler, label: 'Рулетка', key: 'M', hint: 'Укажите две точки, чтобы измерить расстояние' },
+  { id: 'survey', icon: ClipboardCheck, label: 'Обмер', hint: 'Щёлкните размер комнаты и введите длину, замеренную рулеткой' },
   { id: 'label', icon: Type, label: 'Надпись', key: 'T', hint: 'Кликните, чтобы добавить надпись' },
   'sep',
   { id: 'paint', icon: Paintbrush, label: 'Покраска', key: 'B', hint: 'Кликните по полу, стене или предмету, чтобы применить материал' },

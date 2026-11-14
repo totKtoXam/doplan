@@ -3,59 +3,58 @@
  * automatic inner dimensions, manual dimensions and text labels. Text never scales with the
  * wall geometry and is always upright.
  */
-import { ROOM_TYPE_NAMES } from '@core'
-import type { DerivedRoom, Light, Vec2 } from '@core/types'
+import { dimLabel, type EffectiveProvenance, itemClearances, type Clearance, ROOM_TYPE_NAMES, roomEdgeRuns, roomMeasureStatus, runProvenance } from '@core'
+import type { DerivedPlan, DerivedRoom, Doc, Item, Light, Vec2 } from '@core/types'
+import { t } from '@/i18n'
+import '@/ui/accuracyI18n'
+import { accuracyStore } from '@/store/accuracy'
 import type { EditorCtx } from '../context'
-import { type BBox, bboxOf, bboxOverlap, DEG, dist, pointInPolygon, rectCorners } from '../geom'
+import { type BBox, bboxOf, bboxOverlap, DEG, dist, rectCorners } from '../geom'
 import { formatArea, formatLen } from '../format'
 import type { Painter } from '../painter'
+import type { Palette } from '../theme'
 import { dimensionNormal, itemCorners } from '../shapes'
 
 interface AutoDim {
+  /** run key (core/provenance) */
+  key: string
+  roomId: string
   a: Vec2
   b: Vec2
   /** unit normal pointing into the room */
   n: Vec2
   length: number
   box: BBox
+  prov: EffectiveProvenance
 }
 
-function buildAutoDims(rooms: readonly DerivedRoom[]): AutoDim[] {
+function buildAutoDims(doc: Pick<Doc, 'walls'>, rooms: readonly DerivedRoom[]): AutoDim[] {
   const out: AutoDim[] = []
   for (const room of rooms) {
-    // merge consecutive collinear edges (a wall face split by a T-junction on its other side)
-    const runs: { a: Vec2; b: Vec2 }[] = []
-    for (const e of room.edges) {
-      const last = runs[runs.length - 1]
-      if (last && dist(last.b, e.from) < 1) {
-        const d1x = last.b.x - last.a.x
-        const d1y = last.b.y - last.a.y
-        const d2x = e.to.x - e.from.x
-        const d2y = e.to.y - e.from.y
-        const l1 = Math.hypot(d1x, d1y)
-        const l2 = Math.hypot(d2x, d2y)
-        if (l1 > 1 && l2 > 1 && Math.abs(d1x * d2y - d1y * d2x) / (l1 * l2) < 0.01 && d1x * d2x + d1y * d2y > 0) {
-          last.b = e.to
-          continue
-        }
-      }
-      runs.push({ a: e.from, b: e.to })
-    }
-    for (const r of runs) {
-      const dx = r.b.x - r.a.x
-      const dy = r.b.y - r.a.y
-      const l = Math.hypot(dx, dy)
-      if (l < 150) continue
-      let n = { x: -dy / l, y: dx / l }
-      const m = { x: (r.a.x + r.b.x) / 2, y: (r.a.y + r.b.y) / 2 }
-      const probe = { x: m.x + n.x * 8, y: m.y + n.y * 8 }
-      const inside = pointInPolygon(probe, room.polygon) && !room.holes.some((h) => pointInPolygon(probe, h))
-      if (!inside) n = { x: -n.x, y: -n.y }
-      out.push({ a: r.a, b: r.b, n, length: l, box: bboxOf([r.a, r.b]) })
+    for (const r of roomEdgeRuns(room)) {
+      if (r.length < 150) continue
+      out.push({ key: r.key, roomId: room.roomId, a: r.a, b: r.b, n: r.n, length: r.length, box: bboxOf([r.a, r.b]), prov: runProvenance(doc, r) })
     }
   }
   return out
 }
+
+/** colour / style of an automatic dimension by where its number comes from */
+export function provenanceStyle(pal: Palette, p: Pick<EffectiveProvenance, 'source' | 'stale'>): { color: number; italic: boolean; alpha: number } {
+  if (p.stale) return { color: pal.warn, italic: false, alpha: 1 }
+  switch (p.source) {
+    case 'measured':
+      return { color: pal.ok, italic: false, alpha: 1 }
+    case 'estimated':
+      return { color: pal.textMuted, italic: true, alpha: 0.85 }
+    case 'derived':
+      return { color: pal.dimAuto, italic: true, alpha: 1 }
+    default:
+      return { color: pal.dimAuto, italic: false, alpha: 1 }
+  }
+}
+
+const CLEARANCE_WARNING = 'размер стены не замерен: проверьте рулеткой (±1 см)'
 
 const roomBoxes = new WeakMap<DerivedRoom, BBox>()
 
@@ -70,7 +69,13 @@ function roomBox(r: DerivedRoom): BBox {
 
 export class AnnotationsLayer {
   private dimSource: unknown = null
+  private dimWalls: unknown = null
   private autoDims: AutoDim[] = []
+  private statusRooms: unknown = null
+  private statusWalls: unknown = null
+  private fullRooms = new Set<string>()
+  private clrKey: unknown[] = []
+  private clr: Clearance[] = []
 
   draw(ctx: EditorCtx, p: Painter): void {
     const doc = ctx.doc()
@@ -84,23 +89,40 @@ export class AnnotationsLayer {
     const view = cam.visibleBounds(40)
     const lang = ui.lang
 
-    // ── automatic inner dimensions ──
-    if (st.showDimensions) {
-      if (this.dimSource !== derived.rooms) {
+    const acc = accuracyStore.getState()
+    const surveying = ui.tool === 'survey'
+    // ── automatic inner dimensions (styled by provenance) ──
+    if (st.showDimensions || surveying) {
+      if (this.dimSource !== derived.rooms || this.dimWalls !== doc.walls) {
         this.dimSource = derived.rooms
-        this.autoDims = buildAutoDims(derived.rooms)
+        this.dimWalls = doc.walls
+        this.autoDims = buildAutoDims(doc, derived.rooms)
       }
-      let i = 0
+      const hot = acc.target?.key ?? null
       for (const d of this.autoDims) {
-        i++
-        if (d.length * scale < 46) continue
+        const isHot = d.key === hot || d.key === acc.hoverKey
+        if (!isHot && d.length * scale < 46) continue
         if (!bboxOverlap(d.box, view)) continue
-        p.dimension(`ad:${i}`, d.a, d.b, d.n, 0, 15, formatLen(d.length, st.units), {
-          color: pal.dimAuto,
-          size: 10.5,
+        const s = provenanceStyle(pal, d.prov)
+        p.dimension(`ad:${d.roomId}:${d.key}`, d.a, d.b, d.n, 0, 15, dimLabel(formatLen(d.length, st.units), d.prov), {
+          color: isHot ? pal.accent : s.color,
+          alpha: isHot ? 1 : s.alpha,
+          size: isHot ? 12 : 10.5,
+          width: isHot ? 2 : 1,
+          bold: isHot,
+          italic: !isHot && s.italic,
           extension: false,
         })
       }
+    }
+    if (acc.legend) this.drawLegend(p)
+
+    // rooms whose every dimension is measured
+    if (this.statusRooms !== derived.rooms || this.statusWalls !== doc.walls) {
+      this.statusRooms = derived.rooms
+      this.statusWalls = doc.walls
+      this.fullRooms.clear()
+      for (const room of derived.rooms) if (roomMeasureStatus(doc, room).full) this.fullRooms.add(room.roomId)
     }
 
     // ── room labels ──
@@ -123,6 +145,13 @@ export class AnnotationsLayer {
       }
       if (showArea) {
         p.stext(`ra:${room.roomId}`, formatArea(room.area), s.x, s.y + (name ? 8 : 0), { size: 11, color: pal.textMuted })
+      }
+      if (this.fullRooms.has(room.roomId) && hPx > 54) {
+        p.stext(`rm:${room.roomId}`, `✓ ${t('замерено полностью')}`, s.x, s.y + (name ? 8 : 0) + (showArea ? 15 : 8), {
+          size: 10,
+          color: pal.ok,
+          bold: true,
+        })
       }
     }
 
@@ -154,11 +183,17 @@ export class AnnotationsLayer {
         if (bw < 64 || bh < 26 || scale < 0.045) continue
         const asset = ui.getAsset(it.assetId)
         let name = it.name || (lang === 'ru' ? asset?.nameRu || asset?.name : asset?.name || asset?.nameRu) || ''
-        if (!name) continue
+        const sizes = st.showItemSizes && bh >= 40 ? `${formatLen(it.size.w, st.units)} × ${formatLen(it.size.d, st.units)}` : ''
+        if (!name && !sizes) continue
         const maxChars = Math.floor(bw / 6.4)
         if (name.length > maxChars) name = `${name.slice(0, Math.max(1, maxChars - 1))}…`
-        p.stext(`in:${id}`, name, cam.toScreen(it).x, cam.toScreen(it).y, { size: 10.5, color: pal.textMuted })
+        const c = cam.toScreen(it)
+        if (name) p.stext(`in:${id}`, name, c.x, c.y - (sizes ? 7 : 0), { size: 10.5, color: pal.textMuted })
+        if (sizes && sizes.length <= maxChars + 2) p.stext(`is:${id}`, sizes, c.x, c.y + (name ? 7 : 0), { size: 9.5, color: pal.textMuted, alpha: 0.85 })
       }
+      // selected item: its own size and the distances to the walls around it
+      const sel = ui.selection.length === 1 && ui.selection[0].kind === 'item' ? doc.items[ui.selection[0].id] : undefined
+      if (sel && sel.levelId === levelId && !sel.hidden && st.showItemSizes) this.drawItemDims(ctx, p, sel, derived)
     }
 
     // ── lights ──
@@ -196,6 +231,69 @@ export class AnnotationsLayer {
       }
       p.stext(`lb:${id}`, l.text, s.x, s.y, { size: px, color: pal.text, align: 'center' })
     }
+  }
+
+  private drawItemDims(ctx: EditorCtx, p: Painter, it: Item, derived: DerivedPlan): void {
+    const doc = ctx.doc()
+    const pal = p.pal
+    const units = doc.settings.units
+    const r = it.rotation * DEG
+    const ux = { x: Math.cos(r), y: Math.sin(r) }
+    const uy = { x: -Math.sin(r), y: Math.cos(r) }
+    const hw = it.size.w / 2
+    const hd = it.size.d / 2
+    const at = (lx: number, ly: number): Vec2 => ({ x: it.x + ux.x * lx + uy.x * ly, y: it.y + ux.y * lx + uy.y * ly })
+    // width along the front, depth along the right side (outside the footprint)
+    p.dimension(`iw:${it.id}`, at(-hw, hd), at(hw, hd), uy, 0, 16, formatLen(it.size.w, units), { color: pal.accent, size: 11, bold: true })
+    p.dimension(`id:${it.id}`, at(hw, -hd), at(hw, hd), ux, 0, 16, formatLen(it.size.d, units), { color: pal.accent, size: 11, bold: true })
+
+    const key = [it, doc.walls, derived]
+    if (key.length !== this.clrKey.length || key.some((k, i) => k !== this.clrKey[i])) {
+      this.clrKey = key
+      this.clr = itemClearances(doc, derived, it, 8000)
+    }
+    let unreliable = false
+    for (const c of this.clr) {
+      if (c.dist < 1) continue
+      const d = { x: c.to.x - c.from.x, y: c.to.y - c.from.y }
+      const l = Math.hypot(d.x, d.y)
+      const n = { x: -d.y / l, y: d.x / l }
+      if (!c.reliable) unreliable = true
+      const color = c.reliable ? pal.ok : pal.warn
+      const text = c.reliable ? formatLen(c.dist, units) : `${formatLen(c.dist, units)} ?`
+      p.dimension(`ic:${it.id}:${c.dir}`, c.from, c.to, n, 0, 0, text, { color, size: 11, width: 1.2, extension: false, bold: true })
+    }
+    if (unreliable) {
+      const box = bboxOf(itemCorners(it))
+      const s = ctx.camera.toScreen({ x: (box.minX + box.maxX) / 2, y: box.minY })
+      p.sbadge(`icw:${it.id}`, `⚠ ${t(CLEARANCE_WARNING)}`, s.x, s.y - 34, { bg: pal.warn, color: 0x1b1300, size: 10.5 })
+    }
+  }
+
+  /** legend of the dimension styles, bottom-left corner */
+  private drawLegend(p: Painter): void {
+    const pal = p.pal
+    const cam = p.cam
+    const rows: { label: string; sample: string; color: number; italic: boolean }[] = [
+      { label: t('замерено рулеткой (±2 мм)'), sample: '✓ 3000', ...provenanceStyle(pal, { source: 'measured', stale: false }) },
+      { label: t('с плана (±10 мм)'), sample: '3000', ...provenanceStyle(pal, { source: 'plan', stale: false }) },
+      { label: t('выведено из площади (±20 мм)'), sample: '3000', ...provenanceStyle(pal, { source: 'derived', stale: false }) },
+      { label: t('оценка по фото (±50 мм)'), sample: '≈ 3000', ...provenanceStyle(pal, { source: 'estimated', stale: false }) },
+      { label: t('нарисовано, точность неизвестна'), sample: '3000', ...provenanceStyle(pal, { source: 'drawn', stale: false }) },
+      { label: t('стену сдвинули после записи'), sample: '3000 ≠', ...provenanceStyle(pal, { source: 'drawn', stale: true }) },
+    ]
+    const x0 = 12
+    const rowH = 17
+    const h = rows.length * rowH + 30
+    const y0 = cam.height - h - 40
+    p.g.roundRect(x0, y0, 268, h, 6).fill({ color: pal.badgeBg, alpha: 0.82 })
+    p.stext('lg:title', t('Откуда размеры'), x0 + 10, y0 + 14, { size: 11, color: 0xffffff, bold: true, anchorX: 0, anchorY: 0.5 })
+    rows.forEach((r, i) => {
+      const y = y0 + 34 + i * rowH
+      p.g.moveTo(x0 + 10, y + 2).lineTo(x0 + 58, y + 2).stroke({ width: 1, color: r.color })
+      p.stext(`lg:s${i}`, r.sample, x0 + 34, y, { size: 10, color: r.color, italic: r.italic, anchorY: 1 })
+      p.stext(`lg:l${i}`, r.label, x0 + 68, y - 3, { size: 10.5, color: 0xd8dde6, anchorX: 0, anchorY: 0.5 })
+    })
   }
 
   private drawLight(p: Painter, l: Light): void {

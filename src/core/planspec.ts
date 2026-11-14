@@ -14,11 +14,12 @@
  *
  * Pure TS: no DOM / Node imports.
  */
-import type { Asset, Doc, Id, Item, OpeningKind, ProceduralKind, Room, RoomType, Underlay, Vec2, Wall, WallKind } from './types'
+import type { Asset, DimSource, Doc, Id, Item, OpeningKind, ProceduralKind, Room, RoomType, Underlay, Vec2, Wall, WallKind } from './types'
 import { BUILTIN_ASSETS, createEmptyDoc, defaultRoom, OPENING_DEFAULTS, ROOM_TYPE_NAMES } from './defaults'
 import { addItem, addOpening, addWall, normalize, syncRooms } from './ops'
 import { derivePlan } from './derive'
 import { newId } from './ids'
+import { makeProvenance } from './provenance'
 
 // ───────────────────────────── schema ─────────────────────────────
 
@@ -76,6 +77,22 @@ export const SPEC_OPENING_TYPES = [
 export type SpecOpeningType = (typeof SPEC_OPENING_TYPES)[number]
 
 export type RoomSide = 'top' | 'right' | 'bottom' | 'left'
+
+export const SPEC_DIM_SOURCES = ['plan', 'derived', 'estimated', 'measured', 'drawn'] as const
+
+/**
+ * Where a dimension comes from: 'plan' (printed, ±10 mm), 'derived' (from an area / a chain of printed
+ * numbers, ±20 mm), 'estimated' (photo pixels, ±50 mm), 'measured' (tape / laser), 'drawn' (unknown).
+ * Object form adds the tolerance (± mm), the measurement date (YYYY-MM-DD) and a note.
+ */
+export type SpecDimSource = DimSource | { source: DimSource; tol?: number; date?: string; note?: string }
+
+/**
+ * Per-room sources: one value for every side; for `rect` an object by side
+ * ({top, right, bottom, left}) or an array [top, right, bottom, left]; for `polygon` an array by edge
+ * (edge i = polygon[i] → polygon[i+1]).
+ */
+export type SpecRoomDimSources = SpecDimSource | Partial<Record<RoomSide, SpecDimSource>> | SpecDimSource[]
 
 export interface PlanCalibration {
   p1: PlanPoint
@@ -146,6 +163,8 @@ export interface WallSpec {
   /** mm */
   height?: number
   confidence?: number
+  /** provenance of the faces along this wall: one value, or one per path segment */
+  source?: SpecDimSource | SpecDimSource[]
 }
 
 export interface EdgeWallSpec {
@@ -168,6 +187,8 @@ export interface RoomSpec {
   at?: PlanPoint
   /** m² as printed */
   labelledArea?: number
+  /** where the clear dimensions of the sides come from (see SpecRoomDimSources) */
+  source?: SpecRoomDimSources
   /** mm */
   ceilingHeight?: number
   /** wall for edges NOT facing another room (balcony railing, glazed loggia) */
@@ -242,6 +263,11 @@ export interface PlanSpec {
   fixtures?: FixtureSpec[]
   /** alias of fixtures for free-standing furniture hints */
   furniture?: FixtureSpec[]
+  /**
+   * default provenance of every room side without its own `source`
+   * (when absent: 'estimated' for units "px", nothing = drawn otherwise)
+   */
+  dimSource?: SpecDimSource
   notes?: string[]
 }
 
@@ -586,6 +612,58 @@ class Coercer {
     }
     return out
   }
+  dimSource(v: unknown, path: string): SpecDimSource | undefined {
+    if (typeof v === 'string') {
+      if ((SPEC_DIM_SOURCES as readonly string[]).includes(v)) return v as DimSource
+      this.err(path, `недопустимый источник размера "${v}" (допустимо: ${SPEC_DIM_SOURCES.join(', ')})`)
+      return undefined
+    }
+    if (isObj(v)) {
+      const source = this.oneOf(v, 'source', path, SPEC_DIM_SOURCES, true)
+      if (!source) return undefined
+      const out: { source: DimSource; tol?: number; date?: string; note?: string } = { source }
+      const tol = this.num(v, 'tol', path)
+      if (tol !== undefined) out.tol = tol
+      const date = this.str(v, 'date', path)
+      if (date !== undefined) {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(date)) out.date = date
+        else this.err(`${path}.date`, '«date» должна быть в виде ГГГГ-ММ-ДД')
+      }
+      const note = this.str(v, 'note', path)
+      if (note !== undefined) out.note = note
+      return out
+    }
+    this.err(path, 'источник размера: строка (plan, derived, estimated, measured, drawn) или объект {source, tol, date}')
+    return undefined
+  }
+  /** one source, a per-side object (rooms) or an array */
+  dimSources(o: Obj, key: string, path: string, sides: boolean): SpecRoomDimSources | undefined {
+    const raw = o[key]
+    if (raw === undefined || raw === null) return undefined
+    const p = `${path}.${key}`
+    if (Array.isArray(raw)) {
+      const out: SpecDimSource[] = []
+      for (let i = 0; i < raw.length; i++) {
+        const s = this.dimSource(raw[i], `${p}[${i}]`)
+        if (s === undefined) return undefined
+        out.push(s)
+      }
+      return out
+    }
+    if (sides && isObj(raw) && raw.source === undefined) {
+      const out: Partial<Record<RoomSide, SpecDimSource>> = {}
+      for (const k of Object.keys(raw)) {
+        if (k !== 'top' && k !== 'right' && k !== 'bottom' && k !== 'left') {
+          this.err(`${p}.${k}`, 'сторона комнаты: top, right, bottom или left')
+          continue
+        }
+        const s = this.dimSource(raw[k], `${p}.${k}`)
+        if (s !== undefined) out[k] = s
+      }
+      return out
+    }
+    return this.dimSource(raw, p)
+  }
   arr(o: Obj, key: string, path: string, required = false): unknown[] | undefined {
     const raw = o[key]
     if (raw === undefined || raw === null) {
@@ -676,6 +754,11 @@ function coerceSpec(raw: unknown, c: Coercer): PlanSpec {
     }
   }
 
+  if (raw.dimSource !== undefined) {
+    const ds = c.dimSource(raw.dimSource, '$.dimSource')
+    if (ds !== undefined) spec.dimSource = ds
+  }
+
   if (raw.snap !== undefined) {
     if (!isObj(raw.snap)) c.err('$.snap', '«snap» должен быть объектом')
     else {
@@ -706,6 +789,7 @@ function coerceSpec(raw: unknown, c: Coercer): PlanSpec {
         kind: c.oneOf(w, 'kind', p, SPEC_WALL_KINDS),
         height: c.num(w, 'height', p),
         confidence: c.num(w, 'confidence', p),
+        source: c.dimSources(w, 'source', p, false) as SpecDimSource | SpecDimSource[] | undefined,
       })
       if (path) spec.walls!.push(ws)
     })
@@ -738,6 +822,7 @@ function coerceSpec(raw: unknown, c: Coercer): PlanSpec {
         polygon: c.pts(r, 'polygon', p, 3),
         at: c.numArr(r, 'at', p, 2),
         labelledArea: c.num(r, 'labelledArea', p),
+        source: c.dimSources(r, 'source', p, true),
         ceilingHeight: c.num(r, 'ceilingHeight', p),
         edgeWall,
         balcony: c.bool(r, 'balcony', p),
@@ -1507,6 +1592,143 @@ function wallDir(doc: Doc, w: Wall): { A: Vec2; B: Vec2; d: Vec2; L: number } | 
 }
 
 /** Full compiler with diagnostics. */
+// ───────────────────────────── dimension provenance ─────────────────────────────
+
+const PROV_PARALLEL_COS = Math.cos((5 * Math.PI) / 180)
+
+function specDimProv(s: SpecDimSource): { source: DimSource; tol?: number; date?: string; note?: string } {
+  return typeof s === 'string' ? { source: s } : s
+}
+
+/** a spec edge (mm) and the provenance it carries */
+interface ProvEdge {
+  p0: Vec2
+  p1: Vec2
+  src: SpecDimSource
+}
+
+function isSingleSource(g: SpecRoomDimSources): g is SpecDimSource {
+  return typeof g === 'string' || (!Array.isArray(g) && 'source' in g)
+}
+
+/** the spec edges of a room with their sources; rect sides are recognised geometrically */
+function roomProvEdges(r: RoomSpec, poly: Vec2[] | null, U: UnitConv, fallback: SpecDimSource | undefined): ProvEdge[] {
+  const out: ProvEdge[] = []
+  const given = r.source
+  const pick = (i: number, side: RoomSide | null): SpecDimSource | undefined => {
+    if (given === undefined) return fallback
+    if (isSingleSource(given)) return given
+    if (Array.isArray(given)) return given[i] ?? fallback
+    return (side ? (given as Partial<Record<RoomSide, SpecDimSource>>)[side] : undefined) ?? fallback
+  }
+  if (r.rect && r.rect.length === 4 && poly) {
+    const xs = poly.map((p) => p.x)
+    const ys = poly.map((p) => p.y)
+    const x0 = Math.min(...xs)
+    const x1 = Math.max(...xs)
+    const y0 = Math.min(...ys)
+    const y1 = Math.max(...ys)
+    const sides: [RoomSide, Vec2, Vec2][] = [
+      ['top', V(x0, y0), V(x1, y0)],
+      ['right', V(x1, y0), V(x1, y1)],
+      ['bottom', V(x1, y1), V(x0, y1)],
+      ['left', V(x0, y1), V(x0, y0)],
+    ]
+    sides.forEach(([side, p0, p1], i) => {
+      const s = pick(i, side)
+      if (s !== undefined) out.push({ p0, p1, src: s })
+    })
+    return out
+  }
+  if (r.polygon && r.polygon.length >= 3) {
+    // original (unsnapped) points: matching is tolerant, edge indices stay those the author wrote
+    const pts = r.polygon.map((p) => U.pt(p))
+    for (let i = 0; i < pts.length; i++) {
+      const s = pick(i, null)
+      if (s !== undefined) out.push({ p0: pts[i], p1: pts[(i + 1) % pts.length], src: s })
+    }
+  }
+  return out
+}
+
+/** best spec edge for a boundary segment: parallel, overlapping by at least half, nearest within maxDist */
+function matchProvEdge(a: Vec2, b: Vec2, cands: ProvEdge[], maxDist: number): ProvEdge | null {
+  const L = vDist(a, b)
+  if (L < 1) return null
+  const d = V((b.x - a.x) / L, (b.y - a.y) / L)
+  const mid = V((a.x + b.x) / 2, (a.y + b.y) / 2)
+  let best: ProvEdge | null = null
+  let bestDist = maxDist
+  for (const c of cands) {
+    const cl = vDist(c.p0, c.p1)
+    if (cl < 1) continue
+    const cd = V((c.p1.x - c.p0.x) / cl, (c.p1.y - c.p0.y) / cl)
+    if (Math.abs(d.x * cd.x + d.y * cd.y) < PROV_PARALLEL_COS) continue
+    // overlap of [a, b] with the candidate along cd
+    const ta = (a.x - c.p0.x) * cd.x + (a.y - c.p0.y) * cd.y
+    const tb = (b.x - c.p0.x) * cd.x + (b.y - c.p0.y) * cd.y
+    const ov = Math.min(Math.max(ta, tb), cl) - Math.max(Math.min(ta, tb), 0)
+    if (ov < L * 0.5) continue
+    const dist = Math.abs((mid.x - c.p0.x) * -cd.y + (mid.y - c.p0.y) * cd.x)
+    if (dist <= bestDist) {
+      bestDist = dist
+      best = c
+    }
+  }
+  return best
+}
+
+/**
+ * Writes Wall.dims from the spec's "source" fields: room sides (rect/polygon rooms), wall segments and
+ * the top-level "dimSource" (default 'estimated' for units "px"). Room sources win over wall sources.
+ */
+function applySpecProvenance(doc: Doc, levelId: Id, spec: PlanSpec, U: UnitConv, polys: (Vec2[] | null)[], roomIds: Record<string, Id>): void {
+  const fallback: SpecDimSource | undefined = spec.dimSource ?? (spec.units === 'px' ? 'estimated' : undefined)
+  const wallEdges: ProvEdge[] = []
+  for (const w of spec.walls ?? []) {
+    if (w.source === undefined) continue
+    const pts = w.path.map((p) => U.pt(p))
+    for (let j = 0; j + 1 < pts.length; j++) {
+      const s = Array.isArray(w.source) ? w.source[j] : w.source
+      if (s !== undefined) wallEdges.push({ p0: pts[j], p1: pts[j + 1], src: s })
+    }
+  }
+  const roomEdges = new Map<Id, ProvEdge[]>()
+  spec.rooms.forEach((r, i) => {
+    const rid = roomIds[r.id]
+    if (!rid || r.source === undefined) return
+    const edges = roomProvEdges(r, polys[i], U, fallback)
+    if (edges.length) roomEdges.set(rid, edges)
+  })
+  if (!wallEdges.length && !roomEdges.size && fallback === undefined) return
+  const plan = derivePlan(doc, levelId)
+  const set = (wallId: Id, side: 'left' | 'right', from: Vec2, to: Vec2, s: SpecDimSource): void => {
+    const w = doc.walls[wallId]
+    if (!w) return
+    const p = specDimProv(s)
+    if (p.source === 'drawn') {
+      if (w.dims) delete w.dims[side]
+      return
+    }
+    const dims = w.dims ?? (w.dims = {})
+    dims[side] = makeProvenance(p.source, vDist(from, to), { tol: p.tol, date: p.date, note: p.note })
+  }
+  for (const room of plan.rooms) {
+    const cands = roomEdges.get(room.roomId)
+    for (const e of room.edges) {
+      const w = doc.walls[e.wallId]
+      if (!w) continue
+      // room sides: the clear face lies on the room outline (rooms mode) or near it (walls mode)
+      let hit = cands ? matchProvEdge(e.from, e.to, cands, Math.max(150, w.thickness)) : null
+      // wall segments: the face is half a thickness off the centreline
+      if (!hit && wallEdges.length) hit = matchProvEdge(e.from, e.to, wallEdges, w.thickness / 2 + 30)
+      if (hit) set(e.wallId, e.side, e.from, e.to, hit.src)
+      else if (fallback !== undefined) set(e.wallId, e.side, e.from, e.to, fallback)
+    }
+  }
+  for (const w of Object.values(doc.walls)) if (w.dims && !w.dims.left && !w.dims.right) delete w.dims
+}
+
 export function compilePlanSpecDetailed(spec: PlanSpec, opts: CompileOptions = {}): CompileResult {
   const issues: PlanIssue[] = []
   const U = makeUnits(spec)
@@ -1723,6 +1945,7 @@ export function compilePlanSpecDetailed(spec: PlanSpec, opts: CompileOptions = {
     rec.type = type
     if (r.ceilingHeight !== undefined) rec.ceiling = { ...rec.ceiling, height: r.ceilingHeight }
     else if (D.ceilingHeight !== D.wallHeight) rec.ceiling = { ...rec.ceiling, height: D.ceilingHeight }
+    if (r.labelledArea !== undefined && r.labelledArea > 0) rec.labelledArea = r.labelledArea
     doc.rooms[rec.id] = rec
     roomIds[r.id] = rec.id
   })
@@ -1737,6 +1960,15 @@ export function compilePlanSpecDetailed(spec: PlanSpec, opts: CompileOptions = {
         ids: [sid],
       })
     }
+  }
+  applySpecProvenance(doc, levelId, spec, U, polys, roomIds)
+  if (spec.source) {
+    const s = spec.source
+    const ds: NonNullable<Doc['source']> = {}
+    if (s.kind) ds.kind = s.kind
+    if (s.labelledTotalArea && s.labelledTotalArea > 0) ds.labelledTotalArea = s.labelledTotalArea
+    if (s.labelledLivingArea && s.labelledLivingArea > 0) ds.labelledLivingArea = s.labelledLivingArea
+    if (Object.keys(ds).length) doc.source = ds
   }
 
   // ── fixtures / furniture
@@ -2314,6 +2546,14 @@ export function docToPlanSpec(doc: Doc, levelId?: Id): PlanSpec {
       kind,
       height: w.height,
     })
+    // provenance: a wall segment carries one source for both faces; emit it when the faces agree
+    const pl = w.dims?.left
+    const pr = w.dims?.right
+    const pv = pl && pr ? (pl.source === pr.source && pl.tol === pr.tol ? pl : undefined) : (pl ?? pr)
+    if (pv) {
+      const ws = walls[walls.length - 1]
+      ws.source = pv.tol === undefined && !pv.date && !pv.note ? pv.source : strip({ source: pv.source, tol: pv.tol, date: pv.date, note: pv.note })
+    }
   }
   const REVERSE_TYPE: Record<RoomType, SpecRoomType> = {
     living: 'living',
@@ -2338,7 +2578,8 @@ export function docToPlanSpec(doc: Doc, levelId?: Id): PlanSpec {
     const dr = plan.rooms.find((x) => x.roomId === r.id)
     const at = dr ? dr.labelPoint : r.anchor
     const rs: RoomSpec = { id: r.id, name: r.name, type: REVERSE_TYPE[r.type] ?? 'other', at: [r1(at.x), r1(at.y)] }
-    if (dr) rs.labelledArea = Math.round(dr.area * 100) / 100
+    if (r.labelledArea) rs.labelledArea = r.labelledArea
+    else if (dr) rs.labelledArea = Math.round(dr.area * 100) / 100
     if (r.ceiling.height !== undefined) rs.ceilingHeight = r.ceiling.height
     rooms.push(rs)
   }
@@ -2386,5 +2627,6 @@ export function docToPlanSpec(doc: Doc, levelId?: Id): PlanSpec {
     openings,
   }
   if (fixtures.length) spec.fixtures = fixtures
+  if (doc.source) spec.source = strip({ kind: doc.source.kind, labelledTotalArea: doc.source.labelledTotalArea, labelledLivingArea: doc.source.labelledLivingArea })
   return spec
 }

@@ -1,8 +1,9 @@
 import { useMemo, useRef, useState } from 'react'
 import { ArrowLeftRight, Box, Link2, Link2Off, Lock, LockOpen, Eye, EyeOff, Replace, RotateCcw, RotateCw, Undo2 } from 'lucide-react'
-import { sizedCatalogName } from '@core'
+import { resizedParams, sizedCatalogName } from '@core'
 import type { Asset, Id, Item, MountKind } from '@core/types'
 import { useDoc } from '@/store/document'
+import { resizePrefs, useResizePrefs } from '@/store/resizePrefs'
 import { useT } from '@/i18n'
 import { Button, ColorInput, IconButton, Input, NumberInput, Popover, Row, SearchInput, Section, Select, Thumb, Toggle, cn, fmtNum } from '@/ui/kit'
 import { assetIcon } from '../common/assetIcons'
@@ -121,7 +122,8 @@ export function ItemInspector({ id }: { id: Id }) {
   const lang = useLang()
   const item = useDoc((s) => s.doc.items[id])
   const assets = useAssetMap()
-  const [lockRatio, setLockRatio] = useState(true)
+  const lockRatio = useResizePrefs((s) => s.lockRatio)
+  const setLockRatio = resizePrefs.getState().setLockRatio
   if (!item) return null
   const asset = assets.get(item.assetId)
   const set = (label: string, fn: (x: Item) => void, merge?: string) =>
@@ -135,12 +137,35 @@ export function ItemInspector({ id }: { id: Id }) {
   const setSize = (axis: 'w' | 'd' | 'h', v: number, g: string) =>
     set('Размер', (x) => {
       const old = x.size[axis]
+      const from = { ...x.size }
       if (lockRatio && old > 0) {
         const k = v / old
         x.size = { w: Math.round(x.size.w * k), d: Math.round(x.size.d * k), h: Math.round(x.size.h * k) }
         x.size[axis] = v
       } else x.size = { ...x.size, [axis]: v }
+      // doors / drawers / shelves keep their module size
+      const params = resizedParams(asset, x.params, from, x.size)
+      if (params) x.params = params
     }, m(`size${axis}`, g))
+
+  const raised = item.mount === 'wall' || item.mount === 'free' || item.mount === 'surface' || item.elevation > 0
+  const elevationRow = (
+    <Row label={t('Высота над полом')}>
+      <NumberInput
+        kind="length"
+        value={item.elevation}
+        min={0}
+        round={1}
+        disabled={item.locked}
+        onChange={(v, g) =>
+          set('Высота установки', (x) => {
+            x.elevation = v
+            if (x.mount === 'floor' && v > 0) x.mount = 'free'
+          }, m('elev', g))
+        }
+      />
+    </Row>
+  )
 
   const slots = Object.entries(asset?.slots ?? {})
   // kitchen base units: H = floor → top of the worktop (with the plinth), D = with the worktop overhang;
@@ -200,7 +225,10 @@ export function ItemInspector({ id }: { id: Id }) {
         </Row>
       </Section>
 
-      <Section title={t('Положение')} id="insp.item.pos">
+      {/* raised items (on a wall, on a surface, free in the air) get their own section memory: a
+          «Положение» collapsed for floor furniture must not hide «Высота над полом» from them */}
+      <Section title={t('Положение')} id={raised ? 'insp.item.pos.raised' : 'insp.item.pos'}>
+        {raised && elevationRow}
         <Pair>
           <NumberInput kind="length" label="X" value={item.x} round={1} disabled={item.locked} onChange={(v, g) => set('Переместить', (x) => (x.x = v), m('x', g))} />
           <NumberInput kind="length" label="Y" value={item.y} round={1} disabled={item.locked} onChange={(v, g) => set('Переместить', (x) => (x.y = v), m('y', g))} />
@@ -210,12 +238,21 @@ export function ItemInspector({ id }: { id: Id }) {
           <IconButton size="sm" icon={<RotateCcw />} label={t('−90°')} disabled={item.locked} onClick={() => set('Повернуть', (x) => (x.rotation = (((x.rotation - 90) % 360) + 360) % 360))} />
           <IconButton size="sm" icon={<RotateCw />} label={t('+90°')} disabled={item.locked} onClick={() => set('Повернуть', (x) => (x.rotation = (x.rotation + 90) % 360))} />
         </Row>
-        <Row label={t('Высота над полом')}>
-          <NumberInput kind="length" value={item.elevation} min={0} round={1} disabled={item.locked} onChange={(v, g) => set('Высота установки', (x) => (x.elevation = v), m('elev', g))} />
-        </Row>
+        {!raised && elevationRow}
         <Row label={t('Крепление')}>
-          <Select<MountKind> value={item.mount} options={optionsOf(MOUNT_RU)} onChange={(k) => set('Крепление', (x) => (x.mount = k))} />
+          <Select<MountKind>
+            value={item.mount}
+            options={optionsOf(MOUNT_RU)}
+            onChange={(k) =>
+              set('Крепление', (x) => {
+                x.mount = k
+                // «На полу» puts the item down on the floor
+                if (k === 'floor') x.elevation = 0
+              })
+            }
+          />
         </Row>
+        {raised && <Hint>{t('Высоту можно менять и в 3D: тяните вертикальную стрелку над объектом')}</Hint>}
       </Section>
 
       <Section

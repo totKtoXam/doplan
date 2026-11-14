@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createEmptyDoc } from '../defaults'
+import { createEmptyDoc, sizedCatalogName } from '../defaults'
 import { derivePlan } from '../derive'
 import { parseDoc, serializeDoc } from '../io'
 import { compilePlanSpecDetailed, docToPlanSpec, parsePlanSpec } from '../planspec'
@@ -430,5 +430,14 @@ describe('itemGaps', () => {
     expect(itemGaps(a, [b])).toHaveLength(1)
     expect(itemGaps(a, [b], 1500, [{ dir: 'right', dist: 200 }])).toEqual([])
     expect(itemGaps(a, [b], 1500, [{ dir: 'right', dist: 600 }])).toHaveLength(1)
+  })
+})
+
+describe('sizedCatalogName', () => {
+  it('replaces the default width in the catalog name', () => {
+    expect(sizedCatalogName('Тумба под мойку 800', 800, 600)).toBe('Тумба под мойку 600')
+    expect(sizedCatalogName('Тумба под мойку 800', 800, 800)).toBe('Тумба под мойку 800')
+    expect(sizedCatalogName('Диван двухместный', 1600, 1800)).toBe('Диван двухместный')
+    expect(sizedCatalogName('Шкаф 1800 ×800', 800, 900)).toBe('Шкаф 1800 ×800')
   })
 })

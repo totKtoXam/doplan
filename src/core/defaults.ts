@@ -1033,3 +1033,15 @@ export function createEmptyDoc(name = 'Новый проект'): Doc {
     assets: {},
   }
 }
+
+/**
+ * Catalog names that carry the default width in mm ("Тумба под мойку 800") follow the item's
+ * current width ("Тумба под мойку 600"). Names without that number are returned unchanged.
+ */
+export function sizedCatalogName(name: string, defaultW: number, w: number): string {
+  const dw = Math.round(defaultW)
+  const cw = Math.round(w)
+  if (!name || dw === cw) return name
+  const re = new RegExp(`(^|\\s)${dw}(?=$|\\s)`)
+  return re.test(name) ? name.replace(re, `$1${cw}`) : name
+}

@@ -15,6 +15,7 @@ import { API_MODELS, runAnthropicApi } from './anthropicApi'
 import { abortRunCalls, onToolResult } from './bridge'
 import { runClaude, runCodex, runGemini, type RunCtx } from './cliRunners'
 import { binVersion, findOnPath, killTree, type ResolvedBin } from './detect'
+import { authStatus, cancelLogin, isAuthError, loginInput, startLogin } from './login'
 import { closeMcpServer, openEndpoint, revokeRun } from './mcpServer'
 import { AGENT_SYSTEM_PROMPT, PLAN_MODE_NOTE } from './prompt'
 import { agentWorkDir, deleteChat, getChatSettings, listChats, loadChat, sanitizeSettings, saveChat, setChatSettings } from './store'
@@ -50,20 +51,16 @@ function codexModels(): { models: { id: string; label: string }[]; efforts: stri
 async function detectCli(id: AiProviderId, name: string, label: string, base: Omit<AiProviderInfo, 'id' | 'label' | 'available'>): Promise<Detected> {
   const bin = findOnPath(name)
   if (!bin) return { info: { id, label, available: false, reason: `${name} не найден в PATH`, ...base } }
-  const version = await binVersion(bin)
-  return { bin, info: { id, label, available: true, path: bin.path, version, ...base } }
+  const canLogin = id === 'claude' || id === 'codex'
+  const [version, st] = await Promise.all([binVersion(bin), canLogin ? authStatus(id, bin) : Promise.resolve(undefined)])
+  return { bin, info: { id, label, available: true, path: bin.path, version, ...base, auth: st?.auth, account: st?.account, canLogin } }
 }
 
 async function detectAll(): Promise<Detected[]> {
   const [claude, codex, gemini, key] = await Promise.all([
     detectCli('claude', 'claude', 'Claude Code', {
-      models: [
-        { id: '', label: 'По умолчанию' },
-        { id: 'opus', label: 'Opus' },
-        { id: 'fable', label: 'Fable' },
-        { id: 'sonnet', label: 'Sonnet' },
-        { id: 'haiku', label: 'Haiku' },
-      ],
+      // exact model ids (the CLI's aliases opus/sonnet/… would hide the version)
+      models: [{ id: '', label: 'По умолчанию' }, ...API_MODELS.map((m) => ({ id: m.id, label: m.label.replace(/^Claude /, '') }))],
       efforts: EFFORTS,
       reportsCost: true,
       images: true,
@@ -162,7 +159,13 @@ async function startRun(raw: unknown): Promise<void> {
   let finished = false
   const emit = (ev: AiRunEvent) => {
     if (finished) return
-    if (ev.type === 'done') finished = true
+    if (ev.type === 'done') {
+      finished = true
+      if (!ev.ok && !ev.stopped && isAuthError(ev.error)) {
+        ev = { ...ev, authRequired: true }
+        prov.info.auth = 'required'
+      }
+    }
     sendToRenderer(CH.evAiChatEvent, req.runId, ev)
   }
   const userText = chipsText(req.chips) + req.text
@@ -222,6 +225,23 @@ export function registerAiChat(): void {
   handleIpc(CH.aiChatDelete, (p: unknown, id: unknown) => deleteChat(typeof p === 'string' ? p : null, id))
   handleIpc(CH.aiChatGetSettings, (p: unknown) => getChatSettings(typeof p === 'string' ? p : null))
   handleIpc(CH.aiChatSetSettings, (p: unknown, s: unknown) => setChatSettings(typeof p === 'string' ? p : null, s))
+  handleIpc(CH.aiChatLogin, async (id: unknown) => {
+    const prov = (await providers(false)).find((p) => p.info.id === id)
+    if (!prov?.bin || !prov.info.canLogin) throw new Error('Вход для этого провайдера недоступен')
+    const pid = prov.info.id
+    startLogin(
+      pid,
+      prov.bin,
+      (ev) => sendToRenderer(CH.evAiChatLogin, pid, ev),
+      () => {
+        detected = null // re-detect: sign-in state changed
+      },
+    )
+  })
+  handleIpc(CH.aiChatLoginInput, (text: unknown) => {
+    if (typeof text === 'string') loginInput(text)
+  })
+  handleIpc(CH.aiChatLoginCancel, () => cancelLogin())
   // warm up detection so the panel opens instantly
   void providers(false)
 }
@@ -229,5 +249,6 @@ export function registerAiChat(): void {
 /** App quit: stop every agent and its children, close the MCP server. */
 export function shutdownAiChat(): void {
   for (const id of [...runs.keys()]) stopRun(id)
+  cancelLogin()
   closeMcpServer()
 }

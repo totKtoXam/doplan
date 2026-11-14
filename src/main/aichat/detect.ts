@@ -78,6 +78,19 @@ export function binVersion(bin: ResolvedBin): Promise<string | undefined> {
   })
 }
 
+/** Runs a short CLI command (status checks) and collects its output; never rejects. */
+export function binOutput(bin: ResolvedBin, args: string[], timeout = 15000): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const env = { ...process.env }
+    if (bin.asNode) env['ELECTRON_RUN_AS_NODE'] = '1'
+    else delete env['ELECTRON_RUN_AS_NODE']
+    execFile(bin.command, [...bin.prefix, ...args], { env, timeout, windowsHide: true }, (err, stdout, stderr) => {
+      const code = err ? (typeof (err as { code?: unknown }).code === 'number' ? ((err as { code: number }).code) : -1) : 0
+      resolve({ code, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') })
+    })
+  })
+}
+
 /** Kills a child and everything it started. */
 export function killTree(child: ChildProcess | null | undefined): void {
   if (!child || child.exitCode !== null || child.pid === undefined) return

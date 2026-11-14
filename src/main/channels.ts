@@ -40,6 +40,10 @@ export const CH = {
   aiChatDelete: 'aiChat:delete',
   aiChatGetSettings: 'aiChat:getSettings',
   aiChatSetSettings: 'aiChat:setSettings',
+  aiChatLogin: 'aiChat:login',
+  aiChatLoginInput: 'aiChat:loginInput',
+  aiChatLoginCancel: 'aiChat:loginCancel',
+  evAiChatLogin: 'ev:aiChatLogin',
   evAiChatEvent: 'ev:aiChatEvent',
   evAiChatToolCall: 'ev:aiChatToolCall',
   // ── end ai-chat block ──

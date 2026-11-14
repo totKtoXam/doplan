@@ -22,6 +22,12 @@ export interface AiProviderInfo {
   reportsCost: boolean
   /** supports image attachments */
   images: boolean
+  /** CLI sign-in state: required = the CLI is installed but not signed in */
+  auth?: 'ok' | 'required' | 'unknown'
+  /** e.g. "Claude Max", "ChatGPT" */
+  account?: string
+  /** the provider can sign in from the app (claude / codex) */
+  canLogin?: boolean
 }
 
 /** Per-project chat settings (persisted with the project's chats). */
@@ -93,7 +99,8 @@ export type AiRunEvent =
   | { type: 'notice'; level: 'info' | 'warning' | 'error'; text: string }
   /** Anthropic API provider: updated conversation to persist */
   | { type: 'apiHistory'; messages: unknown[] }
-  | { type: 'done'; ok: boolean; stopped?: boolean; error?: string }
+  /** authRequired: the CLI rejected its credentials — offer «Войти» */
+  | { type: 'done'; ok: boolean; stopped?: boolean; error?: string; authRequired?: boolean }
 
 /** A doc tool call forwarded from the MCP server / API provider to the renderer. */
 export interface AiToolCall {
@@ -130,7 +137,8 @@ export type AiPart =
       /** thumbnail data URL for render_snapshot */
       image?: string
     }
-  | { type: 'notice'; level: 'info' | 'warning' | 'error'; text: string }
+  /** login: the CLI's sign-in expired — the notice offers «Войти» */
+  | { type: 'notice'; level: 'info' | 'warning' | 'error'; text: string; login?: AiProviderId }
 
 export interface AiMessage {
   id: string
@@ -160,6 +168,13 @@ export interface AiChatRecord extends AiChatMeta {
   totals?: { inputTokens: number; outputTokens: number; costUsd: number }
 }
 
+/** Progress of an in-app CLI sign-in (`claude auth login` / `codex login`). */
+export type AiLoginEvent =
+  | { type: 'output'; text: string }
+  /** sign-in page (also opened in the browser) */
+  | { type: 'url'; url: string }
+  | { type: 'done'; ok: boolean; error?: string }
+
 export interface AiChatApi {
   providers(refresh?: boolean): Promise<AiProviderInfo[]>
   run(req: AiRunRequest): Promise<void>
@@ -173,4 +188,10 @@ export interface AiChatApi {
   deleteChat(projectPath: string | null, chatId: string): Promise<void>
   getSettings(projectPath: string | null): Promise<AiChatSettings>
   setSettings(projectPath: string | null, s: AiChatSettings): Promise<void>
+  /** start signing the CLI in; progress arrives through onLogin */
+  login(provider: AiProviderId): Promise<void>
+  /** paste the code shown by the sign-in page (when the CLI asks for one) */
+  loginInput(text: string): Promise<void>
+  loginCancel(): Promise<void>
+  onLogin(cb: (provider: AiProviderId, ev: AiLoginEvent) => void): () => void
 }

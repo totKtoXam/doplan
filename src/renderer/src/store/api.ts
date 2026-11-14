@@ -232,6 +232,10 @@ function createFallbackApi(): DoplanApi {
         return { ...DEFAULT_AI_SETTINGS, models: {} }
       },
       async setSettings() {},
+      async login() {},
+      async loginInput() {},
+      async loginCancel() {},
+      onLogin: noopUnsub,
     },
     // ── end ai-chat block ──
     window: {

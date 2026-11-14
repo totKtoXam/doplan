@@ -7,7 +7,7 @@ import { produce } from 'immer'
 import { createStore } from 'zustand/vanilla'
 import { useStore } from 'zustand'
 import type { EntityRef } from '@core/types'
-import type { AiChatMeta, AiChatRecord, AiChatSettings, AiChip, AiImage, AiMessage, AiPart, AiProviderInfo, AiRunEvent, AiToolCall } from '@shared/aiChat'
+import type { AiChatMeta, AiChatRecord, AiChatSettings, AiChip, AiImage, AiLoginEvent, AiMessage, AiPart, AiProviderId, AiProviderInfo, AiRunEvent, AiToolCall } from '@shared/aiChat'
 import { DEFAULT_AI_SETTINGS } from '@shared/aiChat'
 import { AI_TOOL_TITLES, isAiToolName } from '@shared/aiTools'
 import { api } from '@/store/api'
@@ -20,6 +20,15 @@ import { describeCall, executeTool, isMutating } from './tools'
 export type DockTab = 'props' | 'ai'
 
 export type PendingImage = AiImage & { url: string }
+
+/** in-app CLI sign-in in progress (or just finished) */
+export interface LoginState {
+  provider: AiProviderId
+  phase: 'running' | 'done' | 'error'
+  url?: string
+  output: string
+  error?: string
+}
 
 export interface AiState {
   providers: AiProviderInfo[]
@@ -39,6 +48,7 @@ export interface AiState {
   /** bumped to focus the input (Ctrl+L) */
   focusTick: number
   showHistory: boolean
+  login: LoginState | null
 }
 
 const TAB_KEY = 'doplan.ai.dockTab'
@@ -75,6 +85,7 @@ export const aiStore = createStore<AiState>()(() => ({
   dockTab: readTab(),
   focusTick: 0,
   showHistory: false,
+  login: null,
 }))
 
 export function useAi<T>(selector: (s: AiState) => T): T {
@@ -131,6 +142,7 @@ export function initAi(): void {
   void refreshProviders(false)
   api.aiChat.onEvent(onRunEvent)
   api.aiChat.onToolCall((call) => void onToolCall(call))
+  api.aiChat.onLogin(onLoginEvent)
   let lastPath: string | null | undefined
   const sync = () => {
     const p = docStore.getState().filePath
@@ -140,6 +152,44 @@ export function initAi(): void {
   }
   docStore.subscribe(sync)
   sync()
+}
+
+// ───────────── CLI sign-in ─────────────
+
+export async function startLogin(provider: AiProviderId): Promise<void> {
+  set({ login: { provider, phase: 'running', output: '' } })
+  try {
+    await api.aiChat.login(provider)
+  } catch (e) {
+    set({ login: { provider, phase: 'error', output: '', error: (e as Error).message } })
+  }
+}
+
+export function sendLoginCode(code: string): void {
+  if (!code.trim()) return
+  void api.aiChat.loginInput(code)
+  const l = get().login
+  if (l) set({ login: { ...l, output: `${l.output}\n› код отправлен\n` } })
+}
+
+export function cancelLogin(): void {
+  void api.aiChat.loginCancel()
+  set({ login: null })
+}
+
+export function dismissLogin(): void {
+  set({ login: null })
+}
+
+function onLoginEvent(provider: AiProviderId, ev: AiLoginEvent): void {
+  const l = get().login
+  const cur: LoginState = l && l.provider === provider ? l : { provider, phase: 'running', output: '' }
+  if (ev.type === 'output') set({ login: { ...cur, output: (cur.output + ev.text).slice(-4000) } })
+  else if (ev.type === 'url') set({ login: { ...cur, url: ev.url } })
+  else {
+    set({ login: { ...cur, phase: ev.ok ? 'done' : 'error', error: ev.error } })
+    void refreshProviders(true)
+  }
 }
 
 export async function refreshProviders(refresh: boolean): Promise<void> {
@@ -484,7 +534,7 @@ function onRunEvent(runId: string, ev: AiRunEvent): void {
           // CLIs often print the same failure as the assistant's text: show it once, as an error
           const last = m.parts.at(-1)
           if (last?.type === 'text' && last.text.trim() === ev.error.trim()) m.parts.pop()
-          pushPart(m, null, { type: 'notice', level: 'error', text: ev.error })
+          pushPart(m, null, { type: 'notice', level: 'error', text: ev.error, ...(ev.authRequired ? { login: get().settings.provider } : {}) })
         }
         if (!m.parts.length) pushPart(m, null, { type: 'notice', level: 'warning', text: 'Пустой ответ' })
       })
@@ -492,6 +542,7 @@ function onRunEvent(runId: string, ev: AiRunEvent): void {
         c.updatedAt = now()
       })
       set({ running: null, status: '' })
+      if (ev.authRequired) void refreshProviders(false)
       void persist()
       return
   }

@@ -36,6 +36,7 @@ import { perfBegin, perfEnabled, perfEnd, perfRecord, perfTime } from './perf'
 import { currentQuality, getShared, isWebGPU, type QualitySettings } from './quality'
 import type { AtrousDenoiser } from './denoise'
 import { prefs3dStore, type DenoiseMode } from './prefs'
+import { setPtStage } from './status'
 
 // The TSL typings are stricter than what a dynamically assembled graph satisfies.
 const TSL: any = TSLModule
@@ -66,6 +67,17 @@ const MAX_STILL_EDGE = 8192
 const DEFAULT_STILL_SAMPLES = 256
 /** the camera has to rest this long before tracing resumes (the raster frame shows meanwhile) */
 const CAMERA_REST_MS = 450
+/** walking stops between key presses: wait for a real pause before tracing again */
+const WALK_REST_MS = 1500
+
+function cameraRestMs(): number {
+  return uiStore.getState().cameraMode === 'walk' ? WALK_REST_MS : CAMERA_REST_MS
+}
+
+/** lets the overlay paint a status before blocking work starts */
+function nextPaint(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)))
+}
 /** the same after an edit of the document, lights or materials */
 const EDIT_REST_MS = 1200
 /**
@@ -352,6 +364,7 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
    * ceiling auto-hide only toggle `visible`, which emits no scene change, but the tracer's BVH is
    * a snapshot of the visible scene.
    */
+  let holdReason = ''
   function computeVisSig(): number {
     let h = 0
     ctx.roots.architecture.traverseVisible((o) => {
@@ -471,9 +484,11 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
   async function capture(): Promise<void> {
     const token = ++sceneToken
     capturing = true
+    setPtStage('preparing')
     const done = (): boolean => {
       if (token !== sceneToken) return true
       capturing = false
+      setPtStage('idle')
       return disposed || !interactive || stillRunning
     }
     let rt: Runtime
@@ -486,6 +501,11 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
       }
       return
     }
+    if (token !== sceneToken || disposed || !interactive || stillRunning) {
+      done()
+      return
+    }
+    await nextPaint()
     if (token !== sceneToken || disposed || !interactive || stillRunning) {
       done()
       return
@@ -511,6 +531,8 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
       return
     }
     if (done()) return
+    // the first sample after a capture compiles the kernel (blocking): keep the status up
+    setPtStage('preparing')
     visSig = vis
     // taken after the capture: the BVH build indexes non-indexed geometries. A scene change
     // during the build may have been missed by the snapshot, so it captures again
@@ -602,6 +624,7 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
       if (runtime) runtime.pt.renderToCanvas = false
       resetCounters()
     }
+    if (!capturing) setPtStage('idle')
     holdUntil = Math.max(holdUntil, performance.now() + ms)
     clearHoldTimer()
     holdTimer = setTimeout(() => {
@@ -635,6 +658,7 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
   }
 
   function endInteractive(): void {
+    setPtStage('idle')
     interactive = false
     ready = false
     capturing = false
@@ -862,7 +886,7 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
   if (perfEnabled()) {
     ;(globalThis as unknown as { __doplanPT?: unknown }).__doplanPT = {
       get runtime() { return runtime },
-      get state() { return { interactive, ready, stillRunning, phase, capturing, holdIn: holdUntil - performance.now(), sceneToken, avgSamples, minSamples, target } },
+      get state() { return { interactive, ready, stillRunning, phase, capturing, holdIn: holdUntil - performance.now(), holdReason, sceneToken, avgSamples, minSamples, target } },
     }
   }
 
@@ -930,11 +954,19 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
       // they never rebuild the BVH (visibility is a per-object flag of the packed scene)
       if (cameraChanged()) {
         needCamera = true
-        hold(CAMERA_REST_MS)
+        holdReason = 'camera'
+        hold(cameraRestMs())
       }
-      if (ready && !capturing && computeVisSig() !== visSig) {
-        needTransforms = true
-        hold(CAMERA_REST_MS)
+      if (ready && !capturing) {
+        // remember the new state right away: comparing with the last *applied* one would extend
+        // the hold on every frame and tracing would never resume (stuck at 0/N)
+        const vis = computeVisSig()
+        if (vis !== visSig) {
+          visSig = vis
+          needTransforms = true
+          holdReason = 'visibility'
+          hold(cameraRestMs())
+        }
       }
       if (phase === 'hold') {
         if (capturing || performance.now() < holdUntil) return 0
@@ -949,6 +981,7 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
           return 0
         }
         phase = 'warm'
+        if (firstSampleTimed) setPtStage('tracing')
         warmSince = performance.now()
         perfBegin('ptRest1')
         perfBegin('ptRestShown')
@@ -958,6 +991,7 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
         if (!firstSampleTimed) {
           firstSampleTimed = true
           perfTime('pt.firstSample.cpu', () => pt.renderSample())
+          if (phase === 'warm') setPtStage('tracing')
         } else pt.renderSample()
       } catch (err) {
         fail(err)
@@ -972,6 +1006,7 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
       if (phase === 'warm' && (avgSamples >= Math.min(swapAt, target) || done)) {
         // enough samples to beat the raster frame: present the traced image from the next frame on
         phase = 'trace'
+        setPtStage('idle')
         pt.renderToCanvas = true
         if (denoising) filtered = runDenoiser(rt, avgSamples)
         perfEnd('ptRestShown', 'pt.rest→shown')
@@ -1003,6 +1038,7 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
       unsubQuality()
       unsubDenoise()
       clearHoldTimer()
+      setPtStage('idle')
       interactive = false
       ready = false
       sceneToken++

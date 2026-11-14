@@ -25,6 +25,7 @@ import { handles, setHandle } from '@/store/handles'
 import { pathTracingDone, uiStore, useUi } from '@/store/ui'
 import type { Engine3DHandle } from '@/contracts'
 import { prefs3dStore, usePrefs3d, type DenoiseMode, type TraceMode } from '@/view3d/prefs'
+import { useStatus3d } from '@/view3d/status'
 import { IconBtn, MiniSelect, Segmented, TextBtn } from './primitives'
 
 const QUALITY: QualityPreset[] = ['low', 'medium', 'high', 'ultra']
@@ -41,6 +42,9 @@ addTranslations('en', {
     'Path tracing with the button; the realtime frame shows while the camera moves or the project changes',
   'Трассировка запускается сама, когда камера и проект в покое': 'Path tracing starts by itself once the camera and the project rest',
   'Остановить трассировку': 'Stop path tracing',
+  'Подготовка трассировки…': 'Preparing path tracing…',
+  'Загрузка моделей': 'Loading models',
+  'Трассировка…': 'Path tracing…',
   'Шумодав: авто': 'Denoise: auto',
   'Шумодав: вкл': 'Denoise: on',
   'Шумодав: выкл': 'Denoise: off',
@@ -208,6 +212,29 @@ function Overlay({ engine, hidden }: { engine: Engine3DHandle; hidden?: boolean 
   )
 }
 
+/** what slow work runs right now (path tracer preparation, model loading), with a spinner */
+function BusyStatus() {
+  const t = useT()
+  const stage = useStatus3d((s) => s.ptStage)
+  const pending = useStatus3d((s) => s.modelsPending)
+  const total = useStatus3d((s) => s.modelsTotal)
+  const text =
+    stage === 'preparing'
+      ? t('Подготовка трассировки…')
+      : pending > 0
+        ? `${t('Загрузка моделей')} ${total - pending}/${total}`
+        : stage === 'tracing'
+          ? t('Трассировка…')
+          : null
+  if (!text) return null
+  return (
+    <div className="pointer-events-none absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-lg border border-border bg-panel/90 px-3 py-1.5 text-xs text-text shadow-pop backdrop-blur" role="status">
+      <LoaderCircle size={14} className="dp-spin text-accent" />
+      {text}
+    </div>
+  )
+}
+
 /** Lazily loads the 3D engine chunk and mounts it. */
 export function Viewport3D({ hidden }: { hidden?: boolean }) {
   const t = useT()
@@ -307,6 +334,7 @@ export function Viewport3D({ hidden }: { hidden?: boolean }) {
         </div>
       )}
       {engine && <Overlay engine={engine} hidden={hidden} />}
+      {engine && !hidden && <BusyStatus />}
     </div>
   )
 }

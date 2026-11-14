@@ -12,7 +12,7 @@
  */
 import * as THREE from 'three'
 import { DEFAULT_MATERIALS } from '@core'
-import type { EntityRef, FinishZone, Id, Opening, SurfaceFinish, Vec2, Wall, WallGeom, WallSide } from '@core/types'
+import type { EntityRef, FinishZone, Id, Opening, SurfaceFinish, TilePattern, Vec2, Wall, WallGeom, WallSide } from '@core/types'
 import type { MaterialLibraryEx } from '../materials'
 import { type Hole, archPoints, openingHoles } from './holes'
 import { GeoBuilder, MM, type P2, clipBand, dir3, distToSegment, signedArea, w3 } from './util'
@@ -38,6 +38,8 @@ interface Band {
    * undefined when the side is one uniform finish
    */
   zone?: { from: number; to: number }
+  /** laying pattern of the band (zone's, else the side's); undefined = the material's own */
+  pattern?: TilePattern
   key: string
 }
 
@@ -60,17 +62,19 @@ function computeBands(side: WallSide, H: number): Band[] {
     if (y1 - y0 < 0.05) continue
     const mid = (y0 + y1) / 2
     let materialId = side.materialId
+    let pattern = side.pattern
     let zone: FinishZone | null = null
     for (const z of zones) {
       if (z.from <= mid && z.to >= mid) {
         materialId = z.materialId
+        pattern = z.pattern
         zone = z
       }
     }
     const last = bands[bands.length - 1]
     const lastZone = last?.zone && last.key.startsWith('z') ? last.zone : null
     const sameSource = zone ? lastZone && lastZone.from === zone.from && lastZone.to === zone.to : last && !last.key.startsWith('z')
-    if (last && sameSource && last.materialId === materialId && Math.abs(last.y1 - y0) < 0.05) {
+    if (last && sameSource && last.materialId === materialId && last.pattern === pattern && Math.abs(last.y1 - y0) < 0.05) {
       last.y1 = y1
       if (!zone && last.zone) last.zone = { from: last.zone.from, to: y1 }
     } else {
@@ -78,6 +82,7 @@ function computeBands(side: WallSide, H: number): Band[] {
         y0,
         y1,
         materialId,
+        pattern,
         zone: zone ? { from: zone.from, to: zone.to } : zones.length ? { from: y0, to: y1 } : undefined,
         key: zone ? `z${zone.from}:${zone.to}` : `b${y0}`,
       })
@@ -220,7 +225,7 @@ export function buildWall(input: WallInput, lib: MaterialLibraryEx): THREE.Group
     for (const { band, gb } of builders.values()) {
       const extra: Record<string, unknown> = { side, materialId: band.materialId, part: 'face' }
       if (band.zone) extra.zone = { from: band.zone.from, to: band.zone.to }
-      add(gb.mesh(lib.get(band.materialId), ref, extra))
+      add(gb.mesh(lib.get(band.pattern ? { materialId: band.materialId, pattern: band.pattern } : band.materialId), ref, extra))
     }
   }
 

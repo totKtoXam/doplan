@@ -5,6 +5,33 @@ import { uiStore } from '@/store/ui'
 import { addTranslations } from '@/i18n'
 import { tx } from './catalog'
 
+// M2: finishes v2 (layout start, waste, wall/zone patterns) and product cards
+addTranslations('en', {
+  'Начало раскладки': 'Layout start',
+  'сдвиг первой целой плитки от угла, мм': 'offset of the first whole tile from the corner, mm',
+  'Запас на подрезку': 'Cutting waste',
+  'по умолч.': 'default',
+  'Раскладка стены': 'Wall layout',
+  'Раскладка зоны': 'Zone layout',
+  Рулон: 'Roll',
+  'ширина × длина рулона и раппорт рисунка, мм': 'roll width × length and pattern repeat, mm',
+  Д: 'L',
+  Р: 'R',
+  Расход: 'Coverage',
+  'м² на литр за один слой': 'm² per litre per coat',
+  Товар: 'Product',
+  'в валюте проекта; цена в смете проекта важнее': 'in the project currency; a price set in the project estimate wins',
+  'за ед. сметы': 'per estimate unit',
+  'Единица цены': 'Price unit',
+  Упаковка: 'Pack',
+  'м² в упаковке, литров в банке, штук в коробке': 'm² per pack, litres per can, pieces per box',
+  Поставщик: 'Vendor',
+  Артикул: 'SKU',
+  Ссылка: 'Link',
+  'Ссылка на товар': 'Product link',
+  'прайс-лист': 'price list',
+})
+
 addTranslations('en', {
   Стиль: 'Style',
   'Стили интерьера': 'Interior styles',

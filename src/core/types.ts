@@ -45,10 +45,16 @@ export interface FinishZone {
   from: number
   to: number
   materialId: Id
+  /** laying pattern of the band (default: the material's own) */
+  pattern?: TilePattern
+  /** e.g. 'Фартук', 'Панель' (estimate / drawings) */
+  label?: string
 }
 
 export interface WallSide {
   materialId: Id
+  /** laying pattern of the face outside zones (default: the material's own) */
+  pattern?: TilePattern
   /** optional bands overriding `materialId` between heights */
   zones?: FinishZone[]
 }
@@ -200,6 +206,11 @@ export interface TilePattern {
   variation?: number
   /** optional second colour for checkerboard, '#rrggbb' */
   altColor?: string
+  /** shift of the layout origin along the surface, mm (where the first full tile starts) */
+  offsetX?: number
+  offsetY?: number
+  /** waste allowance 0..1 for the estimate (default by type: straight 10 %, diagonal 15 %, herringbone / chevron 20 %) */
+  waste?: number
 }
 
 export interface SurfaceFinish {
@@ -389,6 +400,45 @@ export interface ColorCode {
   code: string
 }
 
+export interface WallpaperSpec {
+  /** roll width and length, mm (default 530 × 10050) */
+  rollW: number
+  rollL: number
+  /** vertical pattern repeat, mm (0 = free match) */
+  repeat?: number
+  /** straight / offset (half-drop) / free match */
+  match?: 'straight' | 'offset' | 'free'
+}
+
+export interface PaintSpec {
+  /** m² per litre per coat (default 10) */
+  coverage?: number
+  /** coats (default 2) */
+  coats?: number
+}
+
+/** Price unit of a product = the estimate unit it is bought in. */
+export type PriceUnit = 'м²' | 'м' | 'шт' | 'л' | 'рул.' | 'уп.'
+
+/**
+ * A product the user buys for a material or an item. `price` is in the project currency
+ * (`DocDesign.currency`), per `priceUnit`.
+ */
+export interface ProductRef {
+  vendor?: string
+  sku?: string
+  url?: string
+  price?: number
+  priceUnit?: PriceUnit
+  /** amount in one pack, in the estimate unit: m² per pack, litres per can, metres per plank */
+  pack?: number
+  /** ISO date of the price */
+  updatedAt?: string
+  /** where the price came from */
+  source?: 'manual' | 'csv' | 'link' | 'feed'
+  note?: string
+}
+
 export interface Material {
   id: Id
   name: string
@@ -398,6 +448,12 @@ export interface Material {
   color: string
   /** colour-system code of a paint (NCS / RAL / brand) */
   colorCode?: ColorCode
+  /** wallpaper roll and pattern repeat (estimate) */
+  wallpaper?: WallpaperSpec
+  /** paint coverage (estimate) */
+  paint?: PaintSpec
+  /** the product to buy: vendor, article, link, price */
+  product?: ProductRef
   roughness: number
   metalness: number
   /** texture URLs (doplan-asset://… or relative to catalog root) */
@@ -628,6 +684,10 @@ export interface Doc {
 export interface DocDesign {
   /** style applied to the whole apartment last (default for new rooms) */
   styleId?: Id
+  /** ISO 4217 currency of prices in this project ('KZT', 'RUB', 'USD', 'EUR'…); absent = not chosen */
+  currency?: string
+  /** the user's own price list: material / asset id → product (wins over `Material.product`) */
+  priceList?: Record<Id, ProductRef>
 }
 
 export type EntityKind =

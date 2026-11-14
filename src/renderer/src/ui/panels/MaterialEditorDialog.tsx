@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ImagePlus, Link2, Link2Off, Wallpaper, X } from 'lucide-react'
-import type { Material, MaterialCategory } from '@core/types'
+import type { Material, MaterialCategory, PriceUnit, ProductRef } from '@core/types'
 import { newId } from '@core'
 import { docStore } from '@/store/document'
 import { useT } from '@/i18n'
@@ -33,9 +33,59 @@ interface Draft {
   /** colour-system code (paints); system 'none' = no code */
   codeSystem: string
   code: string
+  /** product card: where to buy and for how much (price in the project currency) */
+  vendor: string
+  sku: string
+  url: string
+  price: number | null
+  priceUnit: PriceUnit | 'none'
+  pack: number | null
+  /** wallpaper roll (mm) and pattern repeat; paint coverage (m²/l per coat) */
+  rollW: number | null
+  rollL: number | null
+  repeat: number | null
+  coverage: number | null
 }
 
 const CODE_SYSTEMS = ['none', 'NCS', 'RAL', 'custom']
+const PRICE_UNITS: PriceUnit[] = ['м²', 'м', 'шт', 'л', 'рул.', 'уп.']
+const EMPTY_PRODUCT = {
+  vendor: '',
+  sku: '',
+  url: '',
+  price: null,
+  priceUnit: 'none',
+  pack: null,
+  rollW: null,
+  rollL: null,
+  repeat: null,
+  coverage: null,
+} satisfies Partial<Draft>
+
+/** paint settings the editor does not show (coats) survive an edit */
+const prevPaint = (id: string | null | undefined) => (id ? lookupMaterial(id)?.paint : undefined)
+
+/** product / wallpaper / paint fields of the draft as material fields (undefined = not set) */
+function productOf(d: Draft): Pick<Material, 'product' | 'wallpaper' | 'paint'> {
+  const product: ProductRef = {}
+  if (d.vendor.trim()) product.vendor = d.vendor.trim()
+  if (d.sku.trim()) product.sku = d.sku.trim()
+  if (/^https?:\/\//i.test(d.url.trim())) product.url = d.url.trim()
+  if (d.price !== null) product.price = d.price
+  if (d.priceUnit !== 'none') product.priceUnit = d.priceUnit
+  if (d.pack !== null && d.pack > 0) product.pack = d.pack
+  const hasProduct = Object.keys(product).length > 0
+  if (hasProduct) {
+    product.source = product.url ? 'link' : 'manual'
+    product.updatedAt = new Date().toISOString().slice(0, 10)
+  }
+  const wallpaper =
+    d.category === 'wallpaper' && d.rollW && d.rollL
+      ? { rollW: d.rollW, rollL: d.rollL, ...(d.repeat ? { repeat: d.repeat } : {}) }
+      : undefined
+  const paint = d.category === 'paint' && d.coverage ? { coverage: d.coverage } : undefined
+  return { product: hasProduct ? product : undefined, wallpaper, paint }
+}
 
 export interface MaterialEditorDialogProps {
   open: boolean
@@ -46,7 +96,7 @@ export interface MaterialEditorDialogProps {
 }
 
 function emptyDraft(): Draft {
-  return { name: 'Мой материал', category: 'paint', color: '#d8d4cc', roughness: 0.8, metalness: 0, maps: {}, sizeMm: [1000, 1000], codeSystem: 'none', code: '' }
+  return { name: 'Мой материал', category: 'paint', color: '#d8d4cc', roughness: 0.8, metalness: 0, maps: {}, sizeMm: [1000, 1000], codeSystem: 'none', code: '', ...EMPTY_PRODUCT }
 }
 
 function draftFrom(m: Material, copy: boolean): Draft {
@@ -65,6 +115,16 @@ function draftFrom(m: Material, copy: boolean): Draft {
     sizeMm: m.sizeMm ? [m.sizeMm[0], m.sizeMm[1]] : [1000, 1000],
     codeSystem: m.colorCode?.system ?? 'none',
     code: m.colorCode?.code ?? '',
+    vendor: m.product?.vendor ?? '',
+    sku: m.product?.sku ?? '',
+    url: m.product?.url ?? '',
+    price: m.product?.price ?? null,
+    priceUnit: m.product?.priceUnit ?? 'none',
+    pack: m.product?.pack ?? null,
+    rollW: m.wallpaper?.rollW ?? null,
+    rollL: m.wallpaper?.rollL ?? null,
+    repeat: m.wallpaper?.repeat ?? null,
+    coverage: m.paint?.coverage ?? null,
   }
 }
 
@@ -195,6 +255,7 @@ export function MaterialEditorDialog({ open, onClose, materialId, onSaved }: Mat
       const name = draft.name.trim() || t('Мой материал')
       const code = draft.code.trim()
       const colorCode = draft.codeSystem !== 'none' && code ? { system: draft.codeSystem, code } : undefined
+      const extra = productOf(draft)
       const base: Omit<Material, 'id'> = {
         name,
         nameRu: name,
@@ -204,6 +265,9 @@ export function MaterialEditorDialog({ open, onClose, materialId, onSaved }: Mat
         metalness: draft.metalness,
         ...(hasMaps ? { maps, sizeMm: [draft.sizeMm[0], draft.sizeMm[1]] as [number, number] } : {}),
         ...(colorCode ? { colorCode } : {}),
+        ...(extra.product ? { product: extra.product } : {}),
+        ...(extra.wallpaper ? { wallpaper: extra.wallpaper } : {}),
+        ...(extra.paint ? { paint: { ...(prevPaint(editId) ?? {}), ...extra.paint } } : {}),
         custom: true,
       }
       const id = editId ?? newId('m')
@@ -215,6 +279,9 @@ export function MaterialEditorDialog({ open, onClose, materialId, onSaved }: Mat
           delete next.sizeMm
         }
         if (!colorCode) delete next.colorCode
+        if (!extra.product) delete next.product
+        if (!extra.wallpaper) delete next.wallpaper
+        if (!extra.paint) delete next.paint
         d.materials[id] = next
       })
 
@@ -322,6 +389,41 @@ export function MaterialEditorDialog({ open, onClose, materialId, onSaved }: Mat
           </Row>
           <Row label={t('Металличность')}>
             <Slider value={draft.metalness} min={0} max={1} step={0.01} onChange={(v) => patch({ metalness: v })} format={(v) => fmtNum(v, 2)} />
+          </Row>
+
+          {draft.category === 'wallpaper' && (
+            <Row label={t('Рулон')} hint={t('ширина × длина рулона и раппорт рисунка, мм')}>
+              <NumberInput kind="length" unit="mm" label={t('Ш')} value={draft.rollW} min={100} max={3000} round={1} placeholder="530" onChange={(v) => patch({ rollW: v })} />
+              <NumberInput kind="length" unit="mm" label={t('Д')} value={draft.rollL} min={1000} max={50000} round={10} placeholder="10050" onChange={(v) => patch({ rollL: v })} />
+              <NumberInput kind="length" unit="mm" label={t('Р')} value={draft.repeat} min={0} max={2000} round={1} placeholder="0" onChange={(v) => patch({ repeat: v })} />
+            </Row>
+          )}
+          {draft.category === 'paint' && (
+            <Row label={t('Расход')} hint={t('м² на литр за один слой')}>
+              <NumberInput value={draft.coverage} min={1} max={30} step={0.5} decimals={1} suffix="м²/л" placeholder="8" onChange={(v) => patch({ coverage: v })} />
+            </Row>
+          )}
+
+          <div className="mt-1 text-[11px] font-semibold">{t('Товар')}</div>
+          <Row label={t('Цена')} hint={t('в валюте проекта; цена в смете проекта важнее')}>
+            <NumberInput value={draft.price} min={0} step={1} decimals={2} placeholder="—" onChange={(v) => patch({ price: v })} />
+            <Select<PriceUnit | 'none'>
+              value={draft.priceUnit}
+              onChange={(v) => patch({ priceUnit: v })}
+              options={[{ value: 'none', label: t('за ед. сметы') }, ...PRICE_UNITS.map((u) => ({ value: u, label: `/${u}` }))]}
+              className="w-28 shrink-0"
+              aria-label={t('Единица цены')}
+            />
+          </Row>
+          <Row label={t('Упаковка')} hint={t('м² в упаковке, литров в банке, штук в коробке')}>
+            <NumberInput value={draft.pack} min={0} step={0.1} decimals={2} placeholder="—" onChange={(v) => patch({ pack: v })} />
+          </Row>
+          <Row label={t('Поставщик')}>
+            <Input value={draft.vendor} onChange={(v) => patch({ vendor: v })} onKeyDown={(e) => e.stopPropagation()} aria-label={t('Поставщик')} />
+            <Input value={draft.sku} onChange={(v) => patch({ sku: v })} onKeyDown={(e) => e.stopPropagation()} placeholder={t('Артикул')} aria-label={t('Артикул')} className="w-28 shrink-0" />
+          </Row>
+          <Row label={t('Ссылка')}>
+            <Input value={draft.url} onChange={(v) => patch({ url: v })} onKeyDown={(e) => e.stopPropagation()} placeholder="https://" aria-label={t('Ссылка на товар')} />
           </Row>
 
           <div className="mt-1 text-[11px] font-semibold">{t('Текстуры')}</div>

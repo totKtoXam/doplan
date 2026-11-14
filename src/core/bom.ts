@@ -17,6 +17,8 @@ import type {
   LightKind,
   Material,
   OpeningKind,
+  PriceUnit,
+  ProductRef,
   Room,
   TilePattern,
   Vec2,
@@ -34,10 +36,24 @@ export interface BomRow {
   unit: string
   quantity: number
   note?: string
-  /** material / asset id the row refers to, when applicable */
+  /**
+   * id the row refers to and prices are keyed by: a material / asset id, or a synthetic key for
+   * openings (`opening:door:800x2000`), lights (`light:spot`) and cornices (`cornice:60`)
+   */
   refId?: Id
   /** room names the row comes from */
   rooms?: string[]
+  /** a "to buy" row (with waste, in packs / pieces / litres / rolls) as opposed to a measured quantity */
+  purchase?: boolean
+  /** the same purchase in other units (tiles: шт and м²; packs: уп. and м²; paint: л and cans) */
+  alt?: Partial<Record<PriceUnit, number>>
+  /** price per `priceUnit` in the project currency, the unit it is quoted in, and the row total */
+  price?: number
+  priceUnit?: PriceUnit
+  total?: number
+  vendor?: string
+  sku?: string
+  url?: string
 }
 
 export interface BomOptions {
@@ -139,8 +155,31 @@ function tileOf(pattern: TilePattern | undefined, m: Material | undefined): { w:
   return null
 }
 
-function wasteFor(type: string): number {
-  return type === 'diagonal' || type === 'herringbone' || type === 'chevron' ? 0.15 : 0.1
+/** waste allowance: the pattern's own, else straight 10 %, diagonal 15 %, herringbone / chevron 20 % */
+export function wasteFor(type: string, pattern?: TilePattern): number {
+  if (pattern?.waste !== undefined) return pattern.waste
+  if (type === 'herringbone' || type === 'chevron') return 0.2
+  if (type === 'diagonal' || type === 'hex') return 0.15
+  return 0.1
+}
+
+/**
+ * The product (price, vendor, link) of a material / asset / synthetic key: the project's price list
+ * entry over the material's own product card, field by field.
+ */
+export function productFor(doc: Doc, catalog: Catalog | undefined, refId: Id | undefined): ProductRef | undefined {
+  if (!refId) return undefined
+  const own = doc.design?.priceList?.[refId]
+  const card = lookupMaterial(doc, catalog, refId)?.product
+  if (own && card) return { ...card, ...own }
+  return own ?? card
+}
+
+/** wallpaper strip length for a band height, with trimming allowance and pattern repeat */
+export function wallpaperStrip(bandH: number, repeat = 0, match: 'straight' | 'offset' | 'free' = 'straight'): number {
+  const base = bandH + 100
+  if (repeat <= 0 || match === 'free') return base
+  return Math.ceil(base / repeat) * repeat + (match === 'offset' ? repeat / 2 : 0)
 }
 
 interface Acc {
@@ -180,7 +219,7 @@ export function computeBom(doc: Doc, catalog?: Catalog, opts: BomOptions = {}): 
   const addAcc = (map: Map<string, Acc>, materialId: Id, pattern: TilePattern | undefined, area: number, room: string) => {
     if (area <= 1e-6) return
     const p = pattern && pattern.type !== 'none' ? pattern : undefined
-    const key = p ? `${materialId}|${p.type}|${p.tileW}x${p.tileH}|${p.grout}` : materialId
+    const key = p ? `${materialId}|${p.type}|${p.tileW}x${p.tileH}|${p.grout}|${p.waste ?? ''}` : materialId
     let a = map.get(key)
     if (!a) {
       a = { key, materialId, pattern: p, area: 0, rooms: new Set() }
@@ -241,26 +280,27 @@ export function computeBom(doc: Doc, catalog?: Catalog, opts: BomOptions = {}): 
           else if (o.kind === 'balconyBlock') doorCut += Math.min(len, Math.min(800, o.width * 0.45))
         }
         const side = w[e.side]
-        // bands: [from, to, materialId]
-        const bands: [number, number, Id][] = []
+        // bands: [from, to, materialId, pattern]
+        type BandT = [number, number, Id, TilePattern | undefined]
+        const bands: BandT[] = []
         const zones = (side.zones ?? [])
-          .map((z) => [Math.max(0, z.from), Math.min(H, z.to), z.materialId] as [number, number, Id])
+          .map((z) => [Math.max(0, z.from), Math.min(H, z.to), z.materialId, z.pattern] as BandT)
           .filter((z) => z[1] > z[0])
           .sort((a, b) => a[0] - b[0])
         let cur = 0
         for (const z of zones) {
-          if (z[0] > cur) bands.push([cur, z[0], side.materialId])
+          if (z[0] > cur) bands.push([cur, z[0], side.materialId, side.pattern])
           const zFrom = Math.max(cur, z[0])
-          if (z[1] > zFrom) bands.push([zFrom, z[1], z[2]])
+          if (z[1] > zFrom) bands.push([zFrom, z[1], z[2], z[3]])
           cur = Math.max(cur, z[1])
         }
-        if (cur < H) bands.push([cur, H, side.materialId])
-        for (const [b0, b1, mid] of bands) {
+        if (cur < H) bands.push([cur, H, side.materialId, side.pattern])
+        for (const [b0, b1, mid, bp] of bands) {
           let area = L * (b1 - b0)
           for (const { o, len } of ops) area -= len * overlap(o.sill, o.sill + o.height, b0, b1)
           area = Math.max(0, area) / 1e6
           const m = lookupMaterial(doc, catalog, mid)
-          addAcc(walls, mid, m?.category === 'wallpaper' ? undefined : m?.pattern, area, rn)
+          addAcc(walls, mid, m?.category === 'wallpaper' ? undefined : (bp ?? m?.pattern), area, rn)
           if (m?.category === 'wallpaper') {
             const k = wpRoom.get(mid) ?? { length: 0, height: 0 }
             k.length += L
@@ -291,6 +331,45 @@ export function computeBom(doc: Doc, catalog?: Catalog, opts: BomOptions = {}): 
 
   const rows: BomRow[] = []
   const sortedRooms = (s: Set<string>) => [...s].sort((a, b) => a.localeCompare(b, 'ru'))
+  /** pack size of the product when it is bought in `unit` packs (or the pack is given without a unit) */
+  const packOf = (refId: Id, unit: PriceUnit): number | undefined => {
+    const p = productFor(doc, catalog, refId)
+    return p?.pack && (!p.priceUnit || p.priceUnit === unit) ? p.pack : undefined
+  }
+  const paintRow = (group: BomGroup, m: Material, id: Id, area: number): BomRow => {
+    const k = m.paint?.coats ?? coats
+    const cov = m.paint?.coverage ?? coverage
+    const litres = round((area * k) / cov, 1)
+    const can = packOf(id, 'шт')
+    const alt: BomRow['alt'] = { л: litres }
+    if (can) alt['шт'] = Math.ceil(litres / can)
+    return {
+      group,
+      name: `${materialName(m, id)} — краска`,
+      unit: 'л',
+      quantity: litres,
+      note: `${k} ${k === 1 ? 'слой' : k < 5 ? 'слоя' : 'слоёв'}, расход ${fmt(1 / cov, 2)} л/м²${can ? `, ${alt['шт']} банок по ${fmt(can, 1)} л` : ''}`,
+      refId: id,
+      purchase: true,
+      alt,
+    }
+  }
+  const tileRow = (group: BomGroup, m: Material | undefined, id: Id, tile: { w: number; h: number; grout: number }, area: number, waste: number, cell: number): BomRow => {
+    const count = Math.ceil((area * (1 + waste)) / cell)
+    const pack = packOf(id, 'уп.')
+    const alt: BomRow['alt'] = { шт: count, 'м²': round(count * cell) }
+    if (pack) alt['уп.'] = Math.ceil((count * cell) / pack)
+    return {
+      group,
+      name: `${materialName(m, id)} — плитка ${Math.round(tile.w)}×${Math.round(tile.h)} мм`,
+      unit: 'шт',
+      quantity: count,
+      note: `запас ${Math.round(waste * 100)}%, шов ${fmt(tile.grout, 1)} мм, ${fmt(count * cell)} м²${pack ? `, ${alt['уп.']} уп. по ${fmt(pack)} м²` : ''}`,
+      refId: id,
+      purchase: true,
+      alt,
+    }
+  }
 
   // ── floors
   for (const a of [...floors.values()].sort((x, y) => y.area - x.area)) {
@@ -301,27 +380,24 @@ export function computeBom(doc: Doc, catalog?: Catalog, opts: BomOptions = {}): 
     const tile = tileOf(a.pattern, m)
     const planks = isPlankCategory(m) || a.pattern?.type === 'planks'
     if (planks && (m?.category === 'laminate' || m?.category === 'parquet' || !tile || a.pattern?.type === 'planks')) {
-      const need = a.area * 1.1
+      const waste = wasteFor(a.pattern?.type ?? 'planks', a.pattern ?? m?.pattern)
+      const need = a.area * (1 + waste)
+      const pack = packOf(a.materialId, 'уп.') ?? packArea
+      const packs = Math.ceil(need / pack)
       rows.push({
         group: 'Полы',
         name: `${materialName(m, a.materialId)} — упаковки`,
         unit: 'уп.',
-        quantity: Math.ceil(need / packArea),
-        note: `${fmt(need)} м² с запасом 10%, упаковка ${fmt(packArea)} м²`,
+        quantity: packs,
+        note: `${fmt(need)} м² с запасом ${Math.round(waste * 100)}%, упаковка ${fmt(pack)} м²`,
         refId: a.materialId,
+        purchase: true,
+        alt: { 'уп.': packs, 'м²': round(packs * pack) },
       })
     } else if (tile) {
-      const waste = wasteFor(a.pattern?.type ?? tile.type)
+      const waste = wasteFor(a.pattern?.type ?? tile.type, a.pattern ?? m?.pattern)
       const cell = ((tile.w + tile.grout) * (tile.h + tile.grout)) / 1e6
-      const count = Math.ceil((a.area * (1 + waste)) / cell)
-      rows.push({
-        group: 'Полы',
-        name: `${materialName(m, a.materialId)} — плитка ${Math.round(tile.w)}×${Math.round(tile.h)} мм`,
-        unit: 'шт',
-        quantity: count,
-        note: `запас ${Math.round(waste * 100)}%, шов ${fmt(tile.grout, 1)} мм`,
-        refId: a.materialId,
-      })
+      rows.push(tileRow('Полы', m, a.materialId, tile, a.area, waste, cell))
     } else if (m?.category === 'carpet') {
       rows.push({
         group: 'Полы',
@@ -330,6 +406,7 @@ export function computeBom(doc: Doc, catalog?: Catalog, opts: BomOptions = {}): 
         quantity: round(a.area * 1.1),
         note: 'запас 10% на подрезку',
         refId: a.materialId,
+        purchase: true,
       })
     }
   }
@@ -340,49 +417,38 @@ export function computeBom(doc: Doc, catalog?: Catalog, opts: BomOptions = {}): 
     const name = materialName(m, a.materialId)
     rows.push({ group: 'Стены', name, unit: 'м²', quantity: round(a.area), refId: a.materialId, rooms: sortedRooms(a.rooms), note: 'за вычетом проёмов' })
     if (!m || m.category === 'paint') {
-      if (m) {
-        const litres = (a.area * coats) / coverage
-        rows.push({
-          group: 'Стены',
-          name: `${name} — краска`,
-          unit: 'л',
-          quantity: round(litres, 1),
-          note: `${coats} слоя, расход ${fmt(1 / coverage, 2)} л/м²`,
-          refId: a.materialId,
-        })
-      }
+      if (m) rows.push(paintRow('Стены', m, a.materialId, a.area))
     } else if (m.category === 'wallpaper') {
       const wp = wallpaper.get(a.materialId)
       if (wp) {
+        const rw = m.wallpaper?.rollW ?? rollW
+        const rl = m.wallpaper?.rollL ?? rollL
+        const repeat = m.wallpaper?.repeat ?? 0
+        const match = m.wallpaper?.match ?? 'straight'
         let rolls = 0
         for (const v of wp.perRoom.values()) {
-          const stripH = v.height + 100
-          const perRoll = Math.max(1, Math.floor(rollL / stripH))
-          const strips = Math.ceil(v.length / rollW)
+          const stripH = wallpaperStrip(v.height, repeat, match)
+          const perRoll = Math.max(1, Math.floor(rl / stripH))
+          const strips = Math.ceil(v.length / rw)
           rolls += strips / perRoll
         }
+        const rep = repeat > 0 && match !== 'free' ? `, раппорт ${Math.round(repeat)} мм${match === 'offset' ? ' со смещением' : ''}` : ''
         rows.push({
           group: 'Стены',
           name: `${name} — обои`,
           unit: 'рул.',
           quantity: Math.ceil(rolls),
-          note: `рулон ${fmt(rollW / 1000)}×${fmt(rollL / 1000)} м, по полосам без вычета проёмов`,
+          note: `рулон ${fmt(rw / 1000)}×${fmt(rl / 1000)} м${rep}, по полосам без вычета проёмов`,
           refId: a.materialId,
+          purchase: true,
         })
       }
     } else {
       const tile = tileOf(a.pattern, m)
       if (tile && (isTileCategory(m) || a.pattern)) {
-        const waste = wasteFor(a.pattern?.type ?? tile.type)
+        const waste = wasteFor(a.pattern?.type ?? tile.type, a.pattern ?? m.pattern)
         const cell = ((tile.w + tile.grout) * (tile.h + tile.grout)) / 1e6
-        rows.push({
-          group: 'Стены',
-          name: `${name} — плитка ${Math.round(tile.w)}×${Math.round(tile.h)} мм`,
-          unit: 'шт',
-          quantity: Math.ceil((a.area * (1 + waste)) / cell),
-          note: `запас ${Math.round(waste * 100)}%, шов ${fmt(tile.grout, 1)} мм`,
-          refId: a.materialId,
-        })
+        rows.push(tileRow('Стены', m, a.materialId, tile, a.area, waste, cell))
       }
     }
   }
@@ -392,25 +458,22 @@ export function computeBom(doc: Doc, catalog?: Catalog, opts: BomOptions = {}): 
     const m = lookupMaterial(doc, catalog, a.materialId)
     const name = materialName(m, a.materialId)
     rows.push({ group: 'Потолки', name, unit: 'м²', quantity: round(a.area), refId: a.materialId, rooms: sortedRooms(a.rooms) })
-    if (m?.category === 'paint') {
-      rows.push({
-        group: 'Потолки',
-        name: `${name} — краска`,
-        unit: 'л',
-        quantity: round((a.area * coats) / coverage, 1),
-        note: `${coats} слоя, расход ${fmt(1 / coverage, 2)} л/м²`,
-        refId: a.materialId,
-      })
-    }
+    if (m?.category === 'paint') rows.push(paintRow('Потолки', m, a.materialId, a.area))
   }
   for (const c of cornice.values()) {
+    const refId = `cornice:${Math.round(c.profile)}`
+    const len = round(c.length * 1.05)
+    const piece = packOf(refId, 'шт') ?? 2
     rows.push({
       group: 'Потолки',
       name: `Карниз потолочный ${Math.round(c.profile)} мм`,
       unit: 'м',
-      quantity: round(c.length * 1.05),
-      note: `${Math.ceil((c.length * 1.05) / 2)} шт по 2 м, запас 5%`,
+      quantity: len,
+      note: `${Math.ceil(len / piece)} шт по ${fmt(piece, 1)} м, запас 5%`,
       rooms: sortedRooms(c.rooms),
+      refId,
+      purchase: true,
+      alt: { м: len, шт: Math.ceil(len / piece) },
     })
   }
 
@@ -418,14 +481,19 @@ export function computeBom(doc: Doc, catalog?: Catalog, opts: BomOptions = {}): 
   for (const s of skirting.values()) {
     const m = lookupMaterial(doc, catalog, s.materialId)
     const need = s.length * 1.05
+    const refId = `skirting:${s.materialId ?? ''}:${Math.round(s.height)}`
+    const piece = packOf(refId, 'шт') ?? plank
+    const pieces = Math.ceil(need / piece)
     rows.push({
       group: 'Плинтус',
       name: `Плинтус ${Math.round(s.height)} мм${s.materialId ? ` — ${materialName(m, s.materialId)}` : ''}`,
       unit: 'м',
       quantity: round(s.length),
-      note: `${Math.ceil(need / plank)} шт по ${fmt(plank, 1)} м (запас 5%), за вычетом дверных проёмов`,
-      refId: s.materialId,
+      note: `${pieces} шт по ${fmt(piece, 1)} м (запас 5%), за вычетом дверных проёмов`,
+      refId,
       rooms: sortedRooms(s.rooms),
+      purchase: true,
+      alt: { м: round(pieces * piece), шт: pieces },
     })
   }
 
@@ -442,7 +510,7 @@ export function computeBom(doc: Doc, catalog?: Catalog, opts: BomOptions = {}): 
   }
   const kindOrder = Object.keys(OPENING_NAMES) as OpeningKind[]
   for (const e of [...openings.values()].sort((a, b) => kindOrder.indexOf(a.kind) - kindOrder.indexOf(b.kind) || a.w - b.w || a.h - b.h)) {
-    rows.push({ group: 'Двери и окна', name: `${OPENING_NAMES[e.kind]} ${e.w}×${e.h} мм`, unit: 'шт', quantity: e.n })
+    rows.push({ group: 'Двери и окна', name: `${OPENING_NAMES[e.kind]} ${e.w}×${e.h} мм`, unit: 'шт', quantity: e.n, refId: `opening:${e.kind}:${e.w}x${e.h}` })
   }
 
   // ── items
@@ -484,18 +552,234 @@ export function computeBom(doc: Doc, catalog?: Catalog, opts: BomOptions = {}): 
         unit: 'м',
         quantity: round(e.stripMm / 1000),
         note: `${e.n} отрезк., всего ${Math.round(e.lumens)} лм`,
+        refId: `light:${kind}`,
       })
     } else {
-      rows.push({ group: 'Освещение', name: LIGHT_NAMES[kind], unit: 'шт', quantity: e.n, note: `всего ${Math.round(e.lumens)} лм` })
+      rows.push({ group: 'Освещение', name: LIGHT_NAMES[kind], unit: 'шт', quantity: e.n, note: `всего ${Math.round(e.lumens)} лм`, refId: `light:${kind}` })
     }
   }
+  attachPrices(rows, doc, catalog)
   return rows
 }
 
-/** BOM rows as CSV (semicolon-separated, Excel-friendly in RU locales). */
-export function bomToCsv(rows: BomRow[]): string {
-  const q = (s: string) => (/[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s)
-  const lines = ['Раздел;Наименование;Ед.;Кол-во;Примечание']
-  for (const r of rows) lines.push([r.group, r.name, r.unit, String(r.quantity).replace('.', ','), r.note ?? ''].map(q).join(';'))
+/** quantity of a row in `unit`, if it is known in that unit */
+function qtyIn(r: BomRow, unit: PriceUnit): number | undefined {
+  return r.alt?.[unit] ?? (r.unit === unit ? r.quantity : undefined)
+}
+
+/**
+ * Put prices on the rows: per refId and group, the purchase row is priced first (the measured row
+ * only when there is no purchase row in that unit). A price without a unit goes on the purchase row
+ * in its own unit, else on the measured row.
+ */
+export function attachPrices(rows: BomRow[], doc: Doc, catalog?: Catalog): void {
+  const byKey = new Map<string, BomRow[]>()
+  for (const r of rows) {
+    if (!r.refId) continue
+    const k = `${r.group}|${r.refId}`
+    const l = byKey.get(k) ?? []
+    l.push(r)
+    byKey.set(k, l)
+  }
+  for (const list of byKey.values()) {
+    const p = productFor(doc, catalog, list[0].refId)
+    if (!p) continue
+    const ordered = [...list.filter((r) => r.purchase), ...list.filter((r) => !r.purchase)]
+    const target = p.priceUnit
+      ? ordered.find((r) => qtyIn(r, p.priceUnit!) !== undefined)
+      : ordered[0]
+    for (const r of list) {
+      if (p.vendor) r.vendor = p.vendor
+      if (p.sku) r.sku = p.sku
+      if (p.url) r.url = p.url
+    }
+    if (!target || p.price === undefined) continue
+    const unit = p.priceUnit ?? (target.unit as PriceUnit)
+    const q = qtyIn(target, unit) ?? target.quantity
+    target.price = p.price
+    target.priceUnit = unit
+    target.total = round(p.price * q, 2)
+  }
+}
+
+export interface BomTotals {
+  total: number
+  byGroup: Partial<Record<BomGroup, number>>
+  /** rows that carry a price / rows that could (have a refId) but do not */
+  priced: number
+  unpriced: number
+}
+
+export function bomTotals(rows: BomRow[]): BomTotals {
+  const t: BomTotals = { total: 0, byGroup: {}, priced: 0, unpriced: 0 }
+  const pricedKeys = new Set<string>()
+  for (const r of rows) if (r.total !== undefined && r.refId) pricedKeys.add(`${r.group}|${r.refId}`)
+  const seen = new Set<string>()
+  for (const r of rows) {
+    if (r.total !== undefined) {
+      t.total += r.total
+      t.byGroup[r.group] = (t.byGroup[r.group] ?? 0) + r.total
+      t.priced++
+    } else if (r.refId) {
+      const k = `${r.group}|${r.refId}`
+      if (!pricedKeys.has(k) && !seen.has(k)) t.unpriced++
+      seen.add(k)
+    }
+  }
+  t.total = round(t.total, 2)
+  return t
+}
+
+/** currencies offered in the project settings (ISO 4217); any other 3-letter code is accepted too */
+export const CURRENCIES = ['KZT', 'RUB', 'USD', 'EUR', 'UZS', 'KGS', 'BYN', 'UAH', 'GEL', 'AMD', 'AZN', 'TRY', 'GBP', 'CNY', 'AED', 'PLN'] as const
+
+/** money in the project currency ("12 500 ₸", "$1,200.00"); plain number when no currency is chosen */
+export function formatMoney(v: number, currency?: string, locale = 'ru-RU'): string {
+  const digits = Math.abs(v) >= 1000 || Number.isInteger(v) ? 0 : 2
+  try {
+    if (currency) return new Intl.NumberFormat(locale, { style: 'currency', currency, currencyDisplay: 'narrowSymbol', maximumFractionDigits: digits, minimumFractionDigits: 0 }).format(v)
+  } catch {
+    /* unknown currency code: fall through to a plain number + code */
+  }
+  const n = new Intl.NumberFormat(locale, { maximumFractionDigits: digits }).format(v)
+  return currency ? `${n} ${currency}` : n
+}
+
+/** the currency's symbol (₸, ₽, $, €…) or the code itself */
+export function currencySymbol(currency: string, locale = 'ru-RU'): string {
+  try {
+    const part = new Intl.NumberFormat(locale, { style: 'currency', currency, currencyDisplay: 'narrowSymbol' })
+      .formatToParts(0)
+      .find((p) => p.type === 'currency')
+    return part?.value ?? currency
+  } catch {
+    return currency
+  }
+}
+
+const csvCell = (s: string) => (/[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s)
+const csvNum = (v: number | undefined) => (v === undefined ? '' : String(v).replace('.', ','))
+
+/** BOM rows as CSV (semicolon-separated, Excel-friendly in RU locales), with prices when present. */
+export function bomToCsv(rows: BomRow[], currency?: string): string {
+  const cur = currency ? ` (${currency})` : ''
+  const lines = [`Раздел;Наименование;Ед.;Кол-во;Примечание;Цена${cur};За ед.;Сумма${cur};Поставщик;Артикул;Ссылка`]
+  for (const r of rows)
+    lines.push(
+      [r.group, r.name, r.unit, csvNum(r.quantity), r.note ?? '', csvNum(r.price), r.priceUnit ?? '', csvNum(r.total), r.vendor ?? '', r.sku ?? '', r.url ?? '']
+        .map(csvCell)
+        .join(';'),
+    )
+  const t = bomTotals(rows)
+  if (t.priced) lines.push(['Итого', '', '', '', '', '', '', csvNum(t.total), '', '', ''].map(csvCell).join(';'))
   return lines.join('\n')
+}
+
+// ───────────────────────────── price list CSV ─────────────────────────────
+
+const PRICE_HEADER = ['id', 'Наименование', 'Ед.', 'Цена', 'Упаковка', 'Поставщик', 'Артикул', 'Ссылка', 'Дата']
+const UNITS: readonly PriceUnit[] = ['м²', 'м', 'шт', 'л', 'рул.', 'уп.']
+
+/**
+ * The project's price list as CSV: one line per priceable thing in the estimate (materials,
+ * items, openings, lights…) plus any price-list entries not in the estimate. Fill the prices in
+ * a spreadsheet and import it back with `parsePriceListCsv`.
+ */
+export function priceListToCsv(rows: BomRow[], doc: Doc, catalog?: Catalog): string {
+  const lines = [PRICE_HEADER.join(';')]
+  const seen = new Set<Id>()
+  const line = (id: Id, name: string, unit: string, p: ProductRef | undefined) =>
+    lines.push(
+      [id, name, p?.priceUnit ?? unit, csvNum(p?.price), csvNum(p?.pack), p?.vendor ?? '', p?.sku ?? '', p?.url ?? '', p?.updatedAt ?? ''].map(csvCell).join(';'),
+    )
+  for (const r of rows) {
+    if (!r.refId || seen.has(r.refId)) continue
+    seen.add(r.refId)
+    const purchase = rows.find((x) => x.refId === r.refId && x.purchase)
+    line(r.refId, r.name.replace(/ — (упаковки|плитка .*|краска|обои|с запасом)$/, ''), (purchase ?? r).unit, productFor(doc, catalog, r.refId))
+  }
+  for (const [id, p] of Object.entries(doc.design?.priceList ?? {})) if (!seen.has(id)) line(id, '', p.priceUnit ?? '', p)
+  return lines.join('\n')
+}
+
+function splitCsvLine(line: string, sep: string): string[] {
+  const out: string[] = []
+  let cur = ''
+  let q = false
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]
+    if (q) {
+      if (c === '"' && line[i + 1] === '"') {
+        cur += '"'
+        i++
+      } else if (c === '"') q = false
+      else cur += c
+    } else if (c === '"') q = true
+    else if (c === sep) {
+      out.push(cur)
+      cur = ''
+    } else cur += c
+  }
+  out.push(cur)
+  return out.map((s) => s.trim())
+}
+
+function parseNum(s: string | undefined): number | undefined {
+  if (!s) return undefined
+  const n = Number(s.replace(/\s| /g, '').replace(',', '.'))
+  return Number.isFinite(n) && n >= 0 ? n : undefined
+}
+
+export interface PriceListImport {
+  entries: Record<Id, ProductRef>
+  /** 1-based line numbers that could not be read */
+  skipped: number[]
+}
+
+/** Read a price list CSV (`;` or `,` separated; header row with an `id` column). */
+export function parsePriceListCsv(text: string, today = new Date().toISOString().slice(0, 10)): PriceListImport {
+  const lines = text.replace(/^﻿/, '').split(/\r?\n/)
+  const res: PriceListImport = { entries: {}, skipped: [] }
+  const headerLine = lines.findIndex((l) => l.trim() !== '')
+  if (headerLine < 0) return res
+  const sep = (lines[headerLine].match(/;/g)?.length ?? 0) >= (lines[headerLine].match(/,/g)?.length ?? 0) ? ';' : ','
+  const header = splitCsvLine(lines[headerLine], sep).map((h) => h.toLowerCase())
+  const col = (...names: string[]) => header.findIndex((h) => names.some((n) => h === n || h.startsWith(n)))
+  const ci = {
+    id: col('id', 'код'),
+    unit: col('ед', 'unit'),
+    price: col('цена', 'price'),
+    pack: col('упаков', 'pack'),
+    vendor: col('поставщик', 'vendor', 'магазин'),
+    sku: col('артикул', 'sku'),
+    url: col('ссылка', 'url', 'link'),
+    date: col('дата', 'date', 'updated'),
+  }
+  if (ci.id < 0) {
+    res.skipped.push(headerLine + 1)
+    return res
+  }
+  for (let i = headerLine + 1; i < lines.length; i++) {
+    if (lines[i].trim() === '') continue
+    const c = splitCsvLine(lines[i], sep)
+    const id = c[ci.id]
+    if (!id) {
+      res.skipped.push(i + 1)
+      continue
+    }
+    const p: ProductRef = { source: 'csv' }
+    const price = parseNum(c[ci.price])
+    if (price !== undefined) p.price = price
+    const unit = c[ci.unit] as PriceUnit
+    if (UNITS.includes(unit)) p.priceUnit = unit
+    const pack = parseNum(c[ci.pack])
+    if (pack) p.pack = pack
+    if (ci.vendor >= 0 && c[ci.vendor]) p.vendor = c[ci.vendor]
+    if (ci.sku >= 0 && c[ci.sku]) p.sku = c[ci.sku]
+    if (ci.url >= 0 && c[ci.url]) p.url = c[ci.url]
+    p.updatedAt = (ci.date >= 0 && c[ci.date]) || today
+    if (p.price === undefined && !p.vendor && !p.sku && !p.url && !p.pack) continue
+    res.entries[id] = p
+  }
+  return res
 }

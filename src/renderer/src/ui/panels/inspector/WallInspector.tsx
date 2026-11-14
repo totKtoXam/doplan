@@ -7,7 +7,8 @@ import { useUi } from '@/store/ui'
 import { useT } from '@/i18n'
 import { Button, IconButton, NumberInput, Row, Section, Segmented, Select, formatLength } from '@/ui/kit'
 import { MaterialPicker } from '../common/MaterialPicker'
-import { optionsOf, WALL_CATEGORIES, WALL_KIND_RU } from '../common/labels'
+import { optionsOf, PATTERN_RU, WALL_CATEGORIES, WALL_KIND_RU } from '../common/labels'
+import { TilePatternEditor } from './TilePatternEditor'
 import { tx, useAllMaterials } from '../common/catalog'
 import { roomWallSides } from '../common/edits'
 import { Hint, InspectorHeader, Pair } from './shared'
@@ -108,6 +109,7 @@ function WallSideEditor({ wall, side, room }: { wall: Wall; side: Side; room: { 
   const zones = ws.zones ?? []
   const materials = useAllMaterials()
   const levelId = useUi((s) => s.activeLevelId)
+  const colorOf = (id: Id) => materials.find((m) => m.id === id)?.color ?? '#bbbbbb'
   const title = `${side === 'left' ? t('Левая сторона') : t('Правая сторона')}${room ? ` — ${room.name || t('помещение')}` : ` — ${t('снаружи')}`}`
 
   const setSide = (label: string, fn: (s: Wall['left']) => void, merge?: string) =>
@@ -139,6 +141,16 @@ function WallSideEditor({ wall, side, room }: { wall: Wall; side: Side; room: { 
           onChange={(m) => m && setSide('Материал стены', (s) => (s.materialId = m))}
         />
       </Row>
+      <TilePatternEditor
+        pattern={ws.pattern}
+        color={colorOf(ws.materialId)}
+        onChange={(p, g) =>
+          setSide('Раскладка стены', (s) => {
+            if (p) s.pattern = p
+            else delete s.pattern
+          }, g ? `wall.${wall.id}.${side}.pattern.${g}` : undefined)
+        }
+      />
       {zones.map((z, i) => (
         <div key={i} className="flex flex-col gap-1 rounded-md border border-[var(--border)] p-1.5">
           <div className="flex items-center gap-1">
@@ -194,6 +206,26 @@ function WallSideEditor({ wall, side, room }: { wall: Wall; side: Side; room: { 
               })
             }
           />
+          <details className="text-[11px]">
+            <summary className="cursor-pointer text-[var(--muted)]">
+              {t('Раскладка зоны')}
+              {z.pattern ? ` · ${t(PATTERN_RU[z.pattern.type])}` : ''}
+            </summary>
+            <div className="pt-1">
+              <TilePatternEditor
+                pattern={z.pattern}
+                color={colorOf(z.materialId)}
+                onChange={(p, g) =>
+                  setSide('Раскладка зоны', (s) => {
+                    const zz = s.zones?.[i]
+                    if (!zz) return
+                    if (p) zz.pattern = p
+                    else delete zz.pattern
+                  }, g ? `wall.${wall.id}.${side}.z${i}.pattern.${g}` : undefined)
+                }
+              />
+            </div>
+          </details>
         </div>
       ))}
       <div className="flex flex-wrap gap-1">
@@ -231,7 +263,11 @@ function WallSideEditor({ wall, side, room }: { wall: Wall; side: Side; room: { 
                 const w = d.walls[f.wallId]
                 if (!w) continue
                 const zonesFit = (src.zones ?? []).filter((z) => z.from < w.height).map((z) => ({ ...z, to: Math.min(z.to, w.height) }))
-                w[f.side] = { materialId: src.materialId, ...(zonesFit.length ? { zones: zonesFit } : {}) }
+                w[f.side] = {
+                  materialId: src.materialId,
+                  ...(src.pattern ? { pattern: src.pattern } : {}),
+                  ...(zonesFit.length ? { zones: zonesFit } : {}),
+                }
               }
             })
           }}

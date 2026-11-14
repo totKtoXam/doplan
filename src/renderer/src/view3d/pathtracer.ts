@@ -34,6 +34,9 @@ import { addTranslations, t } from '@/i18n'
 import { imageToBlob, readTarget } from './export'
 import { perfBegin, perfEnabled, perfEnd, perfRecord, perfTime } from './perf'
 import { currentQuality, getShared, isWebGPU, type QualitySettings } from './quality'
+import type { AtrousDenoiser } from './denoise'
+import { prefs3dStore, type DenoiseMode } from './prefs'
+import { setPtStage } from './status'
 
 // The TSL typings are stricter than what a dynamically assembled graph satisfies.
 const TSL: any = TSLModule
@@ -44,6 +47,7 @@ type PathTracer = InstanceType<PTModule['WebGPUPathTracer']>
 interface Runtime {
   mod: PTModule
   pt: PathTracer
+  denoiser: AtrousDenoiser | null
 }
 
 addTranslations('en', {
@@ -63,6 +67,17 @@ const MAX_STILL_EDGE = 8192
 const DEFAULT_STILL_SAMPLES = 256
 /** the camera has to rest this long before tracing resumes (the raster frame shows meanwhile) */
 const CAMERA_REST_MS = 450
+/** walking stops between key presses: wait for a real pause before tracing again */
+const WALK_REST_MS = 1500
+
+function cameraRestMs(): number {
+  return uiStore.getState().cameraMode === 'walk' ? WALK_REST_MS : CAMERA_REST_MS
+}
+
+/** lets the overlay paint a status before blocking work starts */
+function nextPaint(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)))
+}
 /** the same after an edit of the document, lights or materials */
 const EDIT_REST_MS = 1200
 /**
@@ -72,6 +87,18 @@ const EDIT_REST_MS = 1200
 const SWAP_SAMPLES = 8
 const SWAP_SAMPLES_LATE = 3
 const SWAP_LATE_MS = 1500
+/** with the denoiser the filtered image is presentable much earlier */
+const SWAP_SAMPLES_DENOISED = 4
+const SWAP_SAMPLES_DENOISED_LATE = 2
+/** the denoiser runs at most this often while the image accumulates */
+const DENOISE_INTERVAL_MS = 120
+
+/** how much of the filtered image is shown: "Авто" fades the filter out as the image converges */
+function denoiseAmount(mode: DenoiseMode, spp: number): number {
+  if (mode === 'off') return 0
+  if (mode === 'on') return 1
+  return spp <= 64 ? 1 : Math.max(0, 1 - (spp - 64) / 960)
+}
 /** an item model still loading (placeholder shown) delays the capture by up to this long */
 const MODEL_WAIT_MS = 4000
 const COUNT_INTERVAL_MS = 300
@@ -166,6 +193,9 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
   let structSig = 0
   let avgSamples = 0
   let minSamples = 0
+  /** the denoiser's last run (ms) and whether it ran on the finished image */
+  let lastDenoise = 0
+  let denoisedFinal = false
   let lastReported = -1
   const camSig = new Float64Array(33)
   let lightSig = ''
@@ -197,9 +227,17 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
     if (loading) return loading
     loading = (async () => {
       if (!supported) throw new Error(unsupportedText())
-      const [mod, workers] = await Promise.all([import('three-gpu-pathtracer/webgpu'), import('three-mesh-bvh/worker')])
+      const [mod, workers, dn] = await Promise.all([import('three-gpu-pathtracer/webgpu'), import('three-mesh-bvh/worker'), import('./denoise')])
       if (disposed) throw new Error(t('3D-вид закрыт'))
       const pt = new mod.WebGPUPathTracer(renderer)
+      let denoiser: AtrousDenoiser | null = null
+      try {
+        denoiser = new dn.AtrousDenoiser()
+        if (prefs3dStore.getState().denoiseMode !== 'off') pt.setDenoiser(denoiser as any)
+      } catch (err) {
+        console.warn('[pathtracer] denoiser unavailable', err)
+        denoiser = null
+      }
       try {
         pt.setBVHWorker(workers.GenerateMeshBVHWorker as any)
       } catch (err) {
@@ -207,7 +245,7 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
       }
       pt.transmissiveBackground = mod.TRANSMISSIVE_BACKGROUND_ENVIRONMENT
       pt.addEventListener('progress', onProgress)
-      runtime = { mod, pt }
+      runtime = { mod, pt, denoiser }
       return runtime
     })()
     loading.catch((err) => {
@@ -326,6 +364,7 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
    * ceiling auto-hide only toggle `visible`, which emits no scene change, but the tracer's BVH is
    * a snapshot of the visible scene.
    */
+  let holdReason = ''
   function computeVisSig(): number {
     let h = 0
     ctx.roots.architecture.traverseVisible((o) => {
@@ -359,7 +398,29 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
   function resetCounters(): void {
     avgSamples = 0
     minSamples = 0
+    lastDenoise = 0
+    denoisedFinal = false
     report(0)
+  }
+
+  /** filters the tracer's current image; the next blit presents it. False when nothing ran */
+  function runDenoiser(rt: Runtime, spp: number): boolean {
+    const mode = prefs3dStore.getState().denoiseMode
+    if (!rt.denoiser || mode === 'off') return false
+    const target = rt.pt.target
+    const aux = (rt.pt as unknown as { _pathTracer?: { auxTarget?: THREE.Texture | null } })._pathTracer?.auxTarget ?? null
+    if (!target) return false
+    try {
+      perfTime('pt.denoise', () => rt.denoiser!.run(target, aux, spp, denoiseAmount(mode, spp)))
+    } catch (err) {
+      // a failing filter must not stop tracing: drop it and show the raw image
+      console.warn('[pathtracer] denoiser failed', err)
+      rt.pt.setDenoiser(null)
+      rt.denoiser = null
+      return false
+    }
+    lastDenoise = performance.now()
+    return true
   }
 
   function report(samples: number): void {
@@ -423,9 +484,11 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
   async function capture(): Promise<void> {
     const token = ++sceneToken
     capturing = true
+    setPtStage('preparing')
     const done = (): boolean => {
       if (token !== sceneToken) return true
       capturing = false
+      setPtStage('idle')
       return disposed || !interactive || stillRunning
     }
     let rt: Runtime
@@ -438,6 +501,11 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
       }
       return
     }
+    if (token !== sceneToken || disposed || !interactive || stillRunning) {
+      done()
+      return
+    }
+    await nextPaint()
     if (token !== sceneToken || disposed || !interactive || stillRunning) {
       done()
       return
@@ -463,6 +531,8 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
       return
     }
     if (done()) return
+    // the first sample after a capture compiles the kernel (blocking): keep the status up
+    setPtStage('preparing')
     visSig = vis
     // taken after the capture: the BVH build indexes non-indexed geometries. A scene change
     // during the build may have been missed by the snapshot, so it captures again
@@ -554,6 +624,7 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
       if (runtime) runtime.pt.renderToCanvas = false
       resetCounters()
     }
+    if (!capturing) setPtStage('idle')
     holdUntil = Math.max(holdUntil, performance.now() + ms)
     clearHoldTimer()
     holdTimer = setTimeout(() => {
@@ -587,6 +658,7 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
   }
 
   function endInteractive(): void {
+    setPtStage('idle')
     interactive = false
     ready = false
     capturing = false
@@ -629,6 +701,24 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
     if (!interactive || stillRunning || !runtime) return
     configureInteractive(runtime.pt, currentQuality(ctx))
     hold(0)
+  })
+  const unsubDenoise = prefs3dStore.subscribe((s, prev) => {
+    if (s.denoiseMode === prev.denoiseMode || !runtime?.denoiser) return
+    const wasOn = prev.denoiseMode !== 'off'
+    const isOn = s.denoiseMode !== 'off'
+    if (wasOn !== isOn) {
+      // attaching / detaching switches the albedo / normal accumulation: the image starts over
+      runtime.pt.setDenoiser(isOn ? (runtime.denoiser as any) : null)
+      if (interactive && !stillRunning) hold(0)
+      return
+    }
+    // "Авто" ⇄ "Вкл" only changes the mix: filter the current image again
+    denoisedFinal = false
+    lastDenoise = 0
+    if (interactive && !stillRunning && phase === 'trace') {
+      runDenoiser(runtime, avgSamples)
+      ctx.invalidate()
+    }
   })
 
   // ── still rendering ──
@@ -744,7 +834,9 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
         }
       }
 
-      // final blit of the accumulated image (linear) into our own target
+      // final blit of the accumulated image (linear) into our own target, filtered when the
+      // denoiser is on
+      if (runtime) runDenoiser(runtime, total)
       pt.pause = true
       pt.renderToCanvas = true
       const prevClear = new THREE.Color()
@@ -794,7 +886,7 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
   if (perfEnabled()) {
     ;(globalThis as unknown as { __doplanPT?: unknown }).__doplanPT = {
       get runtime() { return runtime },
-      get state() { return { interactive, ready, stillRunning, phase, capturing, holdIn: holdUntil - performance.now(), sceneToken, avgSamples, minSamples, target } },
+      get state() { return { interactive, ready, stillRunning, phase, capturing, holdIn: holdUntil - performance.now(), holdReason, sceneToken, avgSamples, minSamples, target } },
     }
   }
 
@@ -862,11 +954,19 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
       // they never rebuild the BVH (visibility is a per-object flag of the packed scene)
       if (cameraChanged()) {
         needCamera = true
-        hold(CAMERA_REST_MS)
+        holdReason = 'camera'
+        hold(cameraRestMs())
       }
-      if (ready && !capturing && computeVisSig() !== visSig) {
-        needTransforms = true
-        hold(CAMERA_REST_MS)
+      if (ready && !capturing) {
+        // remember the new state right away: comparing with the last *applied* one would extend
+        // the hold on every frame and tracing would never resume (stuck at 0/N)
+        const vis = computeVisSig()
+        if (vis !== visSig) {
+          visSig = vis
+          needTransforms = true
+          holdReason = 'visibility'
+          hold(cameraRestMs())
+        }
       }
       if (phase === 'hold') {
         if (capturing || performance.now() < holdUntil) return 0
@@ -881,6 +981,7 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
           return 0
         }
         phase = 'warm'
+        if (firstSampleTimed) setPtStage('tracing')
         warmSince = performance.now()
         perfBegin('ptRest1')
         perfBegin('ptRestShown')
@@ -890,20 +991,34 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
         if (!firstSampleTimed) {
           firstSampleTimed = true
           perfTime('pt.firstSample.cpu', () => pt.renderSample())
+          if (phase === 'warm') setPtStage('tracing')
         } else pt.renderSample()
       } catch (err) {
         fail(err)
         return 0
       }
-      const swapAt = performance.now() - warmSince > SWAP_LATE_MS ? SWAP_SAMPLES_LATE : SWAP_SAMPLES
-      if (phase === 'warm' && (avgSamples >= Math.min(swapAt, target) || minSamples >= target)) {
+      const rt = runtime!
+      const denoising = !!rt.denoiser && prefs3dStore.getState().denoiseMode !== 'off'
+      const late = performance.now() - warmSince > SWAP_LATE_MS
+      const swapAt = denoising ? (late ? SWAP_SAMPLES_DENOISED_LATE : SWAP_SAMPLES_DENOISED) : late ? SWAP_SAMPLES_LATE : SWAP_SAMPLES
+      const done = minSamples >= target
+      let filtered = false
+      if (phase === 'warm' && (avgSamples >= Math.min(swapAt, target) || done)) {
         // enough samples to beat the raster frame: present the traced image from the next frame on
         phase = 'trace'
+        setPtStage('idle')
         pt.renderToCanvas = true
+        if (denoising) filtered = runDenoiser(rt, avgSamples)
         perfEnd('ptRestShown', 'pt.rest→shown')
         ctx.invalidate()
+      } else if (phase === 'trace' && denoising && !denoisedFinal && (done || performance.now() - lastDenoise >= DENOISE_INTERVAL_MS)) {
+        filtered = runDenoiser(rt, done ? target : avgSamples)
+        if (filtered) ctx.invalidate()
       }
-      return minSamples >= target ? target : Math.min(target - 1, Math.floor(avgSamples))
+      if (done && filtered) denoisedFinal = true
+      // one more frame presents the final filtered image before the loop stops
+      if (done && filtered) return target - 1
+      return done ? target : Math.min(target - 1, Math.floor(avgSamples))
     },
     async renderStill(opts) {
       if (disposed) throw new Error(t('3D-вид закрыт'))
@@ -921,7 +1036,9 @@ export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
       unsubScene()
       unsubLighting()
       unsubQuality()
+      unsubDenoise()
       clearHoldTimer()
+      setPtStage('idle')
       interactive = false
       ready = false
       sceneToken++

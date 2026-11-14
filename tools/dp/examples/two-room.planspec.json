@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "units": "mm",
+  "name": "Пример: 2-комн. квартира 57,4 м² с балконом",
+  "source": {
+    "image": "two-room.png",
+    "size": [960, 1160],
+    "kind": "other",
+    "mmPerPx": 10,
+    "originPx": [100, 100],
+    "labelledTotalArea": 57.4,
+    "labelledLivingArea": 33.1,
+    "toScale": true
+  },
+  "defaults": {
+    "ceilingHeight": 2700,
+    "exteriorThickness": 300,
+    "loadBearingThickness": 200,
+    "partitionThickness": 100,
+    "doorHeight": 2100,
+    "windowSill": 850,
+    "windowHeight": 1500
+  },
+  "snap": { "orthogonal": true, "gridMm": 10 },
+  "rooms": [
+    { "id": "bath", "name": "С/у", "type": "combinedBathroom", "number": "1", "rect": [0, 0, 1700, 2200], "labelledArea": 3.7 },
+    { "id": "ward", "name": "Гардероб", "type": "wardrobe", "number": "2", "rect": [0, 2300, 1700, 900], "labelledArea": 1.5 },
+    { "id": "hall", "name": "Прихожая", "type": "hall", "number": "3", "rect": [1800, 0, 3000, 3200], "labelledArea": 9.6 },
+    { "id": "kitchen", "name": "Кухня", "type": "kitchen", "number": "4", "rect": [4900, 0, 2500, 3200], "labelledArea": 8.0 },
+    { "id": "bed", "name": "Спальня", "type": "bedroom", "number": "5", "rect": [0, 3400, 3300, 4600], "labelledArea": 15.2 },
+    { "id": "living", "name": "Гостиная", "type": "living", "number": "6", "rect": [3500, 3400, 3900, 4600], "labelledArea": 17.9 },
+    {
+      "id": "balc",
+      "name": "Балкон",
+      "type": "balcony",
+      "number": "7",
+      "rect": [3500, 8300, 3900, 1200],
+      "labelledArea": 4.7,
+      "edgeWall": { "kind": "railing", "thickness": 100, "height": 1100 }
+    }
+  ],
+  "openings": [
+    { "id": "d-entr", "type": "entranceDoor", "at": [3050, -150], "width": 900, "between": ["hall", "outside"], "opensInto": "outside", "hinge": "left" },
+    { "id": "d-bath", "type": "door", "at": [1750, 1000], "width": 700, "between": ["bath", "hall"], "opensInto": "hall", "hinge": "right" },
+    { "id": "d-ward", "type": "slidingDoor", "at": [1750, 2750], "width": 700, "between": ["ward", "hall"] },
+    { "id": "d-kit", "type": "door", "at": [4850, 2400], "width": 800, "between": ["hall", "kitchen"], "opensInto": "kitchen", "hinge": "left" },
+    { "id": "d-bed", "type": "door", "at": [2500, 3300], "width": 800, "between": ["hall", "bed"], "opensInto": "bed", "hinge": "right" },
+    { "id": "d-liv", "type": "door", "at": [4100, 3300], "width": 800, "between": ["hall", "living"], "opensInto": "living", "hinge": "left" },
+    { "id": "d-balc", "type": "balconyDoor", "at": [4300, 8150], "width": 800, "between": ["living", "balc"], "opensInto": "living", "hinge": "left" },
+    { "id": "w-kit", "type": "window", "at": [7550, 1600], "width": 1200, "sill": 850, "height": 1500 },
+    { "id": "w-bed", "type": "window", "at": [1650, 8150], "width": 1500, "sill": 850, "height": 1500 },
+    { "id": "w-liv", "type": "window", "at": [5800, 8150], "width": 1800, "sill": 850, "height": 1500 }
+  ],
+  "fixtures": [
+    { "type": "riser", "rect": [1450, 1950, 250, 250] },
+    { "type": "bathtub", "rect": [0, 0, 1700, 700] },
+    { "type": "toilet", "at": [300, 1500], "rotation": 90 },
+    { "type": "stove", "rect": [6800, 300, 600, 600] }
+  ],
+  "notes": [
+    "Толщина наружной стены не подписана — принято 300 мм по пропорции к перегородкам",
+    "Ширина входной двери оценена по чертежу (≈900 мм)"
+  ]
+}

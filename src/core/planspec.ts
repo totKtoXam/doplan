@@ -1,0 +1,2390 @@
+/**
+ * PlanSpec v1 — a compact, human/LLM-writable plan description (docs/research/photo-to-plan.md §4–5).
+ *
+ * Two authoring modes (can be mixed):
+ *  - rooms-mode: rooms are CLEAR interior rectangles/polygons; walls are deduced from the gaps
+ *    between rooms (gap width = wall thickness), unmatched room edges get exterior walls
+ *    (or the room's `edgeWall`, e.g. a balcony railing) placed outside.
+ *  - walls-mode: `walls[]` centre-line polylines are authoritative; rooms are given by a label
+ *    point `at` (or rect/polygon used only for matching).
+ *
+ * Coordinates: x → right, y → DOWN. Plan measures (points, rects, widths, offsets) are in
+ * `units` (mm | cm | m | px). Thicknesses, heights, sills and every `defaults` value are ALWAYS mm.
+ * px needs `source.mmPerPx` or `source.calibration`.
+ *
+ * Pure TS: no DOM / Node imports.
+ */
+import type { Asset, Doc, Id, Item, OpeningKind, ProceduralKind, Room, RoomType, Underlay, Vec2, Wall, WallKind } from './types'
+import { BUILTIN_ASSETS, createEmptyDoc, defaultRoom, OPENING_DEFAULTS, ROOM_TYPE_NAMES } from './defaults'
+import { addItem, addOpening, addWall, normalize, syncRooms } from './ops'
+import { derivePlan } from './derive'
+import { newId } from './ids'
+
+// ───────────────────────────── schema ─────────────────────────────
+
+export type PlanUnits = 'mm' | 'cm' | 'm' | 'px'
+/** [x, y] in spec units */
+export type PlanPoint = number[]
+
+export const SPEC_WALL_KINDS = ['exterior', 'loadBearing', 'partition', 'parapet', 'railing', 'glass', 'separator'] as const
+export type SpecWallKind = (typeof SPEC_WALL_KINDS)[number]
+
+export const SPEC_ROOM_TYPES = [
+  'living',
+  'bedroom',
+  'kitchen',
+  'kitchenLiving',
+  'bathroom',
+  'toilet',
+  'hallway',
+  'corridor',
+  'balcony',
+  'loggia',
+  'wardrobe',
+  'office',
+  'kids',
+  'storage',
+  'other',
+  // PlanSpec aliases (report vocabulary)
+  'study',
+  'dining',
+  'hall',
+  'combinedBathroom',
+  'laundry',
+  'terrace',
+  'utility',
+] as const
+export type SpecRoomType = (typeof SPEC_ROOM_TYPES)[number]
+
+export const SPEC_OPENING_TYPES = [
+  'door',
+  'doubleDoor',
+  'slidingDoor',
+  'entranceDoor',
+  'arch',
+  'opening',
+  'window',
+  'frenchWindow',
+  'balconyDoor',
+  'balconyBlock',
+  // aliases
+  'pocketDoor',
+  'foldingDoor',
+  'passage',
+  'panoramicWindow',
+] as const
+export type SpecOpeningType = (typeof SPEC_OPENING_TYPES)[number]
+
+export type RoomSide = 'top' | 'right' | 'bottom' | 'left'
+
+export interface PlanCalibration {
+  p1: PlanPoint
+  p2: PlanPoint
+  /** real distance between p1 and p2, mm */
+  mm: number
+  label?: string
+}
+
+export interface PlanSource {
+  /** prepped image the px coordinates refer to */
+  image?: string
+  /** [w, h] px of source.image */
+  size?: number[]
+  kind?: string
+  mmPerPx?: number
+  /** only if anisotropic */
+  mmPerPxY?: number
+  /** px position of mm (0,0); default [0,0] */
+  originPx?: PlanPoint
+  calibration?: PlanCalibration[]
+  /** m² as printed */
+  labelledTotalArea?: number
+  labelledLivingArea?: number
+  toScale?: boolean
+}
+
+/** all values mm */
+export interface PlanDefaults {
+  ceilingHeight?: number
+  wallHeight?: number
+  exteriorThickness?: number
+  /** alias of exteriorThickness */
+  outerThickness?: number
+  loadBearingThickness?: number
+  partitionThickness?: number
+  /** alias of partitionThickness */
+  innerThickness?: number
+  doorHeight?: number
+  windowSill?: number
+  windowHeight?: number
+  railingHeight?: number
+  railingThickness?: number
+}
+
+export interface PlanSnap {
+  /** snap near-orthogonal edges of polygons/paths (default true) */
+  orthogonal?: boolean
+  orthoToleranceDeg?: number
+  /** round converted coordinates to this grid (default 10 for px, none otherwise) */
+  gridMm?: number
+  /** collinear bridge / T-join distance, default max(thickness)/2 + 50 */
+  mergeMm?: number
+  /** snap deduced/declared thicknesses within ±15 mm to the standard set (default true) */
+  standardThickness?: boolean
+}
+
+export interface WallSpec {
+  id: string
+  /** ≥ 2 points; centre-line unless `align` says otherwise */
+  path: PlanPoint[]
+  closed?: boolean
+  /** inner/outer only for closed paths: the path is the inner/outer FACE of the loop */
+  align?: 'center' | 'inner' | 'outer'
+  /** mm */
+  thickness?: number
+  kind?: SpecWallKind
+  /** mm */
+  height?: number
+  confidence?: number
+}
+
+export interface EdgeWallSpec {
+  kind: SpecWallKind
+  thickness?: number
+  height?: number
+}
+
+export interface RoomSpec {
+  /** short slug referenced by openings */
+  id: string
+  name?: string
+  type?: SpecRoomType
+  number?: string
+  /** [x, y, w, h] CLEAR interior rectangle */
+  rect?: number[]
+  /** clear interior outline (any winding) */
+  polygon?: PlanPoint[]
+  /** label point inside the room (walls-mode) */
+  at?: PlanPoint
+  /** m² as printed */
+  labelledArea?: number
+  /** mm */
+  ceilingHeight?: number
+  /** wall for edges NOT facing another room (balcony railing, glazed loggia) */
+  edgeWall?: EdgeWallSpec
+  /** treat as an outdoor room (balcony-like) regardless of type */
+  balcony?: boolean
+  /** balcony/loggia is glazed: default edge wall becomes `glass` */
+  glazed?: boolean
+  confidence?: number
+}
+
+export interface OpeningSpec {
+  id?: string
+  type: SpecOpeningType
+  /** centre of the opening on (or near) the wall */
+  at?: PlanPoint
+  /** WallSpec id (walls-mode) */
+  wall?: string
+  /** with `wall`: from wall path start to opening CENTRE along the path; with `room`: from the
+   *  start of the side (left end for top/bottom, top end for left/right) to the centre. Spec units. */
+  offset?: number
+  /** RoomSpec id + side (or polygon edge index) */
+  room?: string
+  side?: RoomSide
+  edge?: number
+  /** clear width, spec units */
+  width: number
+  /** mm */
+  height?: number
+  /** mm */
+  sill?: number
+  /** [roomId, roomId | 'outside'] */
+  between?: string[]
+  /** roomId or 'outside' (swing side) */
+  opensInto?: string
+  /** hinge side seen from the room the door opens INTO, facing the door */
+  hinge?: 'left' | 'right'
+  /** exact doc values (round-trip from docToPlanSpec); override opensInto/hinge */
+  hingeEnd?: 'a' | 'b'
+  swingSide?: 'left' | 'right'
+  sashes?: number
+  confidence?: number
+}
+
+/** fixture / furniture hint */
+export interface FixtureSpec {
+  /** fixture type (riser, bathtub, toilet, stove…) or any ProceduralKind / AssetCategory */
+  type: string
+  /** [x, y, w, h] footprint, spec units (w/h are along plan x/y) */
+  rect?: number[]
+  at?: PlanPoint
+  /** [w, d, h] mm (overrides rect / asset size) */
+  size?: number[]
+  /** degrees clockwise */
+  rotation?: number
+  assetId?: string
+  name?: string
+  /** mm */
+  elevation?: number
+}
+
+export interface PlanSpec {
+  version: 1
+  units: PlanUnits
+  name?: string
+  source?: PlanSource
+  defaults?: PlanDefaults
+  snap?: PlanSnap
+  walls?: WallSpec[]
+  rooms: RoomSpec[]
+  openings: OpeningSpec[]
+  fixtures?: FixtureSpec[]
+  /** alias of fixtures for free-standing furniture hints */
+  furniture?: FixtureSpec[]
+  notes?: string[]
+}
+
+export type PlanIssueSeverity = 'error' | 'warning' | 'info'
+
+export interface PlanIssue {
+  severity: PlanIssueSeverity
+  code: string
+  message: string
+  /** JSON path into the spec, e.g. `rooms[2].rect` */
+  path?: string
+  ids?: string[]
+}
+
+export interface PlanRoomMetric {
+  id: string
+  computed: number
+  labelled?: number
+  delta?: number
+  pct?: number
+}
+
+export interface PlanValidation {
+  ok: boolean
+  issues: PlanIssue[]
+  metrics: { totalArea: number; livingArea: number; perRoom: PlanRoomMetric[] }
+}
+
+// ───────────────────────────── small math ─────────────────────────────
+
+const V = (x: number, y: number): Vec2 => ({ x, y })
+const vAdd = (a: Vec2, b: Vec2): Vec2 => V(a.x + b.x, a.y + b.y)
+const vSub = (a: Vec2, b: Vec2): Vec2 => V(a.x - b.x, a.y - b.y)
+const vMul = (a: Vec2, s: number): Vec2 => V(a.x * s, a.y * s)
+const vDot = (a: Vec2, b: Vec2): number => a.x * b.x + a.y * b.y
+const vCross = (a: Vec2, b: Vec2): number => a.x * b.y - a.y * b.x
+const vLen = (a: Vec2): number => Math.hypot(a.x, a.y)
+const vDist = (a: Vec2, b: Vec2): number => Math.hypot(a.x - b.x, a.y - b.y)
+const vNorm = (a: Vec2): Vec2 => {
+  const l = vLen(a)
+  return l > 1e-12 ? V(a.x / l, a.y / l) : V(0, 0)
+}
+const r3 = (n: number): number => Math.round(n * 1000) / 1000
+
+function signedArea(poly: Vec2[]): number {
+  let s = 0
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i]
+    const b = poly[(i + 1) % poly.length]
+    s += a.x * b.y - b.x * a.y
+  }
+  return s / 2
+}
+
+function pointInPoly(p: Vec2, poly: Vec2[]): boolean {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i]
+    const b = poly[j]
+    if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) inside = !inside
+  }
+  return inside
+}
+
+function distToPolyBoundary(p: Vec2, poly: Vec2[]): number {
+  let best = Infinity
+  for (let i = 0; i < poly.length; i++) {
+    const pr = projectOnSeg(p, poly[i], poly[(i + 1) % poly.length])
+    if (pr.dist < best) best = pr.dist
+  }
+  return best
+}
+
+function projectOnSeg(p: Vec2, a: Vec2, b: Vec2): { point: Vec2; t: number; dist: number; along: number } {
+  const ab = vSub(b, a)
+  const l2 = vDot(ab, ab)
+  let t = l2 > 0 ? vDot(vSub(p, a), ab) / l2 : 0
+  t = Math.max(0, Math.min(1, t))
+  const point = vAdd(a, vMul(ab, t))
+  return { point, t, dist: vDist(p, point), along: t * Math.sqrt(l2) }
+}
+
+/** p + r·λ = q + s·μ */
+function lineHit(p: Vec2, r: Vec2, q: Vec2, s: Vec2): { lambda: number; mu: number; point: Vec2 } | null {
+  const den = vCross(r, s)
+  if (Math.abs(den) < 1e-9) return null
+  const qp = vSub(q, p)
+  const lambda = vCross(qp, s) / den
+  const mu = vCross(qp, r) / den
+  return { lambda, mu, point: vAdd(p, vMul(r, lambda)) }
+}
+
+function polygonCentroidOf(poly: Vec2[]): Vec2 {
+  const a = signedArea(poly)
+  if (Math.abs(a) < 1e-9) {
+    let x = 0
+    let y = 0
+    for (const p of poly) {
+      x += p.x
+      y += p.y
+    }
+    return V(x / poly.length, y / poly.length)
+  }
+  let cx = 0
+  let cy = 0
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i]
+    const q = poly[(i + 1) % poly.length]
+    const f = p.x * q.y - q.x * p.y
+    cx += (p.x + q.x) * f
+    cy += (p.y + q.y) * f
+  }
+  return V(cx / (6 * a), cy / (6 * a))
+}
+
+/** A point guaranteed inside a simple polygon (centroid if inside, else widest scan-line midpoint). */
+function interiorPoint(poly: Vec2[]): Vec2 {
+  const c = polygonCentroidOf(poly)
+  if (pointInPoly(c, poly) && distToPolyBoundary(c, poly) > 1) return c
+  let minY = Infinity
+  let maxY = -Infinity
+  for (const p of poly) {
+    minY = Math.min(minY, p.y)
+    maxY = Math.max(maxY, p.y)
+  }
+  let best: Vec2 = c
+  let bestW = -1
+  for (const f of [0.5, 0.35, 0.65, 0.2, 0.8, 0.1, 0.9]) {
+    const y = minY + (maxY - minY) * f
+    const xs: number[] = []
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i]
+      const b = poly[(i + 1) % poly.length]
+      if (a.y > y !== b.y > y) xs.push(a.x + ((y - a.y) / (b.y - a.y)) * (b.x - a.x))
+    }
+    xs.sort((m, n) => m - n)
+    for (let i = 0; i + 1 < xs.length; i += 2) {
+      const w = xs[i + 1] - xs[i]
+      if (w > bestW) {
+        bestW = w
+        best = V((xs[i] + xs[i + 1]) / 2, y)
+      }
+    }
+  }
+  return best
+}
+
+function segsProperlyIntersect(a: Vec2, b: Vec2, c: Vec2, d: Vec2): boolean {
+  const o = (p: Vec2, q: Vec2, r: Vec2) => vCross(vSub(q, p), vSub(r, p))
+  const d1 = o(a, b, c)
+  const d2 = o(a, b, d)
+  const d3 = o(c, d, a)
+  const d4 = o(c, d, b)
+  return ((d1 > 1e-6 && d2 < -1e-6) || (d1 < -1e-6 && d2 > 1e-6)) && ((d3 > 1e-6 && d4 < -1e-6) || (d3 < -1e-6 && d4 > 1e-6))
+}
+
+function selfIntersects(poly: Vec2[]): boolean {
+  const n = poly.length
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      if (Math.abs(i - j) <= 1 || (i === 0 && j === n - 1)) continue
+      if (segsProperlyIntersect(poly[i], poly[(i + 1) % n], poly[j], poly[(j + 1) % n])) return true
+    }
+  }
+  return false
+}
+
+function isConvex(poly: Vec2[]): boolean {
+  let sign = 0
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i]
+    const b = poly[(i + 1) % poly.length]
+    const c = poly[(i + 2) % poly.length]
+    const cr = vCross(vSub(b, a), vSub(c, b))
+    if (Math.abs(cr) < 1e-6) continue
+    const s = Math.sign(cr)
+    if (sign === 0) sign = s
+    else if (s !== sign) return false
+  }
+  return true
+}
+
+/** Sutherland–Hodgman: subject clipped by a CONVEX clip polygon. */
+function clipConvex(subject: Vec2[], clip: Vec2[]): Vec2[] {
+  const cw = signedArea(clip) > 0 ? 1 : -1
+  let out = subject
+  for (let i = 0; i < clip.length && out.length; i++) {
+    const a = clip[i]
+    const b = clip[(i + 1) % clip.length]
+    const inside = (p: Vec2) => cw * vCross(vSub(b, a), vSub(p, a)) >= -1e-9
+    const input = out
+    out = []
+    for (let j = 0; j < input.length; j++) {
+      const p = input[j]
+      const q = input[(j + 1) % input.length]
+      const pin = inside(p)
+      const qin = inside(q)
+      if (pin) out.push(p)
+      if (pin !== qin) {
+        const h = lineHit(p, vSub(q, p), a, vSub(b, a))
+        if (h) out.push(h.point)
+      }
+    }
+  }
+  return out
+}
+
+/** overlap area of two simple polygons, mm² */
+function overlapArea(p: Vec2[], q: Vec2[]): number {
+  if (isConvex(q)) return Math.abs(signedArea(clipConvex(p, q)))
+  if (isConvex(p)) return Math.abs(signedArea(clipConvex(q, p)))
+  // both concave: grid sampling of the bbox intersection
+  const bb = (poly: Vec2[]) => {
+    let x0 = Infinity
+    let y0 = Infinity
+    let x1 = -Infinity
+    let y1 = -Infinity
+    for (const v of poly) {
+      x0 = Math.min(x0, v.x)
+      y0 = Math.min(y0, v.y)
+      x1 = Math.max(x1, v.x)
+      y1 = Math.max(y1, v.y)
+    }
+    return { x0, y0, x1, y1 }
+  }
+  const a = bb(p)
+  const b = bb(q)
+  const x0 = Math.max(a.x0, b.x0)
+  const y0 = Math.max(a.y0, b.y0)
+  const x1 = Math.min(a.x1, b.x1)
+  const y1 = Math.min(a.y1, b.y1)
+  if (x1 <= x0 || y1 <= y0) return 0
+  const n = 120
+  const dx = (x1 - x0) / n
+  const dy = (y1 - y0) / n
+  let hits = 0
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      const s = V(x0 + (i + 0.5) * dx, y0 + (j + 0.5) * dy)
+      if (pointInPoly(s, p) && pointInPoly(s, q)) hits++
+    }
+  }
+  return hits * dx * dy
+}
+
+// ───────────────────────────── parsing / coercion ─────────────────────────────
+
+type Obj = Record<string, unknown>
+const isObj = (x: unknown): x is Obj => typeof x === 'object' && x !== null && !Array.isArray(x)
+
+class Coercer {
+  issues: PlanIssue[] = []
+  err(path: string, message: string): void {
+    this.issues.push({ severity: 'error', code: 'SCHEMA', message, path })
+  }
+  num(o: Obj, key: string, path: string, required = false): number | undefined {
+    const raw = o[key]
+    if (raw === undefined || raw === null) {
+      if (required) this.err(`${path}.${key}`, `Поле «${key}» обязательно (число)`)
+      return undefined
+    }
+    if (typeof raw === 'number') {
+      if (!Number.isFinite(raw)) {
+        this.err(`${path}.${key}`, `«${key}» должно быть конечным числом`)
+        return undefined
+      }
+      return raw
+    }
+    if (typeof raw === 'string') {
+      const n = Number(raw.trim().replace(',', '.'))
+      if (raw.trim() !== '' && Number.isFinite(n)) return n
+    }
+    this.err(`${path}.${key}`, `«${key}» должно быть числом`)
+    return undefined
+  }
+  str(o: Obj, key: string, path: string, required = false): string | undefined {
+    const raw = o[key]
+    if (raw === undefined || raw === null) {
+      if (required) this.err(`${path}.${key}`, `Поле «${key}» обязательно (строка)`)
+      return undefined
+    }
+    if (typeof raw === 'string') return raw
+    if (typeof raw === 'number') return String(raw)
+    this.err(`${path}.${key}`, `«${key}» должно быть строкой`)
+    return undefined
+  }
+  bool(o: Obj, key: string, path: string): boolean | undefined {
+    const raw = o[key]
+    if (raw === undefined || raw === null) return undefined
+    if (typeof raw === 'boolean') return raw
+    this.err(`${path}.${key}`, `«${key}» должно быть true/false`)
+    return undefined
+  }
+  oneOf<T extends string>(o: Obj, key: string, path: string, allowed: readonly T[], required = false): T | undefined {
+    const s = this.str(o, key, path, required)
+    if (s === undefined) return undefined
+    if ((allowed as readonly string[]).includes(s)) return s as T
+    this.err(`${path}.${key}`, `«${key}»: недопустимое значение "${s}" (допустимо: ${allowed.join(', ')})`)
+    return undefined
+  }
+  numArr(o: Obj, key: string, path: string, len?: number, required = false): number[] | undefined {
+    const raw = o[key]
+    if (raw === undefined || raw === null) {
+      if (required) this.err(`${path}.${key}`, `Поле «${key}» обязательно (массив чисел)`)
+      return undefined
+    }
+    if (!Array.isArray(raw)) {
+      this.err(`${path}.${key}`, `«${key}» должно быть массивом чисел`)
+      return undefined
+    }
+    const out: number[] = []
+    for (let i = 0; i < raw.length; i++) {
+      const n = this.num(raw as unknown as Obj, String(i), `${path}.${key}`)
+      if (n === undefined) return undefined
+      out.push(n)
+    }
+    if (len !== undefined && out.length !== len) {
+      this.err(`${path}.${key}`, `«${key}» должно содержать ${len} чисел, получено ${out.length}`)
+      return undefined
+    }
+    return out
+  }
+  pts(o: Obj, key: string, path: string, minCount: number, required = false): PlanPoint[] | undefined {
+    const raw = o[key]
+    if (raw === undefined || raw === null) {
+      if (required) this.err(`${path}.${key}`, `Поле «${key}» обязательно (массив точек [x, y])`)
+      return undefined
+    }
+    if (!Array.isArray(raw)) {
+      this.err(`${path}.${key}`, `«${key}» должно быть массивом точек [x, y]`)
+      return undefined
+    }
+    const out: PlanPoint[] = []
+    for (let i = 0; i < raw.length; i++) {
+      const p = this.numArr(raw as unknown as Obj, String(i), `${path}.${key}`, 2, true)
+      if (!p) return undefined
+      out.push(p)
+    }
+    if (out.length < minCount) {
+      this.err(`${path}.${key}`, `«${key}»: нужно минимум ${minCount} точки`)
+      return undefined
+    }
+    return out
+  }
+  arr(o: Obj, key: string, path: string, required = false): unknown[] | undefined {
+    const raw = o[key]
+    if (raw === undefined || raw === null) {
+      if (required) this.err(`${path}.${key}`, `Поле «${key}» обязательно (массив)`)
+      return undefined
+    }
+    if (!Array.isArray(raw)) {
+      this.err(`${path}.${key}`, `«${key}» должно быть массивом`)
+      return undefined
+    }
+    return raw
+  }
+}
+
+function strip<T extends object>(o: T): T {
+  for (const k of Object.keys(o) as (keyof T)[]) if (o[k] === undefined) delete o[k]
+  return o
+}
+
+function coerceSpec(raw: unknown, c: Coercer): PlanSpec {
+  const empty: PlanSpec = { version: 1, units: 'mm', rooms: [], openings: [] }
+  if (!isObj(raw)) {
+    c.err('$', 'PlanSpec должен быть JSON-объектом')
+    return empty
+  }
+  const version = c.num(raw, 'version', '$', true)
+  if (version !== undefined && version !== 1) c.err('$.version', `Поддерживается только version: 1 (получено ${version})`)
+  const units = c.oneOf(raw, 'units', '$', ['mm', 'cm', 'm', 'px'] as const) ?? 'mm'
+  const spec: PlanSpec = { version: 1, units, rooms: [], openings: [] }
+  const name = c.str(raw, 'name', '$')
+  if (name !== undefined) spec.name = name
+
+  if (raw.source !== undefined) {
+    if (!isObj(raw.source)) c.err('$.source', '«source» должен быть объектом')
+    else {
+      const s = raw.source
+      const src: PlanSource = strip({
+        image: c.str(s, 'image', '$.source'),
+        size: c.numArr(s, 'size', '$.source', 2),
+        kind: c.str(s, 'kind', '$.source'),
+        mmPerPx: c.num(s, 'mmPerPx', '$.source'),
+        mmPerPxY: c.num(s, 'mmPerPxY', '$.source'),
+        originPx: c.numArr(s, 'originPx', '$.source', 2),
+        labelledTotalArea: c.num(s, 'labelledTotalArea', '$.source'),
+        labelledLivingArea: c.num(s, 'labelledLivingArea', '$.source'),
+        toScale: c.bool(s, 'toScale', '$.source'),
+      })
+      const cal = c.arr(s, 'calibration', '$.source')
+      if (cal) {
+        src.calibration = []
+        cal.forEach((it, i) => {
+          const p = `$.source.calibration[${i}]`
+          if (!isObj(it)) return c.err(p, 'калибровка должна быть объектом {p1, p2, mm}')
+          const p1 = c.numArr(it, 'p1', p, 2, true)
+          const p2 = c.numArr(it, 'p2', p, 2, true)
+          const mm = c.num(it, 'mm', p, true)
+          if (p1 && p2 && mm !== undefined) src.calibration!.push(strip({ p1, p2, mm, label: c.str(it, 'label', p) }))
+        })
+      }
+      spec.source = src
+    }
+  }
+
+  if (raw.defaults !== undefined) {
+    if (!isObj(raw.defaults)) c.err('$.defaults', '«defaults» должен быть объектом')
+    else {
+      const d = raw.defaults
+      const keys: (keyof PlanDefaults)[] = [
+        'ceilingHeight',
+        'wallHeight',
+        'exteriorThickness',
+        'outerThickness',
+        'loadBearingThickness',
+        'partitionThickness',
+        'innerThickness',
+        'doorHeight',
+        'windowSill',
+        'windowHeight',
+        'railingHeight',
+        'railingThickness',
+      ]
+      const out: PlanDefaults = {}
+      for (const k of keys) {
+        const v = c.num(d, k, '$.defaults')
+        if (v !== undefined) out[k] = v
+      }
+      spec.defaults = out
+    }
+  }
+
+  if (raw.snap !== undefined) {
+    if (!isObj(raw.snap)) c.err('$.snap', '«snap» должен быть объектом')
+    else {
+      const s = raw.snap
+      spec.snap = strip({
+        orthogonal: c.bool(s, 'orthogonal', '$.snap'),
+        orthoToleranceDeg: c.num(s, 'orthoToleranceDeg', '$.snap'),
+        gridMm: c.num(s, 'gridMm', '$.snap'),
+        mergeMm: c.num(s, 'mergeMm', '$.snap'),
+        standardThickness: c.bool(s, 'standardThickness', '$.snap'),
+      })
+    }
+  }
+
+  const walls = c.arr(raw, 'walls', '$')
+  if (walls) {
+    spec.walls = []
+    walls.forEach((w, i) => {
+      const p = `$.walls[${i}]`
+      if (!isObj(w)) return c.err(p, 'стена должна быть объектом')
+      const path = c.pts(w, 'path', p, 2, true)
+      const ws: WallSpec = strip({
+        id: c.str(w, 'id', p) ?? `wall${i + 1}`,
+        path: path ?? [],
+        closed: c.bool(w, 'closed', p),
+        align: c.oneOf(w, 'align', p, ['center', 'inner', 'outer'] as const),
+        thickness: c.num(w, 'thickness', p),
+        kind: c.oneOf(w, 'kind', p, SPEC_WALL_KINDS),
+        height: c.num(w, 'height', p),
+        confidence: c.num(w, 'confidence', p),
+      })
+      if (path) spec.walls!.push(ws)
+    })
+  }
+
+  const rooms = c.arr(raw, 'rooms', '$') ?? []
+  rooms.forEach((r, i) => {
+    const p = `$.rooms[${i}]`
+    if (!isObj(r)) return c.err(p, 'комната должна быть объектом')
+    let edgeWall: EdgeWallSpec | undefined
+    if (r.edgeWall !== undefined) {
+      if (!isObj(r.edgeWall)) c.err(`${p}.edgeWall`, '«edgeWall» должен быть объектом')
+      else {
+        const k = c.oneOf(r.edgeWall, 'kind', `${p}.edgeWall`, SPEC_WALL_KINDS, true)
+        if (k)
+          edgeWall = strip({
+            kind: k,
+            thickness: c.num(r.edgeWall, 'thickness', `${p}.edgeWall`),
+            height: c.num(r.edgeWall, 'height', `${p}.edgeWall`),
+          })
+      }
+    }
+    spec.rooms.push(
+      strip({
+        id: c.str(r, 'id', p) ?? `room${i + 1}`,
+        name: c.str(r, 'name', p),
+        type: c.oneOf(r, 'type', p, SPEC_ROOM_TYPES),
+        number: c.str(r, 'number', p),
+        rect: c.numArr(r, 'rect', p, 4),
+        polygon: c.pts(r, 'polygon', p, 3),
+        at: c.numArr(r, 'at', p, 2),
+        labelledArea: c.num(r, 'labelledArea', p),
+        ceilingHeight: c.num(r, 'ceilingHeight', p),
+        edgeWall,
+        balcony: c.bool(r, 'balcony', p),
+        glazed: c.bool(r, 'glazed', p),
+        confidence: c.num(r, 'confidence', p),
+      }),
+    )
+  })
+
+  const openings = c.arr(raw, 'openings', '$') ?? []
+  openings.forEach((o, i) => {
+    const p = `$.openings[${i}]`
+    if (!isObj(o)) return c.err(p, 'проём должен быть объектом')
+    const type = c.oneOf(o, 'type', p, SPEC_OPENING_TYPES, true)
+    const width = c.num(o, 'width', p, true)
+    if (!type || width === undefined) return
+    let between: string[] | undefined
+    const b = c.arr(o, 'between', p)
+    if (b) {
+      if (b.every((x) => typeof x === 'string')) between = b as string[]
+      else c.err(`${p}.between`, '«between» должен быть массивом строк')
+    }
+    spec.openings.push(
+      strip({
+        id: c.str(o, 'id', p),
+        type,
+        at: c.numArr(o, 'at', p, 2),
+        wall: c.str(o, 'wall', p),
+        offset: c.num(o, 'offset', p),
+        room: c.str(o, 'room', p),
+        side: c.oneOf(o, 'side', p, ['top', 'right', 'bottom', 'left'] as const),
+        edge: c.num(o, 'edge', p),
+        width,
+        height: c.num(o, 'height', p),
+        sill: c.num(o, 'sill', p),
+        between,
+        opensInto: c.str(o, 'opensInto', p),
+        hinge: c.oneOf(o, 'hinge', p, ['left', 'right'] as const),
+        hingeEnd: c.oneOf(o, 'hingeEnd', p, ['a', 'b'] as const),
+        swingSide: c.oneOf(o, 'swingSide', p, ['left', 'right'] as const),
+        sashes: c.num(o, 'sashes', p),
+        confidence: c.num(o, 'confidence', p),
+      }),
+    )
+  })
+
+  for (const key of ['fixtures', 'furniture'] as const) {
+    const arr = c.arr(raw, key, '$')
+    if (!arr) continue
+    const list: FixtureSpec[] = []
+    arr.forEach((f, i) => {
+      const p = `$.${key}[${i}]`
+      if (!isObj(f)) return c.err(p, 'элемент должен быть объектом')
+      const type = c.str(f, 'type', p, true)
+      if (!type) return
+      list.push(
+        strip({
+          type,
+          rect: c.numArr(f, 'rect', p, 4),
+          at: c.numArr(f, 'at', p, 2),
+          size: c.numArr(f, 'size', p),
+          rotation: c.num(f, 'rotation', p),
+          assetId: c.str(f, 'assetId', p),
+          name: c.str(f, 'name', p),
+          elevation: c.num(f, 'elevation', p),
+        }),
+      )
+    })
+    spec[key] = list
+  }
+
+  const notes = c.arr(raw, 'notes', '$')
+  if (notes) spec.notes = notes.map((n) => String(n))
+  return spec
+}
+
+/** Parses JSON text or an object into a clean PlanSpec. Throws Error with readable messages on schema errors. */
+export function parsePlanSpec(json: unknown): PlanSpec {
+  let raw = json
+  if (typeof json === 'string') {
+    try {
+      raw = JSON.parse(json)
+    } catch (e) {
+      throw new Error(`PlanSpec: некорректный JSON — ${(e as Error).message}`)
+    }
+  }
+  const c = new Coercer()
+  const spec = coerceSpec(raw, c)
+  const errors = c.issues.filter((i) => i.severity === 'error')
+  if (errors.length) {
+    throw new Error(`PlanSpec: ошибки схемы:\n${errors.map((e) => `  ${e.path ?? ''}: ${e.message}`).join('\n')}`)
+  }
+  return spec
+}
+
+// ───────────────────────────── units & mapping ─────────────────────────────
+
+interface UnitConv {
+  pt(p: PlanPoint): Vec2
+  len(v: number): number
+  mmPerUnit: number
+  grid: number
+}
+
+function mmPerPxOf(spec: PlanSpec): { x: number; y: number } | null {
+  const s = spec.source
+  if (s?.mmPerPx && s.mmPerPx > 0) return { x: s.mmPerPx, y: s.mmPerPxY && s.mmPerPxY > 0 ? s.mmPerPxY : s.mmPerPx }
+  const cal = (s?.calibration ?? []).filter((c) => c.mm > 0 && Math.hypot(c.p2[0] - c.p1[0], c.p2[1] - c.p1[1]) > 0)
+  if (!cal.length) return null
+  let sum = 0
+  for (const c of cal) sum += c.mm / Math.hypot(c.p2[0] - c.p1[0], c.p2[1] - c.p1[1])
+  const m = sum / cal.length
+  return { x: m, y: m }
+}
+
+function makeUnits(spec: PlanSpec): UnitConv {
+  const grid = spec.snap?.gridMm ?? (spec.units === 'px' ? 10 : 0)
+  const round = (n: number) => (grid > 0 ? Math.round(n / grid) * grid : r3(n))
+  if (spec.units === 'px') {
+    const k = mmPerPxOf(spec)
+    if (!k) throw new Error('PlanSpec: для units "px" нужен source.mmPerPx или source.calibration')
+    const o = spec.source?.originPx ?? [0, 0]
+    return {
+      pt: (p) => V(round((p[0] - o[0]) * k.x), round((p[1] - o[1]) * k.y)),
+      len: (v) => r3(v * k.x),
+      mmPerUnit: k.x,
+      grid,
+    }
+  }
+  const f = spec.units === 'cm' ? 10 : spec.units === 'm' ? 1000 : 1
+  return { pt: (p) => V(round(p[0] * f), round(p[1] * f)), len: (v) => r3(v * f), mmPerUnit: f, grid }
+}
+
+const ROOM_TYPE_MAP: Record<SpecRoomType, RoomType> = {
+  living: 'living',
+  bedroom: 'bedroom',
+  kitchen: 'kitchen',
+  kitchenLiving: 'kitchenLiving',
+  bathroom: 'bathroom',
+  toilet: 'toilet',
+  hallway: 'hallway',
+  corridor: 'corridor',
+  balcony: 'balcony',
+  loggia: 'loggia',
+  wardrobe: 'wardrobe',
+  office: 'office',
+  kids: 'kids',
+  storage: 'storage',
+  other: 'other',
+  study: 'office',
+  dining: 'kitchenLiving',
+  hall: 'hallway',
+  combinedBathroom: 'bathroom',
+  laundry: 'storage',
+  terrace: 'balcony',
+  utility: 'storage',
+}
+
+const OPENING_MAP: Record<SpecOpeningType, OpeningKind> = {
+  door: 'door',
+  doubleDoor: 'doubleDoor',
+  slidingDoor: 'slidingDoor',
+  entranceDoor: 'entranceDoor',
+  arch: 'arch',
+  opening: 'opening',
+  window: 'window',
+  frenchWindow: 'frenchWindow',
+  balconyDoor: 'balconyDoor',
+  balconyBlock: 'balconyBlock',
+  pocketDoor: 'slidingDoor',
+  foldingDoor: 'door',
+  passage: 'opening',
+  panoramicWindow: 'frenchWindow',
+}
+
+const WALL_KIND_MAP: Record<SpecWallKind, WallKind> = {
+  exterior: 'wall',
+  loadBearing: 'wall',
+  partition: 'partition',
+  parapet: 'parapet',
+  railing: 'parapet',
+  glass: 'glazing',
+  separator: 'virtual',
+}
+
+const OUTDOOR_TYPES: SpecRoomType[] = ['balcony', 'loggia', 'terrace']
+const LIVING_TYPES: SpecRoomType[] = ['living', 'bedroom', 'kids', 'study', 'office']
+const WINDOW_REQUIRED: SpecRoomType[] = ['living', 'bedroom', 'kids', 'study', 'office', 'kitchen', 'kitchenLiving']
+const DOOR_LIKE: OpeningKind[] = ['door', 'doubleDoor', 'slidingDoor', 'entranceDoor', 'arch', 'opening', 'balconyDoor', 'balconyBlock', 'frenchWindow']
+const WINDOW_LIKE: OpeningKind[] = ['window', 'frenchWindow', 'balconyDoor', 'balconyBlock']
+const STANDARD_THICKNESS = [80, 100, 120, 150, 160, 180, 200, 250, 300, 380, 400, 510, 640]
+const MAX_GAP = 700
+const AREA_COEF: Partial<Record<SpecRoomType, number>> = { balcony: 0.3, loggia: 0.5, terrace: 0.3 }
+
+const isOutdoor = (r: RoomSpec): boolean => r.balcony === true || OUTDOOR_TYPES.includes(r.type ?? 'other')
+
+interface ResolvedDefaults {
+  wallHeight: number
+  ceilingHeight: number
+  exterior: number
+  loadBearing: number
+  partition: number
+  doorHeight?: number
+  windowSill?: number
+  windowHeight?: number
+  railingHeight: number
+  railingThickness: number
+}
+
+function resolveDefaults(spec: PlanSpec): ResolvedDefaults {
+  const d = spec.defaults ?? {}
+  const ceiling = d.ceilingHeight ?? d.wallHeight ?? 2700
+  return {
+    wallHeight: d.wallHeight ?? ceiling,
+    ceilingHeight: ceiling,
+    exterior: d.exteriorThickness ?? d.outerThickness ?? 300,
+    loadBearing: d.loadBearingThickness ?? 200,
+    partition: d.partitionThickness ?? d.innerThickness ?? 100,
+    doorHeight: d.doorHeight,
+    windowSill: d.windowSill,
+    windowHeight: d.windowHeight,
+    railingHeight: d.railingHeight ?? 1100,
+    railingThickness: d.railingThickness ?? 100,
+  }
+}
+
+function thicknessFor(kind: SpecWallKind, D: ResolvedDefaults): number {
+  switch (kind) {
+    case 'exterior':
+      return D.exterior
+    case 'loadBearing':
+      return D.loadBearing
+    case 'partition':
+      return D.partition
+    case 'parapet':
+    case 'railing':
+    case 'glass':
+      return D.railingThickness
+    case 'separator':
+      return 0
+  }
+}
+
+function heightFor(kind: SpecWallKind, D: ResolvedDefaults): number {
+  return kind === 'parapet' || kind === 'railing' ? D.railingHeight : D.wallHeight
+}
+
+function snapThickness(t: number, enabled: boolean): number {
+  if (!enabled) return r3(t)
+  let best = t
+  let bd = Infinity
+  for (const s of STANDARD_THICKNESS) {
+    const d = Math.abs(s - t)
+    if (d <= 15 && d < bd) {
+      bd = d
+      best = s
+    }
+  }
+  return r3(best)
+}
+
+function orthoSnap(points: Vec2[], closed: boolean, tolDeg: number): Vec2[] {
+  const out = points.map((p) => ({ ...p }))
+  const tol = (tolDeg * Math.PI) / 180
+  const n = out.length
+  const count = closed ? n : n - 1
+  for (let i = 0; i < count; i++) {
+    const a = out[i]
+    const bi = (i + 1) % n
+    const b = out[bi]
+    const dx = b.x - a.x
+    const dy = b.y - a.y
+    if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) continue
+    const ang = Math.atan2(Math.abs(dy), Math.abs(dx))
+    if (closed && bi === 0) {
+      // closing edge: adjust the last point instead of the first
+      if (ang < tol) a.y = b.y
+      else if (Math.PI / 2 - ang < tol) a.x = b.x
+    } else if (ang < tol) b.y = a.y
+    else if (Math.PI / 2 - ang < tol) b.x = a.x
+  }
+  return out
+}
+
+function ccw(poly: Vec2[]): Vec2[] {
+  return signedArea(poly) < 0 ? poly.slice().reverse() : poly
+}
+
+/** room polygon in mm, algebraically CCW (signed area > 0), or null */
+function roomPolygonMm(r: RoomSpec, U: UnitConv, snap: PlanSnap | undefined): Vec2[] | null {
+  if (r.rect && r.rect.length === 4) {
+    const [x, y, w, h] = r.rect
+    const p0 = U.pt([x, y])
+    const p1 = U.pt([x + w, y + h])
+    const x0 = Math.min(p0.x, p1.x)
+    const x1 = Math.max(p0.x, p1.x)
+    const y0 = Math.min(p0.y, p1.y)
+    const y1 = Math.max(p0.y, p1.y)
+    if (x1 - x0 < 1 || y1 - y0 < 1) return null
+    return ccw([V(x0, y0), V(x1, y0), V(x1, y1), V(x0, y1)])
+  }
+  if (r.polygon && r.polygon.length >= 3) {
+    let pts = r.polygon.map((p) => U.pt(p))
+    if (snap?.orthogonal !== false) pts = orthoSnap(pts, true, snap?.orthoToleranceDeg ?? 3)
+    // drop consecutive duplicates
+    pts = pts.filter((p, i) => vDist(p, pts[(i + 1) % pts.length]) > 0.5)
+    if (pts.length < 3 || Math.abs(signedArea(pts)) < 1) return null
+    return ccw(pts)
+  }
+  return null
+}
+
+function roomRefPoint(r: RoomSpec, U: UnitConv, snap: PlanSnap | undefined): Vec2 | null {
+  if (r.at && r.at.length === 2) return U.pt(r.at)
+  const poly = roomPolygonMm(r, U, snap)
+  return poly ? interiorPoint(poly) : null
+}
+
+// ───────────────────────────── wall synthesis ─────────────────────────────
+
+interface Seg {
+  a: Vec2
+  b: Vec2
+  t: number
+  kind: SpecWallKind
+  height: number
+}
+
+interface REdge {
+  room: number
+  p0: Vec2
+  p1: Vec2
+  e: Vec2
+  n: Vec2
+  L: number
+  covered: [number, number][]
+  kept: [number, number][]
+}
+
+function subtractIntervals(base: [number, number], cut: [number, number][]): [number, number][] {
+  let parts: [number, number][] = [base]
+  for (const [c0, c1] of cut) {
+    const next: [number, number][] = []
+    for (const [p0, p1] of parts) {
+      if (c1 <= p0 || c0 >= p1) next.push([p0, p1])
+      else {
+        if (c0 > p0) next.push([p0, c0])
+        if (c1 < p1) next.push([c1, p1])
+      }
+    }
+    parts = next
+  }
+  return parts.filter(([a, b]) => b - a > 0.5)
+}
+
+function roomsModeSegments(
+  rooms: RoomSpec[],
+  polys: (Vec2[] | null)[],
+  D: ResolvedDefaults,
+  stdT: boolean,
+  issues: PlanIssue[],
+): Seg[] {
+  const edges: REdge[] = []
+  polys.forEach((poly, ri) => {
+    if (!poly) return
+    for (let i = 0; i < poly.length; i++) {
+      const p0 = poly[i]
+      const p1 = poly[(i + 1) % poly.length]
+      const L = vDist(p0, p1)
+      if (L < 1) continue
+      const e = vNorm(vSub(p1, p0))
+      // polygon is algebraically CCW → interior on the algebraic left (-ey, ex) → outward (ey, -ex)
+      edges.push({ room: ri, p0, p1, e, n: V(e.y, -e.x), L, covered: [], kept: [] })
+    }
+  })
+
+  const segs: Seg[] = []
+  // 1. anti-parallel pairs → shared walls (nearest first)
+  const cands: { A: REdge; B: REdge; d: number; lo: number; hi: number }[] = []
+  for (let i = 0; i < edges.length; i++) {
+    for (let j = i + 1; j < edges.length; j++) {
+      const A = edges[i]
+      const B = edges[j]
+      if (A.room === B.room) continue
+      if (vDot(A.n, B.n) > -0.9995) continue
+      const d = vDot(vSub(B.p0, A.p0), A.n)
+      const d2 = vDot(vSub(B.p1, A.p0), A.n)
+      if (Math.abs(d - d2) > 1) continue
+      if (d < -1 || d > MAX_GAP) continue
+      const t0 = vDot(vSub(B.p0, A.p0), A.e)
+      const t1 = vDot(vSub(B.p1, A.p0), A.e)
+      const lo = Math.max(0, Math.min(t0, t1))
+      const hi = Math.min(A.L, Math.max(t0, t1))
+      if (hi - lo < 10) continue
+      cands.push({ A, B, d: Math.max(0, d), lo, hi })
+    }
+  }
+  cands.sort((x, y) => x.d - y.d)
+  for (const { A, B, d, lo, hi } of cands) {
+    const toB = (t: number) => vDot(vSub(vAdd(A.p0, vMul(A.e, t)), B.p0), B.e)
+    const toA = (t: number) => vDot(vSub(vAdd(B.p0, vMul(B.e, t)), A.p0), A.e)
+    const restA = subtractIntervals([lo, hi], A.covered)
+    for (const [a0, a1] of restA) {
+      const b0 = Math.min(toB(a0), toB(a1))
+      const b1 = Math.max(toB(a0), toB(a1))
+      for (const [s0, s1] of subtractIntervals([b0, b1], B.covered)) {
+        const x0 = Math.min(toA(s0), toA(s1))
+        const x1 = Math.max(toA(s0), toA(s1))
+        if (x1 - x0 < 10) continue
+        A.covered.push([x0, x1])
+        B.covered.push([s0, s1])
+        const ra = rooms[A.room]
+        const rb = rooms[B.room]
+        let kind: SpecWallKind
+        if (isOutdoor(ra) || isOutdoor(rb)) kind = d < 40 ? 'separator' : 'exterior'
+        else if (d < 40) kind = 'separator'
+        else if (d >= 160) kind = 'loadBearing'
+        else kind = 'partition'
+        if (d > 1 && d < 40)
+          issues.push({
+            severity: 'warning',
+            code: 'TINY_GAP',
+            message: `Зазор ${r3(d)} мм между «${ra.id}» и «${rb.id}» — поставлен разделитель без толщины`,
+            ids: [ra.id, rb.id],
+          })
+        const mid = vMul(A.n, d / 2)
+        segs.push({
+          a: vAdd(vAdd(A.p0, vMul(A.e, x0)), mid),
+          b: vAdd(vAdd(A.p0, vMul(A.e, x1)), mid),
+          t: kind === 'separator' ? 0 : snapThickness(d, stdT),
+          kind,
+          height: D.wallHeight,
+        })
+      }
+    }
+  }
+
+  // 2. uncovered edge parts → edge walls (skip short junction gaps between other rooms)
+  for (const E of edges) {
+    E.covered.sort((x, y) => x[0] - y[0])
+    for (const [s0, s1] of subtractIntervals([0, E.L], E.covered)) {
+      if (s1 - s0 <= MAX_GAP) {
+        const probe = vAdd(vAdd(E.p0, vMul(E.e, (s0 + s1) / 2)), vMul(E.n, 30))
+        let near = 0
+        polys.forEach((poly, ri) => {
+          if (!poly || ri === E.room) return
+          if (pointInPoly(probe, poly) || distToPolyBoundary(probe, poly) <= MAX_GAP) near++
+        })
+        const touchesVertex = s0 < 0.5 || s1 > E.L - 0.5
+        if (near >= 2 || (!touchesVertex && near >= 1)) continue
+      }
+      E.kept.push([s0, s1])
+    }
+  }
+
+  const edgeWallOf = (r: RoomSpec): { kind: SpecWallKind; t: number; h: number } => {
+    if (r.edgeWall) {
+      const k = r.edgeWall.kind
+      return { kind: k, t: r.edgeWall.thickness ?? thicknessFor(k, D), h: r.edgeWall.height ?? heightFor(k, D) }
+    }
+    if (isOutdoor(r)) {
+      if (r.glazed) return { kind: 'glass', t: D.railingThickness, h: D.wallHeight }
+      return { kind: 'railing', t: D.railingThickness, h: D.railingHeight }
+    }
+    return { kind: 'exterior', t: D.exterior, h: D.wallHeight }
+  }
+
+  // per-room edge lists in order, to find neighbours at vertices
+  const byRoom = new Map<number, REdge[]>()
+  for (const E of edges) {
+    const list = byRoom.get(E.room) ?? []
+    list.push(E)
+    byRoom.set(E.room, list)
+  }
+  for (const [ri, list] of byRoom) {
+    const room = rooms[ri]
+    const ew = edgeWallOf(room)
+    const n = list.length
+    for (let k = 0; k < n; k++) {
+      const E = list[k]
+      const prev = list[(k - 1 + n) % n]
+      const next = list[(k + 1) % n]
+      for (const [s0, s1] of E.kept) {
+        const off = vMul(E.n, ew.t / 2)
+        let a = vAdd(vAdd(E.p0, vMul(E.e, s0)), off)
+        let b = vAdd(vAdd(E.p0, vMul(E.e, s1)), off)
+        const endAt = (atStart: boolean): Vec2 => {
+          const nb = atStart ? prev : next
+          const vertex = atStart ? E.p0 : E.p1
+          const nbKeptAtVertex = atStart
+            ? nb.kept.some(([, x1]) => x1 > nb.L - 0.5)
+            : nb.kept.some(([x0]) => x0 < 0.5)
+          const convex = atStart ? vCross(nb.e, E.e) > 0 : vCross(E.e, nb.e) > 0
+          const base = atStart ? a : b
+          if (nbKeptAtVertex) {
+            const nbOff = vMul(nb.n, ew.t / 2)
+            const hit = lineHit(vAdd(E.p0, off), E.e, vAdd(nb.p0, nbOff), nb.e)
+            if (hit && vDist(hit.point, vertex) < 2 * ew.t + 10) return hit.point
+            return base
+          }
+          if (convex) return vAdd(base, vMul(E.e, atStart ? -ew.t / 2 : ew.t / 2))
+          return base
+        }
+        if (s0 < 0.5) a = endAt(true)
+        if (s1 > E.L - 0.5) b = endAt(false)
+        segs.push({ a, b, t: ew.t, kind: ew.kind, height: ew.h })
+      }
+    }
+  }
+  return segs
+}
+
+function wallsModeSegments(walls: WallSpec[], U: UnitConv, D: ResolvedDefaults, snap: PlanSnap | undefined): Seg[] {
+  const segs: Seg[] = []
+  const stdT = snap?.standardThickness !== false
+  for (const w of walls) {
+    const kind: SpecWallKind = w.kind ?? 'loadBearing'
+    const t = kind === 'separator' ? 0 : snapThickness(w.thickness ?? thicknessFor(kind, D), stdT)
+    const height = w.height ?? heightFor(kind, D)
+    let pts = w.path.map((p) => U.pt(p))
+    const closed = w.closed === true && pts.length >= 3
+    if (snap?.orthogonal !== false) pts = orthoSnap(pts, closed, snap?.orthoToleranceDeg ?? 3)
+    if (closed && w.align && w.align !== 'center' && t > 0) {
+      const poly = ccw(pts)
+      const sign = w.align === 'inner' ? 1 : -1
+      const lines = poly.map((p, i) => {
+        const q = poly[(i + 1) % poly.length]
+        const e = vNorm(vSub(q, p))
+        return { p: vAdd(p, vMul(V(e.y, -e.x), (sign * t) / 2)), e }
+      })
+      pts = poly.map((p, i) => {
+        const l0 = lines[(i - 1 + poly.length) % poly.length]
+        const l1 = lines[i]
+        const h = lineHit(l0.p, l0.e, l1.p, l1.e)
+        return h ? h.point : l1.p
+      })
+    }
+    const count = closed ? pts.length : pts.length - 1
+    for (let i = 0; i < count; i++) {
+      const a = pts[i]
+      const b = pts[(i + 1) % pts.length]
+      if (vDist(a, b) >= 1) segs.push({ a, b, t, kind, height })
+    }
+  }
+  return segs
+}
+
+function mergeCollinear(segs: Seg[], mergeMm: number): Seg[] {
+  const groups = new Map<string, Seg[]>()
+  for (const s of segs) {
+    const key = `${s.kind}|${Math.round(s.t)}|${Math.round(s.height)}`
+    const g = groups.get(key) ?? []
+    g.push(s)
+    groups.set(key, g)
+  }
+  const endpointInGap = (origin: Vec2, dir: Vec2, nrm: Vec2, g0: number, g1: number, lineT: number): boolean => {
+    for (const o of segs) {
+      const od = vNorm(vSub(o.b, o.a))
+      if (Math.abs(vCross(od, dir)) < 0.3) continue
+      for (const p of [o.a, o.b]) {
+        const dn = Math.abs(vDot(vSub(p, origin), nrm))
+        const u = vDot(vSub(p, origin), dir)
+        if (dn <= lineT / 2 + 10 && u >= g0 - o.t / 2 - 10 && u <= g1 + o.t / 2 + 10) return true
+      }
+    }
+    return false
+  }
+  const out: Seg[] = []
+  for (const g of groups.values()) {
+    const used = new Array<boolean>(g.length).fill(false)
+    for (let i = 0; i < g.length; i++) {
+      if (used[i]) continue
+      const base = g[i]
+      let dir = vNorm(vSub(base.b, base.a))
+      if (dir.x < -1e-9 || (Math.abs(dir.x) <= 1e-9 && dir.y < 0)) dir = vMul(dir, -1)
+      const origin = base.a
+      const nrm = V(-dir.y, dir.x)
+      const cluster: Seg[] = []
+      for (let j = i; j < g.length; j++) {
+        if (used[j]) continue
+        const s = g[j]
+        const sd = vNorm(vSub(s.b, s.a))
+        if (Math.abs(vCross(sd, dir)) > 0.002) continue
+        if (Math.abs(vDot(vSub(s.a, origin), nrm)) > 1 || Math.abs(vDot(vSub(s.b, origin), nrm)) > 1) continue
+        used[j] = true
+        cluster.push(s)
+      }
+      const iv = cluster
+        .map((s) => {
+          const u0 = vDot(vSub(s.a, origin), dir)
+          const u1 = vDot(vSub(s.b, origin), dir)
+          return [Math.min(u0, u1), Math.max(u0, u1)] as [number, number]
+        })
+        .sort((x, y) => x[0] - y[0])
+      let cur = iv[0]
+      const flush = (c: [number, number]) =>
+        out.push({ ...base, a: vAdd(origin, vMul(dir, c[0])), b: vAdd(origin, vMul(dir, c[1])) })
+      for (let k = 1; k < iv.length; k++) {
+        const nx = iv[k]
+        const gap = nx[0] - cur[1]
+        if (gap <= 0.5 || gap <= mergeMm || (gap <= MAX_GAP && endpointInGap(origin, dir, nrm, cur[1], nx[0], base.t))) {
+          cur = [cur[0], Math.max(cur[1], nx[1])]
+        } else {
+          flush(cur)
+          cur = nx
+        }
+      }
+      flush(cur)
+    }
+  }
+  return out
+}
+
+function joinEnds(segs: Seg[], mergeMm: number): void {
+  const onAnother = (p: Vec2, self: Seg): boolean =>
+    segs.some((o) => o !== self && projectOnSeg(p, o.a, o.b).dist <= 0.5)
+  // extension (two passes so chained corners settle)
+  for (let pass = 0; pass < 2; pass++) {
+    for (const s of segs) {
+      for (const end of ['a', 'b'] as const) {
+        const p = s[end]
+        if (onAnother(p, s)) continue
+        const other = end === 'a' ? s.b : s.a
+        const dir = vNorm(vSub(p, other))
+        // a hit through the body of another wall stops the extension (nearest wins);
+        // otherwise (ends meeting near a corner) the thickest target wins, then the nearest
+        let body: { lambda: number; point: Vec2 } | null = null
+        let corner: { lambda: number; point: Vec2; t: number } | null = null
+        for (const o of segs) {
+          if (o === s) continue
+          const od = vSub(o.b, o.a)
+          const oL = vLen(od)
+          if (oL < 1) continue
+          const odn = vMul(od, 1 / oL)
+          if (Math.abs(vCross(dir, odn)) < 0.3) continue
+          const h = lineHit(p, dir, o.a, odn)
+          if (!h) continue
+          const reach = Math.max(o.t / 2 + 10, mergeMm)
+          const tolMu = Math.max(s.t / 2 + 10, mergeMm)
+          if (h.lambda > 0.5 && h.lambda <= reach && h.mu >= -tolMu && h.mu <= oL + tolMu) {
+            if (h.mu > 0.5 && h.mu < oL - 0.5) {
+              if (!body || h.lambda < body.lambda) body = { lambda: h.lambda, point: h.point }
+            } else if (!corner || o.t > corner.t + 0.5 || (Math.abs(o.t - corner.t) <= 0.5 && h.lambda < corner.lambda)) {
+              corner = { lambda: h.lambda, point: h.point, t: o.t }
+            }
+          }
+        }
+        const best = body ?? corner
+        if (best) s[end] = V(r3(best.point.x), r3(best.point.y))
+      }
+    }
+  }
+  // trimming of short overshoots past a crossing wall (free ends only)
+  for (const s of segs) {
+    for (const end of ['a', 'b'] as const) {
+      const p = s[end]
+      const other = end === 'a' ? s.b : s.a
+      const sl = vDist(p, other)
+      const dir = vNorm(vSub(p, other))
+      let best: { lambda: number; point: Vec2 } | null = null
+      for (const o of segs) {
+        if (o === s) continue
+        const od = vSub(o.b, o.a)
+        const oL = vLen(od)
+        if (oL < 1) continue
+        const odn = vMul(od, 1 / oL)
+        if (Math.abs(vCross(dir, odn)) < 0.3) continue
+        const h = lineHit(p, dir, o.a, odn)
+        if (!h) continue
+        if (h.lambda < -0.5 && h.lambda >= -(o.t / 2 + 10) && h.mu > 0.5 && h.mu < oL - 0.5 && sl + h.lambda > 1) {
+          if (!best || h.lambda > best.lambda) best = { lambda: h.lambda, point: h.point }
+        }
+      }
+      if (best) {
+        // only a free end (nothing else touches it) is trimmed
+        const touching = segs.some((o) => o !== s && projectOnSeg(p, o.a, o.b).dist <= 0.5)
+        if (!touching) s[end] = V(r3(best.point.x), r3(best.point.y))
+      }
+    }
+  }
+}
+
+// ───────────────────────────── compiler ─────────────────────────────
+
+export interface CompileOptions {
+  /** add the source image as an Underlay (px specs with source.image/size). Default false. */
+  underlay?: boolean
+}
+
+export interface CompileResult {
+  doc: Doc
+  levelId: Id
+  issues: PlanIssue[]
+  /** spec room id → Room record id */
+  roomIds: Record<string, Id>
+  /** spec opening index → Opening id (null if it could not be placed) */
+  openingIds: (Id | null)[]
+}
+
+const FIXTURE_KIND: Record<string, ProceduralKind> = {
+  column: 'column',
+  riser: 'column',
+  ventShaft: 'column',
+  chimney: 'column',
+  radiator: 'radiator',
+  bathtub: 'bathtub',
+  bath: 'bathtub',
+  shower: 'shower',
+  toilet: 'toilet',
+  washbasin: 'washbasin',
+  sink: 'sink',
+  kitchenSink: 'sink',
+  stove: 'stove',
+  hob: 'stove',
+  oven: 'oven',
+  hood: 'hood',
+  fridge: 'fridge',
+  refrigerator: 'fridge',
+  washer: 'washingMachine',
+  washingMachine: 'washingMachine',
+  dishwasher: 'dishwasher',
+  boiler: 'box',
+  electricPanel: 'box',
+  sofa: 'sofa',
+  bed: 'bed',
+  table: 'table',
+  chair: 'chair',
+  wardrobe: 'wardrobe',
+  shelf: 'shelf',
+  tv: 'tv',
+  rug: 'rug',
+  mirror: 'mirror',
+  picture: 'picture',
+  stairs: 'stairs',
+  airConditioner: 'airConditioner',
+  plant: 'plantPot',
+  plantPot: 'plantPot',
+  kitchenBase: 'kitchenBase',
+  kitchenWall: 'kitchenWall',
+  kitchenTall: 'kitchenTall',
+  worktop: 'worktop',
+  box: 'box',
+}
+
+function findFixtureAsset(f: FixtureSpec): Asset | undefined {
+  if (f.assetId) {
+    const a = BUILTIN_ASSETS.find((x) => x.id === f.assetId)
+    if (a) return a
+  }
+  const kind = FIXTURE_KIND[f.type]
+  if (kind) {
+    const a = BUILTIN_ASSETS.find((x) => x.procedural === kind)
+    if (a) return a
+  }
+  return BUILTIN_ASSETS.find((x) => x.category === f.type || x.procedural === f.type)
+}
+
+function wallDir(doc: Doc, w: Wall): { A: Vec2; B: Vec2; d: Vec2; L: number } | null {
+  const na = doc.nodes[w.a]
+  const nb = doc.nodes[w.b]
+  if (!na || !nb) return null
+  const A = V(na.x, na.y)
+  const B = V(nb.x, nb.y)
+  const L = vDist(A, B)
+  if (L < 1e-6) return null
+  return { A, B, d: vMul(vSub(B, A), 1 / L), L }
+}
+
+/** Full compiler with diagnostics. */
+export function compilePlanSpecDetailed(spec: PlanSpec, opts: CompileOptions = {}): CompileResult {
+  const issues: PlanIssue[] = []
+  const U = makeUnits(spec)
+  const D = resolveDefaults(spec)
+  const snap = spec.snap
+  const stdT = snap?.standardThickness !== false
+
+  const doc = createEmptyDoc(spec.name ?? 'План')
+  const levelId = doc.levelOrder[0]
+  const level = doc.levels[levelId]
+  level.height = D.wallHeight
+  doc.settings.wallHeight = D.wallHeight
+
+  const polys = spec.rooms.map((r) => roomPolygonMm(r, U, snap))
+  const refPoints = spec.rooms.map((r) => roomRefPoint(r, U, snap))
+
+  // ── walls
+  const wallsMode = (spec.walls?.length ?? 0) > 0
+  // Mixed mode (documented): explicit walls are ADDED to the walls inferred from rooms that carry a
+  // rect/polygon — e.g. shaft outlines drawn inside rect rooms. Pure walls-mode (rooms as `at` labels
+  // only) infers nothing from rooms.
+  const roomsWithGeometry = polys.some(Boolean)
+  let segs = [
+    ...(wallsMode ? wallsModeSegments(spec.walls!, U, D, snap) : []),
+    ...(roomsWithGeometry || !wallsMode ? roomsModeSegments(spec.rooms, polys, D, stdT, issues) : []),
+  ]
+  const maxT = segs.reduce((m, s) => Math.max(m, s.t), 0)
+  const mergeMm = snap?.mergeMm ?? maxT / 2 + 50
+  segs = mergeCollinear(segs, mergeMm)
+  joinEnds(segs, mergeMm)
+  segs = segs.filter((s) => vDist(s.a, s.b) >= 1).sort((x, y) => vDist(y.a, y.b) - vDist(x.a, x.b))
+  for (const s of segs) {
+    addWall(doc, levelId, s.a, s.b, { thickness: s.t, height: s.height, kind: WALL_KIND_MAP[s.kind] })
+  }
+  normalize(doc)
+
+  // ── openings
+  const roomIndex = new Map(spec.rooms.map((r, i) => [r.id, i]))
+  const levelWalls = () => Object.values(doc.walls).filter((w) => w.levelId === levelId)
+  const sideOf = (w: Wall, p: Vec2): 'left' | 'right' | null => {
+    const g = wallDir(doc, w)
+    if (!g) return null
+    const nL = V(g.d.y, -g.d.x)
+    const s = vDot(vSub(p, g.A), nL)
+    if (Math.abs(s) < 1e-6) return null
+    return s > 0 ? 'left' : 'right'
+  }
+  const insideAnyRoom = (p: Vec2): boolean =>
+    polys.some((poly) => poly && pointInPoly(p, poly)) ||
+    (wallsMode && derivePlan(doc, levelId).rooms.some((r) => pointInPoly(p, r.polygon)))
+
+  const openingIds: (Id | null)[] = []
+  spec.openings.forEach((o, oi) => {
+    const path = `openings[${oi}]`
+    const label = o.id ?? `#${oi}`
+    let point: Vec2 | null = null
+    let pref: Vec2 | null = null
+    if (o.at) point = U.pt(o.at)
+    else if (o.wall !== undefined) {
+      const ws = spec.walls?.find((w) => w.id === o.wall)
+      if (!ws) {
+        issues.push({ severity: 'error', code: 'OPENING_BAD_REF', message: `Проём ${label}: стена «${o.wall}» не найдена`, path, ids: [label] })
+        openingIds.push(null)
+        return
+      }
+      const pts = ws.path.map((p) => U.pt(p))
+      if (ws.closed && pts.length >= 3) pts.push(pts[0])
+      let rest = U.len(o.offset ?? 0)
+      for (let i = 0; i + 1 < pts.length; i++) {
+        const L = vDist(pts[i], pts[i + 1])
+        if (rest <= L || i + 2 === pts.length) {
+          const e = vNorm(vSub(pts[i + 1], pts[i]))
+          point = vAdd(pts[i], vMul(e, Math.min(rest, L)))
+          pref = e
+          break
+        }
+        rest -= L
+      }
+    } else if (o.room !== undefined) {
+      const ri = roomIndex.get(o.room)
+      const poly = ri !== undefined ? polys[ri] : null
+      if (!poly) {
+        issues.push({
+          severity: 'error',
+          code: 'OPENING_BAD_REF',
+          message: `Проём ${label}: комната «${o.room}» не найдена или не имеет rect/polygon`,
+          path,
+          ids: [label],
+        })
+        openingIds.push(null)
+        return
+      }
+      const edge = pickRoomEdge(poly, o.side, o.edge)
+      if (!edge) {
+        issues.push({ severity: 'error', code: 'OPENING_BAD_REF', message: `Проём ${label}: сторона комнаты не найдена`, path, ids: [label] })
+        openingIds.push(null)
+        return
+      }
+      const L = vDist(edge.p0, edge.p1)
+      const e = vNorm(vSub(edge.p1, edge.p0))
+      let t = o.offset !== undefined ? U.len(o.offset) : L / 2
+      if (o.edge === undefined && o.side) {
+        const reversed = o.side === 'top' || o.side === 'bottom' ? e.x < 0 : e.y < 0
+        if (reversed) t = L - t
+      }
+      point = vAdd(edge.p0, vMul(e, t))
+      pref = e
+    }
+    if (!point) {
+      issues.push({
+        severity: 'error',
+        code: 'OPENING_NO_POSITION',
+        message: `Проём ${label}: нужно указать at, wall+offset или room+side`,
+        path,
+        ids: [label],
+      })
+      openingIds.push(null)
+      return
+    }
+    const width = U.len(o.width)
+    const found = projectToWall(doc, levelWalls(), point, pref)
+    if (!found) {
+      issues.push({
+        severity: 'error',
+        code: 'OPENING_OFF_WALL',
+        message: `Проём ${label}: рядом с точкой (${Math.round(point.x)}, ${Math.round(point.y)}) нет стены`,
+        path,
+        ids: [label],
+      })
+      openingIds.push(null)
+      return
+    }
+    const { wall, offset: rawOffset, L } = found
+    let offset = rawOffset
+    const margin = 50
+    if (L >= width + 2 * margin) offset = Math.min(Math.max(offset, width / 2 + margin), L - width / 2 - margin)
+    else {
+      offset = L / 2
+      issues.push({
+        severity: 'warning',
+        code: 'OPENING_TOO_WIDE',
+        message: `Проём ${label}: ширина ${Math.round(width)} мм больше участка стены ${Math.round(L)} мм`,
+        path,
+        ids: [label],
+      })
+    }
+    if (Math.abs(offset - rawOffset) > 1)
+      issues.push({
+        severity: 'warning',
+        code: 'OPENING_NEAR_CORNER',
+        message: `Проём ${label}: сдвинут на ${Math.round(Math.abs(offset - rawOffset))} мм, чтобы не заходить в угол`,
+        path,
+        ids: [label],
+      })
+    const kind = OPENING_MAP[o.type]
+    const def = OPENING_DEFAULTS[kind]
+    const isWindow = kind === 'window'
+    const isDoorish = !isWindow && kind !== 'frenchWindow' && kind !== 'balconyBlock'
+    const height = o.height ?? (isWindow ? (D.windowHeight ?? def.height) : isDoorish ? (D.doorHeight ?? def.height) : def.height)
+    const sill = o.sill ?? (isWindow ? (D.windowSill ?? def.sill) : def.sill)
+
+    // swing side & hinge
+    let swing: 'left' | 'right' = 'left'
+    let hinge: 'a' | 'b' = 'a'
+    if (o.swingSide) swing = o.swingSide
+    else {
+      const target = o.opensInto ?? o.between?.find((b) => b !== 'outside')
+      if (target && target !== 'outside') {
+        const ri = roomIndex.get(target)
+        const rp = ri !== undefined ? refPoints[ri] : null
+        const s = rp ? sideOf(wall, rp) : null
+        if (s) swing = s
+      } else if (target === 'outside') {
+        const otherRoom = o.between?.find((b) => b !== 'outside')
+        const ri = otherRoom ? roomIndex.get(otherRoom) : undefined
+        const rp = ri !== undefined ? refPoints[ri] : null
+        const s = rp ? sideOf(wall, rp) : null
+        if (s) swing = s === 'left' ? 'right' : 'left'
+        else {
+          const g = wallDir(doc, wall)!
+          const nL = V(g.d.y, -g.d.x)
+          const probe = vAdd(vAdd(g.A, vMul(g.d, offset)), vMul(nL, wall.thickness / 2 + 200))
+          swing = insideAnyRoom(probe) ? 'right' : 'left'
+        }
+      }
+    }
+    if (o.hingeEnd) hinge = o.hingeEnd
+    else if (o.hinge) hinge = (o.hinge === 'left') === (swing === 'left') ? 'b' : 'a'
+
+    const patch: Partial<import('./types').Opening> = { width, height, sill, hinge, swing }
+    if (o.sashes !== undefined) patch.sashes = o.sashes
+    const id = addOpening(doc, wall.id, kind, offset, patch)
+    openingIds.push(id)
+  })
+  normalize(doc)
+
+  // ── rooms
+  const roomIds: Record<string, Id> = {}
+  spec.rooms.forEach((r, i) => {
+    const ref = refPoints[i]
+    if (!ref) {
+      issues.push({
+        severity: 'error',
+        code: 'ROOM_NO_GEOMETRY',
+        message: `Комната «${r.id}»: нет rect, polygon или at`,
+        path: `rooms[${i}]`,
+        ids: [r.id],
+      })
+      return
+    }
+    const type = ROOM_TYPE_MAP[r.type ?? 'other']
+    const rec: Room = defaultRoom(levelId, ref)
+    rec.name = r.name ?? ROOM_TYPE_NAMES[type].ru
+    rec.type = type
+    if (r.ceilingHeight !== undefined) rec.ceiling = { ...rec.ceiling, height: r.ceilingHeight }
+    else if (D.ceilingHeight !== D.wallHeight) rec.ceiling = { ...rec.ceiling, height: D.ceilingHeight }
+    doc.rooms[rec.id] = rec
+    roomIds[r.id] = rec.id
+  })
+  syncRooms(doc)
+  for (const [sid, rid] of Object.entries(roomIds)) {
+    if (!doc.rooms[rid]) {
+      delete roomIds[sid]
+      issues.push({
+        severity: 'error',
+        code: 'ROOM_OPEN',
+        message: `Комната «${sid}»: точка метки не попала ни в один замкнутый контур стен`,
+        ids: [sid],
+      })
+    }
+  }
+
+  // ── fixtures / furniture
+  const fixtures = [...(spec.fixtures ?? []), ...(spec.furniture ?? [])]
+  fixtures.forEach((f, i) => {
+    const asset = findFixtureAsset(f)
+    const path = i < (spec.fixtures?.length ?? 0) ? `fixtures[${i}]` : `furniture[${i - (spec.fixtures?.length ?? 0)}]`
+    if (!asset) {
+      issues.push({ severity: 'warning', code: 'FIXTURE_UNKNOWN', message: `Неизвестный тип «${f.type}» — пропущен`, path })
+      return
+    }
+    let center: Vec2 | null = null
+    const rot = f.rotation ?? 0
+    const size = { ...asset.size }
+    if (f.rect && f.rect.length === 4) {
+      const p0 = U.pt([f.rect[0], f.rect[1]])
+      const p1 = U.pt([f.rect[0] + f.rect[2], f.rect[1] + f.rect[3]])
+      center = V((p0.x + p1.x) / 2, (p0.y + p1.y) / 2)
+      const rw = Math.abs(p1.x - p0.x)
+      const rh = Math.abs(p1.y - p0.y)
+      const quarter = Math.round((((rot % 360) + 360) % 360) / 90) % 2 === 1
+      size.w = quarter ? rh : rw
+      size.d = quarter ? rw : rh
+    } else if (f.at) center = U.pt(f.at)
+    if (f.size && f.size.length >= 2) {
+      size.w = f.size[0]
+      size.d = f.size[1]
+      if (f.size.length >= 3) size.h = f.size[2]
+    }
+    if (!center) {
+      issues.push({ severity: 'warning', code: 'FIXTURE_NO_POSITION', message: `«${f.type}»: нет rect или at — пропущен`, path })
+      return
+    }
+    const patch: Partial<Item> = { rotation: rot, size }
+    if (f.name) patch.name = f.name
+    if (f.elevation !== undefined) patch.elevation = f.elevation
+    addItem(doc, levelId, asset, center.x, center.y, patch)
+  })
+
+  // ── underlay
+  if (opts.underlay && spec.units === 'px' && spec.source?.image && spec.source.size) {
+    const k = mmPerPxOf(spec)
+    if (k) {
+      const o = spec.source.originPx ?? [0, 0]
+      const u: Underlay = {
+        id: newId('u'),
+        levelId,
+        src: spec.source.image,
+        x: -o[0] * k.x,
+        y: -o[1] * k.y,
+        scale: k.x,
+        rotation: 0,
+        opacity: 0.5,
+        visible: true,
+        locked: true,
+        widthPx: spec.source.size[0],
+        heightPx: spec.source.size[1],
+      }
+      doc.underlays[u.id] = u
+    }
+  }
+
+  return { doc, levelId, issues, roomIds, openingIds }
+}
+
+/** PlanSpec → Doc (one level). Throws on unusable input (e.g. px without scale). */
+export function compilePlanSpec(spec: PlanSpec, opts?: CompileOptions): Doc {
+  return compilePlanSpecDetailed(spec, opts).doc
+}
+
+function pickRoomEdge(poly: Vec2[], side: RoomSide | undefined, edge: number | undefined): { p0: Vec2; p1: Vec2 } | null {
+  const n = poly.length
+  if (edge !== undefined) {
+    const i = ((Math.round(edge) % n) + n) % n
+    return { p0: poly[i], p1: poly[(i + 1) % n] }
+  }
+  if (!side) return null
+  const want = side === 'top' ? V(0, -1) : side === 'bottom' ? V(0, 1) : side === 'left' ? V(-1, 0) : V(1, 0)
+  let best: { p0: Vec2; p1: Vec2; score: number; L: number } | null = null
+  for (let i = 0; i < n; i++) {
+    const p0 = poly[i]
+    const p1 = poly[(i + 1) % n]
+    const e = vNorm(vSub(p1, p0))
+    const out = V(e.y, -e.x)
+    if (vDot(out, want) < 0.7) continue
+    const mid = vMul(vAdd(p0, p1), 0.5)
+    const score = vDot(mid, want)
+    const L = vDist(p0, p1)
+    if (!best || score > best.score + 1 || (Math.abs(score - best.score) <= 1 && L > best.L)) best = { p0, p1, score, L }
+  }
+  return best ? { p0: best.p0, p1: best.p1 } : null
+}
+
+function projectToWall(
+  doc: Doc,
+  walls: Wall[],
+  p: Vec2,
+  pref: Vec2 | null,
+): { wall: Wall; offset: number; L: number; dist: number } | null {
+  const pick = (filter: (w: Wall, d: Vec2) => boolean) => {
+    let best: { wall: Wall; offset: number; L: number; dist: number } | null = null
+    for (const w of walls) {
+      const g = wallDir(doc, w)
+      if (!g || !filter(w, g.d)) continue
+      const pr = projectOnSeg(p, g.A, g.B)
+      const limit = Math.max(w.thickness, 300)
+      if (pr.dist > limit) continue
+      if (!best || pr.dist < best.dist - 0.01) best = { wall: w, offset: pr.along, L: g.L, dist: pr.dist }
+    }
+    return best
+  }
+  const solid = (w: Wall) => w.kind !== 'virtual'
+  if (pref) {
+    const r = pick((w, d) => solid(w) && Math.abs(vDot(d, pref)) > 0.9)
+    if (r) return r
+  }
+  return pick((w) => solid(w)) ?? pick(() => true)
+}
+
+// ───────────────────────────── validator ─────────────────────────────
+
+function areaThreshold(computed: number, labelled: number): PlanIssueSeverity | null {
+  const delta = Math.abs(computed - labelled)
+  if (delta > Math.max(0.4, 0.05 * labelled)) return 'error'
+  if (delta > Math.max(0.15, 0.02 * labelled)) return 'warning'
+  return null
+}
+
+/** Full validation with metrics (same code as the in-app check and `dp spec validate`). */
+export function validatePlanSpecDetailed(input: PlanSpec): PlanValidation {
+  const c = new Coercer()
+  const spec = coerceSpec(input, c)
+  const issues: PlanIssue[] = [...c.issues]
+  const metrics: PlanValidation['metrics'] = { totalArea: 0, livingArea: 0, perRoom: [] }
+  const done = (): PlanValidation => ({ ok: !issues.some((i) => i.severity === 'error'), issues, metrics })
+  if (issues.some((i) => i.severity === 'error')) return done()
+
+  // ── scale
+  if (spec.units === 'px') {
+    if (!mmPerPxOf(spec)) {
+      issues.push({ severity: 'error', code: 'SCALE_MISSING', message: 'units "px": нужен source.mmPerPx или калибровка', path: 'source' })
+      return done()
+    }
+  }
+  const cal = (spec.source?.calibration ?? []).filter((k) => k.mm > 0)
+  if (cal.length >= 2) {
+    const ks = cal.map((k) => k.mm / Math.max(1e-9, Math.hypot(k.p2[0] - k.p1[0], k.p2[1] - k.p1[1])))
+    const mn = Math.min(...ks)
+    const mx = Math.max(...ks)
+    if ((mx - mn) / mn > 0.02)
+      issues.push({
+        severity: 'warning',
+        code: 'SCALE_INCONSISTENT',
+        message: `Калибровки расходятся на ${(((mx - mn) / mn) * 100).toFixed(1)} % — план может быть не в масштабе`,
+        path: 'source.calibration',
+      })
+  }
+  if (spec.source?.mmPerPx && cal.length) {
+    const k = cal[0].mm / Math.max(1e-9, Math.hypot(cal[0].p2[0] - cal[0].p1[0], cal[0].p2[1] - cal[0].p1[1]))
+    if (Math.abs(k - spec.source.mmPerPx) / spec.source.mmPerPx > 0.02)
+      issues.push({
+        severity: 'warning',
+        code: 'SCALE_INCONSISTENT',
+        message: 'source.mmPerPx не совпадает с калибровкой (> 2 %)',
+        path: 'source.mmPerPx',
+      })
+  }
+  const U = makeUnits(spec)
+  const D = resolveDefaults(spec)
+  const wallsMode = (spec.walls?.length ?? 0) > 0
+
+  // ── ids
+  const dup = (list: { id?: string }[], what: string, path: string) => {
+    const seen = new Set<string>()
+    list.forEach((x, i) => {
+      if (!x.id) return
+      if (seen.has(x.id))
+        issues.push({ severity: 'error', code: 'DUPLICATE_ID', message: `${what}: повторяется id «${x.id}»`, path: `${path}[${i}]`, ids: [x.id] })
+      seen.add(x.id)
+    })
+  }
+  dup(spec.rooms, 'Комнаты', 'rooms')
+  dup(spec.walls ?? [], 'Стены', 'walls')
+  dup(spec.openings, 'Проёмы', 'openings')
+  if (!spec.rooms.length) issues.push({ severity: 'warning', code: 'NO_ROOMS', message: 'В плане нет комнат' })
+
+  // ── rooms static
+  const polys = spec.rooms.map((r) => roomPolygonMm(r, U, spec.snap))
+  spec.rooms.forEach((r, i) => {
+    const path = `rooms[${i}]`
+    if (r.rect && (r.rect[2] <= 0 || r.rect[3] <= 0))
+      issues.push({ severity: 'error', code: 'SCHEMA', message: `Комната «${r.id}»: отрицательный или нулевой размер rect`, path: `${path}.rect`, ids: [r.id] })
+    if (!r.rect && !r.polygon && !r.at)
+      issues.push({ severity: 'error', code: 'ROOM_NO_GEOMETRY', message: `Комната «${r.id}»: нет rect, polygon или at`, path, ids: [r.id] })
+    else if (!wallsMode && !r.rect && !r.polygon)
+      issues.push({
+        severity: 'error',
+        code: 'ROOM_NO_GEOMETRY',
+        message: `Комната «${r.id}»: без walls[] комнате нужен rect или polygon`,
+        path,
+        ids: [r.id],
+      })
+    if (r.polygon) {
+      const poly = r.polygon.map((p) => U.pt(p))
+      if (poly.length < 3 || Math.abs(signedArea(poly)) < 1)
+        issues.push({ severity: 'error', code: 'ROOM_OPEN', message: `Комната «${r.id}»: вырожденный полигон`, path: `${path}.polygon`, ids: [r.id] })
+      else if (selfIntersects(poly))
+        issues.push({ severity: 'error', code: 'ROOM_OPEN', message: `Комната «${r.id}»: полигон самопересекается`, path: `${path}.polygon`, ids: [r.id] })
+    }
+    if (r.ceilingHeight !== undefined && (r.ceilingHeight < 2400 || r.ceilingHeight > 3500))
+      issues.push({
+        severity: 'info',
+        code: 'DIMENSION_PRIOR',
+        message: `Комната «${r.id}»: необычная высота потолка ${r.ceilingHeight} мм`,
+        path: `${path}.ceilingHeight`,
+        ids: [r.id],
+      })
+  })
+  for (let i = 0; i < polys.length; i++) {
+    for (let j = i + 1; j < polys.length; j++) {
+      const a = polys[i]
+      const b = polys[j]
+      if (!a || !b) continue
+      const ov = overlapArea(a, b) / 1e6
+      if (ov > 0.05)
+        issues.push({
+          severity: 'error',
+          code: 'ROOM_OVERLAP',
+          message: `Комнаты «${spec.rooms[i].id}» и «${spec.rooms[j].id}» перекрываются на ${ov.toFixed(2)} м²`,
+          ids: [spec.rooms[i].id, spec.rooms[j].id],
+        })
+    }
+  }
+
+  // ── walls static
+  ;(spec.walls ?? []).forEach((w, i) => {
+    const kind = w.kind ?? 'loadBearing'
+    const t = w.thickness ?? thicknessFor(kind, D)
+    if (kind !== 'separator' && (t < 60 || t > 700))
+      issues.push({ severity: 'warning', code: 'WALL_THICKNESS_ODD', message: `Стена «${w.id}»: толщина ${t} мм вне 60–700`, path: `walls[${i}]`, ids: [w.id] })
+    if ((kind === 'partition' || kind === 'loadBearing') && t > D.exterior)
+      issues.push({
+        severity: 'warning',
+        code: 'WALL_THICKNESS_ODD',
+        message: `Стена «${w.id}»: внутренняя стена толще наружной (${t} > ${D.exterior})`,
+        path: `walls[${i}]`,
+        ids: [w.id],
+      })
+    if (w.align && w.align !== 'center' && !w.closed)
+      issues.push({
+        severity: 'warning',
+        code: 'WALL_ALIGN_OPEN',
+        message: `Стена «${w.id}»: align inner/outer работает только для замкнутых контуров — используется ось`,
+        path: `walls[${i}].align`,
+        ids: [w.id],
+      })
+  })
+  if (D.partition > D.exterior)
+    issues.push({ severity: 'warning', code: 'WALL_THICKNESS_ODD', message: 'Перегородки толще наружных стен (defaults)', path: 'defaults' })
+
+  // ── openings static
+  const roomIdSet = new Set(spec.rooms.map((r) => r.id))
+  spec.openings.forEach((o, i) => {
+    const path = `openings[${i}]`
+    const label = o.id ?? `#${i}`
+    if (o.width <= 0) issues.push({ severity: 'error', code: 'SCHEMA', message: `Проём ${label}: ширина должна быть > 0`, path, ids: [label] })
+    if (!o.at && o.wall === undefined && o.room === undefined)
+      issues.push({ severity: 'error', code: 'OPENING_NO_POSITION', message: `Проём ${label}: нужно at, wall+offset или room+side`, path, ids: [label] })
+    if (o.wall !== undefined && !(spec.walls ?? []).some((w) => w.id === o.wall))
+      issues.push({ severity: 'error', code: 'OPENING_BAD_REF', message: `Проём ${label}: стена «${o.wall}» не найдена`, path, ids: [label] })
+    if (o.room !== undefined && !roomIdSet.has(o.room))
+      issues.push({ severity: 'error', code: 'OPENING_BAD_REF', message: `Проём ${label}: комната «${o.room}» не найдена`, path, ids: [label] })
+    if (o.room !== undefined && o.side === undefined && o.edge === undefined)
+      issues.push({ severity: 'error', code: 'OPENING_BAD_REF', message: `Проём ${label}: при room нужен side или edge`, path, ids: [label] })
+    for (const b of [...(o.between ?? []), ...(o.opensInto ? [o.opensInto] : [])]) {
+      if (b !== 'outside' && !roomIdSet.has(b))
+        issues.push({ severity: 'error', code: 'OPENING_BAD_REF', message: `Проём ${label}: неизвестная комната «${b}»`, path, ids: [label] })
+    }
+    const kind = OPENING_MAP[o.type]
+    const wmm = U.len(o.width)
+    if (kind === 'entranceDoor' && (wmm < 800 || wmm > 1100))
+      issues.push({ severity: 'info', code: 'DIMENSION_PRIOR', message: `Входная дверь ${label}: ширина ${Math.round(wmm)} мм (обычно 800–1100)`, path, ids: [label] })
+    else if ((kind === 'door' || kind === 'slidingDoor') && (wmm < 600 || wmm > 1000))
+      issues.push({ severity: 'info', code: 'DIMENSION_PRIOR', message: `Дверь ${label}: ширина ${Math.round(wmm)} мм (обычно 600–1000)`, path, ids: [label] })
+  })
+  if (issues.some((i) => i.severity === 'error')) return done()
+
+  // ── compile-based checks
+  let res: CompileResult
+  try {
+    res = compilePlanSpecDetailed(spec)
+  } catch (e) {
+    issues.push({ severity: 'error', code: 'COMPILE_FAILED', message: `Не удалось построить план: ${(e as Error).message}` })
+    return done()
+  }
+  for (const ci of res.issues) issues.push(ci)
+  const { doc, levelId } = res
+  const plan = derivePlan(doc, levelId)
+  const refPoints = spec.rooms.map((r) => roomRefPoint(r, U, spec.snap))
+  const faceOf = (p: Vec2): number =>
+    plan.rooms.findIndex((r) => pointInPoly(p, r.polygon) && !r.holes.some((h) => pointInPoly(p, h)))
+  const faceToSpec = new Map<number, string[]>()
+  const specFace = new Map<string, number>()
+  spec.rooms.forEach((r, i) => {
+    const rp = refPoints[i]
+    if (!rp) return
+    let fi = faceOf(rp)
+    if (fi < 0 && res.roomIds[r.id]) fi = plan.rooms.findIndex((dr) => dr.roomId === res.roomIds[r.id])
+    if (fi < 0) {
+      if (!issues.some((x) => x.code === 'ROOM_OPEN' && x.ids?.includes(r.id)))
+        issues.push({
+          severity: 'error',
+          code: 'ROOM_OPEN',
+          message: `Комната «${r.id}»: метка не попадает ни в один замкнутый контур стен`,
+          path: `rooms[${i}]`,
+          ids: [r.id],
+        })
+      return
+    }
+    specFace.set(r.id, fi)
+    const list = faceToSpec.get(fi) ?? []
+    list.push(r.id)
+    faceToSpec.set(fi, list)
+  })
+  for (const [, ids] of faceToSpec) {
+    if (ids.length > 1)
+      issues.push({
+        severity: 'error',
+        code: 'ROOM_MERGED',
+        message: `Комнаты ${ids.map((x) => `«${x}»`).join(', ')} оказались в одном контуре — не хватает стены или разделителя`,
+        ids,
+      })
+  }
+  plan.rooms.forEach((r, fi) => {
+    if (!faceToSpec.has(fi) && r.area > 0.5)
+      issues.push({
+        severity: wallsMode ? 'warning' : 'info',
+        code: 'FACE_UNLABELLED',
+        message: `Замкнутый контур площадью ${r.area.toFixed(2)} м² не соответствует ни одной комнате`,
+      })
+  })
+
+  // areas
+  const roomType = (id: string): SpecRoomType => spec.rooms.find((r) => r.id === id)?.type ?? 'other'
+  spec.rooms.forEach((r, i) => {
+    const fi = specFace.get(r.id)
+    let computed: number | undefined
+    if (!wallsMode && polys[i]) computed = Math.abs(signedArea(polys[i]!)) / 1e6
+    else if (fi !== undefined) computed = plan.rooms[fi].area
+    if (computed === undefined) return
+    const m: PlanRoomMetric = { id: r.id, computed: Math.round(computed * 100) / 100 }
+    if (r.labelledArea !== undefined) {
+      m.labelled = r.labelledArea
+      m.delta = Math.round((computed - r.labelledArea) * 100) / 100
+      m.pct = r.labelledArea > 0 ? Math.round(((computed - r.labelledArea) / r.labelledArea) * 1000) / 10 : undefined
+      const sev = areaThreshold(computed, r.labelledArea)
+      if (sev)
+        issues.push({
+          severity: sev,
+          code: 'AREA_MISMATCH',
+          message: `Комната «${r.id}»: площадь ${computed.toFixed(2)} м², на плане ${r.labelledArea} м²`,
+          path: `rooms[${i}]`,
+          ids: [r.id],
+        })
+    }
+    metrics.perRoom.push(m)
+    const coef = r.balcony && !AREA_COEF[r.type ?? 'other'] ? 0.3 : (AREA_COEF[r.type ?? 'other'] ?? 1)
+    // shafts / boxed niches (< 1 m², type other) are not floor area in BTI totals
+    const technical = computed < 1 && (r.type === undefined || r.type === 'other')
+    if (!technical) metrics.totalArea += computed * coef
+    if (LIVING_TYPES.includes(r.type ?? 'other')) metrics.livingArea += computed
+  })
+  metrics.totalArea = Math.round(metrics.totalArea * 100) / 100
+  metrics.livingArea = Math.round(metrics.livingArea * 100) / 100
+  const lt = spec.source?.labelledTotalArea
+  if (lt !== undefined) {
+    const sev = areaThreshold(metrics.totalArea, lt)
+    if (sev)
+      issues.push({
+        severity: sev,
+        code: 'TOTAL_AREA_MISMATCH',
+        message: `Общая площадь ${metrics.totalArea.toFixed(2)} м² (балкон ×0,3, лоджия ×0,5), на плане ${lt} м²`,
+        path: 'source.labelledTotalArea',
+      })
+  }
+  const ll = spec.source?.labelledLivingArea
+  if (ll !== undefined) {
+    const sev = areaThreshold(metrics.livingArea, ll)
+    if (sev)
+      issues.push({
+        severity: sev,
+        code: 'TOTAL_AREA_MISMATCH',
+        message: `Жилая площадь ${metrics.livingArea.toFixed(2)} м², на плане ${ll} м²`,
+        path: 'source.labelledLivingArea',
+      })
+  }
+
+  // openings: sides, between, overlap, reachability, windows
+  const specOfFace = (fi: number): string => (fi < 0 ? 'outside' : (faceToSpec.get(fi)?.[0] ?? `face${fi}`))
+  const adj = new Map<string, Set<string>>()
+  const link = (a: string, b: string) => {
+    if (a === b) return
+    if (!adj.has(a)) adj.set(a, new Set())
+    if (!adj.has(b)) adj.set(b, new Set())
+    adj.get(a)!.add(b)
+    adj.get(b)!.add(a)
+  }
+  const entranceRooms: string[] = []
+  const windowRooms = new Set<string>()
+  spec.openings.forEach((o, i) => {
+    const oid = res.openingIds[i]
+    if (!oid) return
+    const op = doc.openings[oid]
+    if (!op) return
+    const wall = doc.walls[op.wallId]
+    const g = wall ? wallDir(doc, wall) : null
+    if (!wall || !g) return
+    const nL = V(g.d.y, -g.d.x)
+    const c = vAdd(g.A, vMul(g.d, op.offset))
+    const reach = wall.thickness / 2 + 150
+    const sL = specOfFace(faceOf(vAdd(c, vMul(nL, reach))))
+    const sR = specOfFace(faceOf(vAdd(c, vMul(nL, -reach))))
+    const label = o.id ?? `#${i}`
+    if (o.between && o.between.length === 2) {
+      const want = [...o.between].sort().join('|')
+      const got = [sL, sR].sort().join('|')
+      if (want !== got)
+        issues.push({
+          severity: 'error',
+          code: 'DOOR_BETWEEN_MISMATCH',
+          message: `Проём ${label}: соединяет ${sL} и ${sR}, а указано ${o.between.join(' и ')}`,
+          path: `openings[${i}]`,
+          ids: [label],
+        })
+    }
+    if (DOOR_LIKE.includes(op.kind)) link(sL, sR)
+    if (op.kind === 'entranceDoor') {
+      for (const s of [sL, sR]) if (s !== 'outside') entranceRooms.push(s)
+    }
+    if (WINDOW_LIKE.includes(op.kind)) {
+      windowRooms.add(sL)
+      windowRooms.add(sR)
+    }
+  })
+  // overlaps on the same wall
+  const byWall = new Map<Id, { id: Id; lo: number; hi: number }[]>()
+  for (const op of Object.values(doc.openings)) {
+    const list = byWall.get(op.wallId) ?? []
+    list.push({ id: op.id, lo: op.offset - op.width / 2, hi: op.offset + op.width / 2 })
+    byWall.set(op.wallId, list)
+  }
+  for (const list of byWall.values()) {
+    list.sort((a, b) => a.lo - b.lo)
+    for (let k = 1; k < list.length; k++) {
+      if (list[k].lo < list[k - 1].hi - 1) {
+        const ia = res.openingIds.indexOf(list[k - 1].id)
+        const ib = res.openingIds.indexOf(list[k].id)
+        const la = ia >= 0 ? (spec.openings[ia].id ?? `#${ia}`) : list[k - 1].id
+        const lb = ib >= 0 ? (spec.openings[ib].id ?? `#${ib}`) : list[k].id
+        issues.push({ severity: 'error', code: 'OPENING_OVERLAP', message: `Проёмы ${la} и ${lb} перекрываются на одной стене`, ids: [la, lb] })
+      }
+    }
+  }
+  if (entranceRooms.length) {
+    const seen = new Set<string>(entranceRooms)
+    const queue = [...entranceRooms]
+    while (queue.length) {
+      const cur = queue.shift()!
+      for (const nb of adj.get(cur) ?? []) {
+        if (nb === 'outside' || seen.has(nb)) continue
+        seen.add(nb)
+        queue.push(nb)
+      }
+    }
+    for (const r of spec.rooms) {
+      // shafts, risers, boxed niches: tiny closed areas with no doors are technical, not rooms
+      const face = specFace.get(r.id)
+      const technical =
+        face !== undefined && plan.rooms[face].area < 1 && !(adj.get(r.id)?.size ?? 0) && (r.type === undefined || r.type === 'other' || r.type === 'storage')
+      if (face !== undefined && !seen.has(r.id) && !technical)
+        issues.push({
+          severity: 'error',
+          code: 'ROOM_UNREACHABLE',
+          message: `Комната «${r.id}» недостижима от входной двери через двери и проёмы`,
+          ids: [r.id],
+        })
+    }
+  } else if (spec.openings.length) {
+    issues.push({ severity: 'info', code: 'NO_ENTRANCE', message: 'Нет входной двери (entranceDoor) — проверка достижимости пропущена' })
+  }
+  for (const r of spec.rooms) {
+    if (WINDOW_REQUIRED.includes(roomType(r.id)) && specFace.has(r.id) && !windowRooms.has(r.id))
+      issues.push({ severity: 'warning', code: 'NO_WINDOW', message: `Комната «${r.id}» без окна или балконной двери`, ids: [r.id] })
+  }
+
+  // dangling walls
+  const degree = new Map<Id, number>()
+  const lw = Object.values(doc.walls).filter((w) => w.levelId === levelId)
+  for (const w of lw) {
+    degree.set(w.a, (degree.get(w.a) ?? 0) + 1)
+    degree.set(w.b, (degree.get(w.b) ?? 0) + 1)
+  }
+  let dangling = 0
+  for (const w of lw) {
+    if (w.kind === 'parapet' || w.kind === 'glazing' || w.kind === 'virtual') continue
+    if ((degree.get(w.a) ?? 0) === 1 || (degree.get(w.b) ?? 0) === 1) dangling++
+  }
+  if (dangling)
+    issues.push({ severity: 'warning', code: 'DANGLING_WALL', message: `${dangling} стен(ы) со свободным концом — проверьте примыкания` })
+  // non-orthogonal edges
+  let nonOrtho = 0
+  for (const w of lw) {
+    const g = wallDir(doc, w)
+    if (!g) continue
+    const ang = (Math.atan2(Math.abs(g.d.y), Math.abs(g.d.x)) * 180) / Math.PI
+    if (ang > 0.5 && ang < 89.5) nonOrtho++
+  }
+  if (nonOrtho) issues.push({ severity: 'info', code: 'NON_ORTHO', message: `${nonOrtho} стен(ы) под непрямым углом` })
+  return done()
+}
+
+/** Returns issues (severity/code/message/path). Never throws. */
+export function validatePlanSpec(spec: PlanSpec): PlanIssue[] {
+  return validatePlanSpecDetailed(spec).issues
+}
+
+// ───────────────────────────── Doc → PlanSpec ─────────────────────────────
+
+const r1 = (n: number): number => Math.round(n * 10) / 10
+
+/** Decompile one level to a walls-mode PlanSpec in mm (round-trips through compilePlanSpec). */
+export function docToPlanSpec(doc: Doc, levelId?: Id): PlanSpec {
+  const lid = levelId ?? doc.levelOrder[0]
+  const level = doc.levels[lid]
+  const plan = derivePlan(doc, lid)
+  const sidesWithRoom = new Map<Id, Set<string>>()
+  for (const r of plan.rooms) {
+    for (const e of r.edges) {
+      const s = sidesWithRoom.get(e.wallId) ?? new Set<string>()
+      s.add(e.side)
+      sidesWithRoom.set(e.wallId, s)
+    }
+  }
+  const walls: WallSpec[] = []
+  for (const w of Object.values(doc.walls)) {
+    if (w.levelId !== lid) continue
+    const a = doc.nodes[w.a]
+    const b = doc.nodes[w.b]
+    if (!a || !b) continue
+    let kind: SpecWallKind
+    switch (w.kind) {
+      case 'wall':
+        kind = (sidesWithRoom.get(w.id)?.size ?? 0) >= 2 ? 'loadBearing' : 'exterior'
+        break
+      case 'partition':
+        kind = 'partition'
+        break
+      case 'parapet':
+        kind = 'parapet'
+        break
+      case 'glazing':
+        kind = 'glass'
+        break
+      case 'virtual':
+        kind = 'separator'
+        break
+    }
+    walls.push({
+      id: w.id,
+      path: [
+        [r1(a.x), r1(a.y)],
+        [r1(b.x), r1(b.y)],
+      ],
+      thickness: w.thickness,
+      kind,
+      height: w.height,
+    })
+  }
+  const REVERSE_TYPE: Record<RoomType, SpecRoomType> = {
+    living: 'living',
+    bedroom: 'bedroom',
+    kitchen: 'kitchen',
+    kitchenLiving: 'kitchenLiving',
+    bathroom: 'bathroom',
+    toilet: 'toilet',
+    hallway: 'hallway',
+    corridor: 'corridor',
+    balcony: 'balcony',
+    loggia: 'loggia',
+    wardrobe: 'wardrobe',
+    office: 'office',
+    kids: 'kids',
+    storage: 'storage',
+    other: 'other',
+  }
+  const rooms: RoomSpec[] = []
+  for (const r of Object.values(doc.rooms)) {
+    if (r.levelId !== lid) continue
+    const dr = plan.rooms.find((x) => x.roomId === r.id)
+    const at = dr ? dr.labelPoint : r.anchor
+    const rs: RoomSpec = { id: r.id, name: r.name, type: REVERSE_TYPE[r.type] ?? 'other', at: [r1(at.x), r1(at.y)] }
+    if (dr) rs.labelledArea = Math.round(dr.area * 100) / 100
+    if (r.ceiling.height !== undefined) rs.ceilingHeight = r.ceiling.height
+    rooms.push(rs)
+  }
+  const openings: OpeningSpec[] = []
+  for (const o of Object.values(doc.openings)) {
+    const w = doc.walls[o.wallId]
+    if (!w || w.levelId !== lid) continue
+    const os: OpeningSpec = {
+      id: o.id,
+      type: o.kind,
+      wall: o.wallId,
+      offset: r1(o.offset),
+      width: o.width,
+      height: o.height,
+      sill: o.sill,
+      hingeEnd: o.hinge,
+      swingSide: o.swing,
+    }
+    if (o.sashes !== undefined) os.sashes = o.sashes
+    openings.push(os)
+  }
+  const fixtures: FixtureSpec[] = []
+  for (const it of Object.values(doc.items)) {
+    if (it.levelId !== lid) continue
+    const asset = doc.assets[it.assetId] ?? BUILTIN_ASSETS.find((a) => a.id === it.assetId)
+    const f: FixtureSpec = {
+      type: asset?.procedural ?? asset?.category ?? 'box',
+      assetId: it.assetId,
+      at: [r1(it.x), r1(it.y)],
+      size: [it.size.w, it.size.d, it.size.h],
+      rotation: it.rotation,
+    }
+    if (it.name) f.name = it.name
+    if (it.elevation) f.elevation = it.elevation
+    fixtures.push(f)
+  }
+  const spec: PlanSpec = {
+    version: 1,
+    units: 'mm',
+    name: doc.meta.name,
+    defaults: { ceilingHeight: level?.height ?? doc.settings.wallHeight, wallHeight: level?.height ?? doc.settings.wallHeight },
+    snap: { orthogonal: false, standardThickness: false, mergeMm: 1 },
+    walls,
+    rooms,
+    openings,
+  }
+  if (fixtures.length) spec.fixtures = fixtures
+  return spec
+}

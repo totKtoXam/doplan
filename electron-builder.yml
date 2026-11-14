@@ -1,0 +1,58 @@
+appId: com.doplan.app
+productName: doplan
+copyright: Copyright © 2026 doplan
+directories:
+  output: release/${version}
+  buildResources: resources
+files:
+  - out/**/*
+  - package.json
+  - "!**/*.map"
+  - "!**/node_modules/**/*"
+asar: true
+compression: normal
+extraResources:
+  - from: resources/assets
+    to: assets
+    filter:
+      - "**/*"
+      - "!downloaded/**"
+fileAssociations:
+  - ext: doplan
+    name: doplan project
+    description: doplan project
+    mimeType: application/x-doplan
+    role: Editor
+    icon: resources/icon.png
+win:
+  icon: resources/icon.png
+  executableName: doplan
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: doplan
+  deleteAppDataOnUninstall: false
+  artifactName: ${productName}-setup-${version}.${ext}
+portable:
+  artifactName: ${productName}-portable-${version}.${ext}
+electronFuses:
+  runAsNode: false
+  enableCookieEncryption: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  grantFileProtocolExtraPrivileges: false
+npmRebuild: false
+publish: null

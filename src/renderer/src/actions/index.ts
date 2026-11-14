@@ -1,0 +1,73 @@
+/**
+ * Application commands shared by the top bar, menus, keyboard shortcuts and panels.
+ */
+import { dialogStore } from '@/store/dialogs'
+import { uiStore } from '@/store/ui'
+import type { ViewMode } from '@/contracts'
+import { copySelection, cutSelection, deleteSelection, duplicateSelection, groupRotate, hasClipboard, paste, redo, selectAll, undo, zoomFit } from './edit'
+import { ensureEngine, exportGlb, exportPlan, renderStill, snapshot3d } from './export'
+import { addUnderlayFromData, handleDroppedFiles, importModelFiles, importPlanSpec, importUnderlay, planFromPhoto } from './import'
+import { addLevel, deleteLevel, moveLevel, renameLevel, toggleLevelVisible } from './levels'
+import { autosaveNow, confirmDiscard, handleCloseRequest, loadDocument, newProject, newSampleProject, offerRecovery, openProject, saveProject } from './project'
+
+export const actions = {
+  // project
+  newProject,
+  newSampleProject,
+  openProject,
+  saveProject,
+  confirmDiscard,
+  loadDocument,
+  autosaveNow,
+  handleCloseRequest,
+  offerRecovery,
+  // export
+  exportPlan,
+  exportGlb,
+  renderStill,
+  snapshot3d,
+  ensureEngine,
+  // import
+  importPlanSpec,
+  importUnderlay,
+  addUnderlayFromData,
+  importModelFiles,
+  planFromPhoto,
+  handleDroppedFiles,
+  // edit
+  undo,
+  redo,
+  deleteSelection,
+  duplicateSelection,
+  groupRotate,
+  selectAll,
+  copySelection,
+  cutSelection,
+  paste,
+  hasClipboard,
+  zoomFit,
+  // levels
+  addLevel,
+  renameLevel,
+  deleteLevel,
+  moveLevel,
+  toggleLevelVisible,
+  // view
+  setMode(mode: ViewMode) {
+    uiStore.getState().setMode(mode)
+  },
+  openRenderDialog() {
+    dialogStore.getState().open('render')
+  },
+  openSettings() {
+    dialogStore.getState().open('settings')
+  },
+  openBom() {
+    dialogStore.getState().open('bom')
+  },
+  openMaterialEditor() {
+    dialogStore.getState().open('materialEditor')
+  },
+}
+
+export type Actions = typeof actions

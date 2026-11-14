@@ -1,0 +1,21 @@
+/**
+ * doplan core — pure TypeScript (no DOM / Node / three imports).
+ * Geometry kernel, document operations and (from core-output) PlanSpec, display list, exports, BOM.
+ */
+export * from './types'
+export * from './ids'
+export * from './geom'
+export * from './defaults'
+export * from './joins'
+export * from './rooms'
+export * from './derive'
+export * from './ops'
+export * from './io'
+export * from './catalog'
+export * from './planspec'
+export * from './display'
+export * from './bom'
+export * from './area'
+export * from './export/svg'
+export * from './export/dxf'
+export * from './export/canvas'

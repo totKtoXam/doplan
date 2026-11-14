@@ -1,0 +1,21 @@
+node_modules/
+out/
+dist/
+release/
+*.log
+.DS_Store
+assets-cache/
+resources/assets/downloaded/
+.vite/
+
+# heavy CC0 binaries: re-created by `pnpm assets:fetch` (catalog.json, thumbs and LICENSES.md stay tracked)
+resources/assets/models/
+resources/assets/materials/
+resources/assets/hdris/
+
+# personal data: plan photos, photo→plan work dirs, user projects
+inbox/
+.doplan-work/
+/*.doplan
+.claude/settings.local.json
+.claude/worktrees/

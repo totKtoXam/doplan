@@ -397,6 +397,84 @@ export function itemClearances(doc: Pick<Doc, 'walls' | 'rooms'>, plan: DerivedP
   return out
 }
 
+// ───────────────────────────── gaps between items ─────────────────────────────
+
+export interface ItemGap {
+  dir: ClearanceDir
+  /** point on this item's edge and on the neighbour's footprint, mm */
+  from: Vec2
+  to: Vec2
+  /** clear distance between the footprints, mm */
+  dist: number
+  itemId: Id
+}
+
+type GapItem = Pick<Item, 'id' | 'levelId' | 'x' | 'y' | 'rotation' | 'size' | 'elevation'> & { hidden?: boolean }
+
+/**
+ * Gaps from the item footprint to the nearest neighbouring item in each of its four local directions,
+ * measured axis-aligned in the item's frame (the neighbour's footprint is taken as its bounding box in
+ * that frame). Only neighbours on the same level whose height range overlaps the item's, whose
+ * footprint overlaps the item's side band, and that are closer than `maxMm` count. Thin floor items
+ * (rugs, mats: under 50 mm high) are ignored; a neighbour farther than the wall in that direction
+ * (`walls`, e.g. from itemClearances) is behind the wall and ignored too.
+ */
+export function itemGaps(item: GapItem, items: Iterable<GapItem>, maxMm = 1500, walls: readonly { dir: ClearanceDir; dist: number }[] = []): ItemGap[] {
+  const r = (item.rotation * Math.PI) / 180
+  const ux = { x: Math.cos(r), y: Math.sin(r) }
+  const uy = { x: -Math.sin(r), y: Math.cos(r) }
+  const hw = item.size.w / 2
+  const hd = item.size.d / 2
+  const at = (lx: number, ly: number): Vec2 => ({ x: item.x + ux.x * lx + uy.x * ly, y: item.y + ux.y * lx + uy.y * ly })
+  const z0 = item.elevation
+  const z1 = item.elevation + item.size.h
+  const best = new Map<ClearanceDir, ItemGap>()
+  const consider = (g: ItemGap) => {
+    if (walls.some((w) => w.dir === g.dir && w.dist < g.dist)) return
+    const b = best.get(g.dir)
+    if (!b || g.dist < b.dist) best.set(g.dir, g)
+  }
+  for (const o of items) {
+    if (o.id === item.id || o.levelId !== item.levelId || o.hidden) continue
+    if (o.size.h < 50 && o.elevation < 50) continue
+    if (Math.min(z1, o.elevation + o.size.h) - Math.max(z0, o.elevation) <= 1) continue
+    // neighbour's corners in this item's frame → bounding box
+    const ro = (o.rotation * Math.PI) / 180
+    const ox = { x: Math.cos(ro), y: Math.sin(ro) }
+    const oy = { x: -Math.sin(ro), y: Math.cos(ro) }
+    let minX = Infinity
+    let maxX = -Infinity
+    let minY = Infinity
+    let maxY = -Infinity
+    for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+      const px = o.x + ox.x * sx * (o.size.w / 2) + oy.x * sy * (o.size.d / 2) - item.x
+      const py = o.y + ox.y * sx * (o.size.w / 2) + oy.y * sy * (o.size.d / 2) - item.y
+      const lx = px * ux.x + py * ux.y
+      const ly = px * uy.x + py * uy.y
+      minX = Math.min(minX, lx)
+      maxX = Math.max(maxX, lx)
+      minY = Math.min(minY, ly)
+      maxY = Math.max(maxY, ly)
+    }
+    // band overlap across the direction (> 1 mm), then the gap along it
+    const oyLo = Math.max(minY, -hd)
+    const oyHi = Math.min(maxY, hd)
+    if (oyHi - oyLo > 1) {
+      const ym = (oyLo + oyHi) / 2
+      if (minX >= hw - 0.5 && minX - hw <= maxMm) consider({ dir: 'right', from: at(hw, ym), to: at(minX, ym), dist: Math.max(0, minX - hw), itemId: o.id })
+      if (maxX <= -hw + 0.5 && -hw - maxX <= maxMm) consider({ dir: 'left', from: at(-hw, ym), to: at(maxX, ym), dist: Math.max(0, -hw - maxX), itemId: o.id })
+    }
+    const oxLo = Math.max(minX, -hw)
+    const oxHi = Math.min(maxX, hw)
+    if (oxHi - oxLo > 1) {
+      const xm = (oxLo + oxHi) / 2
+      if (minY >= hd - 0.5 && minY - hd <= maxMm) consider({ dir: 'front', from: at(xm, hd), to: at(xm, minY), dist: Math.max(0, minY - hd), itemId: o.id })
+      if (maxY <= -hd + 0.5 && -hd - maxY <= maxMm) consider({ dir: 'back', from: at(xm, -hd), to: at(xm, maxY), dist: Math.max(0, -hd - maxY), itemId: o.id })
+    }
+  }
+  return [...best.values()]
+}
+
 // ───────────────────────────── area report ─────────────────────────────
 
 export type AreaLevel = 'ok' | 'warn' | 'bad'

@@ -119,7 +119,7 @@ export function ToolOptionsBar() {
             title={t('Тип проёма')}
             value={openingKind}
             options={(tool === 'door' ? DOOR_KINDS : WINDOW_KINDS).map((k) => ({ value: k, label: t(OPENING_NAMES[k]) }))}
-            onChange={(k) => set({ openingKind: k })}
+            onChange={(k) => set({ openingKind: k, openingPreset: null })}
           />
         </>
       )}

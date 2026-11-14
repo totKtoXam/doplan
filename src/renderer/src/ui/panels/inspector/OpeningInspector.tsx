@@ -1,12 +1,15 @@
 import { ArrowLeftRight, DoorOpen, FlipVertical2 } from 'lucide-react'
-import type { CurtainKind, CurtainSpec, Id, Opening, OpeningKind } from '@core/types'
-import { defaultCurtain, OPENING_DEFAULTS } from '@core'
+import type { CurtainKind, CurtainSpec, DoorLeafStyle, DoorSlide, Id, Opening, OpeningKind } from '@core/types'
+import { defaultCurtain, doorLeafSize, DOOR_LEAF_STYLES, DOOR_SLIDES, leafAllowance, OPENING_DEFAULTS, STANDARD_LEAF_HEIGHTS, standardLeafWidths } from '@core'
 import { useDoc } from '@/store/document'
 import { useT } from '@/i18n'
 import { Button, NumberInput, Row, Section, Segmented, Select, Slider, Toggle, fmtNum } from '@/ui/kit'
 import { MaterialPicker } from '../common/MaterialPicker'
 import {
   CURTAIN_KIND_RU,
+  DOOR_LEAF_STYLE_RU,
+  DOOR_LOOK_KINDS,
+  DOOR_SLIDE_RU,
   FABRIC_CATEGORIES,
   FRAME_CATEGORIES,
   hasLeaf,
@@ -16,6 +19,7 @@ import {
 } from '../common/labels'
 import { tx } from '../common/catalog'
 import { Hint, InspectorHeader, Pair } from './shared'
+import '@/ui/catalogI18n'
 
 export function OpeningInspector({ id }: { id: Id }) {
   const t = useT()
@@ -78,6 +82,39 @@ export function OpeningInspector({ id }: { id: Id }) {
             </Button>
           </div>
         )}
+        {DOOR_LOOK_KINDS.has(o.kind) && (
+          <>
+            <Row label={t('Полотно')}>
+              <Select<DoorLeafStyle | 'auto'>
+                value={o.style ?? 'auto'}
+                options={[{ value: 'auto', label: t('По материалу') }, ...optionsOf(DOOR_LEAF_STYLE_RU, DOOR_LEAF_STYLES)]}
+                onChange={(v) => set('Вид полотна', (x) => (v === 'auto' ? delete x.style : (x.style = v)))}
+              />
+            </Row>
+            {o.kind === 'slidingDoor' && (
+              <Row label={t('Раздвижение')}>
+                <Select<DoorSlide>
+                  value={o.slide ?? 'surface'}
+                  options={optionsOf(DOOR_SLIDE_RU, DOOR_SLIDES)}
+                  onChange={(v) =>
+                    set('Тип раздвижной двери', (x) => {
+                      // keep the leaf size: the opening follows the new frame allowance
+                      const leaf = doorLeafSize(x)
+                      if (v === 'surface') delete x.slide
+                      else x.slide = v
+                      const a = leafAllowance(x.kind, x.slide)
+                      if (leaf && a) {
+                        x.width = leaf.w + a.w
+                        x.height = Math.min(leaf.h + a.h, Math.max(100, wall.height - x.sill))
+                      }
+                    })
+                  }
+                />
+              </Row>
+            )}
+            <LeafSize opening={o} wallHeight={wall.height} />
+          </>
+        )}
       </Section>
 
       <Section title={t('Материалы и детали')} id="insp.opening.mat">
@@ -103,6 +140,54 @@ export function OpeningInspector({ id }: { id: Id }) {
 
       {(isWin || o.kind === 'balconyDoor') && <CurtainEditor opening={o} />}
     </div>
+  )
+}
+
+/**
+ * Leaf size 1:1 (what is printed on the door): the opening is the leaf plus the frame / lining and
+ * gaps of the door model; sliding and barn leaves hang over the opening.
+ */
+function LeafSize({ opening: o, wallHeight }: { opening: Opening; wallHeight: number }) {
+  const t = useT()
+  const leaf = doorLeafSize(o)
+  const a = leafAllowance(o.kind, o.slide)
+  if (!leaf || !a) return null
+  const id = o.id
+  const setW = (w: number, merge?: string) =>
+    tx('Ширина полотна', (d) => {
+      const x = d.openings[id]
+      if (x) x.width = Math.max(100, Math.round(w + a.w))
+    }, merge)
+  const setH = (h: number, merge?: string) =>
+    tx('Высота полотна', (d) => {
+      const x = d.openings[id]
+      if (x) x.height = Math.min(Math.max(100, Math.round(h + a.h)), Math.max(100, wallHeight - x.sill))
+    }, merge)
+  const two = o.kind === 'doubleDoor'
+  return (
+    <>
+      <Row label={two ? t('Полотна (обе створки)') : t('Полотно')}>
+        <Pair>
+          <NumberInput kind="length" label={t('Ш')} value={leaf.w} min={200} round={1} onChange={(v, g) => setW(v, `leaf.${id}.w.${g}`)} />
+          <NumberInput kind="length" label={t('В')} value={leaf.h} min={500} round={1} onChange={(v, g) => setH(v, `leaf.${id}.h.${g}`)} />
+        </Pair>
+      </Row>
+      <Row label={t('Ширина полотна')}>
+        <Segmented<string>
+          value={String(Math.round(leaf.w))}
+          onChange={(v) => setW(Number(v))}
+          options={standardLeafWidths(o.kind).map((v) => ({ value: String(v), label: two ? `2×${v / 2}` : String(v) }))}
+        />
+      </Row>
+      <Row label={t('Высота полотна')}>
+        <Segmented<string> value={String(Math.round(leaf.h))} onChange={(v) => setH(Number(v))} options={STANDARD_LEAF_HEIGHTS.map((v) => ({ value: String(v), label: String(v) }))} />
+      </Row>
+      <Hint>
+        {a.w >= 0
+          ? t('Проём = полотно + коробка: {w} мм по ширине, {h} мм по высоте.', { w: a.w, h: a.h })
+          : t('Полотно перекрывает проём: на {w} мм шире и на {h} мм выше.', { w: -a.w, h: -a.h })}
+      </Hint>
+    </>
   )
 }
 

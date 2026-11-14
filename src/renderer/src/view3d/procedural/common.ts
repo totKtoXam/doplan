@@ -921,14 +921,36 @@ export function plateWithHoles(w: number, d: number, outerR: number, holes: { w:
 
 // ───────────────────────────── common furniture parts ─────────────────────────────
 
-export type HandleStyle = 'bar' | 'knob' | 'none' | 'edge'
+export type HandleStyle = 'bar' | 'knob' | 'none' | 'edge' | 'cup' | 'gola'
+/** every handle style (param option lists) */
+export const HANDLE_STYLES: readonly HandleStyle[] = ['bar', 'knob', 'edge', 'cup', 'gola', 'none']
+/** front (door / drawer face) styles: plain slab, shaker frame-and-panel, classic raised panel */
+export type FrontStyle = 'flat' | 'shaker' | 'classic'
+export const FRONT_STYLES: readonly FrontStyle[] = ['flat', 'shaker', 'classic']
+/** height of the horizontal handle-less (gola) channel above a front, m */
+export const GOLA = 0.03
 
 /**
  * Adds a handle centred at (x, y) on a front whose outer face is at z.
  * `vertical`: bar orientation. Length is the bar length (bar style).
  */
 export function addHandle(c: Ctx, style: HandleStyle, x: number, y: number, z: number, len: number, vertical: boolean, parent?: THREE.Object3D): void {
-  if (style === 'none') return
+  // gola fronts have no handle: the channel is added with the fronts (addFronts)
+  if (style === 'none' || style === 'gola') return
+  if (style === 'cup') {
+    // shell (cup) pull: a half-round shell on a slim back plate
+    const g = cached(gkey('cupHandle'), () => {
+      const shell = new THREE.CylinderGeometry(0.016, 0.016, 0.085, 20, 1, false, 0, Math.PI)
+      shell.rotateZ(Math.PI / 2)
+      shell.rotateY(Math.PI / 2)
+      shell.scale(1, 1, 0.9)
+      const plate = new THREE.BoxGeometry(0.095, 0.034, 0.004)
+      plate.translate(0, 0.002, 0.002)
+      return merge([{ g: shell }, { g: plate }])
+    })
+    c.add(g, 'handles', F.steel, [x, y, z], vertical ? [0, 0, Math.PI / 2] : undefined, parent)
+    return
+  }
   if (style === 'knob') {
     const g = lathe(
       [
@@ -975,7 +997,7 @@ export function addHandle(c: Ctx, style: HandleStyle, x: number, y: number, z: n
 }
 
 export interface FrontOpts {
-  layout: 'doors' | 'drawers' | 'mixed' | 'lift' | 'glass'
+  layout: 'doors' | 'drawers' | 'mixed' | 'lift' | 'lift2' | 'glass'
   doors: number
   drawers: number
   handle: HandleStyle
@@ -983,6 +1005,51 @@ export interface FrontOpts {
   handlePos: 'top' | 'bottom' | 'middle'
   gap: number
   thick: number
+  /** face style of every front (default flat) */
+  style?: FrontStyle
+}
+
+/**
+ * One door / drawer front of w × h × t centred on its own origin in the given style.
+ * Shaker: a recessed centre panel inside a flat frame; classic: the centre field raised again.
+ */
+export function frontGeometry(w: number, h: number, t: number, style: FrontStyle = 'flat'): THREE.BufferGeometry {
+  const rad = 0.0015
+  const fw = Math.min(0.065, w * 0.17, h * 0.2)
+  if (style === 'flat' || fw < 0.018 || w < 0.1 || h < 0.08) return rbox(w, h, t, rad)
+  return cached(gkey('front', style, w, h, t), () => {
+    const recess = Math.min(0.007, t * 0.4)
+    const slab = new THREE.BoxGeometry(w - 0.002, h - 0.002, t - recess)
+    slab.translate(0, 0, -recess / 2)
+    const ring = roundedRectShape(w, h, rad)
+    const hole = new THREE.Path()
+    roundedRectPath(hole, w - 2 * fw, h - 2 * fw, 0.002, 0, 0, true)
+    ring.holes.push(hole)
+    const frame = new THREE.ExtrudeGeometry(ring, { depth: recess, bevelEnabled: false, curveSegments: 4 })
+    frame.translate(0, 0, t / 2 - recess)
+    const parts: { g: THREE.BufferGeometry; m?: THREE.Matrix4 }[] = [{ g: slab }, { g: frame }]
+    if (style === 'classic') {
+      // raised field with a bevelled edge, inset from the frame
+      const iw = w - 2 * fw - 0.03
+      const ih = h - 2 * fw - 0.03
+      if (iw > 0.04 && ih > 0.04) {
+        const bev = 0.008
+        const field = new THREE.ExtrudeGeometry(roundedRectShape(iw - 2 * bev, ih - 2 * bev, 0.002), {
+          depth: recess * 0.3,
+          bevelEnabled: true,
+          bevelThickness: recess * 0.5,
+          bevelSize: bev,
+          bevelSegments: 1,
+          curveSegments: 4,
+        })
+        field.translate(0, 0, t / 2 - recess + recess * 0.5)
+        parts.push({ g: field })
+      }
+    }
+    const merged = merge(parts)
+    merged.computeVertexNormals()
+    return boxUV(merged)
+  })
 }
 
 /**
@@ -998,7 +1065,19 @@ export function addFronts(c: Ctx, x0: number, x1: number, y0: number, y1: number
   const Hh = y1 - y0
   if (W <= 2 * g || Hh <= 2 * g) return
   const rad = 0.0015
-  const doorRow = (ya: number, yb: number, count: number, glass: boolean, handlePos: FrontOpts['handlePos']) => {
+  const gola = o.handle === 'gola'
+  /** recessed aluminium C-profile between ya (top) and yb, set into the carcass behind the fronts */
+  const golaChannel = (ya: number, yb: number) => {
+    c.add(box(W, ya - yb, 0.004), 'handles', F.aluminium, [(x0 + x1) / 2, (ya + yb) / 2, z - 0.026], undefined, parent)
+    c.add(box(W, 0.003, 0.026), 'handles', F.aluminium, [(x0 + x1) / 2, yb + 0.0015, z - 0.013], undefined, parent)
+  }
+  const doorRow = (ya: number, yb0: number, count: number, glass: boolean, handlePos: FrontOpts['handlePos']) => {
+    // gola on a base unit: the doors stop under a channel (doors with their handle at the top only)
+    let yb = yb0
+    if (gola && handlePos === 'top' && yb0 - ya > GOLA * 4) {
+      yb = yb0 - GOLA
+      golaChannel(yb0, yb)
+    }
     const n = Math.max(1, count)
     const dw = (W - g * (n + 1)) / n
     const dh = yb - ya - 2 * g
@@ -1022,9 +1101,9 @@ export function addFronts(c: Ctx, x0: number, x1: number, y0: number, y1: number
         c.add(frame, 'front', F.white, [cx, cy, zc], undefined, parent)
         c.add(box(dw - 2 * fw + 0.004, dh - 2 * fw + 0.004, 0.004), 'glass', F.frosted, [cx, cy, zc], undefined, parent)
       } else {
-        c.add(rbox(dw, dh, t, rad), 'front', F.white, [cx, cy, zc], undefined, parent)
+        c.add(frontGeometry(dw, dh, t, o.style), 'front', F.white, [cx, cy, zc], undefined, parent)
       }
-      if (o.handle !== 'none') {
+      if (o.handle !== 'none' && o.handle !== 'gola') {
         const hingeLeft = n === 1 ? true : i < n / 2
         const hx = n === 1 && o.handlePos !== 'middle' ? cx : hingeLeft ? cx + dw / 2 - 0.035 : cx - dw / 2 + 0.035
         const hLen = o.handle === 'knob' ? 0 : Math.min(0.22, dh * 0.4)
@@ -1052,8 +1131,15 @@ export function addFronts(c: Ctx, x0: number, x1: number, y0: number, y1: number
     for (let i = 0; i < n; i++) {
       const h = (avail * weights[i]) / wsum
       const cy = ytop - h / 2
-      c.add(rbox(W - 2 * g, h, t, rad), 'front', F.white, [(x0 + x1) / 2, cy, zc], undefined, parent)
-      addHandle(c, o.handle, (x0 + x1) / 2, o.handle === 'edge' ? ytop - 0.006 : ytop - Math.min(0.05, h / 2), zf, Math.min(0.4, (W - 2 * g) * 0.45), false, parent)
+      if (gola && h > GOLA * 2.5) {
+        // handle-less: the drawer front stops under an aluminium channel recessed into the carcass
+        const fh = h - GOLA
+        c.add(frontGeometry(W - 2 * g, fh, t, o.style), 'front', F.white, [(x0 + x1) / 2, ytop - GOLA - fh / 2, zc], undefined, parent)
+        golaChannel(ytop + g, ytop - GOLA)
+      } else {
+        c.add(frontGeometry(W - 2 * g, h, t, o.style), 'front', F.white, [(x0 + x1) / 2, cy, zc], undefined, parent)
+        addHandle(c, o.handle, (x0 + x1) / 2, o.handle === 'edge' ? ytop - 0.006 : ytop - Math.min(0.05, h / 2), zf, Math.min(0.4, (W - 2 * g) * 0.45), false, parent)
+      }
       ytop -= h + g
     }
   }
@@ -1070,6 +1156,13 @@ export function addFronts(c: Ctx, x0: number, x1: number, y0: number, y1: number
     case 'lift':
       doorRow(y0, y1, 1, false, o.handlePos)
       break
+    case 'lift2': {
+      // two horizontal lift-up fronts (bi-fold / two separate lifts), handles on the lower edges
+      const mid = (y0 + y1) / 2
+      doorRow(y0, mid + g / 2, 1, false, 'bottom')
+      doorRow(mid - g / 2, y1, 1, false, 'bottom')
+      break
+    }
     case 'glass':
       doorRow(y0, y1, o.doors, true, o.handlePos)
       break

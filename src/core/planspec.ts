@@ -14,7 +14,8 @@
  *
  * Pure TS: no DOM / Node imports.
  */
-import type { Asset, DimSource, Doc, Id, Item, OpeningKind, ProceduralKind, Room, RoomType, Underlay, Vec2, Wall, WallKind } from './types'
+import type { Asset, DimSource, Doc, DoorLeafStyle, DoorSlide, Id, Item, OpeningKind, ProceduralKind, Room, RoomType, Underlay, Vec2, Wall, WallKind } from './types'
+import { DOOR_LEAF_STYLES, DOOR_SLIDES } from './types'
 import { BUILTIN_ASSETS, createEmptyDoc, defaultRoom, OPENING_DEFAULTS, ROOM_TYPE_NAMES } from './defaults'
 import { addItem, addOpening, addWall, normalize, syncRooms } from './ops'
 import { derivePlan } from './derive'
@@ -230,6 +231,10 @@ export interface OpeningSpec {
   hingeEnd?: 'a' | 'b'
   swingSide?: 'left' | 'right'
   sashes?: number
+  /** slidingDoor: how the leaf slides (pocketDoor / foldingDoor set it too); default surface */
+  slide?: DoorSlide
+  /** door leaf look: flush | panel | glazed | insert | glass */
+  style?: DoorLeafStyle
   confidence?: number
 }
 
@@ -864,6 +869,8 @@ function coerceSpec(raw: unknown, c: Coercer): PlanSpec {
         hingeEnd: c.oneOf(o, 'hingeEnd', p, ['a', 'b'] as const),
         swingSide: c.oneOf(o, 'swingSide', p, ['left', 'right'] as const),
         sashes: c.num(o, 'sashes', p),
+        slide: c.oneOf(o, 'slide', p, DOOR_SLIDES),
+        style: c.oneOf(o, 'style', p, DOOR_LEAF_STYLES),
         confidence: c.num(o, 'confidence', p),
       }),
     )
@@ -993,7 +1000,7 @@ const OPENING_MAP: Record<SpecOpeningType, OpeningKind> = {
   balconyDoor: 'balconyDoor',
   balconyBlock: 'balconyBlock',
   pocketDoor: 'slidingDoor',
-  foldingDoor: 'door',
+  foldingDoor: 'slidingDoor',
   passage: 'opening',
   panoramicWindow: 'frenchWindow',
 }
@@ -1920,6 +1927,10 @@ export function compilePlanSpecDetailed(spec: PlanSpec, opts: CompileOptions = {
 
     const patch: Partial<import('./types').Opening> = { width, height, sill, hinge, swing }
     if (o.sashes !== undefined) patch.sashes = o.sashes
+    if (o.type === 'pocketDoor') patch.slide = 'pocket'
+    else if (o.type === 'foldingDoor') patch.slide = 'folding'
+    else if (kind === 'slidingDoor' && o.slide && o.slide !== 'surface') patch.slide = o.slide
+    if (o.style) patch.style = o.style
     const id = addOpening(doc, wall.id, kind, offset, patch)
     openingIds.push(id)
   })
@@ -2589,7 +2600,8 @@ export function docToPlanSpec(doc: Doc, levelId?: Id): PlanSpec {
     if (!w || w.levelId !== lid) continue
     const os: OpeningSpec = {
       id: o.id,
-      type: o.kind,
+      // the aliases keep the slide kind readable; a barn door is a slidingDoor with slide 'barn'
+      type: o.kind === 'slidingDoor' && o.slide === 'pocket' ? 'pocketDoor' : o.kind === 'slidingDoor' && o.slide === 'folding' ? 'foldingDoor' : o.kind,
       wall: o.wallId,
       offset: r1(o.offset),
       width: o.width,
@@ -2599,6 +2611,8 @@ export function docToPlanSpec(doc: Doc, levelId?: Id): PlanSpec {
       swingSide: o.swing,
     }
     if (o.sashes !== undefined) os.sashes = o.sashes
+    if (o.kind === 'slidingDoor' && o.slide === 'barn') os.slide = 'barn'
+    if (o.style) os.style = o.style
     openings.push(os)
   }
   const fixtures: FixtureSpec[] = []

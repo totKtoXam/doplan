@@ -104,14 +104,19 @@ File → «План из PlanSpec (JSON)…», and the CLI uses it in `pnpm dp s
 
 ## openings
 ```ts
-{ id?, type, width, at? | wall+offset? | room+side|edge+offset?, height?, sill?, between?, opensInto?, hinge?, hingeEnd?, swingSide?, sashes?, confidence? }
+{ id?, type, width, at? | wall+offset? | room+side|edge+offset?, height?, sill?, between?, opensInto?, hinge?, hingeEnd?, swingSide?, sashes?, slide?, style?, confidence? }
 ```
 - `type`:
   - door-like: `door`, `doubleDoor`, `slidingDoor`, `entranceDoor`, `arch`, `opening`, `balconyDoor`,
     `balconyBlock` (balcony door + window), `frenchWindow`;
   - window: `window`;
-  - aliases: `pocketDoor` becomes `slidingDoor`, `foldingDoor` becomes `door`, `passage` becomes
-    `opening`, `panoramicWindow` becomes `frenchWindow`.
+  - aliases: `pocketDoor` becomes `slidingDoor` with `slide: "pocket"` (the leaf slides into the wall),
+    `foldingDoor` becomes `slidingDoor` with `slide: "folding"` (accordion, no swing arc), `passage`
+    becomes `opening`, `panoramicWindow` becomes `frenchWindow`.
+- `slide` (`slidingDoor` only): `surface` (default, leaf on the wall face), `pocket`, `barn` (a wide leaf
+  on an exposed rail), `folding`.
+- `style` (door leaves): `flush`, `panel`, `glazed`, `insert` (царговая), `glass`. Optional; without it
+  the look follows the leaf material.
 - Position, three ways:
   1. `at: [x,y]`, the centre on or near a wall centre line. The simplest.
   2. `wall: "<wallId>"` + `offset`: distance from the path start to the opening **centre**.

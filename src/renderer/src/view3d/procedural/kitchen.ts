@@ -4,7 +4,10 @@ import { addHob, addMicrowaveFront, addOvenFront } from './appliances'
 import {
   type Ctx,
   F,
+  FRONT_STYLES,
   type FrontOpts,
+  type FrontStyle,
+  HANDLE_STYLES,
   type HandleStyle,
   addFaucet,
   addFronts,
@@ -12,12 +15,14 @@ import {
   box,
   clamp,
   cyl,
+  gkey,
   taperedLeg,
   plateWithHoles,
   rbox,
+  slabFromShape,
 } from './common'
 
-const HANDLES = ['bar', 'knob', 'none', 'edge'] as const
+const HANDLES = HANDLE_STYLES
 const PANEL = 0.018
 
 export function boxKind(c: Ctx): void {
@@ -59,6 +64,7 @@ function frontOpts(c: Ctx, defLayout: FrontOpts['layout'], handlePos: FrontOpts[
     handlePos,
     gap: 0.003,
     thick: c.num('frontThickness', 18, 10, 40) / 1000,
+    style: c.str('frontStyle', 'flat', FRONT_STYLES) as FrontStyle,
   }
 }
 
@@ -131,8 +137,13 @@ export function kitchenBase(c: Ctx): void {
   const wt = hasTop ? clamp(c.num('worktopThickness', 38) / 1000, 0.01, H * 0.2) : 0
   const ov = hasTop ? clamp(c.num('overhang', 20) / 1000, 0, D * 0.2) : 0
   const plinth = Math.min(c.num('plinth', 100, 0, 250) / 1000, H * 0.3)
+  const layout = c.str('layout', 'doors', ['doors', 'drawers', 'mixed', 'glass', 'dishwasher', 'oven', 'open'] as const)
   const fo = frontOpts(c, 'doors', 'top', ['doors', 'drawers', 'mixed', 'glass'])
   const island = c.bool('island', false)
+  if (isLCorner(c)) {
+    lCorner(c, { plinth, worktop: wt, overhang: ov, fo, base: true })
+    return
+  }
   // islands: seating overhang at the back, closed by a finished back panel
   const backOv = island && hasTop && D > 0.75 ? clamp(c.num('backOverhang', Math.min(300, D * 1000 * 0.3)) / 1000, 0, D * 0.4) : 0
   const backPanel = island ? PANEL : 0
@@ -140,7 +151,13 @@ export function kitchenBase(c: Ctx): void {
   const Dc = Math.max(0.05, D - ov - fo.thick - 0.001 - backOv - backPanel)
   const Hc = Math.max(0.05, H - wt - plinth)
   const cut = hasTop ? cutoutSpec(c, W, D) : { kind: 'none' as const, x: 0, w: 0, d: 0, bowls: 1, hob: 'induction' as const, faucet: false }
-  addCarcass(c, W, Hc, Dc, plinth, zb, { closedTop: cut.kind !== 'sink', shelves: fo.layout === 'drawers' ? 0 : 1 })
+  if (layout === 'dishwasher') {
+    // integrated dishwasher: the machine fills the niche behind one full-height front, no carcass
+    c.add(rbox(W - 0.006, Hc - 0.004, Dc - 0.01, 0.003), 'metal', F.steel, [0, plinth + Hc / 2, zb + Dc / 2 - 0.005])
+  } else {
+    const shelves = layout === 'open' ? Math.max(1, Math.round(Hc / 0.3) - 1) : fo.layout === 'drawers' || layout === 'oven' ? 0 : 1
+    addCarcass(c, W, Hc, Dc, plinth, zb, { closedTop: cut.kind !== 'sink', shelves })
+  }
   if (plinth > 0.005) {
     c.add(box(W - 0.002, plinth - 0.002, 0.016), 'plinth', F.white, [0, plinth / 2, zb + Dc - 0.04])
     // dark void behind the plinth
@@ -150,7 +167,17 @@ export function kitchenBase(c: Ctx): void {
   // finished back panel of an island in the front material
   if (island) c.add(rbox(W, H - wt, backPanel, 0.0015), 'front', F.white, [0, (H - wt) / 2, zb - backPanel / 2])
   const zf = zb + Dc + 0.001
-  if (c.bool('corner', false)) {
+  if (layout === 'open') {
+    // open end shelf unit: no fronts
+  } else if (layout === 'dishwasher') {
+    addFronts(c, -W / 2, W / 2, plinth, plinth + Hc, zf, { ...fo, layout: 'doors', doors: 1 })
+  } else if (layout === 'oven') {
+    // built-in oven under the hob, a low drawer below it
+    const drawerTop = plinth + Math.max(0.1, Hc - 0.6)
+    addFronts(c, -W / 2, W / 2, plinth, drawerTop, zf, { ...fo, layout: 'drawers', drawers: 1, handle: fo.handle === 'gola' ? 'edge' : fo.handle })
+    c.add(box(W - 2 * PANEL, plinth + Hc - drawerTop, 0.004), 'body', F.anthracite, [0, (drawerTop + plinth + Hc) / 2, zf - 0.02])
+    addOvenFront(c, -W / 2 + 0.004, W / 2 - 0.004, drawerTop + 0.003, plinth + Hc - 0.003, zf - 0.01)
+  } else if (c.bool('corner', false)) {
     // blind corner unit: a fixed filler panel on the blind side, one working door on the other
     const blindLeft = c.str('cornerSide', 'left', ['left', 'right'] as const) === 'left'
     const doorW = clamp(c.num('cornerDoorWidth', Math.min(450, W * 500)) / 1000, 0.2, Math.max(0.21, W - 0.1))
@@ -165,15 +192,102 @@ export function kitchenBase(c: Ctx): void {
   if (hasTop) addWorktop(c, W, wt, D, H, 0, cut)
 }
 
+/** corner module with two legs (L-shaped carcass) instead of a blind corner */
+function isLCorner(c: Ctx): boolean {
+  if (c.raw('corner') === 'L') return true
+  return c.bool('corner', false) && c.str('cornerType', 'blind', ['blind', 'L'] as const) === 'L'
+}
+
+/**
+ * L-shaped corner unit filling the W × D footprint: one leg along the back (-Z), one along the side
+ * wall (`cornerSide`), each `legDepth` deep (base units: including the worktop overhang). The doors face
+ * the inner corner; the worktop is one L-shaped slab. Shared by base (plinth + worktop) and wall units.
+ */
+function lCorner(c: Ctx, o: { plinth: number; worktop: number; overhang: number; fo: FrontOpts; base: boolean; open?: boolean }): void {
+  const { W, H, D } = c
+  const s = c.str('cornerSide', 'left', ['left', 'right'] as const) === 'left' ? -1 : 1
+  const dep = clamp(c.num('legDepth', o.base ? 600 : 320) / 1000, 0.2, Math.max(0.21, Math.min(W, D) - 0.1))
+  const fo = o.fo
+  const frontT = o.open ? 0 : fo.thick + 0.001
+  const Dc = Math.max(0.1, dep - o.overhang - frontT)
+  const Hc = Math.max(0.1, H - o.worktop - o.plinth)
+  const y0 = o.plinth
+  const shelves = o.base ? 1 : Math.max(0, Math.round(Hc / 0.32) - 1)
+  // back leg: the full width
+  addCarcass(c, W, Hc, Dc, y0, -D / 2, { closedTop: true, shelves })
+  // side leg: from the front of the back leg to the front edge of the footprint, built in a frame whose
+  // local +Z points into the corner and whose local x runs along the world z axis
+  const z0 = -D / 2 + Dc
+  const Ls = D / 2 - z0
+  const zcS = (z0 + D / 2) / 2
+  const g = c.group([(s * W) / 2, 0, zcS], [0, (-s * Math.PI) / 2, 0])
+  addCarcass(c, Ls, Hc, Dc, y0, 0, { closedTop: true, shelves, parent: g })
+  const lx = (z: number): number => (s < 0 ? -(z - zcS) : z - zcS)
+  if (!o.open) {
+    const zf = -D / 2 + Dc + 0.001
+    const bx0 = s < 0 ? -W / 2 + Dc + frontT : -W / 2
+    const bx1 = s < 0 ? W / 2 : W / 2 - Dc - frontT
+    const one: FrontOpts = { ...fo, doors: 1, layout: fo.layout === 'glass' ? 'glass' : 'doors' }
+    addFronts(c, bx0, bx1, y0, y0 + Hc, zf, one)
+    const sa = lx(z0 + frontT)
+    const sb = lx(D / 2)
+    addFronts(c, Math.min(sa, sb), Math.max(sa, sb), y0, y0 + Hc, Dc + 0.001, one, g)
+  }
+  if (o.plinth > 0.005) {
+    const pz = -D / 2 + Dc - 0.04
+    const px0 = s < 0 ? -W / 2 + Dc - 0.04 : -W / 2
+    const px1 = s < 0 ? W / 2 : W / 2 - Dc + 0.04
+    c.add(box(px1 - px0, o.plinth - 0.002, 0.016), 'plinth', F.white, [(px0 + px1) / 2, o.plinth / 2, pz])
+    const pa = lx(pz)
+    const pb = lx(D / 2)
+    c.add(box(Math.abs(pb - pa), o.plinth - 0.002, 0.016), 'plinth', F.white, [(pa + pb) / 2, o.plinth / 2, Dc - 0.04], undefined, g)
+  }
+  if (o.worktop > 0) {
+    const top = slabFromShape(
+      gkey('lTop', W, D, dep, s),
+      () => {
+        const pts: [number, number][] = [
+          [-W / 2, -D / 2],
+          [W / 2, -D / 2],
+          [W / 2, -D / 2 + dep],
+          [-W / 2 + dep, -D / 2 + dep],
+          [-W / 2 + dep, D / 2],
+          [-W / 2, D / 2],
+        ]
+        const p = pts.map(([x, z]): [number, number] => [s < 0 ? x : -x, z])
+        if (s > 0) p.reverse()
+        const sh = new THREE.Shape()
+        sh.moveTo(p[0][0], p[0][1])
+        for (let i = 1; i < p.length; i++) sh.lineTo(p[i][0], p[i][1])
+        sh.closePath()
+        return sh
+      },
+      o.worktop,
+      Math.min(0.003, o.worktop / 3),
+      1,
+    )
+    c.add(top, 'worktop', F.stone, [0, H - o.worktop, 0])
+  }
+  if (!o.base && c.bool('underLight', false)) {
+    const strip = c.add(box(W - Dc - 0.06, 0.004, 0.012), 'light', F.emissive, [s < 0 ? Dc / 2 : -Dc / 2, 0.002, -D / 2 + Dc * 0.7])
+    strip.userData.emissiveReady = true
+  }
+}
+
 export function kitchenWall(c: Ctx): void {
   const { W, H, D } = c
   const fo = frontOpts(c, 'doors', 'bottom', ['doors'])
-  const layout = c.str('layout', 'doors', ['doors', 'glass', 'lift', 'open'] as const)
+  const layout = c.str('layout', 'doors', ['doors', 'glass', 'lift', 'lift2', 'open'] as const)
+  if (isLCorner(c)) {
+    lCorner(c, { plinth: 0, worktop: 0, overhang: 0, fo: { ...fo, layout: layout === 'glass' ? 'glass' : 'doors' }, base: false, open: layout === 'open' })
+    return
+  }
   const Dc = Math.max(0.05, D - (layout === 'open' ? 0 : fo.thick + 0.001))
   const shelves = Math.max(0, Math.round(H / 0.32) - 1)
   addCarcass(c, W, H, Dc, 0, -D / 2, { closedTop: true, shelves })
   if (layout === 'open') return
   if (layout === 'lift') fo.layout = 'lift'
+  else if (layout === 'lift2') fo.layout = 'lift2'
   else if (layout === 'glass') fo.layout = 'glass'
   else fo.layout = 'doors'
   addFronts(c, -W / 2, W / 2, 0, H, -D / 2 + Dc + 0.001, fo)
@@ -321,7 +435,16 @@ export function wardrobe(c: Ctx): void {
   const doors = c.int('count', Math.max(1, Math.round(W / 0.45)), 0, 12)
   const nDrawers = c.int('drawers', 0, 0, 8)
   const zf = zb + Dc + 0.001
-  const base: FrontOpts = { layout: 'drawers', doors: 1, drawers: Math.max(1, nDrawers), handle, handlePos: 'middle', gap: 0.003, thick: frontT }
+  const base: FrontOpts = {
+    layout: 'drawers',
+    doors: 1,
+    drawers: Math.max(1, nDrawers),
+    handle,
+    handlePos: 'middle',
+    gap: 0.003,
+    thick: frontT,
+    style: c.str('frontStyle', 'flat', FRONT_STYLES) as FrontStyle,
+  }
   if (doors === 0) {
     // chest of drawers / nightstand: drawer columns per section
     for (let s = 0; s < sections; s++) {

@@ -6,7 +6,7 @@
 | **БТИ / техпаспорт / поэтажный план** | thin black lines, walls hatched or filled, rooms numbered (1, 2, 3… or 1а), экспликация table | clear interior sizes in **metres with a comma** (`3,25`) or mm, written inside rooms along the walls | in the room: `15,2` or in a circle/fraction `5 / 15,2` (number / area) | old scans are skewed and stretched; the numbering continues across the floor; hand-written corrections |
 | **Застройщик (developer brochure)** | coloured fills, furniture, a compass, "ЖК …" logo | often none, or overall/axis dimensions in mm (`5700`) | `Кухня 12,4 м²` | proportions are approximate; furniture hides walls; sometimes mirrored versions |
 | **Sketch / hand drawing** | not to scale | numbers only | maybe | geometry comes only from the numbers (`source.toScale: false`) |
-| **Phone photo of a sheet** | perspective, shadow, curved paper | as the original | as the original | use `--contrast --deskew`; ask for a straight-on shot if it is trapezoidal |
+| **Phone photo of a sheet** | perspective, shadow, curved paper | as the original | as the original | use `--contrast --deskew`; trapezoidal → `--perspective` on 4 corners of the outer walls / sheet frame |
 | **Architectural / project drawing** | axes with letters and numbers (А–Г, 1–5) in circles, dimension chains in mm | axis-to-axis and wall-face chains | in the room or the table | dimensions to axes: subtract half-walls |
 
 ## Abbreviations

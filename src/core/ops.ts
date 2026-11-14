@@ -167,6 +167,9 @@ function splitWallAtNode(doc: Doc, wall: Wall, nodeId: Id, s: number): Id {
     left: cloneSide(wall.left),
     right: cloneSide(wall.right),
   }
+  // the face provenance travels with both halves; each half's recorded length no longer matches,
+  // so a split dimension shows as changed until it is measured again (see core/provenance)
+  if (wall.dims) w2.dims = JSON.parse(JSON.stringify(wall.dims)) as NonNullable<Wall['dims']>
   doc.walls[w2.id] = w2
   wall.b = nodeId
   for (const id in doc.openings) {
@@ -362,7 +365,7 @@ export function addRectRoom(
  * Moves several nodes at once. Openings keep their position relative to the end of the wall that
  * did not move (when only node `a` moved the offsets are shifted by the change of length).
  */
-function moveNodes(doc: Doc, moves: Map<Id, Vec2>): void {
+export function moveNodes(doc: Doc, moves: Map<Id, Vec2>): void {
   const affected: { wall: Wall; oldLen: number }[] = []
   for (const id in doc.walls) {
     const w = doc.walls[id]
@@ -955,6 +958,8 @@ export function normalize(doc: Doc): void {
         if (w2fwd) flipOpening(o)
       }
     }
+    // the merged faces are new dimensions: their recorded provenance no longer applies
+    if (w1.dims) delete w1.dims
     openingMap().set(w1.id, [...own, ...moved])
     openingMap().delete(w2.id)
     delete doc.walls[w2.id]

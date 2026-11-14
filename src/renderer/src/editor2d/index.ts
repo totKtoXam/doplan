@@ -17,6 +17,7 @@ import type { CreateEditor2D, Editor2DHandle, ToolId } from '@/contracts'
 import { docStore } from '@/store/document'
 import { handles as appHandles } from '@/store/handles'
 import { uiStore } from '@/store/ui'
+import { accuracyStore } from '@/store/accuracy'
 import { fitBounds } from './bounds'
 import { buildContextMenu } from './contextMenu'
 import { EMPTY_DERIVED, type ContextMenuItem, type EditorCtx } from './context'
@@ -102,7 +103,6 @@ export const createEditor2D: CreateEditor2D = async (container: HTMLElement): Pr
   // ── state ──
   let destroyed = false
   let raf = 0
-  let lastHint = ''
   // a fit was requested while the viewport had no real size (hidden / not laid out): run it on resize
   let fitPending = true
   // camera.version right after the last fit; still equal → the user has not panned/zoomed since
@@ -137,8 +137,8 @@ export const createEditor2D: CreateEditor2D = async (container: HTMLElement): Pr
     levelId,
     derived: () => docStore.getState().derived[levelId()] ?? EMPTY_DERIVED,
     setHint(text: string) {
-      if (text === lastHint) return
-      lastHint = text
+      // compare with the store, not a local copy: the shell also writes tool hints
+      if (uiStore.getState().hint === text) return
       uiStore.getState().set({ hint: text })
     },
     setCursor() {
@@ -327,6 +327,9 @@ export const createEditor2D: CreateEditor2D = async (container: HTMLElement): Pr
     }
   })
 
+  // provenance legend / «Обмер» hover and target are drawn by the annotations layer
+  const unsubAccuracy = accuracyStore.subscribe(() => requestRender())
+
   // the 3D camera has no change event: poll it cheaply while a 3D view is visible
   let cameraSig = ''
   const cameraTimer = window.setInterval(() => {
@@ -369,6 +372,7 @@ export const createEditor2D: CreateEditor2D = async (container: HTMLElement): Pr
       ro.disconnect()
       unsubDoc()
       unsubUi()
+      unsubAccuracy()
       try {
         tool.deactivate?.()
       } catch {

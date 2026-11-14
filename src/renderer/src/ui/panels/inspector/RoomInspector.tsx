@@ -10,6 +10,7 @@ import { lookupMaterial, tx, useLang, useMaterialMap } from '../common/catalog'
 import { roomWallSides } from '../common/edits'
 import { TilePatternEditor } from './TilePatternEditor'
 import { Hint, InspectorHeader, Stat } from './shared'
+import { RoomAccuracy } from './RoomAccuracy'
 
 export function RoomInspector({ id }: { id: Id }) {
   const t = useT()
@@ -75,6 +76,7 @@ export function RoomInspector({ id }: { id: Id }) {
         ) : (
           <Hint>{t('Контур не замкнут — площадь недоступна.')}</Hint>
         )}
+        {dr && <RoomAccuracy id={id} dr={dr} />}
       </Section>
 
       <Section title={t('Пол')} id="insp.room.floor">

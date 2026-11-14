@@ -976,6 +976,7 @@ export function defaultSettings(): DocSettings {
     showDimensions: true,
     showAreas: true,
     showFurniture2d: true,
+    showItemSizes: true,
     units: 'mm',
   }
 }

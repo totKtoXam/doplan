@@ -334,7 +334,7 @@ export class Painter {
     offsetMm: number,
     offsetPx: number,
     label: string,
-    o: { color: number; alpha?: number; size?: number; width?: number; extension?: boolean; bold?: boolean },
+    o: { color: number; alpha?: number; size?: number; width?: number; extension?: boolean; bold?: boolean; italic?: boolean },
   ): void {
     const sa = this.S(a)
     const sb = this.S(b)
@@ -375,6 +375,7 @@ export class Painter {
       anchorX: 0.5,
       anchorY: 1,
       bold: o.bold,
+      italic: o.italic,
     })
   }
 }

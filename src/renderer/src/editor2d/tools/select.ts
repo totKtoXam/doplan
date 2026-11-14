@@ -4,11 +4,23 @@
  * dimension offsets, resize / rotate handles, the 3D camera gizmo). Drags run as transient
  * transactions and become one history entry on pointer-up; Esc cancels.
  */
-import { moveNode, moveOpening } from '@core'
+import {
+  clampItemSize,
+  type ItemPose,
+  minItemSize,
+  moveNode,
+  moveOpening,
+  planResizeTargets,
+  resizedParams,
+  resizeFromFace,
+  snapValue,
+  wallFaceSegments,
+} from '@core'
 import type { Dimension, EntityRef, Id, Item, Opening, Vec2 } from '@core/types'
 import { t } from '@/i18n'
 import { docStore } from '@/store/document'
 import { handles as appHandles } from '@/store/handles'
+import { resizePrefs } from '@/store/resizePrefs'
 import { uiStore } from '@/store/ui'
 import type { EditorCtx, PointerInfo } from '../context'
 import { add, cross, dist, dot, leftOf, lineLine, mid, mul, norm, normDeg, projectOnLine, sub } from '../geom'
@@ -17,9 +29,10 @@ import { computeHandles, type Handle, handleAt, handleCursor } from '../handles'
 import type { WallHit } from '../hit'
 import type { Painter } from '../painter'
 import { dimensionNormal, itemToLocal, itemToPlan } from '../shapes'
-import { lengthStep, snapPoint, snapToGrid } from '../snap'
+import { gridSteps, lengthStep, snapPoint, snapToGrid } from '../snap'
 import { placeItem, placeOpeningOnWall, selectOnly, setHover, toggleSelection } from './common'
 import type { Tool } from './types'
+import { requestWallFrom } from './wallStart'
 
 type Cam = { position: [number, number, number]; target: [number, number, number]; fov: number }
 
@@ -133,6 +146,28 @@ export function createSelectTool(ctx: EditorCtx): Tool {
     }
   }
 
+  /**
+   * Hands the gesture over to the wall tool anchored at the node: it keeps receiving this pointer's
+   * moves, places the first segment where the button is released and returns here when the chain ends.
+   */
+  function startWallDrag(nodeId: Id, press: PointerInfo): void {
+    drag = { type: 'none' }
+    dragHandle = null
+    badge = null
+    ctx.snapFeedback = null
+    lastClick = null
+    requestWallFrom(ctx, nodeId, { pressScreen: press.screen, returnToSelect: true })
+  }
+
+  /** status-bar hint for the current selection (a lone node advertises "continue the wall") */
+  function selectionHint(): string {
+    const sel = ui().selection
+    if (sel.length === 1 && sel[0].kind === 'node') {
+      return t('Узел: перетаскивание — переместить · «+» или Ctrl+перетаскивание — новая стена отсюда · W — продолжить стену')
+    }
+    return t('Щелчок — выбрать · Shift — добавить · перетаскивание — переместить или выделить рамкой')
+  }
+
   function beginDrag(e: PointerInfo, pend: Extract<Drag, { type: 'pending' }>): void {
     const d = doc()
     const derived = ctx.derived()
@@ -147,6 +182,10 @@ export function createSelectTool(ctx: EditorCtx): Tool {
         case 'node': {
           const n = d.nodes[h.nodeId]
           if (!n) break
+          if (pend.start.ctrl) {
+            startWallDrag(h.nodeId, pend.start)
+            return
+          }
           drag = { type: 'node', nodeId: h.nodeId, grab: sub(start, n), excludeWalls: wallsAtNodes([h.nodeId]) }
           return
         }
@@ -207,6 +246,11 @@ export function createSelectTool(ctx: EditorCtx): Tool {
     }
     if (hit.kind === 'node') {
       const n = d.nodes[hit.id]
+      if (n && pend.start.ctrl) {
+        // Ctrl+drag from a junction draws a new wall from it (plain drag moves the node)
+        startWallDrag(hit.id, pend.start)
+        return
+      }
       if (n) {
         drag = { type: 'node', nodeId: hit.id, grab: sub(start, n), excludeWalls: wallsAtNodes([hit.id]) }
         return
@@ -538,37 +582,58 @@ export function createSelectTool(ctx: EditorCtx): Tool {
         break
       }
       case 'itemResize': {
+        // same face-anchored math as the 3D handles (core/manipulate.ts): the opposite face (or corner)
+        // stays put, the dragged face snaps to wall faces, neighbours' edges and the grid (Alt — free)
         const m = drag
-        const p = itemToLocal(m.base, snapToGrid(ctx, e.plan, e.alt))
-        let w = m.base.size.w
-        let dep = m.base.size.d
-        let cx = 0
-        let cy = 0
-        if (m.sx !== 0) {
-          w = Math.max(50, m.sx * p.x + m.base.size.w / 2)
-          cx = (m.sx * (w - m.base.size.w)) / 2
+        const b = m.base
+        const asset = ui().getAsset(b.assetId)
+        const min = minItemSize(asset)
+        const start: ItemPose = { x: b.x, y: b.y, rotation: b.rotation, elevation: b.elevation, size: b.size }
+        const p = itemToLocal(b, e.plan)
+        const snapOn = !e.alt
+        const step = snapOn && st.snapGrid ? gridSteps(st.gridMm, ctx.camera.scale).minor : 0
+        const doc = ctx.doc()
+        const lid = ctx.levelId()
+        const objSnap = snapOn && st.snapObjects !== false
+        const near = objSnap ? Object.values(doc.items).filter((o) => o.levelId === lid) : []
+        const walls = objSnap ? wallFaceSegments(doc.walls, ctx.derived().wallGeoms, lid) : []
+        const lenFor = (axis: 'w' | 'd', side: 1 | -1, raw: number): number =>
+          snapValue(raw, snapOn ? planResizeTargets(start, axis, side, { walls, items: near, selfId: m.id }) : [], ctx.mm(8), step).value
+        const lockPref = resizePrefs.getState().lockRatio
+        let w = m.sx !== 0 ? lenFor('w', m.sx as 1 | -1, m.sx * p.x + b.size.w / 2) : b.size.w
+        let dep = m.sy !== 0 ? lenFor('d', m.sy as 1 | -1, m.sy * p.y + b.size.d / 2) : b.size.d
+        let h = b.size.h
+        let pose: ItemPose
+        if (m.sx !== 0 && m.sy !== 0 && (e.shift || lockPref)) {
+          // corner with proportions kept (Shift or the inspector's lock): the opposite corner stays
+          const k = Math.max(w / b.size.w, dep / b.size.d, min.w / b.size.w, min.d / b.size.d)
+          w = b.size.w * k
+          dep = b.size.d * k
+          if (lockPref) h = Math.max(min.h, b.size.h * k)
+          pose = resizeFromFace(start, 'w', m.sx as 1 | -1, w, { min })
+          pose = resizeFromFace(pose, 'd', m.sy as 1 | -1, dep, { min })
+          pose = { ...pose, size: { ...pose.size, h } }
+        } else if (m.sx !== 0 && m.sy !== 0) {
+          pose = resizeFromFace(start, 'w', m.sx as 1 | -1, w, { min })
+          pose = resizeFromFace(pose, 'd', m.sy as 1 | -1, dep, { min })
+        } else {
+          const axis = m.sx !== 0 ? 'w' : 'd'
+          const side = (m.sx !== 0 ? m.sx : m.sy) as 1 | -1
+          pose = resizeFromFace(start, axis, side, axis === 'w' ? w : dep, { min, lockRatio: lockPref, fixedBack: b.mount === 'wall' })
         }
-        if (m.sy !== 0) {
-          dep = Math.max(50, m.sy * p.y + m.base.size.d / 2)
-          cy = (m.sy * (dep - m.base.size.d)) / 2
-        }
-        if (e.shift && m.sx !== 0 && m.sy !== 0) {
-          // keep proportions
-          const k = Math.max(w / m.base.size.w, dep / m.base.size.d)
-          w = m.base.size.w * k
-          dep = m.base.size.d * k
-          cx = (m.sx * (w - m.base.size.w)) / 2
-          cy = (m.sy * (dep - m.base.size.d)) / 2
-        }
-        const c = itemToPlan(m.base, { x: cx, y: cy })
-        transient(t('Изменение размера'), (dr) => {
+        const size = clampItemSize({ w: Math.round(pose.size.w), d: Math.round(pose.size.d), h: Math.round(pose.size.h) }, asset)
+        const params = resizedParams(asset, b.params, b.size, size) ?? b.params
+        transient(t('Изменить размер'), (dr) => {
           const it = dr.items[m.id]
           if (!it) return
-          it.size = { w: Math.round(w), d: Math.round(dep), h: m.base.size.h }
-          it.x = c.x
-          it.y = c.y
+          it.size = size
+          it.x = pose.x
+          it.y = pose.y
+          it.elevation = pose.elevation
+          if (params) it.params = { ...params }
+          else delete it.params
         })
-        badge = { at: e.plan, text: `${formatLen(w, st.units)} × ${formatLen(dep, st.units)}` }
+        badge = { at: e.plan, text: `${formatLen(size.w, st.units)} × ${formatLen(size.d, st.units)}${lockPref ? ` × ${formatLen(size.h, st.units)}` : ''}` }
         break
       }
       case 'itemRotate': {
@@ -644,7 +709,9 @@ export function createSelectTool(ctx: EditorCtx): Tool {
               ? t('Перемещение стены')
               : was.type === 'opening'
               ? t('Перемещение проёма')
-              : was.type === 'openingEnd' || was.type === 'itemResize'
+              : was.type === 'itemResize'
+                ? t('Изменить размер')
+                : was.type === 'openingEnd'
                 ? t('Изменение размера')
                 : was.type === 'itemRotate'
                   ? t('Поворот')
@@ -746,7 +813,11 @@ export function createSelectTool(ctx: EditorCtx): Tool {
     cursor: 'default',
 
     activate() {
-      ctx.setHint(t('Щелчок — выбрать · Shift — добавить · перетаскивание — переместить или выделить рамкой'))
+      ctx.setHint(selectionHint())
+      // the shell writes the generic tool hint right after switching tools: put ours back
+      queueMicrotask(() => {
+        if (ui().tool === 'select') ctx.setHint(selectionHint())
+      })
     },
 
     deactivate() {
@@ -763,6 +834,11 @@ export function createSelectTool(ctx: EditorCtx): Tool {
       if (drag.type !== 'none') finish(true)
       const list = computeHandles(ctx)
       const handle = handleAt(ctx, list, e.screen)
+      if (handle?.type === 'nodeAdd') {
+        // "+" next to the selected node: draw a new wall from it (drag, or click then click)
+        startWallDrag(handle.nodeId, e)
+        return
+      }
       if (handle) {
         drag = { type: 'pending', start: e, hit: null, handle, wasSelected: true }
         return
@@ -796,13 +872,16 @@ export function createSelectTool(ctx: EditorCtx): Tool {
       if (drag.type === 'none') {
         const handle = handleAt(ctx, computeHandles(ctx), e.screen)
         if (handle) {
-          setHover(null)
-          ctx.setCursor(handleCursor(handle))
+          // a wall end handle is a junction: hovering it shows the angles there
+          setHover(handle.type === 'node' ? { kind: 'node', id: handle.nodeId } : null)
+          ctx.setCursor(handle.type === 'node' && e.ctrl ? 'copy' : handleCursor(handle))
           return
         }
         const hit = ctx.hit.hit(e.plan, ctx.mm(8))
         setHover(hit && hit.kind !== 'room' ? hit : null)
-        ctx.setCursor(hit && hit.kind !== 'room' ? (ctx.isSelected(hit) ? 'move' : 'pointer') : 'default')
+        ctx.setCursor(
+          hit?.kind === 'node' && e.ctrl ? 'copy' : hit && hit.kind !== 'room' ? (ctx.isSelected(hit) ? 'move' : 'pointer') : 'default',
+        )
         return
       }
       if (drag.type === 'pending') {
@@ -958,6 +1037,8 @@ export function createSelectTool(ctx: EditorCtx): Tool {
 
     draw(p: Painter) {
       const pal = p.pal
+      // in 3D (or 2D+3D with the pointer over the 3D view) the 3D view owns the status hint
+      if (drag.type === 'none' && (ui().mode === '2d' || ctx.pointer.inside)) ctx.setHint(selectionHint())
       if (drag.type === 'marquee') {
         const a = p.S(drag.start)
         const b = p.S(drag.cur)

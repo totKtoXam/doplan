@@ -8,6 +8,7 @@ import { createOpeningTool } from './opening'
 import { createEyedropperTool, createPaintTool } from './paint'
 import { createRoomTool } from './room'
 import { createSelectTool } from './select'
+import { createSurveyTool } from './survey'
 import type { Tool } from './types'
 import { createWallTool } from './wall'
 
@@ -42,6 +43,7 @@ export function createTools(ctx: EditorCtx): Record<ToolId, Tool> {
     dimension: createDimensionTool(ctx),
     label: createLabelTool(ctx),
     measure: createMeasureTool(ctx),
+    survey: createSurveyTool(ctx),
     paint: createPaintTool(ctx),
     eyedropper: createEyedropperTool(ctx),
     calibrate: createCalibrateTool(ctx),

@@ -73,6 +73,18 @@ const EN: Record<string, string> = {
     'Paint: click a room floor or a wall side · Shift — all walls of the room',
   'Выберите материал в каталоге, затем щёлкните пол или стену': 'Pick a material in the catalogue, then click a floor or a wall',
   'Пипетка: щёлкните пол или сторону стены, чтобы взять отделку': 'Eyedropper: click a floor or a wall side to pick its finish',
+
+  // ── corner angles ──
+  'Угол стены': 'Wall angle',
+  'Поворачивается стена, у дальнего конца которой меньше соединений; её длина сохраняется':
+    'The wall whose far end has fewer connections turns; its length is kept',
+
+  // ── continue a wall from a node ──
+  'Продолжить стену отсюда': 'Continue wall from here',
+  'Узел: перетаскивание — переместить · «+» или Ctrl+перетаскивание — новая стена отсюда · W — продолжить стену':
+    'Node: drag — move · “+” or Ctrl+drag — new wall from here · W — continue the wall',
+  'Стена от узла: щёлкните или отпустите в следующей точке · цифры и Enter — точная длина · Shift — шаг 45° · Alt — без привязки · Esc — отмена':
+    'Wall from node: click or release at the next point · digits + Enter — exact length · Shift — 45° steps · Alt — no snapping · Esc — cancel',
 }
 
 let registered = false

@@ -55,6 +55,37 @@ export interface WallSide {
 
 export type WallKind = 'wall' | 'partition' | 'parapet' | 'glazing' | 'virtual'
 
+/**
+ * Where a dimension comes from (how far it can be trusted):
+ *  - `plan`      printed on the source plan (BTI / developer), ±10 mm
+ *  - `derived`   computed from a printed area or a chain of printed dimensions, ±20 mm
+ *  - `estimated` measured in photo pixels (not printed), ±50 mm
+ *  - `measured`  tape / laser measurement on site, with the date and tolerance
+ *  - `drawn`     drawn by hand in the app (default; accuracy unknown)
+ */
+export type DimSource = 'plan' | 'derived' | 'estimated' | 'measured' | 'drawn'
+
+/** Provenance of one dimension: the clear length of a wall face inside a room. */
+export interface DimProvenance {
+  source: DimSource
+  /** ± mm; default per source (core/provenance DIM_SOURCE_TOL) */
+  tol?: number
+  /**
+   * the clear face length (mm) this provenance was recorded for. When the geometry no longer matches
+   * it (the wall was moved later) the provenance is stale and the dimension counts as `drawn`.
+   */
+  value?: number
+  /** ISO date (YYYY-MM-DD) of a tape / laser measurement */
+  date?: string
+  note?: string
+}
+
+/** provenance of the clear face length on each side of a wall */
+export interface WallDims {
+  left?: DimProvenance
+  right?: DimProvenance
+}
+
 export interface Wall {
   id: Id
   levelId: Id
@@ -68,6 +99,8 @@ export interface Wall {
   kind: WallKind
   left: WallSide
   right: WallSide
+  /** provenance of the face lengths (absent = drawn in the app) */
+  dims?: WallDims
 }
 
 export type OpeningKind =
@@ -205,11 +238,17 @@ export interface Room {
   /** skirting board height mm (0 = none) and material */
   skirting: number
   skirtingMaterialId?: Id
+  /** area printed on the source plan, m² (computed-vs-labelled report) */
+  labelledArea?: number
 }
 
 // ───────────────────────────── Items (furniture etc.) ─────────────────────────────
 
-export type MountKind = 'floor' | 'wall' | 'ceiling' | 'surface'
+/**
+ * floor: stands on the floor · wall: hangs on a wall face · ceiling: hangs from the ceiling ·
+ * surface: stands on another item (worktop, table, stand) · free: anywhere in the air at `elevation`
+ */
+export type MountKind = 'floor' | 'wall' | 'ceiling' | 'surface' | 'free'
 
 export interface Item {
   id: Id
@@ -516,7 +555,19 @@ export interface DocSettings {
   showDimensions: boolean
   showAreas: boolean
   showFurniture2d: boolean
+  /** "W × D" under item names and the clearances of the selected item (default true) */
+  showItemSizes: boolean
   units: 'mm' | 'cm' | 'm'
+}
+
+/** What the source plan the project was traced from (BTI / developer plan) states. */
+export interface DocSource {
+  /** e.g. 'bti', 'developer', 'photo', 'sketch' */
+  kind?: string
+  /** общая площадь as printed, m² */
+  labelledTotalArea?: number
+  /** жилая площадь as printed, m² */
+  labelledLivingArea?: number
 }
 
 export interface DocMeta {
@@ -549,6 +600,8 @@ export interface Doc {
   /** project-local (custom / embedded) materials and assets; builtin ones live in the Catalog */
   materials: Record<Id, Material>
   assets: Record<Id, Asset>
+  /** what the traced source plan states (labelled areas) */
+  source?: DocSource
 }
 
 export type EntityKind =

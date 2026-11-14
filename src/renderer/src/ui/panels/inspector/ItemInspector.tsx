@@ -1,7 +1,9 @@
 import { useMemo, useRef, useState } from 'react'
 import { ArrowLeftRight, Box, Link2, Link2Off, Lock, LockOpen, Eye, EyeOff, Replace, RotateCcw, RotateCw, Undo2 } from 'lucide-react'
+import { resizedParams, sizedCatalogName } from '@core'
 import type { Asset, Id, Item, MountKind } from '@core/types'
 import { useDoc } from '@/store/document'
+import { resizePrefs, useResizePrefs } from '@/store/resizePrefs'
 import { useT } from '@/i18n'
 import { Button, ColorInput, IconButton, Input, NumberInput, Popover, Row, SearchInput, Section, Select, Thumb, Toggle, cn, fmtNum } from '@/ui/kit'
 import { assetIcon } from '../common/assetIcons'
@@ -65,6 +67,41 @@ const PARAM_RU: Record<string, string> = {
   headboard: 'Изголовье',
   sink: 'Мойка',
   hob: 'Варочная панель',
+  worktop: 'Столешница',
+  island: 'Остров',
+  shape: 'Форма',
+  type: 'Тип',
+  railing: 'Перила',
+  horizontal: 'Подъёмные дверцы',
+  oven: 'Духовка',
+  microwave: 'Микроволновка',
+  fridge: 'Холодильник',
+  sliding: 'Раздвижные двери',
+  mirror: 'Зеркало',
+  back: 'Спинка',
+  mattress: 'Матрас',
+  arms: 'Подлокотники',
+  chaise: 'Оттоманка',
+  seatHeight: 'Высота сиденья',
+  sideBySide: 'Двухдверный (side-by-side)',
+  burners: 'Конфорки',
+  builtIn: 'Встроенный',
+  dryer: 'С сушкой',
+  outdoor: 'Уличный',
+  stand: 'Подставка',
+  bowls: 'Чаш',
+  faucet: 'Смеситель',
+  bowlDepth: 'Глубина чаши',
+  tank: 'Бачок',
+  freestanding: 'Отдельностоящая',
+  tray: 'Поддон',
+  vanity: 'Тумба',
+  pedestal: 'Пьедестал',
+  frame: 'Рама',
+  passepartout: 'Паспарту',
+  plant: 'Растение',
+  layout: 'Фасады',
+  cutout: 'Вырез в столешнице',
   steps: 'Ступени',
   glass: 'Стекло',
   open: 'Открыто',
@@ -85,7 +122,8 @@ export function ItemInspector({ id }: { id: Id }) {
   const lang = useLang()
   const item = useDoc((s) => s.doc.items[id])
   const assets = useAssetMap()
-  const [lockRatio, setLockRatio] = useState(true)
+  const lockRatio = useResizePrefs((s) => s.lockRatio)
+  const setLockRatio = resizePrefs.getState().setLockRatio
   if (!item) return null
   const asset = assets.get(item.assetId)
   const set = (label: string, fn: (x: Item) => void, merge?: string) =>
@@ -94,20 +132,76 @@ export function ItemInspector({ id }: { id: Id }) {
       if (x) fn(x)
     }, merge)
   const m = (f: string, g: string) => `item.${id}.${f}.${g}`
-  const assetName = asset ? displayName(asset, lang) : item.assetId
+  const assetName = asset ? sizedCatalogName(displayName(asset, lang), asset.size.w, item.size.w) : item.assetId
 
   const setSize = (axis: 'w' | 'd' | 'h', v: number, g: string) =>
     set('Размер', (x) => {
       const old = x.size[axis]
+      const from = { ...x.size }
       if (lockRatio && old > 0) {
         const k = v / old
         x.size = { w: Math.round(x.size.w * k), d: Math.round(x.size.d * k), h: Math.round(x.size.h * k) }
         x.size[axis] = v
       } else x.size = { ...x.size, [axis]: v }
+      // doors / drawers / shelves keep their module size
+      const params = resizedParams(asset, x.params, from, x.size)
+      if (params) x.params = params
     }, m(`size${axis}`, g))
 
+  const raised = item.mount === 'wall' || item.mount === 'free' || item.mount === 'surface' || item.elevation > 0
+  const elevationRow = (
+    <Row label={t('Высота над полом')}>
+      <NumberInput
+        kind="length"
+        value={item.elevation}
+        min={0}
+        round={1}
+        disabled={item.locked}
+        onChange={(v, g) =>
+          set('Высота установки', (x) => {
+            x.elevation = v
+            if (x.mount === 'floor' && v > 0) x.mount = 'free'
+          }, m('elev', g))
+        }
+      />
+    </Row>
+  )
+
   const slots = Object.entries(asset?.slots ?? {})
-  const params = Object.entries(asset?.defaultParams ?? {})
+  // kitchen base units: H = floor → top of the worktop (with the plinth), D = with the worktop overhang;
+  // the worktop and its sink / hob cut-out are sized like a store lists them
+  const isKitchenBase = asset?.procedural === 'kitchenBase'
+  const pv = (k: string) => item.params?.[k] ?? asset?.defaultParams?.[k]
+  const on = (v: unknown) => v === true || v === 'true' || v === 1
+  const hasTop = isKitchenBase && pv('worktop') !== false && pv('worktop') !== 'false'
+  const cutRaw = pv('cutout')
+  const cutKind: 'none' | 'sink' | 'hob' = !hasTop
+    ? 'none'
+    : cutRaw === 'sink' || cutRaw === 'hob' || cutRaw === 'none'
+      ? cutRaw
+      : on(pv('sink'))
+        ? 'sink'
+        : on(pv('hob'))
+          ? 'hob'
+          : 'none'
+  const pnum = (k: string, def: number) => {
+    const v = Number(pv(k))
+    return Number.isFinite(v) && pv(k) !== undefined && pv(k) !== '' ? v : def
+  }
+  const W = item.size.w
+  const D = item.size.d
+  const bowls = Math.min(2, Math.max(1, Math.round(pnum('bowls', 1))))
+  const cutMaxW = Math.max(160, W - 60)
+  const cutMaxD = Math.max(160, D - 80)
+  const cutW = Math.min(cutMaxW, Math.max(150, pnum('cutoutWidth', cutKind === 'hob' ? Math.min(580, W - 80) : bowls === 2 ? Math.min(760, W - 100) : Math.min(500, W - 100))))
+  const cutD = Math.min(cutMaxD, Math.max(150, pnum('cutoutDepth', Math.min(440, D - 140))))
+  const cutXMax = Math.max(0, W / 2 - cutW / 2 - 30)
+  const TOP_KEYS = new Set(['worktopThickness', 'overhang', 'cutoutWidth', 'cutoutDepth', 'cutoutX', 'bowls', 'faucet'])
+  const setP = (k: string, v: number | string | boolean, g?: string) =>
+    set('Параметр', (x) => {
+      x.params = { ...(x.params ?? {}), [k]: v }
+    }, g ? m(`p.${k}`, g) : undefined)
+  const params = Object.entries(asset?.defaultParams ?? {}).filter(([k]) => !(hasTop && TOP_KEYS.has(k)))
 
   return (
     <div>
@@ -131,7 +225,10 @@ export function ItemInspector({ id }: { id: Id }) {
         </Row>
       </Section>
 
-      <Section title={t('Положение')} id="insp.item.pos">
+      {/* raised items (on a wall, on a surface, free in the air) get their own section memory: a
+          «Положение» collapsed for floor furniture must not hide «Высота над полом» from them */}
+      <Section title={t('Положение')} id={raised ? 'insp.item.pos.raised' : 'insp.item.pos'}>
+        {raised && elevationRow}
         <Pair>
           <NumberInput kind="length" label="X" value={item.x} round={1} disabled={item.locked} onChange={(v, g) => set('Переместить', (x) => (x.x = v), m('x', g))} />
           <NumberInput kind="length" label="Y" value={item.y} round={1} disabled={item.locked} onChange={(v, g) => set('Переместить', (x) => (x.y = v), m('y', g))} />
@@ -141,12 +238,21 @@ export function ItemInspector({ id }: { id: Id }) {
           <IconButton size="sm" icon={<RotateCcw />} label={t('−90°')} disabled={item.locked} onClick={() => set('Повернуть', (x) => (x.rotation = (((x.rotation - 90) % 360) + 360) % 360))} />
           <IconButton size="sm" icon={<RotateCw />} label={t('+90°')} disabled={item.locked} onClick={() => set('Повернуть', (x) => (x.rotation = (x.rotation + 90) % 360))} />
         </Row>
-        <Row label={t('Высота над полом')}>
-          <NumberInput kind="length" value={item.elevation} min={0} round={1} disabled={item.locked} onChange={(v, g) => set('Высота установки', (x) => (x.elevation = v), m('elev', g))} />
-        </Row>
+        {!raised && elevationRow}
         <Row label={t('Крепление')}>
-          <Select<MountKind> value={item.mount} options={optionsOf(MOUNT_RU)} onChange={(k) => set('Крепление', (x) => (x.mount = k))} />
+          <Select<MountKind>
+            value={item.mount}
+            options={optionsOf(MOUNT_RU)}
+            onChange={(k) =>
+              set('Крепление', (x) => {
+                x.mount = k
+                // «На полу» puts the item down on the floor
+                if (k === 'floor') x.elevation = 0
+              })
+            }
+          />
         </Row>
+        {raised && <Hint>{t('Высоту можно менять и в 3D: тяните вертикальную стрелку над объектом')}</Hint>}
       </Section>
 
       <Section
@@ -166,6 +272,12 @@ export function ItemInspector({ id }: { id: Id }) {
           <NumberInput kind="length" label={t('Г')} value={item.size.d} min={1} round={1} onChange={(v, g) => setSize('d', v, g)} />
           <NumberInput kind="length" label={t('В')} value={item.size.h} min={1} round={1} onChange={(v, g) => setSize('h', v, g)} />
         </Triple>
+        {isKitchenBase && (
+          <Hint>
+            {hasTop ? t('В — от пола до верха столешницы (с цоколем)') : t('В — от пола, с цоколем')}
+            {hasTop && <><br />{t('Г — со свесом столешницы')}</>}
+          </Hint>
+        )}
         <Toggle checked={!!item.mirrored} onChange={(v) => set('Отразить', (x) => (x.mirrored = v))} label={<span className="inline-flex items-center gap-1"><ArrowLeftRight className="size-3" />{t('Зеркально')}</span>} />
       </Section>
 
@@ -235,6 +347,39 @@ export function ItemInspector({ id }: { id: Id }) {
               </Row>
             )
           })}
+          {hasTop && (
+            <>
+              <Row label={t('Толщина столешницы')}>
+                <NumberInput kind="length" value={pnum('worktopThickness', 38)} min={10} max={80} round={1} onChange={(v, g) => setP('worktopThickness', v, g)} />
+              </Row>
+              <Row label={t('Свес')}>
+                <NumberInput kind="length" value={pnum('overhang', 20)} min={0} max={100} round={1} onChange={(v, g) => setP('overhang', v, g)} />
+              </Row>
+            </>
+          )}
+          {cutKind !== 'none' && (
+            <>
+              <Row label={cutKind === 'sink' ? t('Мойка: Ш × Г') : t('Варочная: Ш × Г')}>
+                <NumberInput kind="length" value={cutW} min={150} max={cutMaxW} round={1} onChange={(v, g) => setP('cutoutWidth', v, g)} />
+                <span className="text-[var(--muted)]">×</span>
+                <NumberInput kind="length" value={cutD} min={150} max={cutMaxD} round={1} onChange={(v, g) => setP('cutoutDepth', v, g)} />
+              </Row>
+              <Row label={cutKind === 'sink' ? t('Смещение мойки') : t('Смещение панели')}>
+                <NumberInput kind="length" value={Math.max(-cutXMax, Math.min(cutXMax, pnum('cutoutX', 0)))} min={-cutXMax} max={cutXMax} round={1} onChange={(v, g) => setP('cutoutX', v, g)} />
+              </Row>
+              {cutKind === 'sink' && (
+                <>
+                  <Row label={t('Чаш')}>
+                    <NumberInput kind="number" value={bowls} min={1} max={2} step={1} round={1} onChange={(v) => setP('bowls', v)} />
+                  </Row>
+                  <Toggle checked={pv('faucet') === undefined ? true : on(pv('faucet'))} onChange={(v) => setP('faucet', v)} label={t('Смеситель')} />
+                </>
+              )}
+              <Hint>
+                {t('Размер выреза ограничен шириной тумбы минус 6 см и глубиной минус 8 см')}: {fmtNum(cutMaxW / 10, 1)} × {fmtNum(cutMaxD / 10, 1)} {t('см')}
+              </Hint>
+            </>
+          )}
           {item.params && (
             <Button size="sm" variant="ghost" onClick={() => set('Сбросить параметры', (x) => delete x.params)}>
               {t('Сбросить параметры')}

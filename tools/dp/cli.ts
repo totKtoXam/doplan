@@ -24,8 +24,10 @@ const COMMANDS: Record<string, Record<string, Cmd>> = {
       load: async () => (await import('./commands/img')).imgInfo,
     },
     prep: {
-      usage: 'img prep <file> --out <dir> [--max 2000] [--min 1000] [--crop x,y,w,h] [--deskew [auto|<deg>]] [--contrast] [--gray] [--no-upscale]',
-      summary: 'auto-orient, crop, deskew, enhance, resize → <dir>/work.png + prep.json',
+      usage:
+        'img prep <file> --out <dir> [--perspective x1,y1,x2,y2,x3,y3,x4,y4 [--rect-mm W,H] [--pad 0.1]] [--max 2000] [--min 1000] [--crop x,y,w,h] [--deskew [auto|<deg>]] [--contrast] [--gray] [--no-upscale]',
+      summary:
+        'auto-orient, perspective-rectify (4 corners of a rectangle in ORIGINAL px, any order), crop, deskew, enhance, resize → <dir>/work.png + prep.json',
       load: async () => (await import('./commands/img')).imgPrep,
     },
     grid: {

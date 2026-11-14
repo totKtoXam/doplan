@@ -24,6 +24,7 @@ import { fitScale, pickVariant, type NamedBox, type Vec3 } from './assets/fit'
 import { disposeGeometries, stampRef } from './build/util'
 import type { MaterialLibraryEx } from './materials'
 import { resolveAssetUrl } from './textures'
+import { modelLoadEnded, modelLoadStarted } from './status'
 
 export interface ModelTemplate {
   scene: THREE.Object3D
@@ -268,14 +269,17 @@ export class ItemsLayer {
     }
     setContent(this.placeholder(item))
     if (!asset.src || asset.remote) return
-    this.loadTemplate(asset.src, trimsVariants(asset)).then(
-      (tpl) => {
-        if (this.disposed || rec.token !== token || this.records.get(item.id) !== rec) return
-        setContent(this.instantiate(tpl, rec.item, rec.asset))
-        this.onAsyncChange()
-      },
-      (err) => console.warn('[doplan] model failed to load:', asset.src, err),
-    )
+    modelLoadStarted()
+    this.loadTemplate(asset.src, trimsVariants(asset))
+      .then(
+        (tpl) => {
+          if (this.disposed || rec.token !== token || this.records.get(item.id) !== rec) return
+          setContent(this.instantiate(tpl, rec.item, rec.asset))
+          this.onAsyncChange()
+        },
+        (err) => console.warn('[doplan] model failed to load:', asset.src, err),
+      )
+      .finally(modelLoadEnded)
   }
 
   /** returns true when the scene graph changed (not for pure moves) */

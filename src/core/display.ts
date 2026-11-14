@@ -937,7 +937,7 @@ function drawItem(ctx: Ctx, it: Item, asset: Asset | undefined): void {
   const d = it.size.d
   const T = xf(V(it.x, it.y), it.rotation, it.mirrored === true)
   const ref: EntityRef = { kind: 'item', id: it.id }
-  const high = (it.mount === 'wall' && it.elevation >= 1200) || it.mount === 'ceiling'
+  const high = ((it.mount === 'wall' || it.mount === 'free') && it.elevation >= 1200) || it.mount === 'ceiling'
   const outlinePen: DlPen = { color: th.furniture, width: 0.18, dash: high ? [1.5, 1] : undefined }
   const detail: DlPen = { color: th.furniture, width: 0.13, dash: high ? [1.5, 1] : undefined }
   const fill: DlFill | undefined = th.furnitureFill && !high ? { color: th.furnitureFill } : undefined

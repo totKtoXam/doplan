@@ -105,7 +105,21 @@ export function Overlays() {
                 <TriangleExclamationPoint size={14} className={tst.kind === 'error' ? 'text-danger' : 'text-warning'} />
               )}
             </span>
-            <span className="min-w-0 flex-1 break-words">{tst.text}</span>
+            <span className="flex min-w-0 flex-1 flex-col items-start gap-1">
+              <span className="break-words">{tst.text}</span>
+              {tst.action && (
+                <button
+                  type="button"
+                  className="-ml-1.5 rounded px-1.5 py-0.5 font-medium text-accent hover:bg-accent/10"
+                  onClick={() => {
+                    tst.action?.run()
+                    dismissToast(tst.id)
+                  }}
+                >
+                  {tst.action.label}
+                </button>
+              )}
+            </span>
             <button type="button" className="shrink-0 text-muted hover:text-text" onClick={() => dismissToast(tst.id)} aria-label="close">
               <X size={13} />
             </button>

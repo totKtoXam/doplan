@@ -308,7 +308,7 @@ export function attachInput(env: InputEnv): InputHandle {
   }
 
   function refreshTool(): void {
-    // re-run the tool's move logic with the current modifier state (Shift / Alt change snapping)
+    // re-run the tool's move logic with the current modifier state (Shift / Alt change snapping, Ctrl the cursor)
     if (!ctx.pointer.inside || !ctx.pointer.screen || pan) return
     const s = ctx.pointer.screen
     pending = {
@@ -324,10 +324,10 @@ export function attachInput(env: InputEnv): InputHandle {
   }
 
   function onKeyDown(ev: KeyboardEvent): void {
-    const before = `${ctx.keys.shift}${ctx.keys.alt}`
+    const before = `${ctx.keys.shift}${ctx.keys.alt}${ctx.keys.ctrl}`
     syncKeys(ev)
     if (!ctx.pointer.inside || isEditable(ev.target) || ctx.html.promptOpen) return
-    if (`${ctx.keys.shift}${ctx.keys.alt}` !== before) refreshTool()
+    if (`${ctx.keys.shift}${ctx.keys.alt}${ctx.keys.ctrl}` !== before) refreshTool()
 
     if (ev.key === ' ' || ev.code === 'Space') {
       if (!ctx.keys.space) {
@@ -366,7 +366,7 @@ export function attachInput(env: InputEnv): InputHandle {
   }
 
   function onKeyUp(ev: KeyboardEvent): void {
-    const before = `${ctx.keys.shift}${ctx.keys.alt}`
+    const before = `${ctx.keys.shift}${ctx.keys.alt}${ctx.keys.ctrl}`
     syncKeys(ev)
     if (ev.key === ' ' || ev.code === 'Space') {
       if (ctx.keys.space) {
@@ -376,7 +376,7 @@ export function attachInput(env: InputEnv): InputHandle {
       }
       return
     }
-    if (ctx.pointer.inside && `${ctx.keys.shift}${ctx.keys.alt}` !== before) refreshTool()
+    if (ctx.pointer.inside && `${ctx.keys.shift}${ctx.keys.alt}${ctx.keys.ctrl}` !== before) refreshTool()
   }
 
   function onWindowBlur(): void {

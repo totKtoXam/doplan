@@ -39,6 +39,8 @@ const SUN_BASE = 3.2
 const PORTAL_RADIANCE = 3
 /** share of the environment used as (unoccluded) image-based light in the raster path */
 const ENV_RASTER = 0.3
+/** window portal lights while path tracing (the traced sky already comes through the openings) */
+const PORTAL_TRACED = 0.35
 const HEMI_DAY = 0.35
 const HEMI_NIGHT = 0.035
 /** latitude / declination used by the time-of-day model (mid latitudes, late spring) */
@@ -681,7 +683,7 @@ export function createLighting(ctx: EngineContext): LightingRig {
     hemi.color.copy(tmpColor)
     hemi.groundColor.setRGB(0.42, 0.4, 0.37).multiplyScalar(0.6 + 0.4 * day)
     hemi.intensity = (HEMI_NIGHT + (HEMI_DAY - HEMI_NIGHT) * day) * Math.max(0.15, k)
-    const radiance = PORTAL_RADIANCE * day * k * (shared.pathTracing ? 0.35 : 1)
+    const radiance = PORTAL_RADIANCE * day * k * (shared.pathTracing ? PORTAL_TRACED : 1)
     for (const child of portalGroup.children) {
       const light = child as THREE.RectAreaLight
       light.color.copy(tmpColor)
@@ -1005,6 +1007,17 @@ export function createLighting(ctx: EngineContext): LightingRig {
     shadowSig = ''
     sync()
   })
+  shared.rasterLook = () => {
+    const env = scene.environmentIntensity
+    scene.environmentIntensity = env * ENV_RASTER
+    const lights = portalGroup.children as THREE.RectAreaLight[]
+    const saved = lights.map((l) => l.intensity)
+    for (const l of lights) l.intensity /= PORTAL_TRACED
+    return () => {
+      scene.environmentIntensity = env
+      lights.forEach((l, i) => (l.intensity = saved[i]))
+    }
+  }
   const unsubTracing = shared.onPathTracingChanged(() => {
     envSig = ''
     sync()
@@ -1021,6 +1034,7 @@ export function createLighting(ctx: EngineContext): LightingRig {
       unsubScene()
       unsubQuality()
       unsubTracing()
+      shared.rasterLook = null
       hdriToken++
       for (const g of fixtureGroups.values()) disposeFixtureGroup(g)
       fixtureGroups.clear()

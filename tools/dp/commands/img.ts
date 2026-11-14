@@ -22,8 +22,10 @@ import {
   niceStep,
   savePng,
 } from '../lib/draw'
-import { decodeOriented, ensureDirFor, fitsHi, imageInfo, loadGray, visualTokens } from '../lib/image'
-import { type CommandResult, DpError, r2 } from '../lib/output'
+// relative path on purpose (see lib/core.ts): homography.ts is pure and does not pull the whole core index
+import { orderQuad, planRectification, type Rectification } from '../../../src/core/homography'
+import { decodeOriented, ensureDirFor, fitsHi, imageInfo, loadGray, visualTokens, warpPng } from '../lib/image'
+import { type CommandResult, DpError, errMsg, r2, r4 } from '../lib/output'
 
 // ───────────────────────── img info ─────────────────────────
 
@@ -62,6 +64,24 @@ async function enhanceGray(png: Buffer): Promise<Buffer> {
     .toBuffer()
 }
 
+interface PerspectiveInfo {
+  /** TL, TR, BR, BL of the chosen rectangle in px of the original (EXIF-oriented) image */
+  corners: number[][]
+  /** rectified image size before the other prep steps */
+  size: number[]
+  /** margin kept around the rectangle (fraction of its size per side, clipped to the photo) */
+  pad: number
+  /** the rectangle in the rectified image: x, y, w, h (px) */
+  rectPx: number[]
+  /** the rectangle in work.png (only when no crop/deskew followed) */
+  workRectPx?: number[]
+  rectMm?: number[]
+  /** mm per px of the rectified image (only with --rect-mm) */
+  mmPerPx?: number
+  /** mm per px of work.png (after the final resize) */
+  workMmPerPx?: number
+}
+
 export async function imgPrep(a: Args): Promise<CommandResult> {
   const file = resolve(a.pos(0, '<file>'))
   const outDir = resolve(a.req('out'))
@@ -73,6 +93,54 @@ export async function imgPrep(a: Args): Promise<CommandResult> {
   const info = await imageInfo(file)
   let { png, width, height } = await decodeOriented(file)
   if (info.rotatedByExif) transforms.push({ op: 'exifOrient', orientation: info.exifOrientation })
+
+  // perspective rectification first: corners are px of the ORIGINAL (EXIF-oriented) image
+  let perspective: PerspectiveInfo | undefined
+  const corners = a.nums('perspective', 8)
+  const rectMm = a.nums('rect-mm', 2)
+  if (rectMm && !corners) throw new DpError('--rect-mm needs --perspective x1,y1,…,x4,y4')
+  if (corners) {
+    const quad = orderQuad([0, 2, 4, 6].map((i) => ({ x: corners[i], y: corners[i + 1] })))
+    for (const p of quad) {
+      if (p.x < -0.25 * width || p.y < -0.25 * height || p.x > 1.25 * width || p.y > 1.25 * height) {
+        throw new DpError(
+          `--perspective corner ${p.x},${p.y} is far outside the ${width}x${height} image`,
+          1,
+          'corners are px of the original image (after EXIF orientation): read them from `dp img grid` of the original',
+        )
+      }
+    }
+    if (rectMm && !(rectMm[0] > 0 && rectMm[1] > 0)) throw new DpError('--rect-mm expects W,H > 0 (mm)')
+    const pad = a.num('pad', 0.1)
+    if (!(pad >= 0 && pad <= 1)) throw new DpError('--pad expects a fraction 0…1 (0 = crop to the rectangle)')
+    let plan: Rectification
+    try {
+      plan = planRectification(quad, width, height, {
+        rectMm: rectMm ? { width: rectMm[0], height: rectMm[1] } : undefined,
+        pad,
+        maxSide: 8000,
+      })
+    } catch (e) {
+      throw new DpError(`--perspective: ${errMsg(e)}`, 1, 'give the 4 corners of one rectangle (outer walls or the sheet frame), no three on a line')
+    }
+    const r = await warpPng(png, plan.quad, plan.width, plan.height)
+    png = r.png
+    width = r.width
+    height = r.height
+    const rectPx = [plan.rect.x, plan.rect.y, plan.rect.width, plan.rect.height].map(r2)
+    perspective = {
+      corners: quad.map((p) => [r2(p.x), r2(p.y)]),
+      size: [width, height],
+      pad,
+      rectPx,
+      ...(rectMm ? { rectMm: [rectMm[0], rectMm[1]], mmPerPx: plan.mmPerPx } : {}),
+    }
+    transforms.push({ op: 'perspective', corners: perspective.corners, size: [width, height], pad, rectPx, ...(rectMm ? { rectMm } : {}) })
+    notes.push(
+      `perspective rectified: ${perspective.corners.map((c) => c.join(',')).join(' ')} → ${width}x${height}, rectangle at ${rectPx.join(',')}` +
+        (plan.mmPerPx ? ` (${r4(plan.mmPerPx)} mm/px before resize)` : ' (aspect estimated from the photo: give --rect-mm W,H for an exact one)'),
+    )
+  }
 
   const crop = a.nums('crop', 4)
   if (crop) {
@@ -142,6 +210,11 @@ export async function imgPrep(a: Args): Promise<CommandResult> {
     if (scale > 1) notes.push(`small image upscaled ×${r2(scale)}`)
   }
 
+  if (perspective) {
+    if (perspective.mmPerPx) perspective.workMmPerPx = perspective.mmPerPx / scale
+    if (!transforms.some((t) => t.op === 'crop' || t.op === 'rotate')) perspective.workRectPx = perspective.rectPx.map((v) => r2(v * scale))
+  }
+
   const outFile = join(outDir, 'work.png')
   ensureDirFor(outFile)
   writeFileSync(outFile, png)
@@ -153,6 +226,7 @@ export async function imgPrep(a: Args): Promise<CommandResult> {
     deskewDeg,
     scale,
     transforms,
+    ...(perspective ? { perspective } : {}),
     fitsHi: fitsHi(width, height),
     visualTokens: visualTokens(width, height),
   }
@@ -163,6 +237,9 @@ export async function imgPrep(a: Args): Promise<CommandResult> {
       `work: ${outFile} (${width}x${height}, ~${prep.visualTokens} tokens, fits hi-res: ${prep.fitsHi ? 'yes' : 'no'})`,
       `transforms: ${transforms.map((t) => t.op).join(' → ') || 'none'}`,
       ...notes,
+      ...(perspective?.workMmPerPx
+        ? [`work.png scale: ${r4(perspective.workMmPerPx)} mm/px (from --rect-mm; still confirm with a printed dimension: dp spec scale)`]
+        : []),
       `next: dp img grid ${outFile} --out ${join(outDir, 'grid.png')}`,
     ],
   }

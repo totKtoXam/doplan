@@ -66,6 +66,7 @@ export type ToolId =
   | 'dimension'
   | 'label'
   | 'measure'
+  | 'survey' // «Обмер»: replace a dimension with a tape measurement
   | 'paint' // apply `paintMaterialId` to clicked surface
   | 'eyedropper'
   | 'calibrate' // underlay scale calibration: two clicks + typed length

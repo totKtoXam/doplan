@@ -139,6 +139,7 @@ export function ProjectInspector() {
 
       <Section title={t('Отображение на плане')} id="insp.proj.show">
         <Toggle checked={settings.showDimensions} onChange={(v) => setSettings('Показ размеров', { showDimensions: v })} label={t('Размеры стен')} />
+        <Toggle checked={settings.showItemSizes} onChange={(v) => setSettings('Показ размеров мебели', { showItemSizes: v })} label={t('Размеры мебели')} />
         <Toggle checked={settings.showAreas} onChange={(v) => setSettings('Показ площадей', { showAreas: v })} label={t('Площади помещений')} />
         <Toggle checked={settings.showFurniture2d} onChange={(v) => setSettings('Показ мебели', { showFurniture2d: v })} label={t('Мебель на плане')} />
       </Section>

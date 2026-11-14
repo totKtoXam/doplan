@@ -18,7 +18,6 @@ import type {
   Engine3DHandle,
   EngineContext,
   LightingRig,
-  PathTracerHandle,
   PostPipeline,
   ProceduralFactory,
   StillOptions,
@@ -32,10 +31,12 @@ import { createInteraction } from './interaction'
 import { ItemsLayer } from './items'
 import { createLighting } from './lighting'
 import { type MaterialLibraryEx, createMaterialLibrary } from './materials'
-import { createPathTracer } from './pathtracer'
+import { createPathTracer, type InteractivePathTracer } from './pathtracer'
 import { createPost } from './post'
 import { createProceduralFactory } from './procedural'
+import { mountPerfOverlay, perfBegin, perfBeginOnce, perfEnabled, perfEnd, perfPending, perfRecord, perfTime } from './perf'
 import { getQuality, getShared } from './quality'
+import { createMeasure3D } from './measure3d'
 
 type CameraMode = 'orbit' | 'walk' | 'top'
 
@@ -48,7 +49,7 @@ interface SubModules {
   post: PostPipeline
   controls: ControlsWithView
   interaction: { dispose(): void }
-  pathTracer: PathTracerHandle
+  pathTracer: InteractivePathTracer
 }
 
 const DEFAULT_BOUNDS = new THREE.Box3(new THREE.Vector3(-3, 0, -3), new THREE.Vector3(3, 2.7, 3))
@@ -77,6 +78,8 @@ async function makeRenderer(canvas: HTMLCanvasElement, forceWebGL: boolean): Pro
 }
 
 export async function createEngine(container: HTMLElement): Promise<Engine3DHandle> {
+  const openStart = performance.now()
+  perfBegin('open', openStart)
   // ── renderer ──
   let forceWebGL = false
   // the shell publishes the live preference (e.g. "retry with WebGL" before the settings save lands)
@@ -111,7 +114,9 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
   }
   let renderer: any
   try {
+    const t0 = performance.now()
     renderer = await createRendererWithFallback()
+    perfRecord('3d.rendererInit', t0)
   } catch (err) {
     canvas.remove()
     throw err
@@ -121,6 +126,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
   const scene = new THREE.Scene()
   scene.name = 'doplan'
   const camera = new THREE.PerspectiveCamera(50, 1, 0.05, 400)
+  const measure = createMeasure3D(container, camera)
   const group = (name: string): THREE.Group => {
     const g = new THREE.Group()
     g.name = name
@@ -295,7 +301,17 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
   /** applies pending document / ui changes to the scene graph */
   function flushSync(): void {
     if (!pendingSync || destroyed) return
+    const syncStart = performance.now()
+    try {
+      flushSyncInner()
+    } finally {
+      if (lastSyncChanged) perfRecord('3d.sync', syncStart)
+    }
+  }
+  let lastSyncChanged = false
+  function flushSyncInner(): void {
     pendingSync = false
+    lastSyncChanged = false
     const ds = docStore.getState()
     const ui = uiStore.getState()
     const doc = ds.doc
@@ -329,21 +345,30 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       doc.levels !== lastDoc.levels
     if (archDirty) {
       try {
-        if (arch.sync({ doc, plan, levelId, epoch })) sceneChanged = true
+        const t0 = performance.now()
+        if (arch.sync({ doc, plan, levelId, epoch })) {
+          sceneChanged = true
+          perfRecord('3d.sync.architecture', t0)
+        }
       } catch (err) {
         console.error('[doplan] architecture build failed', err)
       }
     }
     if (!lastDoc || epochChanged || levelChanged || doc.items !== lastDoc.items) {
       try {
+        const t0 = performance.now()
         const r = items.sync(doc, levelId, epoch)
-        if (r.changed) sceneChanged = true
+        if (r.changed) {
+          sceneChanged = true
+          perfRecord('3d.sync.items', t0)
+        }
         moved = r.moved
       } catch (err) {
         console.error('[doplan] items build failed', err)
       }
     }
     if (archDirty || sceneChanged || moved) updateBounds(plan, doc, levelId)
+    lastSyncChanged = sceneChanged || moved
 
     const lightsDirty = !lastDoc || levelChanged || doc.lights !== lastDoc.lights || doc.render !== lastDoc.render
     lastDoc = doc
@@ -490,12 +515,27 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       if (!shared.stillBusy && arch.updateVisibility(camera, ui.cameraMode as CameraMode, render, bounds)) refreshOutline()
       if (mods.pathTracer.active) {
         const samples = mods.pathTracer.step()
-        dirtyFrames = Math.max(0, dirtyFrames - 1)
-        if (samples >= ptTarget && ptTarget > 0 && !moving && dirtyFrames === 0) stop()
-        return
+        // while the camera moves or the document changes the tracer pauses and the realtime frame
+        // shows (below); tracing resumes by itself once things rest
+        if (!mods.pathTracer.rasterFrame) {
+          dirtyFrames = Math.max(0, dirtyFrames - 1)
+          if (samples >= ptTarget && ptTarget > 0 && !moving && dirtyFrames === 0) stop()
+          return
+        }
       }
       updateDpr(moving, dtMs, now)
-      mods.post.render()
+      const firstFrame = perfPending('open')
+      const frameStart = performance.now()
+      // the lights are set up for the tracer during a session: draw with the realtime levels
+      const restoreLook = shared.pathTracing ? shared.rasterLook?.() : undefined
+      try {
+        mods.post.render()
+      } finally {
+        restoreLook?.()
+      }
+      measure.update()
+      if (firstFrame) perfRecord('3d.firstFrame.cpu', frameStart)
+      afterFrame()
       dirtyFrames = Math.max(0, dirtyFrames - 1)
       if (!moving && dirtyFrames === 0) stop()
     } catch (err) {
@@ -503,6 +543,20 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       dirtyFrames = 0
       stop()
     }
+  }
+
+  /** closes the open / edit spans once the GPU finished the frame that shows them */
+  function afterFrame(): void {
+    const open = perfPending('open')
+    const edit = perfPending('edit')
+    if (!open && !edit) return
+    const done = (): void => {
+      if (open) perfEnd('open', '3d.open→firstFrame')
+      if (edit) perfEnd('edit', '3d.edit→frame')
+    }
+    const queue = renderer?.backend?.device?.queue as { onSubmittedWorkDone?: () => Promise<void> } | undefined
+    if (queue?.onSubmittedWorkDone) queue.onSubmittedWorkDone().then(done, done)
+    else done()
   }
 
   // ── camera helpers ──
@@ -526,8 +580,10 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
   }
 
   // ── boot ──
-  flushSync() // builds the scene so that controls / lighting start from real bounds
-  mods = createSubModules()
+  perfTime('3d.sceneBuild', () => flushSync()) // builds the scene so that controls / lighting start from real bounds
+  mods = perfTime('3d.subModules', () => createSubModules())
+  const unmountPerf = mountPerfOverlay(container)
+  void lib.whenIdle(30000).then(() => perfRecord('3d.open→texturesIdle', openStart))
   const initialMode = uiStore.getState().cameraMode
   if (initialMode !== 'orbit') mods.controls.setMode(initialMode)
   applySize(targetDpr(false))
@@ -615,7 +671,10 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
 
   // ── subscriptions ──
   const unsubDoc = docStore.subscribe((s, p) => {
-    if (s.revision !== p.revision || s.doc !== p.doc || s.derived !== p.derived) requestSync()
+    if (s.revision !== p.revision || s.doc !== p.doc || s.derived !== p.derived) {
+      if (s.doc !== p.doc) perfBeginOnce('edit')
+      requestSync()
+    }
   })
   const unsubUi = uiStore.subscribe((s, p) => {
     if (s.activeLevelId !== p.activeLevelId || s.catalog !== p.catalog) requestSync()
@@ -714,8 +773,10 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       if (destroyed) return
       destroyed = true
       stop()
+      unmountPerf()
       unsubDoc()
       unsubUi()
+      measure.dispose()
       observer.disconnect()
       if (resizeRaf) cancelAnimationFrame(resizeRaf)
       if (collectTimer) clearTimeout(collectTimer)
@@ -862,5 +923,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       return convertModel(renderer, file, aux)
     },
   }
+  // measurement hook (debug flag only): scripted edits and camera moves for the timing runs
+  if (perfEnabled()) (globalThis as unknown as { __doplan3d?: unknown }).__doplan3d = { docStore, uiStore, engine: handle, scene, camera, renderer, loop: () => ({ running, dirtyFrames, ptTarget, suspended }) }
   return handle
 }

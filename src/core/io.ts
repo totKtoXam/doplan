@@ -15,6 +15,8 @@ import {
   type CeilingSpec,
   type CurtainKind,
   type CurtainSpec,
+  type DimProvenance,
+  type DimSource,
   type Dimension,
   type Doc,
   type FinishZone,
@@ -40,12 +42,14 @@ import {
   type Underlay,
   type Vec2,
   type Wall,
+  type WallDims,
   type WallKind,
   type WallSide,
 } from './types'
 
 type Obj = Record<string, unknown>
 
+const DIM_SOURCES: readonly DimSource[] = ['plan', 'derived', 'estimated', 'measured', 'drawn']
 const WALL_KINDS: readonly WallKind[] = ['wall', 'partition', 'parapet', 'glazing', 'virtual']
 const OPENING_KINDS: readonly OpeningKind[] = [
   'door',
@@ -337,6 +341,35 @@ function readSide(v: unknown): WallSide {
   return side
 }
 
+function readProvenance(v: unknown): DimProvenance | undefined {
+  if (typeof v === 'string') return (DIM_SOURCES as readonly string[]).includes(v) && v !== 'drawn' ? { source: v as DimSource } : undefined
+  if (!isObj(v)) return undefined
+  const source = oneOf(v.source, DIM_SOURCES, 'drawn')
+  // 'drawn' is the default: storing it adds nothing
+  if (source === 'drawn') return undefined
+  const p: DimProvenance = { source }
+  const tol = optNum(v.tol, 0, 10000)
+  if (tol !== undefined) p.tol = tol
+  const value = optNum(v.value, 0, 1e7)
+  if (value !== undefined) p.value = value
+  const date = optStr(v.date)
+  if (date && /^\d{4}-\d{2}-\d{2}/.test(date)) p.date = date.slice(0, 10)
+  const note = optStr(v.note)
+  if (note) p.note = note
+  return p
+}
+
+function readWallDims(v: unknown): WallDims | undefined {
+  if (!isObj(v)) return undefined
+  const left = readProvenance(v.left)
+  const right = readProvenance(v.right)
+  if (!left && !right) return undefined
+  const d: WallDims = {}
+  if (left) d.left = left
+  if (right) d.right = right
+  return d
+}
+
 function readCurtain(v: unknown): CurtainSpec | undefined {
   if (!isObj(v)) return undefined
   const c: CurtainSpec = {
@@ -483,6 +516,7 @@ export function parseDoc(json: unknown): Doc {
     showDimensions: bool(s.showDimensions, ds.showDimensions),
     showAreas: bool(s.showAreas, ds.showAreas),
     showFurniture2d: bool(s.showFurniture2d, ds.showFurniture2d),
+    showItemSizes: bool(s.showItemSizes, ds.showItemSizes),
     units: oneOf(s.units, ['mm', 'cm', 'm'] as const, ds.units),
   }
   const r = isObj(raw.render) ? raw.render : {}
@@ -509,6 +543,18 @@ export function parseDoc(json: unknown): Doc {
   }
   const hdriId = optStr(r.hdriId)
   if (hdriId) doc.render.hdriId = hdriId
+
+  // ── what the source plan states ──
+  if (isObj(raw.source)) {
+    const src: NonNullable<Doc['source']> = {}
+    const kind = optStr(raw.source.kind)
+    if (kind) src.kind = kind
+    const total = optNum(raw.source.labelledTotalArea, 0, 1e7)
+    if (total !== undefined && total > 0) src.labelledTotalArea = total
+    const living = optNum(raw.source.labelledLivingArea, 0, 1e7)
+    if (living !== undefined && living > 0) src.labelledLivingArea = living
+    if (Object.keys(src).length) doc.source = src
+  }
 
   // ── levels ──
   const levels: Record<Id, Level> = {}
@@ -558,6 +604,8 @@ export function parseDoc(json: unknown): Doc {
       left: readSide(v.left),
       right: readSide(v.right),
     }
+    const dims = readWallDims(v.dims)
+    if (dims) wall.dims = dims
     doc.walls[id] = wall
   }
 
@@ -608,6 +656,8 @@ export function parseDoc(json: unknown): Doc {
     }
     const sk = optStr(v.skirtingMaterialId)
     room.skirtingMaterialId = sk ?? DEFAULT_MATERIALS.skirting
+    const labelledArea = optNum(v.labelledArea, 0, 1e6)
+    if (labelledArea !== undefined && labelledArea > 0) room.labelledArea = labelledArea
     doc.rooms[id] = room
   }
 

@@ -81,11 +81,13 @@ export function NumberInput({
   const [invalid, setInvalid] = useState(false)
   const gestureRef = useRef<string>(newGesture('n'))
   const scrub = useRef<{ x: number; start: number; moved: boolean; id: number; last: number } | null>(null)
+  /** the user typed into the field since it got focus — until then an external value change replaces the text */
+  const edited = useRef(false)
 
   const shown = value === null || value === undefined || !Number.isFinite(value) ? '' : formatValue(value, kind, u, dec)
 
   useEffect(() => {
-    if (!focused) setText(shown)
+    if (!focused || !edited.current) setText(shown)
   }, [shown, focused])
 
   const normalise = (v: number): number => {
@@ -128,6 +130,7 @@ export function NumberInput({
     if (e.key === 'Enter') {
       e.preventDefault()
       if (commitText()) {
+        edited.current = false
         gestureRef.current = newGesture('n')
         inputRef.current?.select()
       }
@@ -221,11 +224,13 @@ export function NumberInput({
         placeholder={value === null ? '—' : placeholder}
         value={focused ? text : shown}
         onChange={(e) => {
+          edited.current = true
           setText(e.target.value)
           setInvalid(false)
         }}
         onFocus={() => {
           setFocused(true)
+          edited.current = false
           setText(shown)
           gestureRef.current = newGesture('n')
         }}

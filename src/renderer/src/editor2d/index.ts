@@ -17,6 +17,7 @@ import type { CreateEditor2D, Editor2DHandle, ToolId } from '@/contracts'
 import { docStore } from '@/store/document'
 import { handles as appHandles } from '@/store/handles'
 import { uiStore } from '@/store/ui'
+import { accuracyStore } from '@/store/accuracy'
 import { fitBounds } from './bounds'
 import { buildContextMenu } from './contextMenu'
 import { EMPTY_DERIVED, type ContextMenuItem, type EditorCtx } from './context'
@@ -326,6 +327,9 @@ export const createEditor2D: CreateEditor2D = async (container: HTMLElement): Pr
     }
   })
 
+  // provenance legend / «Обмер» hover and target are drawn by the annotations layer
+  const unsubAccuracy = accuracyStore.subscribe(() => requestRender())
+
   // the 3D camera has no change event: poll it cheaply while a 3D view is visible
   let cameraSig = ''
   const cameraTimer = window.setInterval(() => {
@@ -368,6 +372,7 @@ export const createEditor2D: CreateEditor2D = async (container: HTMLElement): Pr
       ro.disconnect()
       unsubDoc()
       unsubUi()
+      unsubAccuracy()
       try {
         tool.deactivate?.()
       } catch {

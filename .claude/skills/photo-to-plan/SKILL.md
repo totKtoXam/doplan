@@ -41,15 +41,25 @@ intermediate file there; numbered iterations make it easy to go back.
 
 ### 2. Prepare
 ```
-pnpm -s dp img prep <file> --out .doplan-work/<slug>/ [--crop x,y,w,h] [--deskew] [--contrast]
+pnpm -s dp img prep <file> --out .doplan-work/<slug>/ [--perspective x1,y1,…,x4,y4 [--rect-mm W,H]] [--crop x,y,w,h] [--deskew] [--contrast]
 ```
 - Always produces `work.png` (oriented, ≤ 2000 px long side, upscaled to ≥ 1000) + `prep.json`.
 - `--deskew` for phone photos/scans that look tilted (auto-detects ±5°; or `--deskew 1.5`).
 - `--contrast` for phone photos (uneven light, grey paper). `--gray` for colourful brochure plans.
 - `--crop` to drop margins, stamps, legends and the second plan on the sheet (take crop coords from an
   `img grid` of the original). **From here on all px coordinates refer to `work.png`.**
-- Perspective (photo taken at an angle, trapezoid outline) cannot be fixed by the CLI: ask the user for a
-  straight-on photo or a scan if the distortion is visible; otherwise treat it as a sketch (see accuracy).
+- `--perspective x1,y1,x2,y2,x3,y3,x4,y4` when the photo was taken at an angle (trapezoid outline,
+  parallel walls converge). Make an `img grid` of the ORIGINAL file and read the 4 corners of one big
+  rectangle: the outer wall faces of a rectangular flat, or the frame of the sheet / drawing. Corners
+  are px of the original (after EXIF orientation), any order; the warp runs before crop/deskew/resize.
+  Add `--rect-mm W,H` if that rectangle's real size is printed (overall outer dimensions): the aspect
+  becomes exact and `prep.json` → `perspective.workMmPerPx` gives mm per px of `work.png`. Without it the
+  aspect is estimated from the photo. A 10 % margin around the rectangle is kept (dimension chains,
+  balconies; `--pad 0.25` for more, `--pad 0` to crop to it); `perspective.workRectPx` says where the
+  rectangle is in `work.png`. Check `work.png`: the chosen rectangle must now be square-cornered.
+  Then calibrate as usual (`spec scale` from a printed dimension); the warp does not replace it.
+- Perspective you cannot fix (no rectangle with 4 visible corners, strongly curved paper): ask for a
+  straight-on photo or a scan; otherwise treat it as a sketch (see accuracy).
 
 ### 3. Look: grid and tiles
 ```
@@ -164,6 +174,28 @@ app (the underlay is on its own layer; walls can be dragged). Do not claim accur
 7. **One plan per spec.** Multi-level houses: one spec per level (separate builds) unless told otherwise.
 8. If the image is a photo of a real room (not a plan), a 3D render or an elevation, stop and explain;
    offer to draw the plan from dimensions the user dictates instead.
+
+## Dimension provenance (`source`) — always fill it
+The app shows the user where every clear dimension came from (italic grey `≈` = estimated, ✓ = measured)
+and uses it for the area report, the «Обмер» checklist and furniture clearance warnings. So tell it:
+
+| value | when | tolerance |
+|---|---|---|
+| `plan` | the side length is a number printed on the plan (БТИ/застройщик) | ±10 mm |
+| `derived` | computed: area ÷ other side, or a chain of printed numbers minus walls | ±20 mm |
+| `estimated` | not printed, read from photo pixels | ±50 mm |
+| `measured` | the user gave a tape/laser value (add `date`) | ±2 mm |
+| `drawn` | unknown (the default when omitted) | — |
+
+- Room: `"source": "plan"` for all sides, or by side for a `rect`:
+  `"source": { "top": "plan", "bottom": "plan", "left": "derived", "right": { "source": "estimated", "tol": 80 } }`
+  (or an array `[top, right, bottom, left]`); for a `polygon` an array by edge (edge i = point i → i+1).
+- Wall (walls-mode): `"source"` = one value or one per path segment; it applies to both faces.
+- Top-level `"dimSource"`: default for every side without its own; for `units: "px"` the default is `estimated`.
+- Object form `{ "source": "measured", "tol": 3, "date": "2026-11-01", "note": "лазер" }`.
+- Be honest: a side the plan does not print is `derived` or `estimated`, never `plan`. Keep `labelledArea`
+  and `source.labelledTotalArea`/`labelledLivingArea`: the app compares them with the geometry and flags
+  plans whose printed numbers contradict each other.
 
 ## Worked example (2-room flat with a balcony, rooms-mode)
 The repo contains it: `tools/dp/examples/two-room.planspec.json` (`pnpm exec tsx tools/dp/smoke.ts`

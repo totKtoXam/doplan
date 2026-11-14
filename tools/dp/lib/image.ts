@@ -2,6 +2,10 @@
 import { existsSync, mkdirSync } from 'node:fs'
 import { dirname, extname } from 'node:path'
 import sharp, { type Metadata, type Sharp } from 'sharp'
+// relative path on purpose (see core.ts); homography.ts is pure and self-contained, so `img …` does not
+// load the whole core index
+import { warpPerspective } from '../../../src/core/homography'
+import type { Vec2 } from '../../../src/core/types'
 import type { Gray } from './cv'
 import { DpError, errMsg } from './output'
 
@@ -146,4 +150,35 @@ export async function grayToPng(g: Gray): Promise<Buffer> {
   })
     .png()
     .toBuffer()
+}
+
+/**
+ * Perspective rectification of a PNG: the source `quad` (TL, TR, BR, BL, px of `png`) becomes the
+ * whole outW × outH result (core `warpPerspective`, bilinear, white outside the source).
+ */
+export async function warpPng(
+  png: Buffer,
+  quad: Vec2[],
+  outW: number,
+  outH: number,
+): Promise<{ png: Buffer; width: number; height: number }> {
+  const { data, info } = await sharp(png, { limitInputPixels: 400_000_000 })
+    .flatten({ background: '#ffffff' })
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true })
+  const channels: 1 | 3 = info.channels === 1 ? 1 : 3
+  if (info.channels !== channels) throw new DpError(`unexpected channel count ${info.channels} after decoding`)
+  let warped: ReturnType<typeof warpPerspective>
+  try {
+    warped = warpPerspective({ width: info.width, height: info.height, data, channels }, quad, outW, outH)
+  } catch (e) {
+    throw new DpError(`--perspective: ${errMsg(e)}`)
+  }
+  const out = await sharp(Buffer.from(warped.data.buffer, warped.data.byteOffset, warped.data.byteLength), {
+    raw: { width: warped.width, height: warped.height, channels: warped.channels },
+  })
+    .png()
+    .toBuffer()
+  return { png: out, width: warped.width, height: warped.height }
 }

@@ -5,6 +5,7 @@ import { useT } from '@/i18n'
 import { setHandle } from '@/store/handles'
 import type { Editor2DHandle } from '@/contracts'
 import { TextBtn } from './primitives'
+import { MeasureChecklist, SurveyPanel } from '@/ui/panels/SurveyPanel'
 
 /** Mounts the PixiJS plan editor into a div and keeps it sized. */
 export function Viewport2D({ hidden }: { hidden?: boolean }) {
@@ -63,6 +64,12 @@ export function Viewport2D({ hidden }: { hidden?: boolean }) {
   return (
     <div className={hidden ? 'hidden' : 'relative min-h-0 min-w-0 flex-1 overflow-hidden bg-viewport'} data-viewport="2d">
       <div ref={host} className="absolute inset-0" />
+      {!loading && !error && (
+        <>
+          <SurveyPanel />
+          <MeasureChecklist />
+        </>
+      )}
       {loading && !error && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-muted">{t('Загрузка редактора…')}</div>
       )}

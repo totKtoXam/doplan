@@ -11,6 +11,8 @@ export interface Toast {
   id: number
   kind: ToastKind
   text: string
+  /** optional button inside the toast: runs the action and closes the toast */
+  action?: { label: string; run(): void }
 }
 
 export interface ModalButton {
@@ -52,9 +54,9 @@ export function useNotify<T>(selector: (s: NotifyState) => T): T {
 
 let seq = 1
 
-export function toast(text: string, kind: ToastKind = 'info', ms = 3500): void {
+export function toast(text: string, kind: ToastKind = 'info', ms = 3500, action?: Toast['action']): void {
   const id = seq++
-  notifyStore.setState((s) => ({ toasts: [...s.toasts, { id, kind, text }] }))
+  notifyStore.setState((s) => ({ toasts: [...s.toasts, action ? { id, kind, text, action } : { id, kind, text }] }))
   setTimeout(() => dismissToast(id), ms)
 }
 

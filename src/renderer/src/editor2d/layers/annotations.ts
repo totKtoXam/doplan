@@ -182,6 +182,11 @@ export class AnnotationsLayer {
             .lineTo(lx + 6.5, ly + 3)
             .stroke({ width: 1.2, color: pal.textMuted })
         }
+        // raised items: their height above the floor next to the footprint («↑ 150»)
+        if (it.elevation > 0.5 && scale >= 0.02) {
+          const c = cam.toScreen({ x: box.maxX, y: box.maxY })
+          p.stext(`ie:${id}`, `↑ ${formatLen(it.elevation, st.units)}`, c.x + 4, c.y + 7, { size: 9.5, color: pal.accent, anchorX: 0, bold: true })
+        }
         if (bw < 64 || bh < 26 || scale < 0.045) continue
         const asset = ui.getAsset(it.assetId)
         let name = it.name || sizedCatalogName((lang === 'ru' ? asset?.nameRu || asset?.name : asset?.name || asset?.nameRu) || '', asset?.size.w ?? 0, it.size.w)

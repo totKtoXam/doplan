@@ -15,13 +15,36 @@
  * faces `userData.side` ('left' | 'right'), item meshes `userData.slot`.
  */
 import * as THREE from 'three'
-import { addItem, applyFinishToWallSide, pointInPolygon, removeEntities } from '@core'
-import type { Asset, DerivedPlan, Doc, EntityKind, EntityRef, Id, Item, SurfaceFinish, Wall, WallGeom } from '@core/types'
+import {
+  addItem,
+  applyFinishToWallSide,
+  canSupport,
+  clampItemSize,
+  findSupport,
+  minItemSize,
+  mountForElevation,
+  planResizeTargets,
+  pointInPolygon,
+  removeEntities,
+  resizeFromFace,
+  resizedParams,
+  snapValue,
+  supportCoverage,
+  wallFaceSegments,
+  type ItemPose,
+  type PlanSeg,
+  type SnapTarget,
+} from '@core'
+import type { Asset, DerivedPlan, Doc, EntityKind, EntityRef, Id, Item, MountKind, SurfaceFinish, Wall, WallGeom } from '@core/types'
 import type { CameraControls, EngineContext, PostPipeline } from '@/contracts'
+import { formatLen, isLengthChar, parseLengthInput } from '@/editor2d/format'
 import { docStore } from '@/store/document'
+import { toast } from '@/store/notify'
+import { resizePrefs } from '@/store/resizePrefs'
 import { uiStore } from '@/store/ui'
 import { t } from '@/i18n'
 import { getShared } from './quality'
+import { type HandleSpec, ResizeHandles, worldPerPixel } from './resizeHandles'
 
 const DEG = Math.PI / 180
 const CLICK_SLOP = 4 // px
@@ -85,6 +108,41 @@ type DragState =
       offY: number
       /** grabbed height − item elevation, mm (wall items) */
       offH: number
+      /** surface items: tops (mm) of the items they can be put on, highest first */
+      tops: number[]
+      /** surface items: elevation off any support (the floor for a vase lifted off its table) */
+      rest: number
+      applied: boolean
+    }
+  | {
+      /** one face of the item follows the pointer, the opposite face stays */
+      kind: 'resize'
+      id: Id
+      handle: string
+      axis: 'w' | 'd' | 'h'
+      side: 1 | -1
+      start: ItemPose
+      startParams: Item['params']
+      asset: Asset | undefined
+      /** world line the handle slides on */
+      origin: THREE.Vector3
+      dir: THREE.Vector3
+      t0: number
+      /** digits typed during the drag (exact size) */
+      typed: string
+      len: number
+      applied: boolean
+    }
+  | {
+      /** the vertical arrow: raise / lower the whole item */
+      kind: 'elevate'
+      id: Id
+      start: ItemPose
+      startMount: MountKind
+      origin: THREE.Vector3
+      dir: THREE.Vector3
+      t0: number
+      typed: string
       applied: boolean
     }
   | {
@@ -582,6 +640,11 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
   puck.renderOrder = 1001
   gizmo.add(knob, puck)
   let gizmoItem: Id | null = null
+  const resizeHandles = new ResizeHandles(accent)
+  /** a typed-size Enter ended the drag while the button is still down: ignore that release */
+  let swallowUp = false
+  /** the status hint currently describes a hovered handle */
+  let handleHint = false
 
   const ghost = new THREE.Group()
   ghost.name = 'doplan-placement-ghost'
@@ -596,15 +659,45 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
   function ensureHelpers(): void {
     const root = ctx.roots.helpers
     if (gizmo.parent !== root) root.add(gizmo)
+    if (resizeHandles.group.parent !== root) root.add(resizeHandles.group)
     if (ghost.parent !== root) root.add(ghost)
+  }
+
+  /** the camera looks (almost) straight down: vertical handles make no sense */
+  function topView(): boolean {
+    if (controls.mode === 'top' || uiStore.getState().cameraMode === 'top') return true
+    camera.getWorldDirection(v1)
+    return v1.y < -0.985
+  }
+
+  /** the item whose resize handles are shown, if any */
+  function handleItem(): Item | undefined {
+    const ui = uiStore.getState()
+    if (ui.selection.length !== 1 || ui.selection[0].kind !== 'item' || !selectLike(ui.tool) || shared.stillBusy) return undefined
+    const it = docStore.getState().doc.items[ui.selection[0].id]
+    if (!it || it.locked || it.hidden || it.levelId !== levelId()) return undefined
+    return it
+  }
+
+  function refreshHandles(): void {
+    const d = drag
+    // while moving / rotating the item the handles would only flicker along
+    const it = d && (d.kind === 'move' || d.kind === 'rotate') ? undefined : handleItem()
+    if (!it) {
+      if (resizeHandles.hide()) ctx.invalidate()
+      return
+    }
+    resizeHandles.sync(it, camera, Math.max(1, canvas.clientHeight), topView())
+    ctx.invalidate()
   }
 
   function refreshGizmo(): void {
     ensureHelpers()
+    refreshHandles()
     const ui = uiStore.getState()
     const doc = docStore.getState().doc
     const only = ui.selection.length === 1 && ui.selection[0].kind === 'item' ? doc.items[ui.selection[0].id] : undefined
-    const show = !!only && !only.locked && !only.hidden && only.levelId === levelId() && ui.tool !== 'item' && !shared.stillBusy && (only.mount === 'floor' || only.mount === 'surface')
+    const show = !!only && !only.locked && !only.hidden && only.levelId === levelId() && ui.tool !== 'item' && !shared.stillBusy && (only.mount === 'floor' || only.mount === 'surface' || only.mount === 'free')
     if (!show || !only) {
       if (gizmo.visible) {
         gizmo.visible = false
@@ -688,7 +781,13 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
       const y = p.z * 1000
       return { x, y, rotation: normDeg(placementRotation), elevation: Math.max(0, ceilingHeightAt(doc, x, y) - size.h) }
     }
-    const elevation = asset.mount === 'surface' ? (asset.elevation ?? 0) : 0
+    if (asset.mount === 'surface') {
+      // put it on the item under the pointer (vase on a table, TV on a stand)
+      const others = supportsOf(doc, new Set())
+      const land = landOnSupport(size, normDeg(placementRotation), 0, 0, others, topsOf(others))
+      if (land) return { x: land.x, y: land.y, rotation: normDeg(placementRotation), elevation: land.elevation }
+    }
+    const elevation = asset.mount === 'surface' || asset.mount === 'free' ? (asset.elevation ?? 0) : 0
     const p = rayPlane(elevation / 1000, v2)
     if (!p) return null
     let x = p.x * 1000
@@ -928,6 +1027,18 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
     const grab = viaGizmo || item?.mount === 'ceiling' ? rayPlane(planeY, v3) : hit.point
     const gx = grab ? grab.x * 1000 : p0.x
     const gy = grab ? grab.z * 1000 : p0.y
+    // surface items (vase, TV, worktop) are put on whatever is under them
+    let tops: number[] = []
+    let rest = p0.elevation
+    if (item?.mount === 'surface' && refs.length === 1) {
+      const others = supportsOf(doc, new Set([item.id]))
+      tops = topsOf(others)
+      const under = findSupport(item, others, { maxTop: item.elevation + 5 })
+      if (under && Math.abs(under.top - item.elevation) <= 5) {
+        const asset = uiStore.getState().getAsset(item.assetId)
+        rest = asset?.elevation ?? 0
+      }
+    }
     drag = {
       kind: 'move',
       primary,
@@ -937,12 +1048,272 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
       offX: p0.x - gx,
       offY: p0.y - gy,
       offH: hit.point.y * 1000 - p0.elevation,
+      tops,
+      rest,
       applied: false,
     }
     lockControls(true)
     setCursor('grabbing')
     setHover(null)
     return true
+  }
+
+  // ───────────────────────────── stacking / resizing ─────────────────────────────
+
+  /** items of the active level that could carry another item (without `exclude`) */
+  function supportsOf(doc: Doc, exclude: ReadonlySet<Id>): Item[] {
+    const lid = levelId()
+    const out: Item[] = []
+    for (const id in doc.items) {
+      const o = doc.items[id]
+      if (o.levelId === lid && !exclude.has(id) && canSupport(o)) out.push(o)
+    }
+    return out
+  }
+
+  /** distinct support tops, highest first */
+  function topsOf(list: readonly Item[]): number[] {
+    const tops: number[] = []
+    for (const o of list) {
+      const top = o.elevation + o.size.h
+      if (!tops.some((x) => Math.abs(x - top) <= 5)) tops.push(top)
+    }
+    return tops.sort((a, b) => b - a)
+  }
+
+  /**
+   * Where a surface item under the pointer lands: on the highest support whose top plane, hit by the
+   * ray, puts at least half of the footprint on it (TV on a stand, vase on a table), else null.
+   */
+  function landOnSupport(size: Item['size'], rotation: number, offX: number, offY: number, others: readonly Item[], tops: readonly number[]): { x: number; y: number; elevation: number } | null {
+    for (const top of tops) {
+      const p = rayPlane(top / 1000, v3)
+      if (!p) continue
+      const x = p.x * 1000 + offX
+      const y = p.z * 1000 + offY
+      if (supportCoverage({ x, y, rotation, size }, others, top) >= 0.5) return { x, y, elevation: top }
+    }
+    return null
+  }
+
+  /** parameter along the world line (origin + t·dir, metres) closest to the pointer ray, or null */
+  function rayLineParam(origin: THREE.Vector3, dir: THREE.Vector3): number | null {
+    const o = raycaster.ray.origin
+    const dr = raycaster.ray.direction
+    v1.copy(origin).sub(o)
+    const b = dir.dot(dr)
+    const denom = 1 - b * b
+    if (denom < 2e-3) return null // looking along the line
+    const d = dir.dot(v1)
+    const e = dr.dot(v1)
+    if ((e - b * d) / denom < 0) return null // behind the camera
+    return (b * e - d) / denom
+  }
+
+  function poseOfItem(it: Item): ItemPose {
+    return { x: it.x, y: it.y, rotation: it.rotation, elevation: it.elevation, size: { ...it.size } }
+  }
+
+  /** mm per screen pixel at a world point */
+  function mmPerPx(p: THREE.Vector3): number {
+    return worldPerPixel(camera, p, Math.max(1, canvas.clientHeight)) * 1000
+  }
+
+  /** length rounding step that stays visible on screen (as the 2D grid: grid/10, grid/2, grid…) */
+  function lengthStep(doc: Doc, mmPx: number): number {
+    if (!doc.settings.snapGrid) return 0
+    const g = doc.settings.gridMm > 0 ? doc.settings.gridMm : 100
+    for (const s of [g / 10, g / 2, g, g * 5]) if (s / mmPx >= 6) return s
+    return g * 5
+  }
+
+  function wallFaceSegs(doc: Doc): PlanSeg[] {
+    const plan = planOf()
+    return plan ? wallFaceSegments(doc.walls, plan.wallGeoms, levelId()) : []
+  }
+
+  /** other items of the level near the given pose (plan distance between bounding circles) */
+  function neighbours(doc: Doc, p: ItemPose, selfId: Id, reach: number): Item[] {
+    const lid = levelId()
+    const r = Math.hypot(p.size.w, p.size.d) / 2 + reach
+    const out: Item[] = []
+    for (const id in doc.items) {
+      const o = doc.items[id]
+      if (id === selfId || o.levelId !== lid || o.hidden) continue
+      if (Math.hypot(o.x - p.x, o.y - p.y) > r + Math.hypot(o.size.w, o.size.d) / 2) continue
+      out.push(o)
+    }
+    return out
+  }
+
+  /** snap targets for the dragged face: wall faces, neighbours' edges / tops, the ceiling */
+  function resizeTargets(doc: Doc, d: Extract<DragState, { kind: 'resize' }>): SnapTarget[] {
+    const near = neighbours(doc, d.start, d.id, 3000)
+    if (d.axis !== 'h') return planResizeTargets(d.start, d.axis, d.side, { walls: wallFaceSegs(doc), items: near, selfId: d.id })
+    const el = d.start.elevation
+    const out: SnapTarget[] = []
+    for (const o of near) {
+      for (const z of [o.elevation, o.elevation + o.size.h]) if (z - el > 5) out.push({ value: z - el, kind: 'item' })
+    }
+    const ceil = ceilingHeightAt(doc, d.start.x, d.start.y) - el
+    if (ceil > 5) out.push({ value: ceil, kind: 'ceiling' })
+    return out
+  }
+
+  function beginResize(spec: HandleSpec): boolean {
+    const it = handleItem()
+    if (!it) return false
+    const t0 = rayLineParam(spec.pos, spec.dir)
+    if (t0 === null) return false
+    if (spec.axis === 'elev') {
+      drag = { kind: 'elevate', id: it.id, start: poseOfItem(it), startMount: it.mount, origin: spec.pos.clone(), dir: spec.dir.clone(), t0, typed: '', applied: false }
+    } else {
+      const asset = uiStore.getState().getAsset(it.assetId)
+      drag = {
+        kind: 'resize',
+        id: it.id,
+        handle: spec.id,
+        axis: spec.axis,
+        side: spec.side,
+        start: poseOfItem(it),
+        startParams: it.params ? { ...it.params } : undefined,
+        asset,
+        origin: spec.pos.clone(),
+        dir: spec.dir.clone(),
+        t0,
+        typed: '',
+        len: it.size[spec.axis],
+        applied: false,
+      }
+      const prefs = resizePrefs.getState()
+      if (asset?.kind === 'model' && !prefs.lockRatio && !prefs.stretchHintShown) {
+        prefs.markStretchHint()
+        toast(t('Модель растягивается: пропорции искажаются'), 'info', 9000, { label: t('Сохранять пропорции'), run: () => resizePrefs.getState().setLockRatio(true) })
+      }
+    }
+    resizeHandles.setActive(spec.id)
+    lockControls(true)
+    setCursor(spec.axis === 'elev' || spec.axis === 'h' ? 'ns-resize' : 'ew-resize')
+    setHover(null)
+    return true
+  }
+
+  function typedLength(text: string): number | null {
+    if (/^\s*0+([.,]0*)?\s*$/.test(text)) return 0
+    return parseLengthInput(text, docStore.getState().doc.settings.units)?.length ?? null
+  }
+
+  const AXIS_RU = { w: 'Ширина', d: 'Глубина', h: 'Высота' } as const
+
+  function updateResize(e: { shiftKey: boolean; altKey: boolean } | null, d: Extract<DragState, { kind: 'resize' }>): void {
+    const store = docStore.getState()
+    const doc = store.doc
+    const units = doc.settings.units
+    let len: number
+    if (d.typed) {
+      const v = typedLength(d.typed)
+      if (v === null || v <= 0) {
+        setHint(`${t(AXIS_RU[d.axis])}: ${d.typed}▏ · ${t('Enter — применить, Esc — отмена')}`)
+        return
+      }
+      len = v
+    } else {
+      const tt = rayLineParam(d.origin, d.dir)
+      if (tt === null) return
+      const raw = d.start.size[d.axis] + (tt - d.t0) * 1000
+      const snap = !e?.shiftKey && !e?.altKey && doc.settings.snapObjects !== false
+      const mmPx = mmPerPx(d.origin)
+      if (snap) {
+        const tol = THREE.MathUtils.clamp(mmPx * 10, 8, 250)
+        len = snapValue(raw, resizeTargets(doc, d), tol, lengthStep(doc, mmPx)).value
+      } else len = Math.round(raw)
+    }
+    d.len = len
+    const it = doc.items[d.id]
+    if (!it) return
+    const lock = resizePrefs.getState().lockRatio
+    const p = resizeFromFace(d.start, d.axis, d.side, len, { lockRatio: lock, min: minItemSize(d.asset), fixedBack: it.mount === 'wall' })
+    const size = clampItemSize({ w: Math.round(p.size.w), d: Math.round(p.size.d), h: Math.round(p.size.h) }, d.asset)
+    const params = resizedParams(d.asset, d.startParams, d.start.size, size) ?? d.startParams
+    d.applied = true
+    store.transact(
+      t('Изменить размер'),
+      (draft) => {
+        const x = draft.items[d.id]
+        if (!x) return
+        x.size = size
+        x.x = p.x
+        x.y = p.y
+        x.elevation = p.elevation
+        if (params) x.params = { ...params }
+        else delete x.params
+      },
+      { transient: true },
+    )
+    const typed = d.typed ? `${d.typed}▏` : formatLen(size[d.axis], units)
+    setHint(
+      `${t(AXIS_RU[d.axis])}: ${typed} · ${formatLen(size.w, units)} × ${formatLen(size.d, units)} × ${formatLen(size.h, units)}${lock ? ` · ${t('пропорции сохраняются')}` : ''} · ` +
+        t('цифры и Enter — точный размер · Shift — без привязки · Esc — отмена'),
+    )
+  }
+
+  function updateElevate(e: { shiftKey: boolean; altKey: boolean } | null, d: Extract<DragState, { kind: 'elevate' }>): void {
+    const store = docStore.getState()
+    const doc = store.doc
+    const units = doc.settings.units
+    const it = doc.items[d.id]
+    if (!it) return
+    let elev: number
+    let onSupport = false
+    const others = supportsOf(doc, new Set([d.id]))
+    if (d.typed) {
+      const v = typedLength(d.typed)
+      if (v === null) {
+        setHint(`${t('Высота над полом')}: ${d.typed}▏ · ${t('Enter — применить, Esc — отмена')}`)
+        return
+      }
+      elev = v
+    } else {
+      const tt = rayLineParam(d.origin, d.dir)
+      if (tt === null) return
+      const raw = d.start.elevation + (tt - d.t0) * 1000
+      const snap = !e?.shiftKey && !e?.altKey && doc.settings.snapObjects !== false
+      if (snap) {
+        const mmPx = mmPerPx(d.origin)
+        const targets: SnapTarget[] = [{ value: 0, kind: 'floor' }]
+        // tops of the items under the footprint: put it on them
+        for (const top of topsOf(others)) {
+          if (supportCoverage(d.start, others, top) >= 0.5) targets.push({ value: top, kind: 'support' })
+        }
+        // align with the neighbours' bottoms and tops
+        for (const o of neighbours(doc, d.start, d.id, 1500)) {
+          targets.push({ value: o.elevation, kind: 'item' }, { value: o.elevation + o.size.h - d.start.size.h, kind: 'item' })
+        }
+        targets.push({ value: ceilingHeightAt(doc, d.start.x, d.start.y) - d.start.size.h, kind: 'ceiling' })
+        const s = snapValue(raw, targets, THREE.MathUtils.clamp(mmPx * 10, 8, 250), Math.max(10, lengthStep(doc, mmPx)))
+        elev = s.value
+        onSupport = s.kind === 'support'
+      } else elev = Math.round(raw)
+    }
+    const hi = Math.max(0, ceilingHeightAt(doc, it.x, it.y) - it.size.h)
+    elev = THREE.MathUtils.clamp(elev, 0, Math.max(hi, d.start.elevation))
+    if (!onSupport) onSupport = elev > 0.5 && supportCoverage(d.start, others, elev) >= 0.5
+    const mount = mountForElevation(d.startMount, elev, onSupport)
+    d.applied = true
+    store.transact(
+      t('Изменить высоту'),
+      (draft) => {
+        const x = draft.items[d.id]
+        if (!x) return
+        x.elevation = elev
+        x.mount = mount
+      },
+      { transient: true },
+    )
+    const where = onSupport ? ` · ${t('на поверхности')}` : elev <= 0.5 ? ` · ${t('на полу')}` : ''
+    setHint(
+      `${t('Высота над полом')}: ${d.typed ? `${d.typed}▏` : formatLen(elev, units)}${where} · ` + t('цифры и Enter — точная высота · Shift — без привязки · Esc — отмена'),
+    )
   }
 
   function beginRotate(): boolean {
@@ -973,6 +1344,15 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
     setRay(e)
     const store = docStore.getState()
     const doc = store.doc
+
+    if (d.kind === 'resize') {
+      updateResize(e, d)
+      return
+    }
+    if (d.kind === 'elevate') {
+      updateElevate(e, d)
+      return
+    }
 
     if (d.kind === 'rotate') {
       const p = rayPlane(d.planeY, v3)
@@ -1013,6 +1393,26 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
       rotation = rotationFacing(face.nx, face.ny)
       elevation = THREE.MathUtils.clamp(face.height - d.offH, 0, Math.max(0, face.wall.height - item.size.h))
       if (!e.altKey) elevation = Math.round(elevation / 10) * 10
+    } else if (item && item.mount === 'surface' && single) {
+      // stacking: on the highest support under the pointer, else down to the rest height
+      const others = supportsOf(doc, new Set([item.id]))
+      const land = landOnSupport(item.size, p0.rotation, d.offX, d.offY, others, d.tops)
+      if (land) {
+        nx = land.x
+        ny = land.y
+        elevation = land.elevation
+      } else {
+        const p = rayPlane(d.rest / 1000, v3) ?? rayPlane(d.planeY, v3)
+        if (!p) return
+        nx = p.x * 1000 + d.offX
+        ny = p.z * 1000 + d.offY
+        elevation = d.rest
+      }
+      if (snappingOn(e)) {
+        const s = snapFloor(doc, item.size, nx, ny, p0.rotation, new Set([item.id]), false)
+        nx = s.x
+        ny = s.y
+      }
     } else {
       const p = rayPlane(d.planeY, v3)
       if (!p) return
@@ -1068,8 +1468,13 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
     if (!d) return
     const store = docStore.getState()
     if (d.applied) {
-      if (commit) store.commitTransient(d.kind === 'rotate' ? t('Повернуть объект') : t('Переместить объект'))
+      const label = d.kind === 'rotate' ? t('Повернуть объект') : d.kind === 'resize' ? t('Изменить размер') : d.kind === 'elevate' ? t('Изменить высоту') : t('Переместить объект')
+      if (commit) store.commitTransient(label)
       else store.cancelTransient()
+    }
+    if (d.kind === 'resize' || d.kind === 'elevate') {
+      resizeHandles.setActive(null)
+      setHint('')
     }
     refreshGizmo()
     syncOutline()
@@ -1166,6 +1571,12 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
     const ui = uiStore.getState()
     if (!selectLike(ui.tool)) return
     setRay(e)
+    // resize / height handles win over the ring and the item under them
+    const rh = resizeHandles.hit(e.clientX, e.clientY, camera, canvas.getBoundingClientRect())
+    if (rh) {
+      if (beginResize(rh)) capture(e)
+      return
+    }
     const handle = gizmoHit()
     if (handle === 'rotate') {
       if (beginRotate()) capture(e)
@@ -1231,6 +1642,23 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
       return
     }
     if (selectLike(ui.tool)) {
+      const rh = resizeHandles.hit(e.clientX, e.clientY, camera, canvas.getBoundingClientRect())
+      if (resizeHandles.setHover(rh?.id ?? null)) refreshHandles()
+      if (rh) {
+        setCursor(rh.axis === 'elev' || rh.axis === 'h' ? 'ns-resize' : 'ew-resize')
+        setHover(null)
+        setHint(
+          rh.axis === 'elev'
+            ? t('Тяните, чтобы поднять или опустить объект · цифры — точная высота')
+            : t('Тяните грань, чтобы изменить размер · противоположная грань остаётся на месте'),
+        )
+        handleHint = true
+        return
+      }
+      if (handleHint) {
+        handleHint = false
+        setHint('')
+      }
       const handle = gizmoHit()
       if (handle) {
         setCursor(handle === 'rotate' ? 'alias' : 'move')
@@ -1272,6 +1700,12 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
     }
     const d = down
     down = null
+    if (swallowUp) {
+      swallowUp = false
+      pending = null
+      lockControls(false)
+      return
+    }
     if (drag) {
       if (lastMove) {
         updateDrag(lastMove)
@@ -1339,6 +1773,38 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
         hideGhost()
         setHint('')
         consume(e)
+      }
+      return
+    }
+    // typed exact size / height while dragging a handle (as the wall tool: digits, Backspace, Enter)
+    if (drag && (drag.kind === 'resize' || drag.kind === 'elevate')) {
+      const d = drag
+      const reapply = (): void => {
+        if (d.kind === 'resize') updateResize(lastPointer, d)
+        else updateElevate(lastPointer, d)
+      }
+      if (e.key === 'Enter') {
+        if (d.typed) {
+          reapply()
+          swallowUp = !!down
+          endDrag(true)
+        }
+        consume(e)
+        return
+      }
+      if (e.key === 'Backspace') {
+        if (d.typed) {
+          d.typed = d.typed.slice(0, -1)
+          reapply()
+        }
+        consume(e)
+        return
+      }
+      if (e.key.length === 1 && isLengthChar(e.key) && (d.typed || /[0-9.,]/.test(e.key))) {
+        if (d.typed.length < 16) d.typed += e.key
+        reapply()
+        consume(e)
+        return
       }
       return
     }
@@ -1462,6 +1928,10 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
   // keep the screen-space size of the handles while the camera moves
   let lastCamDist = 0
   const unsubFrame = ctx.onBeforeRender(() => {
+    if (resizeHandles.visible) {
+      const it = handleItem()
+      if (it) resizeHandles.sync(it, camera, Math.max(1, canvas.clientHeight), topView())
+    }
     if (!gizmo.visible) return
     const dist = camera.position.distanceTo(gizmo.position)
     if (Math.abs(dist - lastCamDist) < 0.01) return
@@ -1507,6 +1977,7 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
       post.setOutline([], null)
       gizmo.removeFromParent()
       ghost.removeFromParent()
+      resizeHandles.dispose()
       if (ringMesh) ringMesh.geometry.dispose()
       gizmoMaterial.dispose()
       gizmoSoftMaterial.dispose()

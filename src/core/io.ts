@@ -82,7 +82,14 @@ const PATTERN_TYPES: readonly TilePatternType[] = [
   'planks',
 ]
 const CEILING_KINDS: readonly CeilingKind[] = ['flat', 'stretch', 'multilevel', 'coffered', 'beams']
-const MOUNT_KINDS: readonly MountKind[] = ['floor', 'wall', 'ceiling', 'surface']
+const MOUNT_KINDS: readonly MountKind[] = ['floor', 'wall', 'ceiling', 'surface', 'free']
+/** older / hand-written spellings of the free mount */
+const FREE_ALIASES = new Set(['none', 'air', 'hanging', 'floating', 'freestanding', 'свободно'])
+
+function readMount(v: unknown): MountKind {
+  if (typeof v === 'string' && FREE_ALIASES.has(v.trim().toLowerCase())) return 'free'
+  return oneOf(v, MOUNT_KINDS, 'floor')
+}
 const LIGHT_KINDS: readonly LightKind[] = ['ceiling', 'spot', 'pendant', 'point', 'strip', 'area']
 const MATERIAL_CATEGORIES: readonly MaterialCategory[] = [
   'paint',
@@ -444,7 +451,7 @@ function readAsset(id: Id, v: Obj): Asset {
     category: oneOf(v.category, ASSET_CATEGORIES, 'other'),
     kind: v.kind === 'model' || (v.kind !== 'procedural' && src && !procedural) ? 'model' : 'procedural',
     size: readSize(v.size, { w: 500, d: 500, h: 500 }),
-    mount: oneOf(v.mount, MOUNT_KINDS, 'floor'),
+    mount: readMount(v.mount),
   }
   if (a.kind === 'procedural') a.procedural = procedural ?? 'box'
   if (src) a.src = src
@@ -681,8 +688,10 @@ export function parseDoc(json: unknown): Doc {
       elevation: num(v.elevation, 0, -100000, 100000),
       rotation: num(v.rotation, 0),
       size: readSize(v.size, { w: 500, d: 500, h: 500 }),
-      mount: oneOf(v.mount, MOUNT_KINDS, 'floor'),
+      mount: readMount(v.mount),
     }
+    // a floor item lifted off the floor (files older than the free mount) hangs in the air
+    if (item.mount === 'floor' && item.elevation > 0.5) item.mount = 'free'
     const name = optStr(v.name)
     if (name) item.name = name
     if (v.mirrored === true) item.mirrored = true

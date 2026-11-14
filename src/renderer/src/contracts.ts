@@ -33,6 +33,8 @@ export interface DocState {
   derived: Record<Id, DerivedPlan>
   /** monotonically increasing; bumped on every commit/undo/redo/load */
   revision: number
+  /** bumped only by load/newDoc: another document is open (a save keeps it, even when filePath changes) */
+  loadId: number
   filePath: string | null
   dirty: boolean
   canUndo: boolean

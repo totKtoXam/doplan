@@ -6,6 +6,7 @@ import { createStore } from 'zustand/vanilla'
 import { useStore } from 'zustand'
 import { markBadge, newId, nextMarkNumber } from '@core'
 import type { Annotation, Id, Vec2 } from '@core/types'
+import { t } from '@/i18n'
 import { docStore } from './document'
 
 export type PencilShape = 'free' | 'lasso' | 'rect'
@@ -47,7 +48,7 @@ export function getMark(id: Id | null | undefined): Annotation | undefined {
 export function addMark(levelId: Id, shape: Annotation['shape'], points: Vec2[]): Id {
   const id = newId('pm')
   const n = Math.max(nextMarkNumber(docStore.getState().doc), takenElsewhere() + 1)
-  docStore.getState().transact(`Пометка ${markBadge(n)}`, (d) => {
+  docStore.getState().transact(t('Пометка {n}', { n: markBadge(n) }), (d) => {
     ;(d.annotations ??= {})[id] = { id, levelId, n, shape, points: points.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) })) }
   })
   marksStore.getState().select(id)
@@ -57,7 +58,7 @@ export function addMark(levelId: Id, shape: Annotation['shape'], points: Vec2[])
 export function deleteMark(id: Id): void {
   const m = getMark(id)
   if (!m) return
-  docStore.getState().transact(`Удалить пометку ${markBadge(m.n)}`, (d) => {
+  docStore.getState().transact(t('Удалить пометку {n}', { n: markBadge(m.n) }), (d) => {
     if (d.annotations) delete d.annotations[id]
     if (d.annotations && !Object.keys(d.annotations).length) delete d.annotations
   })
@@ -68,7 +69,7 @@ export function deleteMark(id: Id): void {
 export function clearMarks(levelId: Id): void {
   const all = docStore.getState().doc.annotations
   if (!all || !Object.values(all).some((m) => m.levelId === levelId)) return
-  docStore.getState().transact('Очистить пометки', (d) => {
+  docStore.getState().transact(t('Очистить пометки'), (d) => {
     for (const id in d.annotations ?? {}) if (d.annotations![id].levelId === levelId) delete d.annotations![id]
     if (d.annotations && !Object.keys(d.annotations).length) delete d.annotations
   })

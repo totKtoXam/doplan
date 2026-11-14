@@ -188,6 +188,8 @@ export interface AiChatApi {
   deleteChat(projectPath: string | null, chatId: string): Promise<void>
   getSettings(projectPath: string | null): Promise<AiChatSettings>
   setSettings(projectPath: string | null, s: AiChatSettings): Promise<void>
+  /** the document got a file (Save / Save As): its chats follow it. Project refs are a file path or `unsaved:<id>` */
+  moveChats(from: string | null, to: string): Promise<void>
   /** start signing the CLI in; progress arrives through onLogin */
   login(provider: AiProviderId): Promise<void>
   /** paste the code shown by the sign-in page (when the CLI asks for one) */

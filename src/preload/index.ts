@@ -109,6 +109,7 @@ const api: DoplanApi = {
     deleteChat: (projectPath, chatId) => invoke(CH.aiChatDelete, projectPath, chatId),
     getSettings: (projectPath) => invoke(CH.aiChatGetSettings, projectPath),
     setSettings: (projectPath, s) => invoke(CH.aiChatSetSettings, projectPath, s),
+    moveChats: (from, to) => invoke(CH.aiChatMove, from, to),
     login: (provider) => invoke(CH.aiChatLogin, provider),
     loginInput: (text) => invoke(CH.aiChatLoginInput, text),
     loginCancel: () => invoke(CH.aiChatLoginCancel),

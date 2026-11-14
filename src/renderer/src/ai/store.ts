@@ -11,6 +11,7 @@ import type { EntityRef, Id } from '@core/types'
 import type { AiChatMeta, AiChatRecord, AiChatSettings, AiChip, AiImage, AiLoginEvent, AiMessage, AiPart, AiProviderId, AiProviderInfo, AiRunEvent, AiToolCall } from '@shared/aiChat'
 import { DEFAULT_AI_SETTINGS } from '@shared/aiChat'
 import { AI_TOOL_TITLES, isAiToolName } from '@shared/aiTools'
+import { t } from '@/i18n'
 import { api } from '@/store/api'
 import { docStore } from '@/store/document'
 import { getMark, marksStore, setMarkNumberFloor } from '@/store/marks'
@@ -128,13 +129,14 @@ function pushPart(m: AiMessage, key: string | null, part: AiPart): void {
   if (key) partIndex.set(key, m.parts.length - 1)
 }
 
+/** saves the chat as it is now (taken synchronously: the caller may switch chats right after) */
 async function persist(): Promise<void> {
   const { chat, projectPath } = get()
   if (!chat.messages.length) return
   try {
     await api.aiChat.saveChat(projectPath, chat)
     const chats = await api.aiChat.listChats(projectPath)
-    set({ chats })
+    if (get().projectPath === projectPath) set({ chats })
   } catch (e) {
     console.error('[doplan] chat save failed', e)
   }
@@ -152,11 +154,17 @@ export function initAi(): void {
   api.aiChat.onToolCall((call) => void onToolCall(call))
   api.aiChat.onLogin(onLoginEvent)
   let lastPath: string | null | undefined
+  let lastLoad: number | undefined
   const sync = () => {
-    const p = docStore.getState().filePath
-    if (p === lastPath) return
+    const { filePath: p, loadId } = docStore.getState()
+    if (p === lastPath && loadId === lastLoad) return
+    const sameDoc = loadId === lastLoad
     lastPath = p
-    void setProject(p)
+    lastLoad = loadId
+    // Save / Save As of the open document: the chat, a running turn and the draft go on
+    if (sameDoc && p) void moveProject(p)
+    // another document: its own chats (an unsaved one gets a fresh bucket of its own)
+    else void setProject(p ?? `unsaved:${uid()}`)
   }
   docStore.subscribe(sync)
   sync()
@@ -177,7 +185,7 @@ export function sendLoginCode(code: string): void {
   if (!code.trim()) return
   void api.aiChat.loginInput(code)
   const l = get().login
-  if (l) set({ login: { ...l, output: `${l.output}\n› код отправлен\n` } })
+  if (l) set({ login: { ...l, output: `${l.output}\n${t('› код отправлен')}\n` } })
 }
 
 export function cancelLogin(): void {
@@ -213,9 +221,32 @@ export async function refreshProviders(refresh: boolean): Promise<void> {
 /** bumped by updateSettings: a project load that finishes later must not undo the user's choice */
 let settingsRev = 0
 
-async function setProject(path: string | null): Promise<void> {
-  if (get().running) stop()
-  discardDraft()
+/** the open document got a file: its chats move there (copied on Save As), nothing is interrupted */
+async function moveProject(path: string): Promise<void> {
+  const from = get().projectPath
+  if (from === path) return
+  set({ projectPath: path })
+  try {
+    await api.aiChat.moveChats(from, path)
+  } catch (e) {
+    console.error('[doplan] moving chats failed', e)
+  }
+  if (get().projectPath !== path) return
+  // the current chat (also when a save of it raced the move) and the list of the new place
+  if (get().chat.messages.length) await persist()
+  else set({ chats: await api.aiChat.listChats(path).catch(() => get().chats) })
+}
+
+/** leaving the current chat: a running turn stops, and the conversation is saved as it stands */
+function leaveChat(): void {
+  const wasRunning = !!get().running
+  if (wasRunning) stop(false)
+  const dropped = discardDraft()
+  if (wasRunning || dropped) void persist()
+}
+
+async function setProject(path: string): Promise<void> {
+  leaveChat()
   const rev = settingsRev
   const [loaded, chats] = await Promise.all([
     api.aiChat.getSettings(path).catch(() => ({ ...DEFAULT_AI_SETTINGS })),
@@ -248,22 +279,30 @@ export function updateSettings(patch: Partial<AiChatSettings>): void {
 // ───────────── chats ─────────────
 
 export function newChat(): void {
-  if (get().running) stop()
-  discardDraft()
+  leaveChat()
   set({ chat: emptyChat(get().settings.provider), status: '', showHistory: false })
 }
 
 export async function openChat(id: string): Promise<void> {
-  if (get().running) stop()
-  const rec = await api.aiChat.loadChat(get().projectPath, id)
-  if (!rec) return
-  discardDraft()
+  if (get().chat.id === id) {
+    set({ showHistory: false })
+    return
+  }
+  leaveChat()
+  const path = get().projectPath
+  const rec = await api.aiChat.loadChat(path, id)
+  if (!rec || get().projectPath !== path || get().running) return
   set({ chat: rec, showHistory: false, status: '' })
 }
 
 export async function removeChat(id: string): Promise<void> {
+  if (get().chat.id === id) {
+    // no save of the chat being deleted
+    if (get().running) stop(false)
+    discardDraft()
+    set({ chat: emptyChat(get().settings.provider), status: '', showHistory: false })
+  }
   await api.aiChat.deleteChat(get().projectPath, id)
-  if (get().chat.id === id) newChat()
   set({ chats: await api.aiChat.listChats(get().projectPath) })
 }
 
@@ -299,7 +338,7 @@ export async function addMarkToChat(id: Id, focus = true): Promise<void> {
   const m = doc.annotations?.[id]
   if (!m) return
   const plan = derived[m.levelId] ?? derivePlan(doc, m.levelId)
-  const chip: AiChip = { kind: 'annotation', id: m.id, label: `Пометка ${markBadge(m.n)}`, summary: describeMark(doc, m, markTargets(doc, plan, m)) }
+  const chip: AiChip = { kind: 'annotation', id: m.id, label: t('Пометка {n}', { n: markBadge(m.n) }), summary: describeMark(doc, m, markTargets(doc, plan, m)) }
   set({ chips: [...get().chips.filter((c) => c.id !== id), chip] })
   if (focus) focusChat()
   else showChat()
@@ -482,12 +521,12 @@ export async function send(raw: string): Promise<void> {
   if (!text.trim() && !st.images.length) return
   const prov = currentProvider()
   if (!prov?.available) {
-    set({ status: prov?.reason ?? 'Провайдер недоступен' })
+    set({ status: prov?.reason ?? t('Провайдер недоступен') })
     return
   }
   if (needsImage && !st.images.length) {
     if (!(await addUnderlayImage().catch(() => false))) {
-      set({ status: 'Приложите фото плана (скрепка или Ctrl+V) или добавьте подложку' })
+      set({ status: t('Приложите фото плана (скрепка или Ctrl+V) или добавьте подложку') })
       return
     }
   }
@@ -512,7 +551,7 @@ export async function send(raw: string): Promise<void> {
     c.provider = settings.provider
     c.updatedAt = now()
   })
-  set({ running: { runId, msgId: asst.id }, chips: [], images: [], status: 'Запуск…', showHistory: false })
+  set({ running: { runId, msgId: asst.id }, chips: [], images: [], status: t('Запуск…'), showHistory: false })
   const chat = get().chat
   try {
     await api.aiChat.run({
@@ -532,12 +571,39 @@ export async function send(raw: string): Promise<void> {
   }
 }
 
-export function stop(): void {
+/**
+ * Stops the turn at once: main kills the agent and revokes its access, and here the run is closed
+ * right away, so a tool call already on its way is refused instead of landing in whatever document
+ * is open by then. `save` = store the chat now (the late 'done' from main is ignored).
+ */
+export function stop(save = true): void {
   const r = get().running
   if (!r) return
+  void api.aiChat.stop(r.runId)
+  finishTurn({ type: 'done', ok: false, stopped: true }, save)
+}
+
+function finishTurn(ev: Extract<AiRunEvent, { type: 'done' }>, save: boolean): void {
   for (const [, res] of approvals) res(false)
   approvals.clear()
-  void api.aiChat.stop(r.runId)
+  patchRunMsg((m) => {
+    for (const p of m.parts) if (p.type === 'tool' && (p.status === 'running' || p.status === 'pending')) p.status = ev.ok ? 'done' : 'error'
+    if (ev.stopped) pushPart(m, null, { type: 'notice', level: 'info', text: t('Остановлено') })
+    else if (!ev.ok && ev.error) {
+      m.error = ev.error
+      // CLIs often print the same failure as the assistant's text: show it once, as an error
+      const last = m.parts.at(-1)
+      if (last?.type === 'text' && last.text.trim() === ev.error.trim()) m.parts.pop()
+      pushPart(m, null, { type: 'notice', level: 'error', text: ev.error, ...(ev.authRequired ? { login: get().settings.provider } : {}) })
+    }
+    if (!m.parts.length) pushPart(m, null, { type: 'notice', level: 'warning', text: t('Пустой ответ') })
+  })
+  patchChat((c) => {
+    c.updatedAt = now()
+  })
+  set({ running: null, status: '' })
+  if (ev.authRequired) void refreshProviders(false)
+  if (save) void persist()
 }
 
 function onRunEvent(runId: string, ev: AiRunEvent): void {
@@ -598,26 +664,7 @@ function onRunEvent(runId: string, ev: AiRunEvent): void {
       })
       return
     case 'done':
-      for (const [, res] of approvals) res(false)
-      approvals.clear()
-      patchRunMsg((m) => {
-        for (const p of m.parts) if (p.type === 'tool' && (p.status === 'running' || p.status === 'pending')) p.status = ev.ok ? 'done' : 'error'
-        if (ev.stopped) pushPart(m, null, { type: 'notice', level: 'info', text: 'Остановлено' })
-        else if (!ev.ok && ev.error) {
-          m.error = ev.error
-          // CLIs often print the same failure as the assistant's text: show it once, as an error
-          const last = m.parts.at(-1)
-          if (last?.type === 'text' && last.text.trim() === ev.error.trim()) m.parts.pop()
-          pushPart(m, null, { type: 'notice', level: 'error', text: ev.error, ...(ev.authRequired ? { login: get().settings.provider } : {}) })
-        }
-        if (!m.parts.length) pushPart(m, null, { type: 'notice', level: 'warning', text: 'Пустой ответ' })
-      })
-      patchChat((c) => {
-        c.updatedAt = now()
-      })
-      set({ running: null, status: '' })
-      if (ev.authRequired) void refreshProviders(false)
-      void persist()
+      finishTurn(ev, true)
       return
   }
 }
@@ -668,6 +715,10 @@ async function onToolCall(call: AiToolCall): Promise<void> {
       })
     const yes = await new Promise<boolean>((res) => approvals.set(call.callId, res))
     approvals.delete(call.callId)
+    if (get().running?.runId !== call.runId) {
+      api.aiChat.toolResult(call.callId, { ok: false, text: 'Запуск остановлен' })
+      return
+    }
     if (!yes) {
       setPart((p) => {
         p.status = 'rejected'
@@ -720,12 +771,13 @@ export function applyDraft(): { ok: boolean; stale: boolean } | null {
   return res
 }
 
-export function discardDraft(): void {
+/** drops the plan-mode proposal; true when there was one (the chat changed) */
+export function discardDraft(): boolean {
   draft = null
-  if (get().draftCount || get().draftChanges.length) {
-    patchChat((c) => {
-      for (const m of c.messages) for (const p of m.parts) if (p.type === 'tool' && p.status === 'proposed') p.status = 'rejected'
-    })
-    set({ draftCount: 0, draftChanges: [] })
-  }
+  if (!get().draftCount && !get().draftChanges.length) return false
+  patchChat((c) => {
+    for (const m of c.messages) for (const p of m.parts) if (p.type === 'tool' && p.status === 'proposed') p.status = 'rejected'
+  })
+  set({ draftCount: 0, draftChanges: [] })
+  return true
 }

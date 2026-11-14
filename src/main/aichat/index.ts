@@ -12,13 +12,13 @@ import { CH } from '../channels'
 import { handleIpc, onIpc } from '../ipc'
 import { sendToRenderer } from '../window'
 import { API_MODELS, runAnthropicApi } from './anthropicApi'
-import { abortRunCalls, onToolResult } from './bridge'
+import { abortRunCalls, closeRun, forgetRun, onToolResult } from './bridge'
 import { runClaude, runCodex, runGemini, type RunCtx } from './cliRunners'
 import { binVersion, findOnPath, killTree, type ResolvedBin } from './detect'
 import { authStatus, cancelLogin, isAuthError, loginInput, startLogin } from './login'
 import { closeMcpServer, openEndpoint, revokeRun } from './mcpServer'
 import { AGENT_SYSTEM_PROMPT, PLAN_MODE_NOTE } from './prompt'
-import { agentWorkDir, deleteChat, getChatSettings, listChats, loadChat, sanitizeSettings, saveChat, setChatSettings } from './store'
+import { agentWorkDir, deleteChat, getChatSettings, listChats, loadChat, moveChats, sanitizeSettings, saveChat, setChatSettings } from './store'
 
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 
@@ -176,6 +176,11 @@ async function startRun(raw: unknown): Promise<void> {
         await runAnthropicApi({ req, emit, signal: run.abort.signal, systemPrompt: systemPrompt(req), userText })
       } else {
         const endpoint = await openEndpoint(req.runId)
+        // stopped while the endpoint was opening: the token is born revoked
+        if (run.abort.signal.aborted) {
+          revokeRun(req.runId)
+          return
+        }
         const ctx: RunCtx = {
           req,
           emit,
@@ -200,6 +205,7 @@ async function startRun(raw: unknown): Promise<void> {
       emit({ type: 'done', ok: !run.abort.signal.aborted, stopped: run.abort.signal.aborted })
       revokeRun(req.runId)
       abortRunCalls(req.runId, 'Запуск завершён')
+      forgetRun(req.runId)
       runs.delete(req.runId)
     }
   })()
@@ -210,7 +216,9 @@ function stopRun(runId: unknown): void {
   const run = runs.get(runId)
   if (!run) return
   run.abort.abort()
-  abortRunCalls(runId)
+  // the agent loses access at once, not when its process finally exits
+  revokeRun(runId)
+  closeRun(runId)
   for (const c of run.children) killTree(c)
 }
 
@@ -225,6 +233,7 @@ export function registerAiChat(): void {
   handleIpc(CH.aiChatDelete, (p: unknown, id: unknown) => deleteChat(typeof p === 'string' ? p : null, id))
   handleIpc(CH.aiChatGetSettings, (p: unknown) => getChatSettings(typeof p === 'string' ? p : null))
   handleIpc(CH.aiChatSetSettings, (p: unknown, s: unknown) => setChatSettings(typeof p === 'string' ? p : null, s))
+  handleIpc(CH.aiChatMove, (from: unknown, to: unknown) => moveChats(typeof from === 'string' ? from : null, typeof to === 'string' ? to : null))
   handleIpc(CH.aiChatLogin, async (id: unknown) => {
     const prov = (await providers(false)).find((p) => p.info.id === id)
     if (!prov?.bin || !prov.info.canLogin) throw new Error('Вход для этого провайдера недоступен')

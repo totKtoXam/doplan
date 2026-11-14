@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { isAuthError } from './login'
+import { isAuthError, terminalCommandLine } from './login'
+
+describe('terminalCommandLine', () => {
+  it('quotes the way cmd.exe expects (checked by hand: paths with spaces reach the CLI intact)', () => {
+    expect(terminalCommandLine('C:\\Program Files\\nodejs\\node.exe', ['C:\\a b\\cli.js'], ['auth', 'login'])).toBe(
+      '/d /s /c "start "doplan" cmd /k ""C:\\Program Files\\nodejs\\node.exe" "C:\\a b\\cli.js" auth login""',
+    )
+    // a quote inside a path can not break out
+    expect(terminalCommandLine('C:\\x"&calc.exe', [], ['login'])).toContain('"C:\\x&calc.exe" login')
+  })
+})
 
 describe('isAuthError', () => {
   it('recognises CLI credential failures', () => {

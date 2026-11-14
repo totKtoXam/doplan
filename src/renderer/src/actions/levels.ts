@@ -80,6 +80,8 @@ export function removeLevelFromDraft(d: Doc, levelId: Id): void {
     const rec = d[c] as Record<Id, { levelId: Id }>
     for (const [id, e] of Object.entries(rec)) if (e.levelId === levelId) delete rec[id]
   }
+  // pencil marks of the level go too (they would keep pushing up the mark numbers)
+  if (d.annotations) for (const [id, m] of Object.entries(d.annotations)) if (m.levelId === levelId) delete d.annotations[id]
   delete d.levels[levelId]
   d.levelOrder = d.levelOrder.filter((id) => id !== levelId)
 }

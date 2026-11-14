@@ -261,8 +261,23 @@ export function applyNodeDistance(doc: Doc, levelId: Id, fixedId: Id, movingId: 
   const before = Math.hypot(m.x - f.x, m.y - f.y)
   if (before < 1) return fail('Узлы совпадают: направление сдвига не определено', before)
   const dir: Vec2 = { x: (m.x - f.x) / before, y: (m.y - f.y) / before }
-  const moving = collectMovingNodes(doc, levelId, movingId, dir, new Set([fixedId])) ?? new Set<Id>([movingId])
+  const moving = collectMovingNodes(doc, levelId, movingId, dir, new Set([fixedId]))
+  // moving the node alone would skew the walls around it (e.g. a diagonal of a rectangular room)
+  if (!moving)
+    return fail(
+      'Эти узлы связаны через стены, не параллельные линии между ними: сдвинуть один, не исказив соседние стены, нельзя. Задайте размер вдоль стены или выберите другие узлы',
+      before,
+    )
   const delta = measuredMm - before
+  // walls with one end moving and one staying stretch; they must not collapse or flip
+  const stretch: { a: Id; b: Id; ax: number; ay: number }[] = []
+  for (const id in doc.walls) {
+    const w = doc.walls[id]
+    if (w.levelId !== levelId || moving.has(w.a) === moving.has(w.b)) continue
+    const pa = doc.nodes[w.a]
+    const pb = doc.nodes[w.b]
+    if (pa && pb) stretch.push({ a: w.a, b: w.b, ax: pb.x - pa.x, ay: pb.y - pa.y })
+  }
   const snapshot = new Map<Id, Vec2>()
   const moves = new Map<Id, Vec2>()
   for (const id of moving) {
@@ -272,6 +287,17 @@ export function applyNodeDistance(doc: Doc, levelId: Id, fixedId: Id, movingId: 
     moves.set(id, { x: n.x + dir.x * delta, y: n.y + dir.y * delta })
   }
   moveNodes(doc, moves)
+  for (const s of stretch) {
+    const pa = doc.nodes[s.a]
+    const pb = doc.nodes[s.b]
+    if (!pa || !pb) continue
+    const nx = pb.x - pa.x
+    const ny = pb.y - pa.y
+    if (Math.hypot(nx, ny) < 1 || nx * s.ax + ny * s.ay <= 0) {
+      moveNodes(doc, snapshot)
+      return fail(`Сдвиг на ${Math.round(delta)} мм схлопнул бы соседнюю стену: проверьте значение или выберите другие узлы`, before)
+    }
+  }
   const now = doc.nodes[movingId] && doc.nodes[fixedId] ? Math.hypot(doc.nodes[movingId].x - doc.nodes[fixedId].x, doc.nodes[movingId].y - doc.nodes[fixedId].y) : NaN
   if (!Number.isFinite(now) || Math.abs(now - measuredMm) > 0.5) {
     moveNodes(doc, snapshot)

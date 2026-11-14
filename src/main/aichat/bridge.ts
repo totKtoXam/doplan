@@ -16,6 +16,8 @@ interface Pending {
 }
 
 const pending = new Map<string, Pending>()
+/** runs stopped by the user: their late MCP calls never reach the document */
+const closed = new Set<string>()
 /** generous: ask mode waits for the user to approve */
 const CALL_TIMEOUT_MS = 15 * 60 * 1000
 const MAX_TEXT = 200_000
@@ -47,6 +49,7 @@ export async function callDocTool(runId: string, tool: string, args: unknown): P
   if (!parsed.ok) return { ok: false, text: parsed.error }
   // static reference text: answered here, the document is not involved
   if (tool === 'get_planspec_schema') return { ok: true, text: PLAN_EXTRACTION_SYSTEM }
+  if (closed.has(runId)) return { ok: false, text: 'Запуск остановлен пользователем' }
   if (!getMainWindow()) return { ok: false, text: 'Окно редактора закрыто' }
   const callId = randomUUID()
   return new Promise<AiToolResult>((resolve) => {
@@ -57,6 +60,17 @@ export async function callDocTool(runId: string, tool: string, args: unknown): P
     pending.set(callId, { runId, resolve, timer })
     sendToRenderer(CH.evAiChatToolCall, { callId, runId, tool, args: parsed.args })
   })
+}
+
+/** Stop: the run takes no more doc calls, the waiting ones resolve as stopped. */
+export function closeRun(runId: string): void {
+  closed.add(runId)
+  abortRunCalls(runId)
+}
+
+/** the run is over and its token revoked: nothing left to remember */
+export function forgetRun(runId: string): void {
+  closed.delete(runId)
 }
 
 /** Resolves every call still waiting for this run (stop / process exit). */

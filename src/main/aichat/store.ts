@@ -1,11 +1,12 @@
 /**
  * Chat storage per project: <userData>/ai-chats/<projectKey>/{settings.json, <chatId>.json}.
- * The project key is a hash of the project file path ('unsaved' for new projects).
+ * The project key is a hash of the project file path; an unsaved document has its own
+ * `unsaved-<id>` folder until it is saved (moveChats).
  * Also provides the agent working directory for projects without their own folder.
  */
 import { createHash } from 'node:crypto'
-import { readdir, rm, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { copyFile, readdir, rename, rm, stat } from 'node:fs/promises'
+import { dirname, join, resolve, sep } from 'node:path'
 import { app } from 'electron'
 import { type AiChatMeta, type AiChatRecord, type AiChatSettings, DEFAULT_AI_SETTINGS } from '../../shared/aiChat'
 import { atomicWrite, ensureDir, exists, readJson } from '../fsutil'
@@ -16,13 +17,31 @@ const PROVIDERS = new Set(['claude', 'codex', 'gemini', 'api'])
 const EFFORTS = new Set(['', 'low', 'medium', 'high', 'xhigh', 'max'])
 const MAX_CHAT_BYTES = 40 * 1024 * 1024
 
+/** `unsaved:<id>`: a document without a file yet; each one keeps its own chats until it is saved */
+const UNSAVED_RE = /^unsaved:([A-Za-z0-9-]{8,64})$/
+
+export function isUnsavedRef(projectPath: string | null | undefined): boolean {
+  return !projectPath || UNSAVED_RE.test(projectPath)
+}
+
+/**
+ * Folder name for a project: a hash of its file path, `unsaved-<id>` for an unsaved document
+ * (the renderer passes `unsaved:<id>`), `unsaved` for older callers without an id.
+ */
 export function projectKey(projectPath: string | null | undefined): string {
   if (!projectPath || typeof projectPath !== 'string') return 'unsaved'
+  const m = UNSAVED_RE.exec(projectPath)
+  if (m) return `unsaved-${m[1]}`
   return createHash('sha1').update(projectPath.replace(/\\/g, '/').toLowerCase()).digest('hex').slice(0, 16)
 }
 
 function chatsDir(projectPath: string | null): string {
   return join(app.getPath('userData'), 'ai-chats', projectKey(projectPath))
+}
+
+/** settings of unsaved documents are shared (the last choice carries over to the next new project) */
+function settingsFile(projectPath: string | null): string {
+  return join(isUnsavedRef(projectPath) ? chatsDir(null) : chatsDir(projectPath), 'settings.json')
 }
 
 function chatFile(projectPath: string | null, chatId: string): string {
@@ -47,12 +66,41 @@ export function sanitizeSettings(raw: unknown): AiChatSettings {
 }
 
 export async function getChatSettings(projectPath: string | null): Promise<AiChatSettings> {
-  return sanitizeSettings(await readJson<unknown>(join(chatsDir(projectPath), 'settings.json'), DEFAULT_AI_SETTINGS))
+  return sanitizeSettings(await readJson<unknown>(settingsFile(projectPath), DEFAULT_AI_SETTINGS))
 }
 
 export async function setChatSettings(projectPath: string | null, s: unknown): Promise<void> {
-  await ensureDir(chatsDir(projectPath))
-  await atomicWrite(join(chatsDir(projectPath), 'settings.json'), JSON.stringify(sanitizeSettings(s), null, 2))
+  const f = settingsFile(projectPath)
+  await ensureDir(dirname(f))
+  await atomicWrite(f, JSON.stringify(sanitizeSettings(s), null, 2))
+}
+
+/**
+ * The document got a (new) file: Save of a new project moves its chats, Save As copies them (the old
+ * file keeps its history). Chats already at the target win. The agent keeps its old working folder,
+ * so a stored Claude Code session still resumes.
+ */
+export async function moveChats(from: string | null, to: string | null): Promise<void> {
+  if (!from || !to || isUnsavedRef(to) || projectKey(from) === projectKey(to)) return
+  const src = chatsDir(from)
+  const dst = chatsDir(to)
+  const move = isUnsavedRef(from)
+  await ensureDir(dst)
+  if (!(await exists(join(dst, 'settings.json')))) await setChatSettings(to, await getChatSettings(from))
+  if (await exists(src)) {
+    for (const f of await readdir(src)) {
+      if (!f.endsWith('.json') || f === 'settings.json' || f === WORKDIR_FILE) continue
+      const target = join(dst, f)
+      if (await exists(target)) continue
+      if (move) await rename(join(src, f), target)
+      else await copyFile(join(src, f), target)
+    }
+  }
+  const work = await existingWorkDir(from)
+  if (work && !(await exists(join(app.getPath('userData'), 'ai-work', projectKey(to)))) && !(await exists(join(dst, WORKDIR_FILE)))) {
+    await atomicWrite(join(dst, WORKDIR_FILE), JSON.stringify({ dir: work }))
+  }
+  if (move) await rm(src, { recursive: true, force: true })
 }
 
 export async function listChats(projectPath: string | null): Promise<AiChatMeta[]> {
@@ -107,9 +155,22 @@ async function isDir(p: string): Promise<boolean> {
  * Agent working directory: the project folder when the app knows one (its CLAUDE.md / AGENTS.md load
  * natively), otherwise a per-project folder under userData seeded with the default instructions.
  */
+const WORKDIR_FILE = 'workdir.json'
+
+/** the agent folder this project uses already: its own, or the one its chats came from (moveChats) */
+async function existingWorkDir(projectPath: string | null): Promise<string | null> {
+  const root = join(app.getPath('userData'), 'ai-work')
+  const own = join(root, projectKey(projectPath))
+  if (await isDir(own)) return own
+  const ptr = await readJson<{ dir?: unknown } | null>(join(chatsDir(projectPath), WORKDIR_FILE), null)
+  const dir = typeof ptr?.dir === 'string' ? resolve(ptr.dir) : null
+  // only folders the app made itself
+  return dir && dir.startsWith(resolve(root) + sep) && (await isDir(dir)) ? dir : null
+}
+
 export async function agentWorkDir(projectPath: string | null, projectRoot?: string | null): Promise<string> {
   if (projectRoot && typeof projectRoot === 'string' && (await isDir(projectRoot))) return projectRoot
-  const dir = join(app.getPath('userData'), 'ai-work', projectKey(projectPath))
+  const dir = (await existingWorkDir(projectPath)) ?? join(app.getPath('userData'), 'ai-work', projectKey(projectPath))
   await ensureDir(dir)
   const agents = join(dir, 'AGENTS.md')
   if (!(await exists(agents))) await atomicWrite(agents, DEFAULT_AGENTS_MD)

@@ -5,7 +5,7 @@
  */
 import { createHash } from 'node:crypto'
 import { readdir, rm, stat } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { app } from 'electron'
 import { type AiChatMeta, type AiChatRecord, type AiChatSettings, DEFAULT_AI_SETTINGS } from '../../shared/aiChat'
 import { atomicWrite, ensureDir, exists, readJson } from '../fsutil'
@@ -121,5 +121,3 @@ export async function agentWorkDir(projectPath: string | null, projectRoot?: str
 export function tempDir(): string {
   return join(app.getPath('temp'), 'doplan-ai')
 }
-
-export { dirname }

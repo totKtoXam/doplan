@@ -7,6 +7,7 @@ import { uiStore } from '@/store/ui'
 import type { ContextMenuItem, EditorCtx } from './context'
 import { dist, normDeg } from './geom'
 import { requestWallFrom } from './tools/wallStart'
+import { addSelectionToChat } from '@/ai/store' // ai-chat
 
 const DUPLICABLE = new Set(['wall', 'opening', 'item', 'light', 'label', 'dimension'])
 
@@ -285,5 +286,7 @@ export function buildContextMenu(ctx: EditorCtx, plan: Vec2, zoomToFit: () => vo
       },
     })
   }
+  // ai-chat
+  if (uiStore.getState().selection.length) items.push({ label: t('Добавить в чат'), run: () => addSelectionToChat() })
   return items
 }

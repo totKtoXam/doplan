@@ -3,7 +3,7 @@
  * automatic inner dimensions, manual dimensions and text labels. Text never scales with the
  * wall geometry and is always upright.
  */
-import { dimLabel, type EffectiveProvenance, itemClearances, type Clearance, ROOM_TYPE_NAMES, roomEdgeRuns, roomMeasureStatus, runProvenance } from '@core'
+import { dimLabel, type EffectiveProvenance, itemClearances, itemGaps, type ItemGap, type Clearance, ROOM_TYPE_NAMES, roomEdgeRuns, roomMeasureStatus, runProvenance } from '@core'
 import type { DerivedPlan, DerivedRoom, Doc, Item, Light, Vec2 } from '@core/types'
 import { t } from '@/i18n'
 import '@/ui/accuracyI18n'
@@ -76,6 +76,8 @@ export class AnnotationsLayer {
   private fullRooms = new Set<string>()
   private clrKey: unknown[] = []
   private clr: Clearance[] = []
+  private gapKey: unknown[] = []
+  private gaps: ItemGap[] = []
 
   draw(ctx: EditorCtx, p: Painter): void {
     const doc = ctx.doc()
@@ -262,6 +264,17 @@ export class AnnotationsLayer {
       const color = c.reliable ? pal.ok : pal.warn
       const text = c.reliable ? formatLen(c.dist, units) : `${formatLen(c.dist, units)} ?`
       p.dimension(`ic:${it.id}:${c.dir}`, c.from, c.to, n, 0, 0, text, { color, size: 11, width: 1.2, extension: false, bold: true })
+    }
+    const gk = [it, doc.items, this.clr]
+    if (gk.length !== this.gapKey.length || gk.some((k, i) => k !== this.gapKey[i])) {
+      this.gapKey = gk
+      this.gaps = itemGaps(it, Object.values(doc.items), 1500, this.clr)
+    }
+    for (const g of this.gaps) {
+      if (g.dist < 1) continue
+      const l = g.dist
+      const n = { x: -(g.to.y - g.from.y) / l, y: (g.to.x - g.from.x) / l }
+      p.dimension(`ig:${it.id}:${g.dir}`, g.from, g.to, n, 0, 0, formatLen(g.dist, units), { color: pal.ok, size: 11, width: 1.2, extension: false, bold: true })
     }
     if (unreliable) {
       const box = bboxOf(itemCorners(it))

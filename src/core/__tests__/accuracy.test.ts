@@ -8,6 +8,7 @@ import { addRectRoom, addWall, moveWall, normalize, syncRooms } from '../ops'
 import {
   type EdgeRun,
   itemClearances,
+  itemGaps,
   roomAreaReport,
   roomEdgeRuns,
   roomMeasureStatus,
@@ -373,5 +374,61 @@ describe('PlanSpec provenance', () => {
     const plan = derivePlan(res.doc, res.levelId)
     const sources = roomEdgeRuns(plan.rooms[0]).map((r) => runProvenance(res.doc, r).source).sort()
     expect(sources).toEqual(['derived', 'measured', 'plan', 'plan'])
+  })
+})
+
+describe('itemGaps', () => {
+  const mk = (id: string, x: number, y: number, w: number, d: number, rotation = 0, extra: Partial<{ elevation: number; h: number; levelId: string }> = {}) => ({
+    id,
+    levelId: extra.levelId ?? 'L',
+    x,
+    y,
+    rotation,
+    elevation: extra.elevation ?? 0,
+    size: { w, d, h: extra.h ?? 800 },
+  })
+  it('finds the nearest neighbour on each side, footprint to footprint', () => {
+    const table = mk('t', 0, 0, 1200, 800)
+    const items = [
+      table,
+      mk('r', 600 + 300 + 250, 0, 500, 500), // right, gap 300
+      mk('r2', 600 + 900 + 250, 0, 500, 500), // further right
+      mk('f', 0, 400 + 700 + 200, 400, 400), // front (+y), gap 700
+      mk('b', 0, -400 - 2000, 400, 400), // back, beyond 1.5 m
+      mk('diag', 1500, 1500, 300, 300), // not in any side band
+    ]
+    const g = itemGaps(table, items)
+    const by = Object.fromEntries(g.map((x) => [x.dir, x]))
+    expect(Object.keys(by).sort()).toEqual(['front', 'right'])
+    expect(by.right.dist).toBeCloseTo(300)
+    expect(by.right.itemId).toBe('r')
+    expect(by.right.from).toEqual({ x: 600, y: 0 })
+    expect(by.front.dist).toBeCloseTo(700)
+  })
+  it('works in the rotated item frame and with rotated neighbours', () => {
+    const bed = mk('bed', 0, 0, 1600, 2000, 90)
+    // local +x of a 90° item points down the plan (+y); a nightstand 200 mm past its local right edge
+    const ns = mk('ns', 0, 800 + 200 + 250, 500, 500, 45)
+    const g = itemGaps(bed, [bed, ns])
+    expect(g).toHaveLength(1)
+    expect(g[0].dir).toBe('right')
+    expect(g[0].dist).toBeCloseTo(200 + 250 - 250 * Math.SQRT2, 3)
+  })
+  it('ignores other levels, hidden items and items at another height', () => {
+    const a = mk('a', 0, 0, 1000, 1000)
+    const others = [
+      mk('lvl', 900, 0, 200, 200, 0, { levelId: 'L2' }),
+      { ...mk('hid', 900, 0, 200, 200), hidden: true },
+      mk('wallcab', 900, 0, 200, 200, 0, { elevation: 1500, h: 700 }),
+      mk('rug', 900, 0, 200, 200, 0, { h: 10 }),
+    ]
+    expect(itemGaps(a, others)).toEqual([])
+  })
+  it('ignores neighbours behind the nearest wall', () => {
+    const a = mk('a', 0, 0, 1000, 1000)
+    const b = mk('b', 1000, 0, 200, 200)
+    expect(itemGaps(a, [b])).toHaveLength(1)
+    expect(itemGaps(a, [b], 1500, [{ dir: 'right', dist: 200 }])).toEqual([])
+    expect(itemGaps(a, [b], 1500, [{ dir: 'right', dist: 600 }])).toHaveLength(1)
   })
 })

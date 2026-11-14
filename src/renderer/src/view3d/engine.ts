@@ -36,6 +36,7 @@ import { createPost } from './post'
 import { createProceduralFactory } from './procedural'
 import { mountPerfOverlay, perfBegin, perfBeginOnce, perfEnabled, perfEnd, perfPending, perfRecord, perfTime } from './perf'
 import { getQuality, getShared } from './quality'
+import { createMeasure3D } from './measure3d'
 
 type CameraMode = 'orbit' | 'walk' | 'top'
 
@@ -125,6 +126,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
   const scene = new THREE.Scene()
   scene.name = 'doplan'
   const camera = new THREE.PerspectiveCamera(50, 1, 0.05, 400)
+  const measure = createMeasure3D(container, camera)
   const group = (name: string): THREE.Group => {
     const g = new THREE.Group()
     g.name = name
@@ -531,6 +533,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       } finally {
         restoreLook?.()
       }
+      measure.update()
       if (firstFrame) perfRecord('3d.firstFrame.cpu', frameStart)
       afterFrame()
       dirtyFrames = Math.max(0, dirtyFrames - 1)
@@ -773,6 +776,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       unmountPerf()
       unsubDoc()
       unsubUi()
+      measure.dispose()
       observer.disconnect()
       if (resizeRaf) cancelAnimationFrame(resizeRaf)
       if (collectTimer) clearTimeout(collectTimer)

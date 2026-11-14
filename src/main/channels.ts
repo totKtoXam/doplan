@@ -14,6 +14,7 @@ export const CH = {
   projectInfo: 'project:info',
   projectDefaultLocation: 'project:defaultLocation',
   projectPickLocation: 'project:pickLocation',
+  projectPickProjectsDir: 'project:pickProjectsDir',
   projectCreate: 'project:create',
   projectOpenFolder: 'project:openFolder',
   projectExportZip: 'project:exportZip',

@@ -14,6 +14,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   autosaveSec: 30,
   anthropicApiKeySet: false,
   recent: [],
+  projectsDir: null,
 }
 
 function readLocalSettings(): AppSettings {
@@ -161,6 +162,9 @@ function createFallbackApi(): DoplanApi {
         return ''
       },
       async pickLocation() {
+        return null
+      },
+      async pickProjectsDir() {
         return null
       },
       async create() {

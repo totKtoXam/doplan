@@ -3,7 +3,7 @@ import { existsSync, promises as fsp } from 'node:fs'
 import { dirname, extname, join } from 'node:path'
 import { app, dialog } from 'electron'
 import { strToU8, unzipSync, zipSync, type Zippable } from 'fflate'
-import type { ProjectInfo, ProjectOpenResult, ProjectSaveOptions, ProjectSaveResult, ProjectVersion } from '../shared/ipc'
+import type { AppSettings, ProjectInfo, ProjectOpenResult, ProjectSaveOptions, ProjectSaveResult, ProjectVersion } from '../shared/ipc'
 import { PLAN_FILE, tagNameFrom } from '../shared/projectFormat'
 import { assertReadable, grantPath } from './access'
 import { atomicWrite, cleanExt, cleanFileName, ensureDir, exists, readJson, rmrf, toBytes } from './fsutil'
@@ -29,7 +29,7 @@ import {
   writeInstructions,
 } from './projectFolder'
 import { paths } from './paths'
-import { addRecent } from './settings'
+import { addRecent, getProjectsDir, setProjectsDir } from './settings'
 import { getMainWindow } from './window'
 
 const FORMAT_VERSION = 1
@@ -260,14 +260,27 @@ export async function exportZip(doc: unknown): Promise<string | null> {
 
 // ───────────── project folders ─────────────
 
+/** default parent folder for new projects: Settings → «Папка проектов», else Documents/doplan */
 export async function defaultLocation(): Promise<string> {
-  return defaultProjectsDir()
+  return (await getProjectsDir()) ?? defaultProjectsDir()
+}
+
+/** folder picker for the default projects folder; stores it in the settings */
+export async function pickProjectsDir(): Promise<AppSettings | null> {
+  const dir = await showOpen({
+    title: 'Папка проектов по умолчанию',
+    defaultPath: await defaultLocation(),
+    properties: ['openDirectory', 'createDirectory', 'promptToCreate'],
+  })
+  if (!dir) return null
+  await ensureDir(dir)
+  return setProjectsDir(dir)
 }
 
 export async function pickLocation(defaultPath?: unknown): Promise<string | null> {
   return showOpen({
     title: 'Где создать папку проекта',
-    defaultPath: typeof defaultPath === 'string' && defaultPath ? defaultPath : defaultProjectsDir(),
+    defaultPath: typeof defaultPath === 'string' && defaultPath ? defaultPath : await defaultLocation(),
     properties: ['openDirectory', 'createDirectory', 'promptToCreate'],
   })
 }
@@ -279,7 +292,7 @@ export async function createProject(doc: unknown, nameArg: unknown, parentArg: u
   if (typeof parentArg === 'string' && parentArg) {
     parent = await assertReadable(parentArg)
   } else {
-    parent = defaultProjectsDir()
+    parent = await defaultLocation()
   }
   await ensureDir(parent)
   const res = await createFolderProject(parent, name, doc)

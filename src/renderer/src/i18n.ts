@@ -480,6 +480,32 @@ const en: Record<string, string> = {
   Металл: 'Metal',
   Стекло: 'Glass',
   Пластик: 'Plastic',
+
+  // ── project folders + git versions ──
+  'Папка проекта': 'Project folder',
+  'Папка проектов': 'Projects folder',
+  'Здесь предлагается создавать новые проекты («Новый проект», «Сохранить как»).': 'New projects are suggested here (New project, Save as).',
+  'Изменить…': 'Change…',
+  'По умолчанию': 'Default',
+  'История версий': 'Version history',
+  'Инструкции для ИИ': 'AI instructions',
+  'Инструкции для ИИ (AGENTS.md)': 'AI instructions (AGENTS.md)',
+  'Инструкции сохранены': 'Instructions saved',
+  'Сохранить как папку проекта': 'Save as project folder',
+  'Сохранить как папку проекта…': 'Save as project folder…',
+  'Показать файл': 'Show file',
+  'Обзор…': 'Browse…',
+  Где: 'Location',
+  'Будет создана папка': 'Folder to be created',
+  Создать: 'Create',
+  Отметить: 'Tag',
+  'К текущей': 'Back to current',
+  текущая: 'current',
+  открыта: 'open',
+  'Например: Согласовано с заказчиком': 'E.g. Approved by client',
+  'Сделать эту версию текущей (новой версией)': 'Make this version current (as a new version)',
+  'Версий пока нет. Сохраните проект (Ctrl+S).': 'No versions yet. Save the project (Ctrl+S).',
+  'Git не найден — история версий недоступна': 'Git not found — version history is unavailable',
 }
 
 const dictionaries: Record<'ru' | 'en', Record<string, string>> = { ru, en }

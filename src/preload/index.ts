@@ -67,6 +67,7 @@ const api: DoplanApi = {
     info: () => invoke(CH.projectInfo),
     defaultLocation: () => invoke(CH.projectDefaultLocation),
     pickLocation: (defaultPath) => invoke(CH.projectPickLocation, defaultPath ?? null),
+    pickProjectsDir: () => invoke(CH.projectPickProjectsDir),
     create: (doc, name, parent) => invoke(CH.projectCreate, doc, name, parent),
     openFolder: () => invoke(CH.projectOpenFolder),
     exportZip: (doc) => invoke(CH.projectExportZip, doc),

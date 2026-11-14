@@ -29,6 +29,8 @@ export interface AppSettings {
   autosaveSec: number
   anthropicApiKeySet: boolean
   recent: RecentProject[]
+  /** default parent folder for new projects chosen in Settings; null → Documents/doplan */
+  projectsDir: string | null
 }
 
 // ── project folders + git versions ──
@@ -146,8 +148,10 @@ export interface DoplanApi {
     setInstructions(text: string): Promise<string | null>
     /** root, git availability and the git version string ('' when git is not installed) */
     info(): Promise<ProjectInfo>
-    /** default parent directory for new projects (Documents/doplan) */
+    /** default parent directory for new projects: the folder from Settings, else Documents/doplan */
     defaultLocation(): Promise<string>
+    /** folder picker → stores the default projects folder in Settings (reset: settings.set({ projectsDir: null })) */
+    pickProjectsDir(): Promise<AppSettings | null>
     /** folder picker for the parent directory of a new project; the chosen folder may then be passed to create() */
     pickLocation(defaultPath?: string): Promise<string | null>
     /** creates `<parent>/<name>/` (parent null → defaultLocation()), writes `doc`, runs `git init` + the first commit */
@@ -197,7 +201,8 @@ export interface DoplanApi {
 
   settings: {
     get(): Promise<AppSettings>
-    set(patch: Partial<Omit<AppSettings, 'anthropicApiKeySet' | 'recent'>>): Promise<AppSettings>
+    /** projectsDir can only be reset to the default here (null); a custom folder is chosen with project.pickProjectsDir() */
+    set(patch: Partial<Omit<AppSettings, 'anthropicApiKeySet' | 'recent' | 'projectsDir'>> & { projectsDir?: null }): Promise<AppSettings>
     setApiKey(key: string | null): Promise<void>
   }
 

@@ -1,4 +1,4 @@
-import { basename } from 'node:path'
+import { basename, isAbsolute } from 'node:path'
 import { safeStorage } from 'electron'
 import type { AppSettings, RecentProject } from '../shared/ipc'
 import { atomicWrite, readJson } from './fsutil'
@@ -10,6 +10,8 @@ interface StoredSettings {
   backend: AppSettings['backend']
   autosaveSec: number
   recent: RecentProject[]
+  /** default parent folder for new projects; absent → Documents/doplan */
+  projectsDir?: string
   /** base64 of safeStorage-encrypted API key */
   apiKeyEnc?: string
 }
@@ -51,6 +53,7 @@ function sanitize(raw: Partial<StoredSettings> | null | undefined): StoredSettin
         ? Math.max(0, Math.min(3600, Math.round(r.autosaveSec)))
         : DEFAULTS.autosaveSec,
     recent,
+    projectsDir: typeof r.projectsDir === 'string' && isAbsolute(r.projectsDir) ? r.projectsDir : undefined,
     apiKeyEnc: typeof r.apiKeyEnc === 'string' && r.apiKeyEnc ? r.apiKeyEnc : undefined,
   }
 }
@@ -76,6 +79,7 @@ function toPublic(s: StoredSettings): AppSettings {
     autosaveSec: s.autosaveSec,
     anthropicApiKeySet: !!s.apiKeyEnc || !!sessionKey,
     recent: s.recent.map((r) => ({ ...r })),
+    projectsDir: s.projectsDir ?? null,
   }
 }
 
@@ -105,6 +109,22 @@ export async function setSettings(patch: unknown): Promise<AppSettings> {
   })
   next.apiKeyEnc = cur.apiKeyEnc
   next.recent = cur.recent
+  // a custom projects folder is chosen only through the main-process folder picker (setProjectsDir);
+  // the renderer may only reset it to the default
+  next.projectsDir = 'projectsDir' in p && p.projectsDir == null ? undefined : cur.projectsDir
+  await persist(next)
+  emit(next)
+  return toPublic(next)
+}
+
+/** custom default parent folder for new projects, or null (→ Documents/doplan) */
+export async function getProjectsDir(): Promise<string | null> {
+  return (await load()).projectsDir ?? null
+}
+
+export async function setProjectsDir(dir: string | null): Promise<AppSettings> {
+  const cur = await load()
+  const next = { ...cur, projectsDir: dir && isAbsolute(dir) ? dir : undefined }
   await persist(next)
   emit(next)
   return toPublic(next)

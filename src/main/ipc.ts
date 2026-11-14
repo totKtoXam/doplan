@@ -11,6 +11,7 @@ import {
   exportZip,
   openProjectFolder,
   pickLocation,
+  pickProjectsDir,
   projectHistory,
   projectInfo,
   projectInstructions,
@@ -63,6 +64,7 @@ export function registerIpc(): void {
   handle(CH.projectInfo, () => projectInfo())
   handle(CH.projectDefaultLocation, () => defaultLocation())
   handle(CH.projectPickLocation, (defaultPath: unknown) => pickLocation(defaultPath))
+  handle(CH.projectPickProjectsDir, () => pickProjectsDir())
   handle(CH.projectCreate, (doc: unknown, name: unknown, parent: unknown) => createProject(doc, name, parent))
   handle(CH.projectOpenFolder, () => openProjectFolder())
   handle(CH.projectExportZip, (doc: unknown) => exportZip(doc))

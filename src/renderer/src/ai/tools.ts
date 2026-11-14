@@ -9,6 +9,12 @@ import {
   addRectRoom,
   addWall,
   applyFinishToWallSide,
+  applyMeasuredLength,
+  applyNodeDistance,
+  derivePlan,
+  findRun,
+  markBadge,
+  roomDisplayName,
   compilePlanSpecDetailed,
   moveNode,
   parsePlanSpec,
@@ -131,6 +137,58 @@ function copyLevel(src: Doc, srcLevel: Id, d: Doc, dst: Id): void {
   for (const [id, a] of Object.entries(src.assets)) if (!d.assets[id]) d.assets[id] = structuredClone(a)
 }
 
+// ───────────── apply_measurement ─────────────
+
+const signed = (v: number) => `${v >= 0 ? '+' : '−'}${r0(Math.abs(v))}`
+
+/**
+ * Applies tape measurements to `d` in order (each one sees the previous ones). Used both on a copy
+ * for the before → after preview and inside the real transaction. Returns readable change lines.
+ */
+export function applyMeasurements(d: Doc, lv: Id, args: AiToolArgs<'apply_measurement'>): { ok: true; lines: string[] } | { ok: false; error: string } {
+  const date = new Date().toISOString().slice(0, 10)
+  const lines: string[] = []
+  for (const [i, m] of args.measurements.entries()) {
+    const no = args.measurements.length > 1 ? `Замер ${i + 1}: ` : ''
+    if (!!m.side === !!m.nodes) return { ok: false, error: `${no}укажи ровно одно: side (сторона стены) или nodes (два узла)` }
+    if (m.side) {
+      const [wallId, side] = m.side.split(':') as [Id, 'left' | 'right']
+      const w = d.walls[wallId]
+      if (!w) return { ok: false, error: `${no}стена ${wallId} не найдена` }
+      if (w.levelId !== lv) return { ok: false, error: `${no}стена ${wallId} на другом уровне` }
+      const end = m.moveEnd ?? 'b'
+      const res = applyMeasuredLength(d, lv, m.side, m.length, end, { date, note: args.note })
+      if (!res.ok) return { ok: false, error: `${no}${m.side}: ${res.error}` }
+      const run = findRun(derivePlan(d, lv), m.side)
+      const roomTxt = run ? `«${roomDisplayName(d, run.roomId)}» ` : ''
+      lines.push(
+        `${roomTxt}${m.side} (${side === 'left' ? 'левая' : 'правая'} сторона): ${r0(res.before)} → ${r0(res.after)} мм (${signed(res.delta)}), двигается конец ${end}, узлов сдвинуто: ${res.moved.length}`,
+      )
+      for (const c of res.conflicts) lines.push(`⚠ изменился ранее замеренный размер «${c.roomName}» ${c.key}: ${r0(c.before)} → ${r0(c.after)} мм`)
+    } else if (m.nodes) {
+      const res = applyNodeDistance(d, lv, m.nodes.fixed, m.nodes.move, m.length)
+      if (!res.ok) return { ok: false, error: `${no}${m.nodes.fixed}–${m.nodes.move}: ${res.error}` }
+      lines.push(`Расстояние ${m.nodes.fixed} → ${m.nodes.move}: ${r0(res.before)} → ${r0(res.after)} мм (${signed(res.delta)}), сдвигается ${m.nodes.move}, узлов сдвинуто: ${res.moved.length}`)
+    }
+  }
+  if (args.annotationId && d.annotations?.[args.annotationId]) {
+    d.annotations[args.annotationId].done = true
+    lines.push(`Пометка ${markBadge(d.annotations[args.annotationId].n)} отмечена как внесённая`)
+  }
+  return { ok: true, lines }
+}
+
+/** before → after of a mutating call, computed on a copy (approval cards); null = no preview */
+export function previewCall(host: ToolHost, tool: string, args: unknown): { ok: true; changes: string[] } | { ok: false; error: string } | null {
+  if (tool !== 'apply_measurement') return null
+  const parsed = parseToolArgs('apply_measurement', args)
+  if (!parsed.ok) return { ok: false, error: parsed.error }
+  const copy = structuredClone(host.doc())
+  const lv = parsed.args.levelId && copy.levels[parsed.args.levelId] ? parsed.args.levelId : host.activeLevelId()
+  const res = applyMeasurements(copy, lv, parsed.args)
+  return res.ok ? { ok: true, changes: res.lines } : res
+}
+
 function catalogSearch(host: ToolHost, args: AiToolArgs<'list_catalog'>): string {
   const doc = host.doc()
   const cat = host.catalog()
@@ -200,6 +258,20 @@ async function run(host: ToolHost, name: AiToolName, a: Record<string, unknown>)
       return fail('get_planspec_schema обрабатывается приложением')
     case 'list_catalog':
       return ok(catalogSearch(host, a as AiToolArgs<'list_catalog'>))
+    case 'apply_measurement': {
+      const args = a as AiToolArgs<'apply_measurement'>
+      const lv = levelOf(host, args.levelId)
+      // dry run first: a failing measurement must not leave half of the others applied
+      const dry = applyMeasurements(structuredClone(doc), lv, args)
+      if (!dry.ok) throw new ToolError(dry.error)
+      let lines: string[] = []
+      host.mutate(label, (d) => {
+        const res = applyMeasurements(d, lv, args)
+        if (!res.ok) throw new ToolError(res.error)
+        lines = res.lines
+      })
+      return ok(`Замеры внесены (одним шагом отмены):\n${lines.join('\n')}`, lines)
+    }
     case 'render_snapshot': {
       const args = a as AiToolArgs<'render_snapshot'>
       const lv = levelOf(host, args.levelId)
@@ -519,6 +591,8 @@ export function describeCall(tool: string, args: unknown): string {
       return `${a.targetId}${a.surface ? ` (${a.surface})` : ''} → ${a.materialId}`
     case 'apply_planspec':
       return `Построить план (${a.mode ?? 'replace'})`
+    case 'apply_measurement':
+      return `Обмер: ${Array.isArray(a.measurements) ? a.measurements.length : 0} размер(ов)`
     default:
       return isAiToolName(tool) ? AI_TOOL_TITLES[tool] : tool
   }

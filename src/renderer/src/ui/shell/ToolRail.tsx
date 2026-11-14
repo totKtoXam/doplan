@@ -9,6 +9,7 @@ import {
   LampCeiling,
   MousePointer2,
   Paintbrush,
+  Pencil,
   Pipette,
   RotateCw,
   Ruler,
@@ -49,6 +50,7 @@ export const TOOLS: (ToolDef | 'sep')[] = [
   { id: 'measure', icon: Ruler, label: 'Рулетка', key: 'M', hint: 'Укажите две точки, чтобы измерить расстояние' },
   { id: 'survey', icon: ClipboardCheck, label: 'Обмер', hint: 'Щёлкните размер комнаты и введите длину, замеренную рулеткой' },
   { id: 'label', icon: Type, label: 'Надпись', key: 'T', hint: 'Кликните, чтобы добавить надпись' },
+  { id: 'pencil', icon: Pencil, label: 'Карандаш', key: 'P', hint: 'Обведите место на плане и добавьте пометку в чат ИИ (Ctrl+L)' },
   'sep',
   { id: 'paint', icon: Paintbrush, label: 'Покраска', key: 'B', hint: 'Кликните по полу, стене или предмету, чтобы применить материал' },
   { id: 'eyedropper', icon: Pipette, label: 'Пипетка', key: 'I', hint: 'Кликните по поверхности, чтобы взять её материал' },
@@ -85,7 +87,7 @@ export function ToolRail() {
             kbd={d.key}
             tipSide="right"
             active={tool === d.id}
-            disabled={mode === '3d' && (d.id === 'wall' || d.id === 'room' || d.id === 'dimension' || d.id === 'split' || d.id === 'measure' || d.id === 'label')}
+            disabled={mode === '3d' && (d.id === 'wall' || d.id === 'room' || d.id === 'dimension' || d.id === 'split' || d.id === 'measure' || d.id === 'label' || d.id === 'pencil')}
             onClick={() => activateTool(d.id, t)}
           />
         ),

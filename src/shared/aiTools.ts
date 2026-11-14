@@ -143,6 +143,32 @@ export const AI_TOOL_SHAPES = {
     mode: z.enum(['replace', 'newLevel']).optional().describe('replace — заменить план активного уровня (по умолчанию), newLevel — добавить этажом'),
   },
   get_planspec_schema: {},
+  apply_measurement: {
+    measurements: z
+      .array(
+        z
+          .object({
+            side: z
+              .string()
+              .regex(/^[^:\s]+:(left|right)$/)
+              .optional()
+              .describe('Чистый размер: ключ стороны стены wallId:left|right (из пометки или get_plan) — длина этой стороны внутри помещения'),
+            moveEnd: z.enum(['a', 'b']).optional().describe('Для side: какой конец размера сдвигать (a/b, см. концы в пометке); по умолчанию b'),
+            nodes: z
+              .object({ fixed: id('узел, который остаётся на месте'), move: id('узел, который сдвигается') })
+              .strict()
+              .optional()
+              .describe('Расстояние между двумя узлами (по осям стен)'),
+            length: finite().min(10).max(100000).describe('Замеренное значение, мм'),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(20),
+    annotationId: id('id пометки (pm_…), к которой относятся замеры').optional(),
+    note: z.string().max(200).optional().describe('Комментарий к замеру (сохраняется в источнике размера)'),
+    levelId,
+  },
   render_snapshot: {
     view: z.enum(['2d', '3d']).describe('2d — чертёж уровня, 3d — текущая камера 3D'),
     width: z.number().int().min(256).max(1600).optional(),
@@ -167,6 +193,7 @@ export const MUTATING_TOOLS: ReadonlySet<AiToolName> = new Set<AiToolName>([
   'move_item',
   'set_material',
   'apply_planspec',
+  'apply_measurement',
 ])
 
 export const AI_TOOL_DESCRIPTIONS: Record<AiToolName, string> = {
@@ -191,6 +218,8 @@ export const AI_TOOL_DESCRIPTIONS: Record<AiToolName, string> = {
     'Построить план из PlanSpec v1 (как импорт «План по фото»): replace — заменить план активного уровня, newLevel — добавить новым этажом.',
   get_planspec_schema: 'Описание формата PlanSpec v1 и правил распознавания планов (для apply_planspec).',
   render_snapshot: 'Снимок 2D-плана или 3D-вида в PNG, чтобы посмотреть результат.',
+  apply_measurement:
+    'Внести замеры рулеткой: выставить чистую длину стороны стены (side = wallId:left|right, включая глубину и ширину ниши) или расстояние между узлами. Двигается конец moveEnd (по умолчанию b), соседние стены следуют за ним; размер помечается как «замерено». Все замеры вызова — один шаг отмены. Если неясно, к какой стороне или размеру относится число (чистый или по оси), сначала спроси пользователя.',
 }
 
 export const AI_TOOL_TITLES: Record<AiToolName, string> = {
@@ -211,6 +240,7 @@ export const AI_TOOL_TITLES: Record<AiToolName, string> = {
   apply_planspec: 'Построить план',
   get_planspec_schema: 'Формат PlanSpec',
   render_snapshot: 'Снимок',
+  apply_measurement: 'Обмер',
 }
 
 const OBJECTS = Object.fromEntries(

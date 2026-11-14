@@ -112,7 +112,7 @@ const MAX_IMAGES = 8
 
 function chipsText(chips: AiChip[]): string {
   if (!chips.length) return ''
-  const lines = chips.slice(0, 50).map((c) => `- ${c.kind} ${c.id}: ${c.summary}`.slice(0, 600))
+  const lines = chips.slice(0, 50).map((c) => `- ${c.kind} ${c.id}: ${c.summary}`.slice(0, c.kind === 'annotation' ? 6000 : 600))
   return `Контекст (объекты, которые пользователь добавил в чат):\n${lines.join('\n')}\n\n`
 }
 

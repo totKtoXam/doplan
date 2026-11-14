@@ -27,6 +27,8 @@ import { HtmlOverlay } from './htmlOverlay'
 import { registerEditorTranslations } from './i18n'
 import { attachInput } from './input'
 import { AnnotationsLayer } from './layers/annotations'
+import { drawMarks } from './tools/pencil' // ai-chat: pencil marks
+import { marksStore } from '@/store/marks'
 import { GhostLevelLayer } from './layers/ghost'
 import { GridLayer } from './layers/grid'
 import { ItemsLayer } from './layers/items'
@@ -242,6 +244,7 @@ export const createEditor2D: CreateEditor2D = async (container: HTMLElement): Pr
 
     painter.begin(palette)
     annotations.draw(ctx, painter)
+    drawMarks(ctx, painter)
     drawSelection(ctx, painter, computeHandles(ctx), tool.activeHandle?.() ?? null)
     drawCameraGizmo(ctx, painter)
     tool.draw?.(painter)
@@ -329,6 +332,7 @@ export const createEditor2D: CreateEditor2D = async (container: HTMLElement): Pr
 
   // provenance legend / «Обмер» hover and target are drawn by the annotations layer
   const unsubAccuracy = accuracyStore.subscribe(() => requestRender())
+  const unsubMarks = marksStore.subscribe(() => requestRender())
 
   // the 3D camera has no change event: poll it cheaply while a 3D view is visible
   let cameraSig = ''
@@ -373,6 +377,7 @@ export const createEditor2D: CreateEditor2D = async (container: HTMLElement): Pr
       unsubDoc()
       unsubUi()
       unsubAccuracy()
+      unsubMarks()
       try {
         tool.deactivate?.()
       } catch {

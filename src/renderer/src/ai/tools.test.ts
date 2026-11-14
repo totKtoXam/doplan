@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { builtinCatalog, createEmptyDoc, derivePlan } from '@core'
+import { builtinCatalog, createEmptyDoc, derivePlan, roomEdgeRuns } from '@core'
 import type { Catalog } from '@core/types'
 import { parseToolArgs, toolJsonSchema } from '@shared/aiTools'
 import { docStore } from '@/store/document'
@@ -93,5 +93,62 @@ describe('executeTool', () => {
     expect(r.result.text).toContain('n_missing')
     const p = await executeTool(host, 'place_item', { assetId: 'nope', x: 0, y: 0 })
     expect(p.result.ok).toBe(false)
+  })
+})
+
+describe('apply_measurement', () => {
+  beforeEach(() => st().load(createEmptyDoc('T'), null))
+
+  it('maps a tape measurement onto a wall side in one undo step and ticks the mark', async () => {
+    await executeTool(host, 'add_rect_room', { x: 0, y: 0, w: 4000, h: 3000, name: 'Кухня' })
+    const lv = host.activeLevelId()
+    const top = roomEdgeRuns(derivePlan(st().doc, lv).rooms[0]).find((r) => Math.abs(r.a.y - r.b.y) < 1 && r.a.y < 1000)!
+    const before = Math.round(top.length)
+    st().transact('mark', (d) => {
+      d.annotations = {
+        pm_1: {
+          id: 'pm_1',
+          levelId: lv,
+          n: 1,
+          shape: 'stroke',
+          points: [
+            { x: 0, y: 100 },
+            { x: 3000, y: 100 },
+          ],
+        },
+      }
+    })
+
+    const r = await executeTool(host, 'apply_measurement', { measurements: [{ side: top.key, length: before + 120, moveEnd: 'b' }], annotationId: 'pm_1' })
+    expect(r.result.ok, r.result.text).toBe(true)
+    expect(r.result.text).toContain('Кухня')
+    expect(r.result.text).toContain(`${before} → ${before + 120}`)
+    const runAfter = () => roomEdgeRuns(derivePlan(st().doc, lv).rooms[0]).find((x) => x.key === top.key)!
+    expect(Math.round(runAfter().length)).toBe(before + 120)
+    expect(st().doc.annotations?.pm_1.done).toBe(true)
+
+    st().undo()
+    expect(st().doc.annotations?.pm_1.done).toBeUndefined()
+    expect(Math.round(runAfter().length)).toBe(before)
+  })
+
+  it('rejects the whole call when one measurement is wrong (nothing applied)', async () => {
+    await executeTool(host, 'add_rect_room', { x: 0, y: 0, w: 4000, h: 3000 })
+    const nodes = Object.values(st().doc.nodes)
+    const a = nodes.find((n) => n.x === 0 && n.y === 0)!
+    const b = nodes.find((n) => n.x === 4000 && n.y === 0)!
+    const snap = JSON.stringify(st().doc.nodes)
+    const bad = await executeTool(host, 'apply_measurement', {
+      measurements: [
+        { nodes: { fixed: a.id, move: b.id }, length: 4100 },
+        { side: 'w_missing:left', length: 1000 },
+      ],
+    })
+    expect(bad.result.ok).toBe(false)
+    expect(bad.result.text).toContain('w_missing')
+    expect(JSON.stringify(st().doc.nodes)).toBe(snap)
+    const good = await executeTool(host, 'apply_measurement', { measurements: [{ nodes: { fixed: a.id, move: b.id }, length: 4100 }] })
+    expect(good.result.ok, good.result.text).toBe(true)
+    expect(Math.round(st().doc.nodes[b.id].x)).toBe(4100)
   })
 })

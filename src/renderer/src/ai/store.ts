@@ -6,16 +6,19 @@
 import { produce } from 'immer'
 import { createStore } from 'zustand/vanilla'
 import { useStore } from 'zustand'
-import type { EntityRef } from '@core/types'
+import { derivePlan, describeMark, markBadge, markTargets } from '@core'
+import type { EntityRef, Id } from '@core/types'
 import type { AiChatMeta, AiChatRecord, AiChatSettings, AiChip, AiImage, AiLoginEvent, AiMessage, AiPart, AiProviderId, AiProviderInfo, AiRunEvent, AiToolCall } from '@shared/aiChat'
 import { DEFAULT_AI_SETTINGS } from '@shared/aiChat'
 import { AI_TOOL_TITLES, isAiToolName } from '@shared/aiTools'
 import { api } from '@/store/api'
 import { docStore } from '@/store/document'
+import { getMark, marksStore } from '@/store/marks'
 import { uiStore } from '@/store/ui'
 import { DraftHost, liveHost } from './hosts'
+import { markSnapshot } from './markSnapshot'
 import { chipFor, entityLevel, lookupFor } from './summary'
-import { describeCall, executeTool, isMutating } from './tools'
+import { describeCall, executeTool, isMutating, previewCall } from './tools'
 
 export type DockTab = 'props' | 'ai'
 
@@ -275,7 +278,32 @@ export function addRefsToChat(refs: EntityRef[]): void {
 }
 
 export function addSelectionToChat(): void {
-  addRefsToChat(uiStore.getState().selection)
+  // a selected pencil mark goes first while drawing marks (or when nothing else is selected)
+  const mk = marksStore.getState().selected
+  const ui = uiStore.getState()
+  if (mk && getMark(mk) && (ui.tool === 'pencil' || !ui.selection.length)) {
+    void addMarkToChat(mk)
+    return
+  }
+  addRefsToChat(ui.selection)
+}
+
+/** «Пометка ①» chip: what the mark touches, plus a cropped snapshot of that area */
+export async function addMarkToChat(id: Id): Promise<void> {
+  const { doc, derived } = docStore.getState()
+  const m = doc.annotations?.[id]
+  if (!m) return
+  const plan = derived[m.levelId] ?? derivePlan(doc, m.levelId)
+  const chip: AiChip = { kind: 'annotation', id: m.id, label: `Пометка ${markBadge(m.n)}`, summary: describeMark(doc, m, markTargets(doc, plan, m)) }
+  set({ chips: [...get().chips.filter((c) => c.id !== id), chip] })
+  focusChat()
+  if (currentProvider()?.images === false) return
+  try {
+    const img = markSnapshot(doc, plan, m, uiStore.getState().catalog)
+    if (img) set({ images: [...get().images.filter((x) => x.name !== img.name), img].slice(-8) })
+  } catch (e) {
+    console.error('[doplan] mark snapshot failed', e)
+  }
 }
 
 export function focusChat(): void {
@@ -578,6 +606,20 @@ async function onToolCall(call: AiToolCall): Promise<void> {
     })
 
   if (ask) {
+    // tools that can show their effect beforehand (apply_measurement: before → after)
+    const pv = previewCall(liveHost(), call.tool, call.args)
+    if (pv && !pv.ok) {
+      setPart((p) => {
+        p.status = 'error'
+        p.result = pv.error
+      })
+      api.aiChat.toolResult(call.callId, { ok: false, text: pv.error })
+      return
+    }
+    if (pv?.ok)
+      setPart((p) => {
+        p.changes = pv.changes
+      })
     const yes = await new Promise<boolean>((res) => approvals.set(call.callId, res))
     approvals.delete(call.callId)
     if (!yes) {

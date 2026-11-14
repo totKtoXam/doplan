@@ -244,7 +244,11 @@ export interface Room {
 
 // ───────────────────────────── Items (furniture etc.) ─────────────────────────────
 
-export type MountKind = 'floor' | 'wall' | 'ceiling' | 'surface'
+/**
+ * floor: stands on the floor · wall: hangs on a wall face · ceiling: hangs from the ceiling ·
+ * surface: stands on another item (worktop, table, stand) · free: anywhere in the air at `elevation`
+ */
+export type MountKind = 'floor' | 'wall' | 'ceiling' | 'surface' | 'free'
 
 export interface Item {
   id: Id

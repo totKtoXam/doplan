@@ -78,6 +78,7 @@ export const MOUNT_RU: Record<MountKind, string> = {
   wall: 'На стене',
   ceiling: 'На потолке',
   surface: 'На поверхности',
+  free: 'Свободно',
 }
 
 export const MATERIAL_CATEGORY_RU: Record<MaterialCategory, string> = {

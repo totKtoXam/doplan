@@ -5,7 +5,8 @@ import { t } from '@/i18n'
 import { docStore } from '@/store/document'
 import { uiStore } from '@/store/ui'
 import type { ContextMenuItem, EditorCtx } from './context'
-import { normDeg } from './geom'
+import { dist, normDeg } from './geom'
+import { requestWallFrom } from './tools/wallStart'
 
 const DUPLICABLE = new Set(['wall', 'opening', 'item', 'light', 'label', 'dimension'])
 
@@ -74,8 +75,27 @@ export function buildContextMenu(ctx: EditorCtx, plan: Vec2, zoomToFit: () => vo
       })
       break
     }
+    case 'node': {
+      const id = hit.id
+      items.push({ label: t('Продолжить стену отсюда'), run: () => requestWallFrom(ctx, id, { returnToSelect: uiStore.getState().tool === 'select' }) })
+      break
+    }
     case 'wall': {
       const id = hit.id
+      // near one of its ends: offer to continue the wall from that end
+      const w = doc.walls[id]
+      const na = w && doc.nodes[w.a]
+      const nb = w && doc.nodes[w.b]
+      if (w && na && nb) {
+        const da = dist(plan, na)
+        const db = dist(plan, nb)
+        const near = da <= db ? w.a : w.b
+        // a quarter of the wall, but never more than ~60 px on screen
+        const reach = Math.min(ctx.mm(60), Math.max(ctx.mm(24), dist(na, nb) * 0.25))
+        if (Math.min(da, db) <= reach) {
+          items.push({ label: t('Продолжить стену отсюда'), run: () => requestWallFrom(ctx, near, { returnToSelect: uiStore.getState().tool === 'select' }) })
+        }
+      }
       items.push({
         label: t('Разделить стену здесь'),
         run: () =>

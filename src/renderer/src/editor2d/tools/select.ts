@@ -20,6 +20,7 @@ import { dimensionNormal, itemToLocal, itemToPlan } from '../shapes'
 import { lengthStep, snapPoint, snapToGrid } from '../snap'
 import { placeItem, placeOpeningOnWall, selectOnly, setHover, toggleSelection } from './common'
 import type { Tool } from './types'
+import { requestWallFrom } from './wallStart'
 
 type Cam = { position: [number, number, number]; target: [number, number, number]; fov: number }
 
@@ -133,6 +134,28 @@ export function createSelectTool(ctx: EditorCtx): Tool {
     }
   }
 
+  /**
+   * Hands the gesture over to the wall tool anchored at the node: it keeps receiving this pointer's
+   * moves, places the first segment where the button is released and returns here when the chain ends.
+   */
+  function startWallDrag(nodeId: Id, press: PointerInfo): void {
+    drag = { type: 'none' }
+    dragHandle = null
+    badge = null
+    ctx.snapFeedback = null
+    lastClick = null
+    requestWallFrom(ctx, nodeId, { pressScreen: press.screen, returnToSelect: true })
+  }
+
+  /** status-bar hint for the current selection (a lone node advertises "continue the wall") */
+  function selectionHint(): string {
+    const sel = ui().selection
+    if (sel.length === 1 && sel[0].kind === 'node') {
+      return t('Узел: перетаскивание — переместить · «+» или Ctrl+перетаскивание — новая стена отсюда · W — продолжить стену')
+    }
+    return t('Щелчок — выбрать · Shift — добавить · перетаскивание — переместить или выделить рамкой')
+  }
+
   function beginDrag(e: PointerInfo, pend: Extract<Drag, { type: 'pending' }>): void {
     const d = doc()
     const derived = ctx.derived()
@@ -147,6 +170,10 @@ export function createSelectTool(ctx: EditorCtx): Tool {
         case 'node': {
           const n = d.nodes[h.nodeId]
           if (!n) break
+          if (pend.start.ctrl) {
+            startWallDrag(h.nodeId, pend.start)
+            return
+          }
           drag = { type: 'node', nodeId: h.nodeId, grab: sub(start, n), excludeWalls: wallsAtNodes([h.nodeId]) }
           return
         }
@@ -207,6 +234,11 @@ export function createSelectTool(ctx: EditorCtx): Tool {
     }
     if (hit.kind === 'node') {
       const n = d.nodes[hit.id]
+      if (n && pend.start.ctrl) {
+        // Ctrl+drag from a junction draws a new wall from it (plain drag moves the node)
+        startWallDrag(hit.id, pend.start)
+        return
+      }
       if (n) {
         drag = { type: 'node', nodeId: hit.id, grab: sub(start, n), excludeWalls: wallsAtNodes([hit.id]) }
         return
@@ -746,7 +778,11 @@ export function createSelectTool(ctx: EditorCtx): Tool {
     cursor: 'default',
 
     activate() {
-      ctx.setHint(t('Щелчок — выбрать · Shift — добавить · перетаскивание — переместить или выделить рамкой'))
+      ctx.setHint(selectionHint())
+      // the shell writes the generic tool hint right after switching tools: put ours back
+      queueMicrotask(() => {
+        if (ui().tool === 'select') ctx.setHint(selectionHint())
+      })
     },
 
     deactivate() {
@@ -763,6 +799,11 @@ export function createSelectTool(ctx: EditorCtx): Tool {
       if (drag.type !== 'none') finish(true)
       const list = computeHandles(ctx)
       const handle = handleAt(ctx, list, e.screen)
+      if (handle?.type === 'nodeAdd') {
+        // "+" next to the selected node: draw a new wall from it (drag, or click then click)
+        startWallDrag(handle.nodeId, e)
+        return
+      }
       if (handle) {
         drag = { type: 'pending', start: e, hit: null, handle, wasSelected: true }
         return
@@ -796,13 +837,16 @@ export function createSelectTool(ctx: EditorCtx): Tool {
       if (drag.type === 'none') {
         const handle = handleAt(ctx, computeHandles(ctx), e.screen)
         if (handle) {
-          setHover(null)
-          ctx.setCursor(handleCursor(handle))
+          // a wall end handle is a junction: hovering it shows the angles there
+          setHover(handle.type === 'node' ? { kind: 'node', id: handle.nodeId } : null)
+          ctx.setCursor(handle.type === 'node' && e.ctrl ? 'copy' : handleCursor(handle))
           return
         }
         const hit = ctx.hit.hit(e.plan, ctx.mm(8))
         setHover(hit && hit.kind !== 'room' ? hit : null)
-        ctx.setCursor(hit && hit.kind !== 'room' ? (ctx.isSelected(hit) ? 'move' : 'pointer') : 'default')
+        ctx.setCursor(
+          hit?.kind === 'node' && e.ctrl ? 'copy' : hit && hit.kind !== 'room' ? (ctx.isSelected(hit) ? 'move' : 'pointer') : 'default',
+        )
         return
       }
       if (drag.type === 'pending') {
@@ -958,6 +1002,7 @@ export function createSelectTool(ctx: EditorCtx): Tool {
 
     draw(p: Painter) {
       const pal = p.pal
+      if (drag.type === 'none') ctx.setHint(selectionHint())
       if (drag.type === 'marquee') {
         const a = p.S(drag.start)
         const b = p.S(drag.cur)

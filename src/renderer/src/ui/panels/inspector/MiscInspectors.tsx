@@ -6,6 +6,7 @@ import { uiStore } from '@/store/ui'
 import { useT } from '@/i18n'
 import { Button, Input, NumberInput, Row, Section, Slider, Toggle, formatLength } from '@/ui/kit'
 import { tx } from '../common/catalog'
+import { NodeAngleField } from './NodeAngleField'
 import { Hint, InspectorHeader, Pair, Stat } from './shared'
 
 export function NodeInspector({ id }: { id: Id }) {
@@ -22,6 +23,7 @@ export function NodeInspector({ id }: { id: Id }) {
           <NumberInput kind="length" label="Y" value={n.y} round={1} onChange={(v, g) => tx('Переместить узел', (d) => moveNode(d, id, d.nodes[id]?.x ?? n.x, v), `node.${id}.y.${g}`)} />
         </Pair>
         <Stat label={t('Стен в узле')} value={degree} />
+        <NodeAngleField id={id} />
       </Section>
     </div>
   )

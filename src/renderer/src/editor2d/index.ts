@@ -102,7 +102,6 @@ export const createEditor2D: CreateEditor2D = async (container: HTMLElement): Pr
   // ── state ──
   let destroyed = false
   let raf = 0
-  let lastHint = ''
   // a fit was requested while the viewport had no real size (hidden / not laid out): run it on resize
   let fitPending = true
   // camera.version right after the last fit; still equal → the user has not panned/zoomed since
@@ -137,8 +136,8 @@ export const createEditor2D: CreateEditor2D = async (container: HTMLElement): Pr
     levelId,
     derived: () => docStore.getState().derived[levelId()] ?? EMPTY_DERIVED,
     setHint(text: string) {
-      if (text === lastHint) return
-      lastHint = text
+      // compare with the store, not a local copy: the shell also writes tool hints
+      if (uiStore.getState().hint === text) return
       uiStore.getState().set({ hint: text })
     },
     setCursor() {

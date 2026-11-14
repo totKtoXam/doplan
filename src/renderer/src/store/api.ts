@@ -5,6 +5,7 @@
  */
 import type { AppSettings, DoplanApi, FileFilter, MenuCommand } from '@shared/ipc'
 import { DEFAULT_AI_SETTINGS } from '@shared/aiChat'
+import { releasePageUrl } from '@shared/updater'
 
 const SETTINGS_KEY = 'doplan.settings'
 
@@ -238,6 +239,19 @@ function createFallbackApi(): DoplanApi {
       onLogin: noopUnsub,
     },
     // ── end ai-chat block ──
+    updates: {
+      async get() {
+        return { mode: 'disabled', current: '0.5.0-web', status: { kind: 'idle' } }
+      },
+      async check() {
+        return { mode: 'disabled', current: '0.5.0-web', status: { kind: 'idle' } }
+      },
+      async install() {},
+      async openReleasePage(version?: string) {
+        window.open(releasePageUrl(version), '_blank', 'noopener')
+      },
+      onState: noopUnsub,
+    },
     window: {
       setTitle(title: string, dirty: boolean) {
         document.title = `${dirty ? '• ' : ''}${title} — doplan`

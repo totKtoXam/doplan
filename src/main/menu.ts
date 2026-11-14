@@ -43,6 +43,7 @@ const L = {
     devtools: 'Инструменты разработчика',
     reload: 'Перезагрузить',
     help: 'Справка',
+    checkUpdates: 'Проверить обновления…',
     about: 'О программе doplan',
   },
   en: {
@@ -82,6 +83,7 @@ const L = {
     devtools: 'Developer tools',
     reload: 'Reload',
     help: 'Help',
+    checkUpdates: 'Check for updates…',
     about: 'About doplan',
   },
 } as const
@@ -180,7 +182,11 @@ export function buildMenu(lang: Lang, recent: { path: string; name: string }[], 
     },
     {
       label: t.help,
-      submenu: [{ label: t.about, click: cmd('about') }],
+      submenu: [
+        { label: t.checkUpdates, click: cmd('checkUpdates') },
+        { type: 'separator' },
+        { label: t.about, click: cmd('about') },
+      ],
     },
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))

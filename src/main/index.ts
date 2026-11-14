@@ -18,6 +18,7 @@ import { registerIpc } from './ipc'
 import { registerAiChat, shutdownAiChat } from './aichat'
 // ── end ai-chat block ──
 import { getSettings, onSettingsChanged } from './settings'
+import { initUpdater } from './updater'
 import { closeWasConfirmed, createMainWindow, getMainWindow, isTrustedUrl, requestOpenFile } from './window'
 
 // ───────────── pre-ready ─────────────
@@ -108,6 +109,7 @@ if (!gotLock) {
     registerProtocolHandlers()
     registerIpc()
     registerAiChat() // ai-chat
+    initUpdater()
     await Promise.all([initProjectStore(), ensureLibrary()])
 
     const s = await getSettings()

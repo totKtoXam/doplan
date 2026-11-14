@@ -67,6 +67,11 @@ export function confirmClose(): void {
   w.close()
 }
 
+/** the app is about to quit for an update install: let the window close without asking the renderer */
+export function allowQuitWithoutPrompt(on: boolean): void {
+  allowClose = on
+}
+
 export function setWindowTitle(title: unknown, dirty: unknown): void {
   const w = getMainWindow()
   if (!w) return

@@ -9,7 +9,8 @@ import { t } from '@/i18n'
 import { api, isElectron } from '@/store/api'
 import { dialogStore } from '@/store/dialogs'
 import { docStore } from '@/store/document'
-import { notifyStore, alertDialog } from '@/store/notify'
+import { notifyStore, alertDialog, choiceDialog } from '@/store/notify'
+import { checkForUpdatesManually, initUpdates } from '@/store/updates'
 import { uiStore } from '@/store/ui'
 import type { ToolId } from '@/contracts'
 import { shortcutKey } from './keys'
@@ -196,13 +197,25 @@ function onMenu(cmd: MenuCommand): void {
     case 'settings':
       dialogStore.getState().open('settings')
       break
+    case 'checkUpdates':
+      void checkForUpdatesManually()
+      break
     case 'about':
-      void alertDialog(
-        'doplan',
-        `${t('Планировки, фотореалистичное 3D и дизайн интерьера')}\n${t('Версия')} ${api.version} · ${api.platform}\n\n${t('Материалы и модели: Poly Haven, ambientCG, Kenney, Quaternius (CC0) и другие — см. лицензии в папке программы.')}`,
-      )
+      void showAbout()
       break
   }
+}
+
+async function showAbout(): Promise<void> {
+  const choice = await choiceDialog(
+    'doplan',
+    `${t('Планировки, фотореалистичное 3D и дизайн интерьера')}\n${t('Версия')} ${api.version} · ${api.platform}\n\n${t('Материалы и модели: Poly Haven, ambientCG, Kenney, Quaternius (CC0) и другие — см. лицензии в папке программы.')}`,
+    [
+      { id: 'updates', label: 'Проверить обновления' },
+      { id: 'ok', label: 'OK', variant: 'primary' },
+    ],
+  )
+  if (choice === 'updates') await checkForUpdatesManually()
 }
 
 async function onOpenFile(path: string): Promise<void> {
@@ -243,6 +256,7 @@ export function useAppEvents(enabled: boolean): { dragOver: boolean } {
     offs.push(api.window.onMenu(onMenu))
     offs.push(api.window.onCloseRequest(() => void actions.handleCloseRequest()))
     offs.push(api.window.onOpenFile((p) => void onOpenFile(p)))
+    offs.push(initUpdates())
 
     // title / dirty flag
     syncTitle()

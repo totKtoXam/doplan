@@ -240,6 +240,14 @@ export interface Room {
   skirtingMaterialId?: Id
   /** area printed on the source plan, m² (computed-vs-labelled report) */
   labelledArea?: number
+  /** design layer: style the room was dressed in (core/styles) */
+  design?: RoomDesign
+}
+
+/** Per-room design choices. */
+export interface RoomDesign {
+  /** id of the style preset last applied to the room (BUILTIN_STYLES or a project style) */
+  styleId?: Id
 }
 
 // ───────────────────────────── Items (furniture etc.) ─────────────────────────────
@@ -373,6 +381,14 @@ export interface MaterialMaps {
   displacement?: string
 }
 
+/** Colour from a colour system (paints): the hex in `Material.color` is an on-screen approximation. */
+export interface ColorCode {
+  /** 'NCS' | 'RAL' | a paint brand name | 'custom' */
+  system: string
+  /** e.g. 'S 1002-Y', '9010' */
+  code: string
+}
+
 export interface Material {
   id: Id
   name: string
@@ -380,6 +396,8 @@ export interface Material {
   category: MaterialCategory
   /** base colour '#rrggbb' (multiplied with color map if present) */
   color: string
+  /** colour-system code of a paint (NCS / RAL / brand) */
+  colorCode?: ColorCode
   roughness: number
   metalness: number
   /** texture URLs (doplan-asset://… or relative to catalog root) */
@@ -602,6 +620,14 @@ export interface Doc {
   assets: Record<Id, Asset>
   /** what the traced source plan states (labelled areas) */
   source?: DocSource
+  /** design layer: apartment style, currency and the user's price list */
+  design?: DocDesign
+}
+
+/** Project-wide design settings. */
+export interface DocDesign {
+  /** style applied to the whole apartment last (default for new rooms) */
+  styleId?: Id
 }
 
 export type EntityKind =

@@ -3,6 +3,7 @@
  * Everything here is plain data; ids are stable (`mat_*`, `asset_*`) because documents reference them.
  */
 import { newId } from './ids'
+import { STYLE_MATERIALS } from './styleMaterials'
 import {
   DOC_VERSION,
   type Asset,
@@ -302,6 +303,8 @@ export const BUILTIN_MATERIALS: Material[] = [
     emissive: '#ffe2b0',
     emissiveIntensity: 3,
   }),
+  // ── coded paints and finishes used by the interior styles (core/styles.ts) ──
+  ...STYLE_MATERIALS,
 ]
 
 // ───────────────────────────── built-in procedural assets ─────────────────────────────

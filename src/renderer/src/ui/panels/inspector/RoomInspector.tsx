@@ -11,6 +11,9 @@ import { roomWallSides } from '../common/edits'
 import { TilePatternEditor } from './TilePatternEditor'
 import { Hint, InspectorHeader, Stat } from './shared'
 import { RoomAccuracy } from './RoomAccuracy'
+import { BUILTIN_STYLES, findStyle } from '@core'
+import { applyStyleTo } from '../common/style'
+import { StylePaletteStrip } from '../left/StyleTab'
 
 export function RoomInspector({ id }: { id: Id }) {
   const t = useT()
@@ -47,6 +50,7 @@ export function RoomInspector({ id }: { id: Id }) {
   const setCeil = (label: string, fn: (c: CeilingSpec) => void, merge?: string) => set(label, (r) => fn(r.ceiling), merge)
   const m = (f: string, g: string) => `room.${id}.${f}.${g}`
   const floorMat = mats.get(room.floor.materialId)
+  const roomStyle = findStyle(room.design?.styleId)
   const ceilH = room.ceiling.height ?? wallHeight
 
   const changeType = (type: RoomType) =>
@@ -77,6 +81,26 @@ export function RoomInspector({ id }: { id: Id }) {
           <Hint>{t('Контур не замкнут — площадь недоступна.')}</Hint>
         )}
         {dr && <RoomAccuracy id={id} dr={dr} />}
+      </Section>
+
+      <Section title={t('Дизайн')} id="insp.room.design">
+        <Row label={t('Стиль интерьера')}>
+          <Select<string>
+            value={roomStyle?.id ?? ''}
+            placeholder={t('Без стиля')}
+            options={BUILTIN_STYLES.map((s) => ({ value: s.id, label: lang === 'ru' ? s.nameRu : s.name }))}
+            onChange={(v) => applyStyleTo(v, [id])}
+            aria-label={t('Применить стиль к помещению')}
+          />
+        </Row>
+        {roomStyle && (
+          <>
+            <StylePaletteStrip style={roomStyle} size={20} />
+            <Button size="sm" onClick={() => applyStyleTo(roomStyle.id, [id])} disabled={!dr}>
+              {t('Применить стиль к помещению')}
+            </Button>
+          </>
+        )}
       </Section>
 
       <Section title={t('Пол')} id="insp.room.floor">

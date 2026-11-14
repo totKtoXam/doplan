@@ -1,27 +1,28 @@
 import { useState } from 'react'
-import { BrickWall, Lightbulb, Palette, Sofa } from 'lucide-react'
+import { BrickWall, Lightbulb, Palette, Sofa, SwatchBook } from 'lucide-react'
 import { useT } from '@/i18n'
 import { cn, ScrollArea, TabPanel, Tabs } from '@/ui/kit'
 import { ConstructionTab } from './left/ConstructionTab'
 import { FurnitureTab } from './left/FurnitureTab'
 import { MaterialsTab } from './left/MaterialsTab'
 import { LightsTab } from './left/LightsTab'
+import { StyleTab } from './left/StyleTab'
 
-type LeftTab = 'build' | 'furniture' | 'materials' | 'lights'
+type LeftTab = 'build' | 'furniture' | 'materials' | 'style' | 'lights'
 
 const TAB_KEY = 'doplan.leftTab'
 
 function readTab(): LeftTab {
   try {
     const v = localStorage.getItem(TAB_KEY)
-    if (v === 'build' || v === 'furniture' || v === 'materials' || v === 'lights') return v
+    if (v === 'build' || v === 'furniture' || v === 'materials' || v === 'style' || v === 'lights') return v
   } catch {
     /* ignore */
   }
   return 'build'
 }
 
-/** left dock: construction tools, furniture catalogue, materials, lights */
+/** left dock: construction tools, furniture catalogue, materials, interior styles, lights */
 export function LeftPanel({ className }: { className?: string }) {
   const t = useT()
   const [tab, setTabState] = useState<LeftTab>(readTab)
@@ -45,6 +46,7 @@ export function LeftPanel({ className }: { className?: string }) {
           { id: 'build', label: t('Конструкции'), icon: <BrickWall />, title: t('Стены, помещения, двери и окна') },
           { id: 'furniture', label: t('Мебель'), icon: <Sofa /> },
           { id: 'materials', label: t('Материалы'), icon: <Palette /> },
+          { id: 'style', label: t('Стиль'), icon: <SwatchBook />, title: t('Стили интерьера') },
           { id: 'lights', label: t('Свет'), icon: <Lightbulb /> },
         ]}
       />
@@ -53,6 +55,7 @@ export function LeftPanel({ className }: { className?: string }) {
           {tab === 'build' && <ConstructionTab />}
           {tab === 'furniture' && <FurnitureTab />}
           {tab === 'materials' && <MaterialsTab />}
+          {tab === 'style' && <StyleTab />}
           {tab === 'lights' && <LightsTab />}
         </TabPanel>
       </ScrollArea>

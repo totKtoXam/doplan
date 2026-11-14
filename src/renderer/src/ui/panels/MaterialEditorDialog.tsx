@@ -30,7 +30,12 @@ interface Draft {
   metalness: number
   maps: Partial<Record<MapKey, MapSlot>>
   sizeMm: [number, number]
+  /** colour-system code (paints); system 'none' = no code */
+  codeSystem: string
+  code: string
 }
+
+const CODE_SYSTEMS = ['none', 'NCS', 'RAL', 'custom']
 
 export interface MaterialEditorDialogProps {
   open: boolean
@@ -41,7 +46,7 @@ export interface MaterialEditorDialogProps {
 }
 
 function emptyDraft(): Draft {
-  return { name: 'Мой материал', category: 'paint', color: '#d8d4cc', roughness: 0.8, metalness: 0, maps: {}, sizeMm: [1000, 1000] }
+  return { name: 'Мой материал', category: 'paint', color: '#d8d4cc', roughness: 0.8, metalness: 0, maps: {}, sizeMm: [1000, 1000], codeSystem: 'none', code: '' }
 }
 
 function draftFrom(m: Material, copy: boolean): Draft {
@@ -58,6 +63,8 @@ function draftFrom(m: Material, copy: boolean): Draft {
     metalness: m.metalness,
     maps,
     sizeMm: m.sizeMm ? [m.sizeMm[0], m.sizeMm[1]] : [1000, 1000],
+    codeSystem: m.colorCode?.system ?? 'none',
+    code: m.colorCode?.code ?? '',
   }
 }
 
@@ -186,6 +193,8 @@ export function MaterialEditorDialog({ open, onClose, materialId, onSaved }: Mat
         maps[k] = s.data ? await window.doplan.project.addAsset(s.data, s.ext || 'png') : s.url
       }
       const name = draft.name.trim() || t('Мой материал')
+      const code = draft.code.trim()
+      const colorCode = draft.codeSystem !== 'none' && code ? { system: draft.codeSystem, code } : undefined
       const base: Omit<Material, 'id'> = {
         name,
         nameRu: name,
@@ -194,6 +203,7 @@ export function MaterialEditorDialog({ open, onClose, materialId, onSaved }: Mat
         roughness: draft.roughness,
         metalness: draft.metalness,
         ...(hasMaps ? { maps, sizeMm: [draft.sizeMm[0], draft.sizeMm[1]] as [number, number] } : {}),
+        ...(colorCode ? { colorCode } : {}),
         custom: true,
       }
       const id = editId ?? newId('m')
@@ -204,6 +214,7 @@ export function MaterialEditorDialog({ open, onClose, materialId, onSaved }: Mat
           delete next.maps
           delete next.sizeMm
         }
+        if (!colorCode) delete next.colorCode
         d.materials[id] = next
       })
 
@@ -288,6 +299,23 @@ export function MaterialEditorDialog({ open, onClose, materialId, onSaved }: Mat
           </Row>
           <Row label={t('Цвет')}>
             <ColorInput value={draft.color} onChange={(v) => patch({ color: v })} aria-label={t('Цвет')} />
+          </Row>
+          <Row label={t('Код цвета')} hint={t('NCS / RAL / код производителя; цвет на экране — приближённый')}>
+            <Select<string>
+              value={draft.codeSystem}
+              onChange={(v) => patch({ codeSystem: v })}
+              options={CODE_SYSTEMS.map((v) => ({ value: v, label: v === 'none' ? '—' : v === 'custom' ? t('Другая') : v }))}
+              className="w-20 shrink-0"
+              aria-label={t('Система цвета')}
+            />
+            <Input
+              value={draft.code}
+              onChange={(v) => patch({ code: v })}
+              onKeyDown={(e) => e.stopPropagation()}
+              placeholder={draft.codeSystem === 'RAL' ? '9010' : 'S 1002-Y'}
+              disabled={draft.codeSystem === 'none'}
+              aria-label={t('Код цвета')}
+            />
           </Row>
           <Row label={t('Шероховатость')}>
             <Slider value={draft.roughness} min={0} max={1} step={0.01} onChange={(v) => patch({ roughness: v })} format={(v) => fmtNum(v, 2)} />

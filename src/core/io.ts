@@ -19,6 +19,7 @@ import {
   type DimSource,
   type Dimension,
   type Doc,
+  type DocDesign,
   type FinishZone,
   type Id,
   type Item,
@@ -404,6 +405,11 @@ function readMaterial(id: Id, v: Obj): Material {
   }
   const nameRu = optStr(v.nameRu)
   if (nameRu) m.nameRu = nameRu
+  if (isObj(v.colorCode)) {
+    const system = optStr(v.colorCode.system)
+    const code = optStr(v.colorCode.code)
+    if (system && code) m.colorCode = { system, code }
+  }
   const maps = stringRecord(v.maps) as MaterialMaps | undefined
   if (maps) m.maps = maps
   if (Array.isArray(v.sizeMm) && v.sizeMm.length >= 2) m.sizeMm = [num(v.sizeMm[0], 1000, 1), num(v.sizeMm[1], 1000, 1)]
@@ -468,6 +474,14 @@ function readAsset(id: Id, v: Obj): Asset {
   if (typeof v.remote === 'boolean') a.remote = v.remote
   if (typeof v.custom === 'boolean') a.custom = v.custom
   return a
+}
+
+function readDesign(v: unknown): DocDesign | undefined {
+  if (!isObj(v)) return undefined
+  const d: DocDesign = {}
+  const styleId = optStr(v.styleId)
+  if (styleId) d.styleId = styleId
+  return Object.keys(d).length > 0 ? d : undefined
 }
 
 // ───────────────────────────── public API ─────────────────────────────
@@ -665,6 +679,10 @@ export function parseDoc(json: unknown): Doc {
     room.skirtingMaterialId = sk ?? DEFAULT_MATERIALS.skirting
     const labelledArea = optNum(v.labelledArea, 0, 1e6)
     if (labelledArea !== undefined && labelledArea > 0) room.labelledArea = labelledArea
+    if (isObj(v.design)) {
+      const styleId = optStr(v.design.styleId)
+      if (styleId) room.design = { styleId }
+    }
     doc.rooms[id] = room
   }
 
@@ -772,6 +790,10 @@ export function parseDoc(json: unknown): Doc {
   // ── project-local catalogue ──
   for (const [id, v] of entries(raw.materials, 'm')) doc.materials[id] = readMaterial(id, v)
   for (const [id, v] of entries(raw.assets, 'a')) doc.assets[id] = readAsset(id, v)
+
+  // ── design layer ──
+  const design = readDesign(raw.design)
+  if (design) doc.design = design
 
   // openings without an offset go to the middle of their wall (clamping happens in normalize)
   for (const id in doc.openings) {

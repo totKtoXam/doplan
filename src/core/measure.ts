@@ -245,3 +245,37 @@ export function setRunSource(doc: Doc, levelId: Id, key: string, source: 'measur
   }
   return true
 }
+
+/**
+ * Sets the distance between two wall nodes to `measuredMm`: `movingId` slides along the line from
+ * `fixedId`, and the nodes hanging on it through non-parallel walls follow (like applyMeasuredLength).
+ * Mutates `doc`; on failure nothing is changed.
+ */
+export function applyNodeDistance(doc: Doc, levelId: Id, fixedId: Id, movingId: Id, measuredMm: number): MeasureResult {
+  const fail = (error: string, before = 0): MeasureResult => ({ ok: false, error, delta: 0, before, after: before, moved: [], conflicts: [] })
+  const f = doc.nodes[fixedId]
+  const m = doc.nodes[movingId]
+  if (!f || !m || f.levelId !== levelId || m.levelId !== levelId) return fail('Узлы не найдены на этом уровне')
+  if (fixedId === movingId) return fail('Нужны два разных узла')
+  if (!Number.isFinite(measuredMm) || measuredMm < 10) return fail('Введите расстояние в миллиметрах (не меньше 10 мм)')
+  const before = Math.hypot(m.x - f.x, m.y - f.y)
+  if (before < 1) return fail('Узлы совпадают: направление сдвига не определено', before)
+  const dir: Vec2 = { x: (m.x - f.x) / before, y: (m.y - f.y) / before }
+  const moving = collectMovingNodes(doc, levelId, movingId, dir, new Set([fixedId])) ?? new Set<Id>([movingId])
+  const delta = measuredMm - before
+  const snapshot = new Map<Id, Vec2>()
+  const moves = new Map<Id, Vec2>()
+  for (const id of moving) {
+    const n = doc.nodes[id]
+    if (!n) continue
+    snapshot.set(id, { x: n.x, y: n.y })
+    moves.set(id, { x: n.x + dir.x * delta, y: n.y + dir.y * delta })
+  }
+  moveNodes(doc, moves)
+  const now = doc.nodes[movingId] && doc.nodes[fixedId] ? Math.hypot(doc.nodes[movingId].x - doc.nodes[fixedId].x, doc.nodes[movingId].y - doc.nodes[fixedId].y) : NaN
+  if (!Number.isFinite(now) || Math.abs(now - measuredMm) > 0.5) {
+    moveNodes(doc, snapshot)
+    return fail('Не удалось выставить расстояние между узлами', before)
+  }
+  return { ok: true, delta, before, after: now, moved: [...moving], conflicts: [] }
+}

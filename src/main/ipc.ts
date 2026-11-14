@@ -32,6 +32,9 @@ function on(channel: string, fn: Handler): void {
   })
 }
 
+/** exported for feature modules that register their own channels (ai-chat) */
+export { handle as handleIpc, on as onIpc }
+
 export function registerIpc(): void {
   handle(CH.projectOpen, (path?: unknown) => openProject(path))
   handle(CH.projectSave, (doc: unknown, path: unknown) => saveProject(doc, path))

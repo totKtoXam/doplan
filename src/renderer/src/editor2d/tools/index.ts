@@ -5,6 +5,7 @@ import { createDimensionTool, createLabelTool, createLightTool, createMeasureToo
 import { createItemTool } from './item'
 import { createCalibrateTool, createEraseTool, createSplitTool } from './modify'
 import { createOpeningTool } from './opening'
+import { createPencilTool } from './pencil'
 import { createEyedropperTool, createPaintTool } from './paint'
 import { createRoomTool } from './room'
 import { createSelectTool } from './select'
@@ -44,6 +45,7 @@ export function createTools(ctx: EditorCtx): Record<ToolId, Tool> {
     label: createLabelTool(ctx),
     measure: createMeasureTool(ctx),
     survey: createSurveyTool(ctx),
+    pencil: createPencilTool(ctx),
     paint: createPaintTool(ctx),
     eyedropper: createEyedropperTool(ctx),
     calibrate: createCalibrateTool(ctx),

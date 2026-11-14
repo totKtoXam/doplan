@@ -14,6 +14,9 @@ import { paths } from './paths'
 import { initProjectStore, projectFileFromArgv } from './project'
 import { registerProtocolHandlers, registerSchemes } from './protocol'
 import { registerIpc } from './ipc'
+// ── ai-chat block ──
+import { registerAiChat, shutdownAiChat } from './aichat'
+// ── end ai-chat block ──
 import { getSettings, onSettingsChanged } from './settings'
 import { closeWasConfirmed, createMainWindow, getMainWindow, isTrustedUrl, requestOpenFile } from './window'
 
@@ -104,6 +107,7 @@ if (!gotLock) {
     hardenSessions()
     registerProtocolHandlers()
     registerIpc()
+    registerAiChat() // ai-chat
     await Promise.all([initProjectStore(), ensureLibrary()])
 
     const s = await getSettings()
@@ -120,6 +124,7 @@ if (!gotLock) {
 
   // a confirmed close means the user saved or discarded: the crash-recovery snapshot is obsolete
   app.on('will-quit', () => {
+    shutdownAiChat() // ai-chat: stop agents, kill their processes
     if (!closeWasConfirmed()) return
     try {
       rmSync(join(paths.recovery, 'recovery.json'), { force: true })

@@ -7,6 +7,8 @@ import { useDoc } from '@/store/document'
 import { handles, onHandlesChange } from '@/store/handles'
 import { useNotify } from '@/store/notify'
 import { useUi } from '@/store/ui'
+import { api } from '@/store/api'
+import { APP_GIT } from './appVersion'
 import { IconBtn } from './primitives'
 
 export function formatLength(mm: number, units: Doc['settings']['units']): string {
@@ -176,6 +178,9 @@ export function StatusBar() {
           {backend === 'webgpu' ? 'WebGPU' : backend === 'webgl2' || backend === 'webgl' ? 'WebGL 2' : backend}
         </span>
       )}
+      <span className="shrink-0 font-mono text-[10px] text-faint" title={`doplan ${api.version}${APP_GIT ? `\n${APP_GIT}` : ''}`}>
+        v{api.version}
+      </span>
     </footer>
   )
 }

@@ -56,6 +56,21 @@ export function registerIpc(): void {
   handle(CH.projectReset, () => resetProjectAssets())
   handle(CH.projectAddAsset, (data: unknown, ext: unknown) => addProjectAsset(data, ext))
 
+  // project folders + git versions
+  handle(CH.projectRoot, () => getProjectRoot())
+  handle(CH.projectInstructions, () => projectInstructions())
+  handle(CH.projectSetInstructions, (text: unknown) => setProjectInstructions(text))
+  handle(CH.projectInfo, () => projectInfo())
+  handle(CH.projectDefaultLocation, () => defaultLocation())
+  handle(CH.projectPickLocation, (defaultPath: unknown) => pickLocation(defaultPath))
+  handle(CH.projectCreate, (doc: unknown, name: unknown, parent: unknown) => createProject(doc, name, parent))
+  handle(CH.projectOpenFolder, () => openProjectFolder())
+  handle(CH.projectExportZip, (doc: unknown) => exportZip(doc))
+  handle(CH.projectAttach, (path: unknown) => attachProject(path))
+  handle(CH.projectHistory, () => projectHistory())
+  handle(CH.projectVersionDoc, (sha: unknown) => projectVersionDoc(sha))
+  handle(CH.projectTagVersion, (sha: unknown, label: unknown) => tagProjectVersion(sha, label))
+
   handle(CH.filesPick, (filters: unknown, multi: unknown) => pickFiles(filters, multi))
   handle(CH.filesRead, (path: unknown) => readFileBytes(path))
   handle(CH.filesReadText, (path: unknown) => readFileText(path))

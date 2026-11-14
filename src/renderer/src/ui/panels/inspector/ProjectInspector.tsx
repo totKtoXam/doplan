@@ -7,6 +7,7 @@ import { useT } from '@/i18n'
 import { cn, focusRing, IconButton, Input, NumberInput, Row, Section, Segmented, Toggle } from '@/ui/kit'
 import { tx } from '../common/catalog'
 import { refsOnLevel } from '../common/edits'
+import { ProjectFolderSection } from '../ProjectFolderDialogs'
 import { Hint, InspectorHeader } from './shared'
 
 function setSettings(label: string, patch: Partial<DocSettings>, merge?: string) {
@@ -118,6 +119,8 @@ export function ProjectInspector() {
           />
         </Row>
       </Section>
+
+      <ProjectFolderSection />
 
       <Section title={t('Новые стены')} id="insp.proj.walls">
         <Row label={t('Толщина')}>

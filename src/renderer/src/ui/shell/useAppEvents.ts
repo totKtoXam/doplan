@@ -10,7 +10,9 @@ import { api, isElectron } from '@/store/api'
 import { dialogStore } from '@/store/dialogs'
 import { docStore } from '@/store/document'
 import { notifyStore, alertDialog } from '@/store/notify'
+import { projectStore } from '@/store/project'
 import { uiStore } from '@/store/ui'
+import { APP_GIT } from './appVersion'
 import type { ToolId } from '@/contracts'
 import { shortcutKey } from './keys'
 import { activateTool, TOOLS } from './ToolRail'
@@ -28,7 +30,7 @@ function isEditable(target: EventTarget | null): boolean {
 
 function anyDialogOpen(): boolean {
   const d = dialogStore.getState()
-  return d.bom || d.importModel || d.materialEditor || d.settings || d.photoPlan || d.render || notifyStore.getState().modals.length > 0
+  return d.bom || d.importModel || d.materialEditor || d.settings || d.photoPlan || d.render || notifyStore.getState().modals.length > 0 || projectStore.getState().dialog !== null
 }
 
 const TOOL_KEYS = new Map<string, ToolId>()
@@ -196,17 +198,30 @@ function onMenu(cmd: MenuCommand): void {
     case 'settings':
       dialogStore.getState().open('settings')
       break
+    case 'openFolder':
+      void actions.openProjectFolder()
+      break
+    case 'exportDoplan':
+      void actions.exportDoplan()
+      break
+    case 'history':
+      void actions.openHistory()
+      break
+    case 'instructions':
+      void actions.openInstructions()
+      break
     case 'about':
       void alertDialog(
         'doplan',
-        `${t('Планировки, фотореалистичное 3D и дизайн интерьера')}\n${t('Версия')} ${api.version} · ${api.platform}\n\n${t('Материалы и модели: Poly Haven, ambientCG, Kenney, Quaternius (CC0) и другие — см. лицензии в папке программы.')}`,
+        `${t('Планировки, фотореалистичное 3D и дизайн интерьера')}\n${t('Версия')} ${api.version}${APP_GIT ? ` (${APP_GIT})` : ''} · ${api.platform}\n\n${t('Материалы и модели: Poly Haven, ambientCG, Kenney, Quaternius (CC0) и другие — см. лицензии в папке программы.')}`,
       )
       break
   }
 }
 
 async function onOpenFile(path: string): Promise<void> {
-  if (/\.json$/i.test(path)) {
+  // a PlanSpec .json is imported; a project's plan.json opens the project folder
+  if (/\.json$/i.test(path) && !/(^|[\\/])plan\.json$/i.test(path)) {
     try {
       const text = await api.files.readText(path)
       await actions.importPlanSpec(text)
@@ -220,7 +235,9 @@ async function onOpenFile(path: string): Promise<void> {
 
 function syncTitle(): void {
   const { doc, filePath, dirty } = docStore.getState()
-  const name = filePath ? (filePath.split(/[\\/]/).pop() ?? doc.meta.name) : doc.meta.name
+  let name = filePath ? (filePath.split(/[\\/]/).pop() ?? doc.meta.name) : doc.meta.name
+  const viewing = projectStore.getState().viewing
+  if (viewing) name += ` (${t('версия')} ${viewing.short})`
   try {
     api.window.setTitle(name, dirty)
   } catch {
@@ -249,6 +266,11 @@ export function useAppEvents(enabled: boolean): { dragOver: boolean } {
     offs.push(
       docStore.subscribe((s, prev) => {
         if (s.dirty !== prev.dirty || s.filePath !== prev.filePath || s.doc.meta.name !== prev.doc.meta.name) syncTitle()
+      }),
+    )
+    offs.push(
+      projectStore.subscribe((s, prev) => {
+        if (s.viewing !== prev.viewing) syncTitle()
       }),
     )
 

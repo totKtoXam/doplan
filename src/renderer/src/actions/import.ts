@@ -255,6 +255,12 @@ export async function handleDroppedFiles(files: File[]): Promise<void> {
       return
     }
     const json = byExt(['json'])[0]
+    // plan.json of a project folder opens the project (folder format), not a PlanSpec import
+    const planPath = json && json.name.toLowerCase() === 'plan.json' ? pathOfDroppedFile(json) : null
+    if (planPath) {
+      await openProject(planPath)
+      return
+    }
     if (json) {
       await importPlanSpec(await json.text())
       return

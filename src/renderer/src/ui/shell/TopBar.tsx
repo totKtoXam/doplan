@@ -1,6 +1,8 @@
 import clsx from 'clsx'
 import type { ReactNode } from 'react'
 import {
+  Bot,
+  History,
   Box,
   Camera,
   ChevronDown,
@@ -80,6 +82,7 @@ export function TopBar() {
     { label: t('Новый проект'), icon: FilePlus, kbd: 'Ctrl+N', onSelect: () => void actions.newProject() },
     { label: t('Пример квартиры'), icon: House, onSelect: () => void actions.newSampleProject() },
     { label: t('Открыть…'), icon: FolderOpen, kbd: 'Ctrl+O', onSelect: () => void actions.openProject() },
+    { label: t('Открыть папку проекта…'), onSelect: () => void actions.openProjectFolder() },
     {
       type: 'submenu',
       label: t('Недавние'),
@@ -89,6 +92,8 @@ export function TopBar() {
     { type: 'separator' },
     { label: t('Сохранить'), icon: Save, kbd: 'Ctrl+S', onSelect: () => void actions.saveProject(false) },
     { label: t('Сохранить как…'), kbd: 'Ctrl+Shift+S', onSelect: () => void actions.saveProject(true) },
+    { label: t('История версий…'), icon: History, kbd: 'Ctrl+Shift+H', onSelect: () => void actions.openHistory() },
+    { label: t('Инструкции для ИИ…'), icon: Bot, onSelect: () => void actions.openInstructions() },
     { type: 'separator' },
     { type: 'header', label: t('Импорт') },
     { label: t('План из PlanSpec (JSON)…'), onSelect: () => void actions.importPlanSpec() },
@@ -113,6 +118,9 @@ export function TopBar() {
     { label: t('Рендер…'), icon: Sparkles, onSelect: () => dialogStore.getState().open('render') },
     { type: 'separator' },
     { label: t('Смета материалов…'), icon: ClipboardList, onSelect: () => dialogStore.getState().open('bom') },
+    { type: 'separator' },
+    { type: 'header', label: t('Проект') },
+    { label: t('Файл .doplan (один файл)…'), onSelect: () => void actions.exportDoplan() },
   ]
 
   const viewOptions: { value: ViewMode; label: ReactNode; title: string; kbd: string }[] = [

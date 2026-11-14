@@ -9,6 +9,7 @@ import { ensureEngine, exportGlb, exportPlan, renderStill, snapshot3d } from './
 import { addUnderlayFromData, handleDroppedFiles, importModelFiles, importPlanSpec, importUnderlay, planFromPhoto } from './import'
 import { addLevel, deleteLevel, moveLevel, renameLevel, toggleLevelVisible } from './levels'
 import { autosaveNow, confirmDiscard, handleCloseRequest, loadDocument, newProject, newSampleProject, offerRecovery, openProject, saveProject } from './project'
+import { exportDoplan, openHistory, openInstructions, openProjectFolder } from './project'
 
 export const actions = {
   // project
@@ -21,6 +22,11 @@ export const actions = {
   autosaveNow,
   handleCloseRequest,
   offerRecovery,
+  // project folders + git versions
+  openProjectFolder,
+  exportDoplan,
+  openHistory,
+  openInstructions,
   // export
   exportPlan,
   exportGlb,

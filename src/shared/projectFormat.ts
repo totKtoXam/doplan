@@ -147,8 +147,8 @@ export function tagNameFrom(label: string): string {
   let s = String(label ?? '')
     .normalize('NFC')
     .trim()
-    // characters git refuses in ref names: control, space, ~ ^ : ? * [ \ and DEL
-    .replace(/[\u0000- \u007f~^:?*[\\]+/g, '-')
+    // characters git refuses in ref names (control, space, ~ ^ : ? * [ \, DEL) plus ] for symmetry
+    .replace(/[\u0000- \u007f~^:?*[\]\\]+/g, '-')
     .replace(/\.{2,}/g, '.')
     .replace(/@\{/g, '-')
     .replace(/\/+/g, '-')

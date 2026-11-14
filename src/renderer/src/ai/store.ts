@@ -17,12 +17,14 @@ import { getMark, marksStore } from '@/store/marks'
 import { uiStore } from '@/store/ui'
 import { DraftHost, liveHost } from './hosts'
 import { markSnapshot } from './markSnapshot'
+import type { MarkupShape } from './markup'
 import { chipFor, entityLevel, lookupFor } from './summary'
 import { describeCall, executeTool, isMutating, previewCall } from './tools'
 
 export type DockTab = 'props' | 'ai'
 
-export type PendingImage = AiImage & { url: string }
+/** an image waiting to be sent; `markup` keeps the clean picture and the pencil marks drawn over it (re-editable) */
+export type PendingImage = AiImage & { url: string; markup?: { base: string; shapes: MarkupShape[] } }
 
 /** in-app CLI sign-in in progress (or just finished) */
 export interface LoginState {
@@ -367,6 +369,13 @@ export async function addUnderlayImage(): Promise<boolean> {
   if (!u) return false
   set({ images: [...get().images, await toAttachment(u.src, 'подложка')].slice(0, 8) })
   return true
+}
+
+/** puts the image back after drawing pencil marks on it */
+export function replaceImage(i: number, img: PendingImage): void {
+  const images = get().images
+  if (!images[i]) return
+  set({ images: images.map((x, j) => (j === i ? img : x)) })
 }
 
 export function removeImage(i: number): void {

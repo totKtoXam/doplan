@@ -18,24 +18,36 @@ import {
 import { useEffect, useRef, useState } from 'react'
 import type { QualityPreset } from '@core/types'
 import { actions } from '@/actions'
-import { useT } from '@/i18n'
+import { addTranslations, useT } from '@/i18n'
 import { api } from '@/store/api'
 import { docStore, useDoc } from '@/store/document'
 import { handles, setHandle } from '@/store/handles'
 import { pathTracingDone, uiStore, useUi } from '@/store/ui'
 import type { Engine3DHandle } from '@/contracts'
+import { prefs3dStore, usePrefs3d, type TraceMode } from '@/view3d/prefs'
 import { IconBtn, MiniSelect, Segmented, TextBtn } from './primitives'
 
 const QUALITY: QualityPreset[] = ['low', 'medium', 'high', 'ultra']
 const QUALITY_NAMES: Record<QualityPreset, string> = { low: 'Низкое', medium: 'Среднее', high: 'Высокое', ultra: 'Ультра' }
 const PT_TARGETS = [64, 256, 1024, 4096]
 
+addTranslations('en', {
+  Выкл: 'Off',
+  Вручную: 'Manual',
+  Авто: 'Auto',
+  'Трассировка выключена: только реальное время': 'Path tracing off: realtime only',
+  'Трассировка по кнопке; при движении камеры и правках показывается обычный кадр':
+    'Path tracing with the button; the realtime frame shows while the camera moves or the project changes',
+  'Трассировка запускается сама, когда камера и проект в покое': 'Path tracing starts by itself once the camera and the project rest',
+  'Остановить трассировку': 'Stop path tracing',
+})
+
 /** Global flag read by the 3D engine when it picks a backend ('webgpu' | 'webgl'). */
 function publishBackendPref(pref: 'webgpu' | 'webgl'): void {
   ;(globalThis as unknown as { __DOPLAN_BACKEND__?: string }).__DOPLAN_BACKEND__ = pref
 }
 
-function Overlay({ engine }: { engine: Engine3DHandle }) {
+function Overlay({ engine, hidden }: { engine: Engine3DHandle; hidden?: boolean }) {
   const t = useT()
   const cameraMode = useUi((s) => s.cameraMode)
   const pt = useUi((s) => s.pathTracing)
@@ -45,6 +57,10 @@ function Overlay({ engine }: { engine: Engine3DHandle }) {
   const ceiling = useDoc((s) => s.doc.render.ceilingVisible)
   const [target, setTarget] = useState(256)
   const ptDone = pathTracingDone(pt)
+  const traceMode = usePrefs3d((s) => s.traceMode)
+  const canTrace = engine.backend === 'webgpu'
+  // "Авто": a stop with the button holds until the next edit of the document
+  const [autoHeld, setAutoHeld] = useState(false)
 
   const setCam = (m: 'orbit' | 'walk' | 'top') => {
     uiStore.getState().set({ cameraMode: m })
@@ -63,6 +79,31 @@ function Overlay({ engine }: { engine: Engine3DHandle }) {
     engine.stopPathTracing()
     uiStore.getState().set({ pathTracing: { ...uiStore.getState().pathTracing, active: false } })
   }
+  const userStopPt = () => {
+    if (prefs3dStore.getState().traceMode === 'auto') setAutoHeld(true)
+    stopPt()
+  }
+  const setTraceMode = (m: TraceMode) => {
+    setAutoHeld(false)
+    prefs3dStore.getState().setTraceMode(m)
+  }
+
+  useEffect(() => {
+    if (!autoHeld) return
+    return docStore.subscribe((s, p) => {
+      if (s.doc !== p.doc) setAutoHeld(false)
+    })
+  }, [autoHeld])
+
+  useEffect(() => {
+    if (traceMode === 'off') {
+      if (uiStore.getState().pathTracing.active) stopPt()
+      return
+    }
+    // the session itself waits for the camera and the document to rest before it traces
+    if (traceMode === 'auto' && canTrace && !hidden && !autoHeld && !pt.active) startPt()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [traceMode, canTrace, hidden, autoHeld, pt.active])
 
   return (
     <>
@@ -95,7 +136,19 @@ function Overlay({ engine }: { engine: Engine3DHandle }) {
             engine.setQuality(q)
           }}
         />
-        {ptDone ? (
+        {canTrace && (
+          <Segmented
+            size="sm"
+            value={traceMode}
+            onChange={setTraceMode}
+            options={[
+              { value: 'off', label: t('Выкл'), title: t('Трассировка выключена: только реальное время') },
+              { value: 'manual', label: t('Вручную'), title: t('Трассировка по кнопке; при движении камеры и правках показывается обычный кадр') },
+              { value: 'auto', label: t('Авто'), title: t('Трассировка запускается сама, когда камера и проект в покое') },
+            ]}
+          />
+        )}
+        {traceMode === 'off' || !canTrace ? null : ptDone ? (
           <>
             {/* converged: the same target starts over, a higher one keeps accumulating */}
             <MiniSelect title={t('Сэмплов')} value={target} options={PT_TARGETS.map((n) => ({ value: n, label: String(n) }))} onChange={(v) => setTarget(Number(v))} />
@@ -105,14 +158,14 @@ function Overlay({ engine }: { engine: Engine3DHandle }) {
               label={target > pt.target ? `${t('Досчитать до')} ${target}` : t('Перезапустить трассировку')}
               onClick={startPt}
             />
-            <TextBtn variant="default" className="h-6 px-2 text-accent" onClick={stopPt} title={t('Трассировка завершена — выключить')}>
+            <TextBtn variant="default" className="h-6 px-2 text-accent" onClick={userStopPt} title={t('Трассировка завершена — выключить')}>
               <Check size={12} />
               {t('Готово')}
               <span className="font-mono">{pt.target}</span>
             </TextBtn>
           </>
         ) : pt.active ? (
-          <TextBtn variant="default" className="h-6 px-2" onClick={stopPt}>
+          <TextBtn variant="default" className="h-6 px-2" onClick={userStopPt} title={t('Остановить трассировку')}>
             <Pause size={12} />
             <span className="font-mono">
               {pt.samples}/{pt.target}
@@ -238,7 +291,7 @@ export function Viewport3D({ hidden }: { hidden?: boolean }) {
           <div className="max-w-sm text-[11px] text-faint">{t('WebGL работает на большинстве видеокарт, но медленнее и без некоторых эффектов.')}</div>
         </div>
       )}
-      {engine && <Overlay engine={engine} />}
+      {engine && <Overlay engine={engine} hidden={hidden} />}
     </div>
   )
 }

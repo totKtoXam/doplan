@@ -15,6 +15,13 @@
  *  - `OIDNDenoiser` needs `oidn-webgpu` + bundled weights; neither is installed, so stills are
  *    returned without denoising (more samples instead)
  *
+ * Interactive sessions never show a noisy image: while the camera moves or anything changes the
+ * engine draws the realtime raster frame (`rasterFrame`), tracing resumes once things rest and the
+ * traced image replaces the raster frame when it has a few samples. On resume only what changed is
+ * updated: camera, transforms + visibility (cut-away, ceilings), materials, lights in place; a new
+ * scene capture only when meshes or geometries changed (the geometry BVHs are cached on the
+ * geometries, so it costs the new geometries' BVHs plus packing).
+ *
  * The module is imported lazily so the WebGPU kernels and three-mesh-bvh only load when the user
  * actually asks for path tracing.
  */
@@ -25,6 +32,7 @@ import type { EngineContext, PathTracerHandle, StillOptions } from '@/contracts'
 import { uiStore } from '@/store/ui'
 import { addTranslations, t } from '@/i18n'
 import { imageToBlob, readTarget } from './export'
+import { perfBegin, perfEnabled, perfEnd, perfRecord, perfTime } from './perf'
 import { currentQuality, getShared, isWebGPU, type QualitySettings } from './quality'
 
 // The TSL typings are stricter than what a dynamically assembled graph satisfies.
@@ -53,7 +61,19 @@ addTranslations('en', {
 
 const MAX_STILL_EDGE = 8192
 const DEFAULT_STILL_SAMPLES = 256
-const SCENE_REBUILD_DELAY = 150
+/** the camera has to rest this long before tracing resumes (the raster frame shows meanwhile) */
+const CAMERA_REST_MS = 450
+/** the same after an edit of the document, lights or materials */
+const EDIT_REST_MS = 1200
+/**
+ * The traced image replaces the raster frame once it has SWAP_SAMPLES samples per pixel, or
+ * SWAP_SAMPLES_LATE after SWAP_LATE_MS on slow GPUs / heavy presets.
+ */
+const SWAP_SAMPLES = 8
+const SWAP_SAMPLES_LATE = 3
+const SWAP_LATE_MS = 1500
+/** an item model still loading (placeholder shown) delays the capture by up to this long */
+const MODEL_WAIT_MS = 4000
 const COUNT_INTERVAL_MS = 300
 
 function abortError(): DOMException {
@@ -102,7 +122,9 @@ async function encodeImage(image: ImageData, width: number, height: number, type
   return imageToBlob(image, width, height, { type, opaque: true })
 }
 
-export function createPathTracer(ctx: EngineContext): PathTracerHandle {
+export type InteractivePathTracer = PathTracerHandle & { readonly rasterFrame: boolean }
+
+export function createPathTracer(ctx: EngineContext): InteractivePathTracer {
   const shared = getShared(ctx)
   const renderer = ctx.renderer
   const supported = isWebGPU(renderer)
@@ -117,9 +139,31 @@ export function createPathTracer(ctx: EngineContext): PathTracerHandle {
   let interactive = false
   let target = 0
   let progressCb: ((s: number) => void) | null = null
-  let ready = false // the interactive scene is captured and tracing
+  let ready = false // the interactive scene is captured (the BVH matches the scene's structure)
   let sceneToken = 0
-  let rebuildTimer: ReturnType<typeof setTimeout> | null = null
+  /**
+   * What the viewport shows while a session runs:
+   *  - 'hold': the realtime raster frame (camera moving, document edited, scene being captured);
+   *    tracing resumes at `holdUntil`
+   *  - 'warm': accumulating off screen, the canvas keeps the last raster frame
+   *  - 'trace': the traced image is presented
+   */
+  let phase: 'hold' | 'warm' | 'trace' = 'hold'
+  let holdUntil = 0
+  let warmSince = 0
+  let placeholders = 0 // placeholder meshes seen by the last computeStructSig()
+  let modelWaitSince = 0
+  let captureReason = 'start'
+  let sceneEvents = 0
+  let capturedPlaceholders = 0 // placeholders in the captured scene (models that failed stay so)
+  let holdTimer: ReturnType<typeof setTimeout> | null = null
+  let capturing = false
+  // pending work applied when the hold ends
+  let needCapture = true
+  let needSceneUpdate = false
+  let needTransforms = false
+  let needCamera = false
+  let structSig = 0
   let avgSamples = 0
   let minSamples = 0
   let lastReported = -1
@@ -183,10 +227,12 @@ export function createPathTracer(ctx: EngineContext): PathTracerHandle {
     if (!trackTimestamp || pt.frameBudget <= 0) pt.frameBudget = q.ptFrameBudget
     pt.renderScale = q.ptRenderScale
     pt.synchronizeRenderSize = true
-    pt.renderToCanvas = true
-    pt.dynamicLowRes = true
-    pt.renderDelay = 16
-    pt.fadeDuration = 250
+    // no noisy low-resolution preview: the raster frame stays on screen until the traced image
+    // has SWAP_SAMPLES samples, then the tracer presents it at once
+    pt.renderToCanvas = phase === 'trace'
+    pt.dynamicLowRes = false
+    pt.renderDelay = 0
+    pt.fadeDuration = 0
     pt.minSamples = 1
     pt.pause = false
     pt.maxSamples = Math.max(1, target)
@@ -288,6 +334,28 @@ export function createPathTracer(ctx: EngineContext): PathTracerHandle {
     return h
   }
 
+  /** hash of the meshes and their geometries: a change needs a new BVH (`setScene`) */
+  function computeStructSig(): number {
+    let h = 0
+    placeholders = 0
+    const helpers = ctx.roots.helpers
+    const visit = (o: THREE.Object3D): void => {
+      if (o === helpers) return
+      const g = (o as THREE.Mesh).geometry as THREE.BufferGeometry | undefined
+      if (g) {
+        if (o.userData.placeholder) placeholders++
+        h = (Math.imul(h, 31) + o.id) | 0
+        h = (Math.imul(h, 31) + g.id) | 0
+        h = (Math.imul(h, 31) + ((g.attributes.position as THREE.BufferAttribute | undefined)?.version ?? 0)) | 0
+        // not the index version: the BVH build itself flags the index for upload
+        h = (Math.imul(h, 31) + (g.index ? g.index.count : -1)) | 0
+      }
+      for (const c of o.children) visit(c)
+    }
+    visit(ctx.scene)
+    return h
+  }
+
   function resetCounters(): void {
     avgSamples = 0
     minSamples = 0
@@ -308,8 +376,11 @@ export function createPathTracer(ctx: EngineContext): PathTracerHandle {
 
   function onProgress(e: { stage: string; progress: number | null; samples?: { min: number; avg: number } }): void {
     if (e.stage !== 'rendering' || !e.samples) return
+    // a late measurement of the image before the pause
+    if (phase === 'hold') return
     avgSamples = e.samples.avg
     minSamples = e.samples.min
+    if (avgSamples >= 1) perfEnd('ptRest1', 'pt.rest→1spp')
     if (interactive && !stillRunning) {
       report(minSamples >= target ? target : Math.min(target - 1, avgSamples))
       ctx.invalidate()
@@ -318,6 +389,8 @@ export function createPathTracer(ctx: EngineContext): PathTracerHandle {
 
   // ── interactive scene capture ──
   async function captureScene(pt: PathTracer, camera: THREE.Camera): Promise<void> {
+    const t0 = performance.now()
+    instrumentSetScene(pt)
     try {
       await pt.setSceneAsync(ctx.scene, camera)
     } catch (err) {
@@ -325,54 +398,179 @@ export function createPathTracer(ctx: EngineContext): PathTracerHandle {
       console.warn('[pathtracer] async scene build failed, building synchronously', err)
       pt.setScene(ctx.scene, camera)
     }
+    perfRecord('pt.setScene.total', t0, captureReason)
+    firstSampleTimed = false
   }
 
-  async function rebuildInteractive(): Promise<void> {
+  /** times the synchronous part of `setScene` (TLAS + buffer packing + texture atlas) */
+  function instrumentSetScene(pt: PathTracer): void {
+    const anyPt = pt as unknown as { setScene: (s: THREE.Scene, c: THREE.Camera) => void; __timed?: boolean }
+    if (anyPt.__timed) return
+    anyPt.__timed = true
+    const original = anyPt.setScene.bind(pt)
+    anyPt.setScene = (s, c) => {
+      const t = performance.now()
+      try {
+        original(s, c)
+      } finally {
+        perfRecord('pt.setScene.pack', t)
+      }
+    }
+  }
+  let firstSampleTimed = true
+
+  /** captures the scene (BVHs of new geometries in workers, then the packed scene) */
+  async function capture(): Promise<void> {
     const token = ++sceneToken
-    ready = false
+    capturing = true
+    const done = (): boolean => {
+      if (token !== sceneToken) return true
+      capturing = false
+      return disposed || !interactive || stillRunning
+    }
     let rt: Runtime
     try {
       rt = await ensureRuntime()
     } catch (err) {
-      if (token === sceneToken) fail(err)
+      if (token === sceneToken) {
+        capturing = false
+        fail(err)
+      }
       return
     }
-    if (disposed || token !== sceneToken || !interactive || stillRunning) return
+    if (token !== sceneToken || disposed || !interactive || stillRunning) {
+      done()
+      return
+    }
     const pt = rt.pt
     configureInteractive(pt, currentQuality(ctx))
     hideHelpers()
     ctx.scene.updateMatrixWorld(true)
-    // taken before the (async) capture: a change during the BVH build triggers another rebuild
+    // taken before the (async) capture: changes during the BVH build set the flags again
     const vis = computeVisSig()
+    const events = sceneEvents
+    needCapture = false
+    needSceneUpdate = false
+    needTransforms = false
+    needCamera = false
     try {
       await captureScene(pt, ctx.camera)
     } catch (err) {
-      if (token === sceneToken) fail(err)
+      if (token === sceneToken) {
+        capturing = false
+        fail(err)
+      }
       return
     }
-    if (disposed || token !== sceneToken || !interactive || stillRunning) return
+    if (done()) return
     visSig = vis
+    // taken after the capture: the BVH build indexes non-indexed geometries. A scene change
+    // during the build may have been missed by the snapshot, so it captures again
+    structSig = computeStructSig()
+    capturedPlaceholders = placeholders
+    if (sceneEvents !== events) needCapture = true
     pt.setCamera(ctx.camera)
-    pt.reset()
     cameraChanged()
     lightSig = computeLightSig()
     envSig = computeEnvSig()
+    pt.reset()
     ready = true
     resetCounters()
     if (uiStore.getState().hint === t('Трассировка пути: подготовка сцены…')) hint(t('Трассировка пути'))
     ctx.invalidate()
   }
 
-  /** keepTracing: the old capture stays on screen (and accumulating) until the rebuild starts */
-  function scheduleRebuild(keepTracing = false): void {
+  /**
+   * Applies what changed during the hold with the cheapest update: a new BVH only when meshes or
+   * geometries changed, otherwise materials / transforms / lights / camera in place.
+   * @returns false while an asynchronous capture runs
+   */
+  function applyPending(rt: Runtime): boolean {
+    ctx.scene.updateMatrixWorld(true)
+    const structChanged = computeStructSig() !== structSig
+    if (!ready || needCapture || structChanged) {
+      // an item model that is still loading would make this capture stale right away
+      const now = performance.now()
+      if (placeholders > capturedPlaceholders && ready) {
+        if (!modelWaitSince) modelWaitSince = now
+        if (now - modelWaitSince < MODEL_WAIT_MS) {
+          hold(150)
+          return false
+        }
+      }
+      modelWaitSince = 0
+      captureReason = !ready ? 'start' : needCapture ? 'lights' : 'geometry'
+      if (!capturing) void capture()
+      return false
+    }
+    modelWaitSince = 0
+    const pt = rt.pt
+    const kinds: string[] = []
+    const t0 = performance.now()
+    if (needSceneUpdate) {
+      pt.updateMaterials()
+      pt.updateTransforms()
+      kinds.push('materials', 'transforms')
+    } else if (needTransforms) {
+      pt.updateTransforms()
+      kinds.push('transforms')
+    }
+    visSig = computeVisSig()
+    const ls = computeLightSig()
+    if (ls !== lightSig) {
+      lightSig = ls
+      pt.updateLights()
+      kinds.push('lights')
+    }
+    const es = computeEnvSig()
+    if (es !== envSig) {
+      envSig = es
+      pt.updateEnvironment()
+      kinds.push('environment')
+    }
+    if (needCamera) {
+      pt.updateCamera()
+      kinds.push('camera')
+    }
+    pt.reset()
+    needSceneUpdate = false
+    needTransforms = false
+    needCamera = false
+    perfRecord('pt.apply', t0, kinds.join('+') || 'reset')
+    resetCounters()
+    return true
+  }
+
+  function clearHoldTimer(): void {
+    if (holdTimer) clearTimeout(holdTimer)
+    holdTimer = null
+  }
+
+  /** shows the raster frame and resumes tracing once nothing changed for `ms` */
+  function hold(ms: number): void {
     if (!interactive || disposed) return
-    if (!keepTracing) ready = false
-    if (rebuildTimer) clearTimeout(rebuildTimer)
-    rebuildTimer = setTimeout(() => {
-      rebuildTimer = null
-      void rebuildInteractive()
-    }, SCENE_REBUILD_DELAY)
+    if (phase !== 'hold') {
+      phase = 'hold'
+      if (runtime) runtime.pt.renderToCanvas = false
+      resetCounters()
+    }
+    holdUntil = Math.max(holdUntil, performance.now() + ms)
+    clearHoldTimer()
+    holdTimer = setTimeout(() => {
+      holdTimer = null
+      ctx.invalidate()
+    }, Math.max(0, holdUntil - performance.now()) + 5)
     ctx.invalidate()
+  }
+
+  /** a fresh capture for the running session (after a still, or when it starts) */
+  function restartSession(): void {
+    ready = false
+    needCapture = true
+    phase = 'hold'
+    holdUntil = 0
+    cameraChanged() // the capture takes the current camera
+    hold(0)
   }
 
   function fail(err: unknown): void {
@@ -391,13 +589,13 @@ export function createPathTracer(ctx: EngineContext): PathTracerHandle {
   function endInteractive(): void {
     interactive = false
     ready = false
+    capturing = false
+    phase = 'hold'
     sceneToken++
-    if (rebuildTimer) {
-      clearTimeout(rebuildTimer)
-      rebuildTimer = null
-    }
+    clearHoldTimer()
     progressCb = null
     lastReported = -1
+    if (runtime) runtime.pt.renderToCanvas = false
     if (!stillRunning) {
       restoreHelpers()
       shared.setPathTracing(false)
@@ -406,31 +604,22 @@ export function createPathTracer(ctx: EngineContext): PathTracerHandle {
   }
 
   // ── subscriptions ──
+  // every change pauses tracing (the raster frame shows) and resumes it once things rest
   const unsubScene = ctx.onSceneChanged(() => {
-    if (interactive && !stillRunning) scheduleRebuild()
+    if (!interactive || stillRunning) return
+    sceneEvents++
+    needSceneUpdate = true
+    hold(EDIT_REST_MS)
   })
   const unsubLighting = shared.onLightingChanged((c) => {
-    if (!interactive || stillRunning || !ready || !runtime) return
+    if (!interactive || stillRunning) return
     if (c.structure) {
-      scheduleRebuild()
+      needCapture = true
+      hold(EDIT_REST_MS)
       return
     }
-    const pt = runtime.pt
-    try {
-      const ls = computeLightSig()
-      if (ls !== lightSig) {
-        lightSig = ls
-        pt.updateLights()
-        resetCounters()
-      }
-      const es = computeEnvSig()
-      if (es !== envSig) {
-        envSig = es
-        pt.updateEnvironment()
-        resetCounters()
-      }
-    } catch (err) {
-      fail(err)
+    if (ready && (computeLightSig() !== lightSig || computeEnvSig() !== envSig)) {
+      hold(EDIT_REST_MS)
       return
     }
     // tone mapping / exposure only change the blit: draw again
@@ -439,9 +628,7 @@ export function createPathTracer(ctx: EngineContext): PathTracerHandle {
   const unsubQuality = shared.onQualityChanged(() => {
     if (!interactive || stillRunning || !runtime) return
     configureInteractive(runtime.pt, currentQuality(ctx))
-    runtime.pt.reset()
-    resetCounters()
-    ctx.invalidate()
+    hold(0)
   })
 
   // ── still rendering ──
@@ -508,10 +695,8 @@ export function createPathTracer(ctx: EngineContext): PathTracerHandle {
     stillRunning = true
     sceneToken++ // cancels an interactive capture in flight
     ready = false
-    if (rebuildTimer) {
-      clearTimeout(rebuildTimer)
-      rebuildTimer = null
-    }
+    capturing = false
+    clearHoldTimer()
     shared.stillBusy = true
     shared.setPathTracing(true)
     hideHelpers()
@@ -589,8 +774,9 @@ export function createPathTracer(ctx: EngineContext): PathTracerHandle {
       shared.stillBusy = false
       if (resumeInteractive && interactive && !disposed) {
         // the interactive session continues from scratch with the viewport camera
+        phase = 'hold'
         configureInteractive(pt, currentQuality(ctx))
-        void rebuildInteractive()
+        restartSession()
       } else {
         try {
           configureInteractive(pt, q)
@@ -605,8 +791,15 @@ export function createPathTracer(ctx: EngineContext): PathTracerHandle {
     }
   }
 
+  if (perfEnabled()) {
+    ;(globalThis as unknown as { __doplanPT?: unknown }).__doplanPT = {
+      get runtime() { return runtime },
+      get state() { return { interactive, ready, stillRunning, phase, capturing, holdIn: holdUntil - performance.now(), sceneToken, avgSamples, minSamples, target } },
+    }
+  }
+
   // ── public handle ──
-  const handle: PathTracerHandle = {
+  const handle: InteractivePathTracer = {
     start(targetSamples, onProgressCb) {
       if (disposed) return
       if (!supported) {
@@ -626,8 +819,7 @@ export function createPathTracer(ctx: EngineContext): PathTracerHandle {
           runtime.pt.maxSamples = target
           if (ready && minSamples >= target) {
             // already converged for this target: start over (a higher target just continues)
-            runtime.pt.reset()
-            resetCounters()
+            hold(0)
           } else if (ready) report(Math.min(target - 1, avgSamples))
         }
         ctx.invalidate()
@@ -644,8 +836,7 @@ export function createPathTracer(ctx: EngineContext): PathTracerHandle {
       shared.setPathTracing(true)
       hideHelpers()
       hint(t('Трассировка пути: подготовка сцены…'))
-      void rebuildInteractive()
-      ctx.invalidate()
+      restartSession()
     },
     stop() {
       if (!interactive) return
@@ -661,24 +852,56 @@ export function createPathTracer(ctx: EngineContext): PathTracerHandle {
     get active() {
       return interactive && !stillRunning && !disposed
     },
+    /** true while the engine should draw the realtime raster frame instead of the traced one */
+    get rasterFrame() {
+      return interactive && !stillRunning && !disposed && phase === 'hold'
+    },
     step() {
       if (!interactive || stillRunning || disposed) return 0
-      if (!ready || !runtime) return 0
-      const pt = runtime.pt
-      try {
-        if (cameraChanged()) {
-          pt.updateCamera()
-          resetCounters()
-          // a pending visibility recapture (the only kind that keeps `ready`) waits for the camera to rest
-          if (rebuildTimer) scheduleRebuild(true)
-        } else if (!rebuildTimer && computeVisSig() !== visSig) {
-          // cut-away / ceilings changed: recapture once the camera rests (not on every drag frame)
-          scheduleRebuild(true)
+      // camera motion and cut-away / ceiling visibility pause tracing until the camera rests;
+      // they never rebuild the BVH (visibility is a per-object flag of the packed scene)
+      if (cameraChanged()) {
+        needCamera = true
+        hold(CAMERA_REST_MS)
+      }
+      if (ready && !capturing && computeVisSig() !== visSig) {
+        needTransforms = true
+        hold(CAMERA_REST_MS)
+      }
+      if (phase === 'hold') {
+        if (capturing || performance.now() < holdUntil) return 0
+        if (!runtime) {
+          void capture()
+          return 0
         }
-        pt.renderSample()
+        try {
+          if (!applyPending(runtime)) return 0
+        } catch (err) {
+          fail(err)
+          return 0
+        }
+        phase = 'warm'
+        warmSince = performance.now()
+        perfBegin('ptRest1')
+        perfBegin('ptRestShown')
+      }
+      const pt = runtime!.pt
+      try {
+        if (!firstSampleTimed) {
+          firstSampleTimed = true
+          perfTime('pt.firstSample.cpu', () => pt.renderSample())
+        } else pt.renderSample()
       } catch (err) {
         fail(err)
         return 0
+      }
+      const swapAt = performance.now() - warmSince > SWAP_LATE_MS ? SWAP_SAMPLES_LATE : SWAP_SAMPLES
+      if (phase === 'warm' && (avgSamples >= Math.min(swapAt, target) || minSamples >= target)) {
+        // enough samples to beat the raster frame: present the traced image from the next frame on
+        phase = 'trace'
+        pt.renderToCanvas = true
+        perfEnd('ptRestShown', 'pt.rest→shown')
+        ctx.invalidate()
       }
       return minSamples >= target ? target : Math.min(target - 1, Math.floor(avgSamples))
     },
@@ -698,8 +921,7 @@ export function createPathTracer(ctx: EngineContext): PathTracerHandle {
       unsubScene()
       unsubLighting()
       unsubQuality()
-      if (rebuildTimer) clearTimeout(rebuildTimer)
-      rebuildTimer = null
+      clearHoldTimer()
       interactive = false
       ready = false
       sceneToken++

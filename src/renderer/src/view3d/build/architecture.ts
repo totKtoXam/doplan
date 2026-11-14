@@ -156,10 +156,10 @@ export class Architecture {
         hasLeft: !!adj.left,
         hasRight: !!adj.right,
       }
-      if (old) {
-        if (old.lowered && !this.exportMode) this.setLowered(rec, true)
-        this.dropGroup(old.group)
-      }
+      // the cut-away variant is built up front (hidden): toggling it then only flips visibility,
+      // which the path tracer applies in place instead of rebuilding its scene
+      if (!this.exportMode) this.setLowered(rec, !!old?.lowered)
+      if (old) this.dropGroup(old.group)
       this.walls.set(wall.id, rec)
       this.root.add(group)
       changed = true
@@ -246,7 +246,7 @@ export class Architecture {
   }
 
   private setLowered(rec: WallRec, lowered: boolean): void {
-    if (lowered && !rec.low) {
+    if (!rec.low) {
       rec.low = buildWall(
         { ...rec.input, heightMm: Math.min(CUT_HEIGHT, rec.input.wall.height), lowered: true },
         this.lib,

@@ -255,6 +255,11 @@ export interface RenderShared {
   pathTracing: boolean
   /** true while a still is being rendered: interaction and controls stay passive */
   stillBusy: boolean
+  /**
+   * Set by the lighting rig: switches the lights to their realtime levels for one raster frame
+   * drawn during a path tracing session (camera moving, document edited) and returns the undo.
+   */
+  rasterLook: (() => () => void) | null
   onLightingChanged(cb: (c: LightingChange) => void): () => void
   emitLightingChanged(c: LightingChange): void
   onQualityChanged(cb: (q: QualityPreset) => void): () => void
@@ -298,6 +303,7 @@ export function getShared(ctx: EngineContext): RenderShared {
     controls: null,
     quality: null,
     pathTracing: false,
+    rasterLook: null,
     stillBusy: false,
     onLightingChanged: lighting.on,
     emitLightingChanged: lighting.emit,

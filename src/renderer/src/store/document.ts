@@ -417,3 +417,15 @@ export const docStore = createStore<DocStoreState>()((set, get) => {
 export function useDoc<T>(selector: (s: DocStoreState) => T): T {
   return useStore(docStore, selector)
 }
+
+// ───────────── project versions: undo labels since the last commit ─────────────
+
+/** id of the current history position (pass it back to `undoLabelsSince` later) */
+export function historyPosition(): number {
+  return currentId()
+}
+
+/** labels of the history entries made after position `since`, oldest first (undone entries excluded) */
+export function undoLabelsSince(since: number): string[] {
+  return undoStack.filter((e) => e.id > since).map((e) => e.label)
+}

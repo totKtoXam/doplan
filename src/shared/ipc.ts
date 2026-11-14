@@ -31,6 +31,54 @@ export interface AppSettings {
   recent: RecentProject[]
 }
 
+// ── project folders + git versions ──
+
+export interface ProjectOpenResult {
+  /** project folder, .doplan or .json path */
+  path: string
+  doc: unknown
+  /** 'folder' = project folder (path is the folder); 'zip' = .doplan; 'json' = bare document JSON */
+  kind?: 'folder' | 'zip' | 'json'
+  /** folder projects: the folder is a git repository */
+  git?: boolean
+}
+
+export interface ProjectSaveOptions {
+  /** commit message for folder projects (default «Сохранение») */
+  message?: string
+  /** write even if plan.json was changed on disk by someone else since it was read */
+  overwrite?: boolean
+}
+
+export interface ProjectSaveResult {
+  path: string
+  /** folder projects: plan.json changed on disk since it was read; nothing was written */
+  externalChange?: boolean
+  /** folder projects: new commit sha, null when nothing changed or git is unavailable */
+  commit?: string | null
+  /** folder projects: the commit failed (the files were written) */
+  commitError?: string
+}
+
+export interface ProjectInfo {
+  root: string | null
+  /** git executable found */
+  gitAvailable: boolean
+  /** the open folder is a git repository */
+  repo: boolean
+  gitVersion: string
+}
+
+export interface ProjectVersion {
+  sha: string
+  short: string
+  /** ISO 8601 */
+  date: string
+  author: string
+  message: string
+  tags: { name: string; message: string }[]
+}
+
 export type MenuCommand =
   | 'new'
   | 'open'
@@ -55,6 +103,11 @@ export type MenuCommand =
   | 'zoomFit'
   | 'settings'
   | 'about'
+  // project folders + git versions
+  | 'openFolder'
+  | 'exportDoplan'
+  | 'history'
+  | 'instructions'
 
 export interface DoplanApi {
   platform: string
@@ -62,9 +115,9 @@ export interface DoplanApi {
 
   project: {
     /** shows an open dialog when `path` is omitted. Returns parsed doc.json (unvalidated). */
-    open(path?: string): Promise<{ path: string; doc: unknown } | null>
+    open(path?: string): Promise<ProjectOpenResult | null>
     /** `path` null → save dialog. Writes the .doplan zip atomically, embedding project assets. */
-    save(doc: unknown, path: string | null): Promise<{ path: string } | null>
+    save(doc: unknown, path: string | null, opts?: ProjectSaveOptions): Promise<ProjectSaveResult | null>
     /** crash-recovery snapshot in userData/recovery */
     autosave(doc: unknown, path: string | null): Promise<void>
     /** returns a recovery snapshot left by a crashed session, if any */
@@ -74,6 +127,43 @@ export interface DoplanApi {
     reset(): Promise<void>
     /** copies bytes into the project asset dir; returns a doplan-asset://project/… URL */
     addAsset(data: ArrayBuffer, ext: string): Promise<string>
+
+    // ── project folders + git versions ──────────────────────────────────────────────
+    // A project is a folder: plan.json (stable pretty JSON), manifest.json, assets/, AGENTS.md
+    // (AI instructions), CLAUDE.md (`@AGENTS.md`), .gitignore; versioned with the system git.
+    // `open(path)` also accepts a project folder or its plan.json and then resolves with
+    // `kind: 'folder'` and `path` = the folder. `save(doc, folder, opts)` writes the folder and
+    // commits (`opts.message`); a `.doplan` path still writes the single-file zip.
+
+    /**
+     * Folder of the currently open project, or null (unsaved document, .doplan / .json file).
+     * For the AI chat: CLI agents run with this folder as cwd and read AGENTS.md / plan.json there.
+     */
+    root(): Promise<string | null>
+    /** text of AGENTS.md of the open project folder; null when no folder project is open */
+    instructions(): Promise<string | null>
+    /** overwrites AGENTS.md of the open project folder and commits it; resolves with the commit sha (null: no git / no change) */
+    setInstructions(text: string): Promise<string | null>
+    /** root, git availability and the git version string ('' when git is not installed) */
+    info(): Promise<ProjectInfo>
+    /** default parent directory for new projects (Documents/doplan) */
+    defaultLocation(): Promise<string>
+    /** folder picker for the parent directory of a new project; the chosen folder may then be passed to create() */
+    pickLocation(defaultPath?: string): Promise<string | null>
+    /** creates `<parent>/<name>/` (parent null → defaultLocation()), writes `doc`, runs `git init` + the first commit */
+    create(doc: unknown, name: string, parent: string | null): Promise<ProjectOpenResult>
+    /** folder picker → open a project folder */
+    openFolder(): Promise<ProjectOpenResult | null>
+    /** save dialog → single-file .doplan zip (export / sharing); does not change the open project */
+    exportZip(doc: unknown): Promise<string | null>
+    /** makes a folder the open project without reading it (after restoring a recovery snapshot) */
+    attach(path: string | null): Promise<boolean>
+    /** git log of the open project folder, newest first */
+    history(): Promise<ProjectVersion[]>
+    /** plan.json of an old version (unvalidated); its assets become available under doplan-asset://project/ */
+    versionDoc(sha: string): Promise<unknown>
+    /** creates an annotated git tag on a version; `label` is free text (the tag name is derived from it) */
+    tagVersion(sha: string, label: string): Promise<void>
   }
 
   files: {

@@ -1,10 +1,33 @@
 import { createHash } from 'node:crypto'
-import { promises as fsp } from 'node:fs'
+import { existsSync, promises as fsp } from 'node:fs'
 import { dirname, extname, join } from 'node:path'
 import { app, dialog } from 'electron'
-import { strFromU8, strToU8, unzipSync, zipSync, type Zippable } from 'fflate'
+import { strToU8, unzipSync, zipSync, type Zippable } from 'fflate'
+import type { ProjectInfo, ProjectOpenResult, ProjectSaveOptions, ProjectSaveResult, ProjectVersion } from '../shared/ipc'
+import { PLAN_FILE, tagNameFrom } from '../shared/projectFormat'
 import { assertReadable, grantPath } from './access'
 import { atomicWrite, cleanExt, cleanFileName, ensureDir, exists, readJson, rmrf, toBytes } from './fsutil'
+import { findGit, gitLog, gitTag, gitVersion, isRepo } from './git'
+import {
+  ASSET_NAME_RE,
+  commitFolder,
+  createFolderProject,
+  defaultProjectsDir,
+  docName,
+  folderRootOf,
+  getProjectRoot,
+  isDirectory,
+  parseJsonText,
+  planChangedOnDisk,
+  readFolderProject,
+  readInstructions,
+  readVersion,
+  referencedAssets,
+  rememberPlanOnDisk,
+  setProjectRoot,
+  writeFolderProject,
+  writeInstructions,
+} from './projectFolder'
 import { paths } from './paths'
 import { addRecent } from './settings'
 import { getMainWindow } from './window'
@@ -12,7 +35,6 @@ import { getMainWindow } from './window'
 const FORMAT_VERSION = 1
 const MAX_PROJECT_BYTES = 2 * 1024 * 1024 * 1024
 const PROJECT_URL = 'doplan-asset://project/'
-const ASSET_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
 const STORED_EXT = new Set(['glb', 'jpg', 'jpeg', 'png', 'webp', 'avif', 'ktx2', 'gif', 'mp4', 'webm', 'zip', 'hdr', 'exr'])
 
 interface Manifest {
@@ -32,11 +54,6 @@ interface RecoveryFile {
 
 const recoveryFile = () => join(paths.recovery, 'recovery.json')
 
-function docName(doc: unknown): string | undefined {
-  const name = (doc as { meta?: { name?: unknown } } | null)?.meta?.name
-  return typeof name === 'string' && name.trim() ? name.trim() : undefined
-}
-
 /** startup housekeeping: keep embedded assets only if a crash-recovery snapshot needs them */
 export async function initProjectStore(): Promise<void> {
   await ensureDir(paths.recovery)
@@ -47,48 +64,57 @@ export async function initProjectStore(): Promise<void> {
 export async function resetProjectAssets(): Promise<void> {
   await rmrf(paths.projectAssets)
   await ensureDir(paths.projectAssets)
+  setProjectRoot(null)
 }
 
 function isZip(buf: Uint8Array): boolean {
   return buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4b && (buf[2] === 3 || buf[2] === 5) && (buf[3] === 4 || buf[3] === 6)
 }
 
-function parseJsonText(bytes: Uint8Array): unknown {
-  let text = strFromU8(bytes)
-  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1)
-  try {
-    return JSON.parse(text)
-  } catch (err) {
-    throw new Error(`Файл повреждён: некорректный JSON (${(err as Error).message})`)
-  }
+async function showOpen(opts: Electron.OpenDialogOptions): Promise<string | null> {
+  const w = getMainWindow()
+  const res = w ? await dialog.showOpenDialog(w, opts) : await dialog.showOpenDialog(opts)
+  if (res.canceled || !res.filePaths[0]) return null
+  grantPath(res.filePaths[0])
+  return res.filePaths[0]
 }
 
-export async function openProject(pathArg?: unknown): Promise<{ path: string; doc: unknown } | null> {
+async function openFolderAt(root: string): Promise<ProjectOpenResult> {
+  const doc = await readFolderProject(root)
+  grantPath(root)
+  setProjectRoot(root)
+  await addRecent(root, docName(doc))
+  const git = !!(await findGit()) && (await isRepo(root).catch(() => false))
+  return { path: root, doc, kind: 'folder', git }
+}
+
+export async function openProject(pathArg?: unknown): Promise<ProjectOpenResult | null> {
   let path: string
   if (typeof pathArg === 'string' && pathArg) {
     path = await assertReadable(pathArg)
   } else {
-    const w = getMainWindow()
-    const opts: Electron.OpenDialogOptions = {
+    const chosen = await showOpen({
       title: 'Открыть проект',
       properties: ['openFile'],
       filters: [
-        { name: 'Проект doplan', extensions: ['doplan'] },
-        { name: 'JSON', extensions: ['json'] },
+        { name: 'Проект doplan (plan.json, .doplan)', extensions: ['json', 'doplan'] },
         { name: 'Все файлы', extensions: ['*'] },
       ],
-    }
-    const res = w ? await dialog.showOpenDialog(w, opts) : await dialog.showOpenDialog(opts)
-    if (res.canceled || !res.filePaths[0]) return null
-    path = res.filePaths[0]
-    grantPath(path)
+    })
+    if (!chosen) return null
+    path = chosen
   }
+
+  const root = await folderRootOf(path)
+  if (root) return openFolderAt(root)
+  if (await isDirectory(path)) throw new Error('В этой папке нет plan.json — это не папка проекта doplan')
 
   const st = await fsp.stat(path)
   if (st.size > MAX_PROJECT_BYTES) throw new Error('Файл проекта слишком большой')
   const buf = new Uint8Array(await fsp.readFile(path))
   let doc: unknown
-  if (isZip(buf)) {
+  const zip = isZip(buf)
+  if (zip) {
     let files: Record<string, Uint8Array>
     try {
       files = unzipSync(buf)
@@ -115,48 +141,18 @@ export async function openProject(pathArg?: unknown): Promise<{ path: string; do
   }
   grantPath(path)
   if (extname(path).toLowerCase() === '.doplan') await addRecent(path, docName(doc))
-  return { path, doc }
+  return { path, doc, kind: zip ? 'zip' : 'json' }
 }
 
-function referencedAssets(json: string): string[] {
-  const out = new Set<string>()
-  const re = /doplan-asset:\/\/project\/([A-Za-z0-9][A-Za-z0-9._%-]{0,200})/g
-  let m: RegExpExecArray | null
-  while ((m = re.exec(json))) {
-    let name = m[1]
-    try {
-      name = decodeURIComponent(name)
-    } catch {
-      continue
-    }
-    if (ASSET_NAME_RE.test(name)) out.add(name)
-  }
-  return [...out]
+export async function openProjectFolder(): Promise<ProjectOpenResult | null> {
+  const chosen = await showOpen({ title: 'Открыть папку проекта', properties: ['openDirectory'] })
+  if (!chosen) return null
+  const root = await folderRootOf(chosen)
+  if (!root) throw new Error('В этой папке нет plan.json — это не папка проекта doplan')
+  return openFolderAt(root)
 }
 
-export async function saveProject(doc: unknown, pathArg: unknown): Promise<{ path: string } | null> {
-  let path: string | null = null
-  if (typeof pathArg === 'string' && pathArg) {
-    // only paths the user already chose/opened may be overwritten silently
-    path = await assertReadable(pathArg).catch(() => null)
-  }
-  if (!path) {
-    const w = getMainWindow()
-    const suggested =
-      typeof pathArg === 'string' && pathArg
-        ? pathArg
-        : join(app.getPath('documents'), `${cleanFileName(docName(doc) ?? 'Проект')}.doplan`)
-    const opts: Electron.SaveDialogOptions = {
-      title: 'Сохранить проект',
-      defaultPath: suggested,
-      filters: [{ name: 'Проект doplan', extensions: ['doplan'] }],
-    }
-    const res = w ? await dialog.showSaveDialog(w, opts) : await dialog.showSaveDialog(opts)
-    if (res.canceled || !res.filePath) return null
-    path = res.filePath
-  }
-  if (extname(path).toLowerCase() !== '.doplan') path += '.doplan'
-
+async function buildZip(doc: unknown): Promise<Uint8Array> {
   const json = JSON.stringify(doc)
   if (json === undefined) throw new Error('Пустой документ')
   const now = new Date().toISOString()
@@ -186,13 +182,168 @@ export async function saveProject(doc: unknown, pathArg: unknown): Promise<{ pat
   zip['manifest.json'] = [strToU8(JSON.stringify(manifest, null, 2)), { level: 6 }]
   zip['doc.json'] = [strToU8(json), { level: 6 }]
   if (Object.keys(assetDir).length) zip['assets'] = assetDir
-  const bytes = zipSync(zip, { mtime: new Date() })
+  return zipSync(zip, { mtime: new Date() })
+}
+
+async function zipSaveDialog(doc: unknown, suggested: string, title: string): Promise<string | null> {
+  const w = getMainWindow()
+  const opts: Electron.SaveDialogOptions = {
+    title,
+    defaultPath: suggested,
+    filters: [{ name: 'Проект doplan', extensions: ['doplan'] }],
+  }
+  const res = w ? await dialog.showSaveDialog(w, opts) : await dialog.showSaveDialog(opts)
+  if (res.canceled || !res.filePath) return null
+  let path = res.filePath
+  if (extname(path).toLowerCase() !== '.doplan') path += '.doplan'
+  return path
+}
+
+async function saveFolder(root: string, doc: unknown, opts: ProjectSaveOptions): Promise<ProjectSaveResult> {
+  if (!opts.overwrite && (await planChangedOnDisk(root))) return { path: root, externalChange: true }
+  await writeFolderProject(root, doc)
+  grantPath(root)
+  setProjectRoot(root)
+  await addRecent(root, docName(doc))
+  try {
+    const commit = await commitFolder(root, opts.message ?? 'Сохранение')
+    return { path: root, commit }
+  } catch (err) {
+    console.warn('[doplan] commit failed', err)
+    return { path: root, commit: null, commitError: (err as Error).message }
+  }
+}
+
+export async function saveProject(doc: unknown, pathArg: unknown, optsArg?: unknown): Promise<ProjectSaveResult | null> {
+  const opts = (optsArg && typeof optsArg === 'object' ? optsArg : {}) as ProjectSaveOptions
+  const saveOpts: ProjectSaveOptions = {
+    message: typeof opts.message === 'string' ? opts.message.slice(0, 2000) : undefined,
+    overwrite: opts.overwrite === true,
+  }
+  let path: string | null = null
+  if (typeof pathArg === 'string' && pathArg) {
+    // only paths the user already chose/opened may be overwritten silently
+    path = await assertReadable(pathArg).catch(() => null)
+    if (path && (await isDirectory(path))) return saveFolder(path, doc, saveOpts)
+  }
+  if (!path) {
+    const suggested =
+      typeof pathArg === 'string' && pathArg
+        ? pathArg
+        : join(app.getPath('documents'), `${cleanFileName(docName(doc) ?? 'Проект')}.doplan`)
+    path = await zipSaveDialog(doc, suggested, 'Сохранить проект')
+    if (!path) return null
+  }
+  if (extname(path).toLowerCase() !== '.doplan') path += '.doplan'
+  const bytes = await buildZip(doc)
   await ensureDir(dirname(path))
   await atomicWrite(path, bytes)
   grantPath(path)
+  setProjectRoot(null)
   await addRecent(path, docName(doc))
   return { path }
 }
+
+/** single-file .doplan copy of the document (sharing); the open project stays as it is */
+export async function exportZip(doc: unknown): Promise<string | null> {
+  const root = getProjectRoot()
+  const base = cleanFileName(docName(doc) ?? 'Проект')
+  const suggested = root ? join(dirname(root), `${base}.doplan`) : join(app.getPath('documents'), `${base}.doplan`)
+  const path = await zipSaveDialog(doc, suggested, 'Экспорт в .doplan')
+  if (!path) return null
+  const bytes = await buildZip(doc)
+  await ensureDir(dirname(path))
+  await atomicWrite(path, bytes)
+  grantPath(path)
+  return path
+}
+
+// ───────────── project folders ─────────────
+
+export async function defaultLocation(): Promise<string> {
+  return defaultProjectsDir()
+}
+
+export async function pickLocation(defaultPath?: unknown): Promise<string | null> {
+  return showOpen({
+    title: 'Где создать папку проекта',
+    defaultPath: typeof defaultPath === 'string' && defaultPath ? defaultPath : defaultProjectsDir(),
+    properties: ['openDirectory', 'createDirectory', 'promptToCreate'],
+  })
+}
+
+export async function createProject(doc: unknown, nameArg: unknown, parentArg: unknown): Promise<ProjectOpenResult> {
+  const name = typeof nameArg === 'string' ? nameArg.trim() : ''
+  if (!name) throw new Error('Укажите название проекта')
+  let parent: string
+  if (typeof parentArg === 'string' && parentArg) {
+    parent = await assertReadable(parentArg)
+  } else {
+    parent = defaultProjectsDir()
+  }
+  await ensureDir(parent)
+  const res = await createFolderProject(parent, name, doc)
+  grantPath(res.root)
+  setProjectRoot(res.root)
+  await addRecent(res.root, docName(doc) ?? name)
+  return { path: res.root, doc, kind: 'folder', git: res.git }
+}
+
+export async function attachProject(pathArg: unknown): Promise<boolean> {
+  if (typeof pathArg !== 'string' || !pathArg) {
+    setProjectRoot(null)
+    return false
+  }
+  const path = await assertReadable(pathArg)
+  const root = await folderRootOf(path)
+  setProjectRoot(root)
+  if (root) await rememberPlanOnDisk(root)
+  return !!root
+}
+
+export async function projectInfo(): Promise<ProjectInfo> {
+  const root = getProjectRoot()
+  const gitAvailable = !!(await findGit())
+  const repo = !!root && gitAvailable && (await isRepo(root).catch(() => false))
+  return { root, gitAvailable, repo, gitVersion: gitVersion() }
+}
+
+function requireRoot(): string {
+  const root = getProjectRoot()
+  if (!root) throw new Error('Проект не сохранён в папку. Сохраните его как папку проекта.')
+  return root
+}
+
+export async function projectInstructions(): Promise<string | null> {
+  const root = getProjectRoot()
+  return root ? readInstructions(root) : null
+}
+
+export async function setProjectInstructions(text: unknown): Promise<string | null> {
+  if (typeof text !== 'string') throw new Error('Ожидался текст')
+  if (text.length > 1024 * 1024) throw new Error('Слишком длинный текст инструкций')
+  return writeInstructions(requireRoot(), text)
+}
+
+export async function projectHistory(): Promise<ProjectVersion[]> {
+  const root = getProjectRoot()
+  if (!root || !(await findGit()) || !(await isRepo(root))) return []
+  return gitLog(root)
+}
+
+export async function projectVersionDoc(sha: unknown): Promise<unknown> {
+  if (typeof sha !== 'string') throw new Error('Некорректная версия')
+  return readVersion(requireRoot(), sha)
+}
+
+export async function tagProjectVersion(sha: unknown, label: unknown): Promise<void> {
+  if (typeof sha !== 'string' || typeof label !== 'string') throw new Error('Некорректные аргументы')
+  const name = tagNameFrom(label)
+  if (!name) throw new Error('Введите название метки')
+  await gitTag(requireRoot(), sha, name, label.trim())
+}
+
+// ───────────── recovery ─────────────
 
 export async function autosave(doc: unknown, path: unknown): Promise<void> {
   const rec: RecoveryFile = {
@@ -224,12 +375,13 @@ export async function addProjectAsset(data: unknown, ext: unknown): Promise<stri
   return PROJECT_URL + name
 }
 
+/** .doplan / .json file, a project folder or its plan.json given on the command line */
 export function projectFileFromArgv(argv: string[]): string | null {
   for (const a of argv.slice(1)) {
     if (!a || a.startsWith('-')) continue
     const ext = extname(a).toLowerCase()
     if (ext === '.doplan' || ext === '.json') return a
+    if (existsSync(join(a, PLAN_FILE))) return a
   }
   return null
 }
-

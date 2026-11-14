@@ -4,6 +4,21 @@ import { downloadEntry, importMaterial, importModel, loadCatalog, removeEntry, s
 import { CH } from './channels'
 import { exportPdf, pickFiles, readFileBytes, readFileText, reveal, saveBinary, saveText } from './files'
 import { addProjectAsset, autosave, clearRecovery, openProject, recover, resetProjectAssets, saveProject } from './project'
+import {
+  attachProject,
+  createProject,
+  defaultLocation,
+  exportZip,
+  openProjectFolder,
+  pickLocation,
+  projectHistory,
+  projectInfo,
+  projectInstructions,
+  projectVersionDoc,
+  setProjectInstructions,
+  tagProjectVersion,
+} from './project'
+import { getProjectRoot } from './projectFolder'
 import { getSettings, setApiKey, setSettings } from './settings'
 import { confirmClose, getMainWindow, isTrustedUrl, setWindowTitle } from './window'
 
@@ -34,7 +49,7 @@ function on(channel: string, fn: Handler): void {
 
 export function registerIpc(): void {
   handle(CH.projectOpen, (path?: unknown) => openProject(path))
-  handle(CH.projectSave, (doc: unknown, path: unknown) => saveProject(doc, path))
+  handle(CH.projectSave, (doc: unknown, path: unknown, opts: unknown) => saveProject(doc, path, opts))
   handle(CH.projectAutosave, (doc: unknown, path: unknown) => autosave(doc, path))
   handle(CH.projectRecover, () => recover())
   handle(CH.projectClearRecovery, () => clearRecovery())

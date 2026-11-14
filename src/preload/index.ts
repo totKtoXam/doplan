@@ -54,12 +54,26 @@ const api: DoplanApi = {
 
   project: {
     open: (path) => invoke(CH.projectOpen, path),
-    save: (doc, path) => invoke(CH.projectSave, doc, path),
+    save: (doc, path, opts) => invoke(CH.projectSave, doc, path, opts ?? {}),
     autosave: (doc, path) => invoke(CH.projectAutosave, doc, path),
     recover: () => invoke(CH.projectRecover),
     clearRecovery: () => invoke(CH.projectClearRecovery),
     reset: () => invoke(CH.projectReset),
     addAsset: (data, ext) => invoke(CH.projectAddAsset, data, ext),
+    // project folders + git versions
+    root: () => invoke(CH.projectRoot),
+    instructions: () => invoke(CH.projectInstructions),
+    setInstructions: (text) => invoke(CH.projectSetInstructions, text),
+    info: () => invoke(CH.projectInfo),
+    defaultLocation: () => invoke(CH.projectDefaultLocation),
+    pickLocation: (defaultPath) => invoke(CH.projectPickLocation, defaultPath ?? null),
+    create: (doc, name, parent) => invoke(CH.projectCreate, doc, name, parent),
+    openFolder: () => invoke(CH.projectOpenFolder),
+    exportZip: (doc) => invoke(CH.projectExportZip, doc),
+    attach: (path) => invoke(CH.projectAttach, path),
+    history: () => invoke(CH.projectHistory),
+    versionDoc: (sha) => invoke(CH.projectVersionDoc, sha),
+    tagVersion: (sha, label) => invoke(CH.projectTagVersion, sha, label),
   },
 
   files: {

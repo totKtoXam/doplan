@@ -5070,11 +5070,11 @@
    "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-119/adb3b931f3ef4941830eea9705657a3d.glb",
    "thumb": "https://media.sketchfab.com/models/adb3b931f3ef4941830eea9705657a3d/thumbnails/694c1c2699d94114b5ba08815abf4dbb/32fff4bb5b394eb89befc834bd32b162.jpeg",
    "sizeMm": [
-    316,
-    562,
+    360,
+    650,
     780
    ],
-   "sizeNote": "European close-coupled toilet, height ~780 mm (cf. 360×650×780)",
+   "sizeNote": "European close-coupled toilet, real unit 360×650×780 mm (model stretched within the aspect tolerance)",
    "approxSizeMB": 2.87,
    "attributionRequired": true,
    "fix": {

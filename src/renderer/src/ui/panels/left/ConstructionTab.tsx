@@ -2,12 +2,13 @@ import { useState } from 'react'
 import type { OpeningPreset } from '@/contracts'
 import { FileUp, ImageUp, ScanText } from 'lucide-react'
 import type { DocSettings, OpeningKind, RoomType, Vec2, WallKind } from '@core/types'
-import { addWall, defaultRoom, OPENING_DEFAULTS, polylabel } from '@core'
+import { addWall, defaultRoom, OPENING_DEFAULTS, openingForLeaf, polylabel } from '@core'
 import { uiStore, useUi } from '@/store/ui'
 import { docStore, useDoc } from '@/store/document'
 import { handles } from '@/store/handles'
 import { actions } from '@/actions'
 import { useT } from '@/i18n'
+import '@/ui/catalogI18n'
 import { Button, Dialog, Input, NumberInput, Row, Section, Segmented, Select, Toggle, fmtNum } from '@/ui/kit'
 import { DOOR_KINDS, OPENING_KIND_RU, ROOM_TYPES, roomTypeName, WALL_KIND_RU, WINDOW_KINDS, isWindowKind } from '../common/labels'
 import { freeOrigin, offsetPolygon } from '../common/edits'
@@ -116,8 +117,8 @@ export function ConstructionTab() {
               key={p.id}
               icon={<OpeningKindIcon kind={p.kind} />}
               label={t(p.label)}
-              sub={`${fmtNum((p.patch.width ?? OPENING_DEFAULTS[p.kind].width) / 10, 0)}×${fmtNum((p.patch.height ?? OPENING_DEFAULTS[p.kind].height) / 10, 0)}`}
-              active={tool === 'door' && openingPreset?.id === p.id}
+              sub={`${fmtNum(p.leaf[0] / 10, 0)}×${fmtNum(p.leaf[1] / 10, 0)}`}
+              active={tool === 'door' && openingPreset?.id === p.id && openingKind === p.kind}
               onClick={() => pickPreset(p)}
             />
           ))}
@@ -157,22 +158,29 @@ export function ConstructionTab() {
   )
 }
 
-/** ready door looks; width / height / style can be changed in the inspector afterwards */
-const DOOR_PRESETS: (OpeningPreset & { label: string })[] = [
-  { id: 'flush', label: 'Гладкая', kind: 'door', patch: { style: 'flush', width: 800, leafMaterialId: 'mat_wood_white' } },
-  { id: 'panel', label: 'Филёнчатая', kind: 'door', patch: { style: 'panel', width: 800, leafMaterialId: 'mat_wood_oak_bleached' } },
-  { id: 'glazed', label: 'Остеклённая', kind: 'door', patch: { style: 'glazed', width: 800, leafMaterialId: 'mat_wood_white' } },
-  { id: 'insert', label: 'Царговая', kind: 'door', patch: { style: 'insert', width: 800, leafMaterialId: 'mat_wood_ash_grey' } },
-  { id: 'glass', label: 'Стеклянная', kind: 'door', patch: { style: 'glass', width: 800, leafMaterialId: 'mat_glass_frosted', frameMaterialId: 'mat_metal_aluminium' } },
-  { id: 'narrow', label: 'В санузел 600', kind: 'door', patch: { style: 'flush', width: 600, height: 2000 } },
-  { id: 'tall', label: 'Высокая 2300', kind: 'door', patch: { style: 'flush', width: 900, height: 2300, leafMaterialId: 'mat_wood_walnut' } },
-  { id: 'double-glazed', label: 'Двустворчатая остеклённая', kind: 'doubleDoor', patch: { style: 'glazed', width: 1300 } },
-  { id: 'pocket', label: 'Пенал в стену', kind: 'slidingDoor', patch: { slide: 'pocket', style: 'flush', width: 800 } },
-  { id: 'barn', label: 'Амбарная', kind: 'slidingDoor', patch: { slide: 'barn', style: 'flush', width: 900, leafMaterialId: 'mat_wood_oak_natural' } },
-  { id: 'glass-slide', label: 'Стеклянное купе', kind: 'slidingDoor', patch: { slide: 'surface', style: 'glass', width: 900, leafMaterialId: 'mat_glass_frosted' } },
-  { id: 'folding', label: 'Гармошка', kind: 'slidingDoor', patch: { slide: 'folding', width: 800, leafMaterialId: 'mat_plastic_white' } },
-  { id: 'steel', label: 'Входная стальная', kind: 'entranceDoor', patch: { style: 'flush', width: 960, height: 2050, leafMaterialId: 'mat_metal_black', frameMaterialId: 'mat_metal_black' } },
-  { id: 'steel-glazed', label: 'Входная со стеклом', kind: 'entranceDoor', patch: { style: 'glazed', width: 960, height: 2050, leafMaterialId: 'mat_paint_anthracite', frameMaterialId: 'mat_metal_black' } },
+type DoorPreset = OpeningPreset & { label: string; leaf: [number, number] }
+
+/** a door preset given by its leaf size (1:1, as sold); the opening is the leaf plus the frame */
+function doorPreset(id: string, label: string, kind: OpeningKind, leaf: [number, number], patch: OpeningPreset['patch'] = {}): DoorPreset {
+  return { id, label, leaf, kind, patch: { ...patch, ...openingForLeaf(kind, patch.slide, leaf[0], leaf[1]) } }
+}
+
+/** ready door looks; the leaf size / style can be changed in the inspector afterwards */
+const DOOR_PRESETS: DoorPreset[] = [
+  doorPreset('flush', 'Гладкая', 'door', [800, 2000], { style: 'flush', leafMaterialId: 'mat_wood_white' }),
+  doorPreset('panel', 'Филёнчатая', 'door', [800, 2000], { style: 'panel', leafMaterialId: 'mat_wood_oak_bleached' }),
+  doorPreset('glazed', 'Остеклённая', 'door', [800, 2000], { style: 'glazed', leafMaterialId: 'mat_wood_white' }),
+  doorPreset('insert', 'Царговая', 'door', [800, 2000], { style: 'insert', leafMaterialId: 'mat_wood_ash_grey' }),
+  doorPreset('glass', 'Стеклянная', 'door', [800, 2000], { style: 'glass', leafMaterialId: 'mat_glass_frosted', frameMaterialId: 'mat_metal_aluminium' }),
+  doorPreset('narrow', 'В санузел 600', 'door', [600, 2000], { style: 'flush' }),
+  doorPreset('tall', 'Высокая 2300', 'door', [900, 2300], { style: 'flush', leafMaterialId: 'mat_wood_walnut' }),
+  doorPreset('double-glazed', 'Двустворчатая остеклённая', 'doubleDoor', [1200, 2000], { style: 'glazed' }),
+  doorPreset('pocket', 'Пенал в стену', 'slidingDoor', [800, 2000], { slide: 'pocket', style: 'flush' }),
+  doorPreset('barn', 'Амбарная', 'slidingDoor', [900, 2000], { slide: 'barn', style: 'flush', leafMaterialId: 'mat_wood_oak_natural' }),
+  doorPreset('glass-slide', 'Стеклянное купе', 'slidingDoor', [900, 2000], { slide: 'surface', style: 'glass', leafMaterialId: 'mat_glass_frosted' }),
+  doorPreset('folding', 'Гармошка', 'slidingDoor', [800, 2000], { slide: 'folding', leafMaterialId: 'mat_plastic_white' }),
+  doorPreset('steel', 'Входная стальная', 'entranceDoor', [860, 2000], { style: 'flush', leafMaterialId: 'mat_metal_black', frameMaterialId: 'mat_metal_black' }),
+  doorPreset('steel-glazed', 'Входная со стеклом', 'entranceDoor', [860, 2000], { style: 'glazed', leafMaterialId: 'mat_paint_anthracite', frameMaterialId: 'mat_metal_black' }),
 ]
 
 function sizeLabel(k: OpeningKind): string {

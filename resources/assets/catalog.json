@@ -14058,8 +14058,8 @@
    "kind": "model",
    "src": "models/toilet_adb3/adb3b931f3ef4941830eea9705657a3d.glb",
    "size": {
-    "w": 316,
-    "d": 562,
+    "w": 360,
+    "d": 650,
     "h": 780
    },
    "mount": "floor",

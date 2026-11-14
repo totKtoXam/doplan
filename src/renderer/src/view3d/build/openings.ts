@@ -26,7 +26,10 @@ export interface OpeningInput {
 interface Parts {
   frame: GeoBuilder
   leaf: GeoBuilder
+  /** lites set into an opaque leaf (always the default glass) */
   glass: GeoBuilder
+  /** an all-glass leaf: the leaf material when one is chosen, else the default glass; paints as the leaf */
+  glassLeaf: GeoBuilder
   metal: GeoBuilder
 }
 
@@ -61,7 +64,7 @@ export function buildOpening(input: OpeningInput, lib: MaterialLibraryEx, factor
   }
   if (zLeft > zRight) [zLeft, zRight] = [zRight, zLeft]
   const fr: Frame = { zLeft, zRight, wallH: wall.height * MM }
-  const parts: Parts = { frame: new GeoBuilder(), leaf: new GeoBuilder(), glass: new GeoBuilder(), metal: new GeoBuilder() }
+  const parts: Parts = { frame: new GeoBuilder(), leaf: new GeoBuilder(), glass: new GeoBuilder(), glassLeaf: new GeoBuilder(), metal: new GeoBuilder() }
 
   const W = Math.max(0.2, o.width * MM)
   const y0 = Math.max(0, o.sill * MM)
@@ -143,8 +146,8 @@ export function buildOpening(input: OpeningInput, lib: MaterialLibraryEx, factor
     }
   }
 
-  const add = (gb: GeoBuilder, material: THREE.Material, part: string, shadow = true): void => {
-    const mesh = gb.mesh(material, ref, { part, slot: part })
+  const add = (gb: GeoBuilder, material: THREE.Material, part: string, shadow = true, slot = part): void => {
+    const mesh = gb.mesh(material, ref, { part, slot })
     if (!mesh) return
     mesh.castShadow = shadow
     group.add(mesh)
@@ -152,6 +155,7 @@ export function buildOpening(input: OpeningInput, lib: MaterialLibraryEx, factor
   add(parts.frame, lib.get(frameId), 'frame')
   add(parts.leaf, lib.get(leafId), 'leaf', !glassLeaf)
   add(parts.glass, lib.get(DEFAULT_MATERIALS.glass), 'glass', false)
+  add(parts.glassLeaf, lib.get(o.leafMaterialId ?? DEFAULT_MATERIALS.glass), 'glassLeaf', false, 'leaf')
   add(parts.metal, lib.plain({ color: '#b4b7bb', roughness: 0.32, metalness: 1 }), 'hardware')
 
   // ── curtains ──
@@ -237,26 +241,36 @@ function hingedLeaf(
   }
   const entrance = style === 'entrance' || style === 'entranceFlush' || style === 'entranceGlazed'
   if (style === 'glass') {
-    box(p.leaf, 0, width, yb, yt, 0.012, 0.022)
+    box(p.glassLeaf, 0, width, yb, yt, 0.012, 0.022)
   } else if (style === 'glazed' || style === 'insert') {
     leafFace(p, box, style, width, yb, yt, th)
   } else {
-    box(p.leaf, 0, width, yb, yt, 0, th)
     const h = yt - yb
     const mx = Math.min(0.13, width * 0.18)
-    if (style === 'entranceGlazed') {
-      // narrow vertical lite next to the free edge, framed on both faces
-      const g0 = width * 0.6
-      const g1 = width - 0.15
-      if (g1 - g0 > 0.06 && h > 1.2) {
-        for (const [d0, d1] of [
-          [-0.006, 0],
-          [th, th + 0.006],
-        ]) {
-          box(p.metal, g0 - 0.02, g1 + 0.02, yb + 0.35, yt - 0.25, d0, d1)
-        }
-        box(p.glass, g0, g1, yb + 0.37, yt - 0.27, -0.007, th + 0.007)
+    // glazed entrance door: a narrow vertical lite near the free edge, cut through the leaf
+    const g0 = width * 0.6
+    const g1 = width - 0.15
+    const ga = yb + 0.37
+    const gt = yt - 0.27
+    if (style === 'entranceGlazed' && g1 - g0 > 0.06 && h > 1.2) {
+      box(p.leaf, 0, g0, yb, yt, 0, th)
+      box(p.leaf, g1, width, yb, yt, 0, th)
+      box(p.leaf, g0, g1, yb, ga, 0, th)
+      box(p.leaf, g0, g1, gt, yt, 0, th)
+      // steel beads round the cut-out on both faces, the glass unit in the middle of the leaf
+      const b = 0.02
+      for (const [d0, d1] of [
+        [-0.006, 0.004],
+        [th - 0.004, th + 0.006],
+      ]) {
+        box(p.metal, g0 - b, g1 + b, ga - b, ga + 0.004, d0, d1)
+        box(p.metal, g0 - b, g1 + b, gt - 0.004, gt + b, d0, d1)
+        box(p.metal, g0 - b, g0 + 0.004, ga, gt, d0, d1)
+        box(p.metal, g1 - 0.004, g1 + b, ga, gt, d0, d1)
       }
+      box(p.glass, g0, g1, ga, gt, th / 2 - 0.012, th / 2 + 0.012)
+    } else {
+      box(p.leaf, 0, width, yb, yt, 0, th)
     }
     if (style === 'panel' && width > 0.4 && h > 1.2) {
       const split = yb + h * 0.42
@@ -304,7 +318,7 @@ function slidingLeaf(p: Parts, fr: Frame, o: Opening, x0: number, x1: number, y0
   const zb = zFace + sw * (glass ? 0.024 : 0.054)
   const open = o.hinge === 'a' ? -1 : 1
   const shift = open * w * 0.14
-  p.leaf.addBox(x0 - 0.03 + shift, y0 + 0.008, za, x1 + 0.03 + shift, y1 + 0.035, zb)
+  ;(glass ? p.glassLeaf : p.leaf).addBox(x0 - 0.03 + shift, y0 + 0.008, Math.min(za, zb), x1 + 0.03 + shift, y1 + 0.035, Math.max(za, zb))
   // top rail covers the closed and the fully open position
   const rx0 = open < 0 ? x0 - w - 0.05 : x0 - 0.05
   const rx1 = open < 0 ? x1 + 0.05 : x1 + w + 0.05
@@ -372,7 +386,7 @@ function pocketLeaf(p: Parts, fr: Frame, o: Opening, x0: number, x1: number, y0:
   const t = glass ? 0.01 : Math.min(0.04, Math.max(0.02, (fr.zRight - fr.zLeft) * 0.4))
   const open = o.hinge === 'a' ? -1 : 1
   const shift = open * w * 0.3
-  ;(glass ? p.glass : p.leaf).addBox(x0 + shift, y0 + 0.008, zc - t / 2, x1 + shift, y1 - 0.004, zc + t / 2)
+  ;(glass ? p.glassLeaf : p.leaf).addBox(x0 + shift, y0 + 0.008, zc - t / 2, x1 + shift, y1 - 0.004, zc + t / 2)
   // recessed pull on the visible edge, both faces
   const hx = open < 0 ? x1 + shift - 0.05 : x0 + shift + 0.05
   const hy = Math.min(y0 + 1.0, (y0 + y1) / 2)
@@ -393,14 +407,15 @@ function barnLeaf(p: Parts, fr: Frame, o: Opening, x0: number, x1: number, y0: n
   const ly0 = y0 + 0.01
   const ly1 = Math.min(fr.wallH - 0.14, y1 + 0.05)
   const [za, zb] = span(0.02, 0.055)
-  ;(glass ? p.glass : p.leaf).addBox(lx0, ly0, za, lx1, ly1, zb)
+  ;(glass ? p.glassLeaf : p.leaf).addBox(lx0, ly0, za, lx1, ly1, zb)
   if (!glass) {
     // Z-brace: two ledges and a diagonal, proud of the room-side face
     const [zl, zh] = span(0.055, 0.067)
     const lh = Math.min(0.14, (ly1 - ly0) * 0.08)
     p.leaf.addBox(lx0 + 0.02, ly0 + 0.12, zl, lx1 - 0.02, ly0 + 0.12 + lh, zh)
     p.leaf.addBox(lx0 + 0.02, ly1 - 0.12 - lh, zl, lx1 - 0.02, ly1 - 0.12, zh)
-    const dx = lx1 - lx0 - 0.1
+    // the turned brace keeps 20 mm inside the leaf edges (its ends stick out by up to lh·sin)
+    const dx = lx1 - lx0 - 0.04 - lh
     const dy = ly1 - ly0 - 0.24 - 2 * lh
     const len = Math.hypot(dx, dy)
     const m = new THREE.Matrix4().makeRotationZ(Math.atan2(dy, dx)).setPosition((lx0 + lx1) / 2, (ly0 + ly1) / 2, 0)
@@ -446,16 +461,17 @@ function foldingLeaf(p: Parts, fr: Frame, o: Opening, x0: number, x1: number, y0
   // track across the head of the opening
   p.metal.addBox(x0, y1 - 0.03, zc - 0.025, x1, y1, zc + 0.025)
   let x = dir > 0 ? x0 : x1
-  let zz = zc - (pw * Math.sin(a)) / 2
-  const gb = glass ? p.glass : p.leaf
+  // plan k = -local z: the plan symbol starts at k < 0, i.e. on the +z side, and zigzags towards -z
+  let zz = zc + (pw * Math.sin(a)) / 2
+  const gb = glass ? p.glassLeaf : p.leaf
   for (let i = 0; i < n; i++) {
     const up = i % 2 === 0 ? 1 : -1
-    // panel from (x, zz) to (x + dir·pw·cos a, zz + up·pw·sin a)
-    const m = new THREE.Matrix4().makeRotationY(-dir * up * a).setPosition(x, 0, zz)
+    // panel from (x, zz) to (x + dir·pw·cos a, zz - up·pw·sin a)
+    const m = new THREE.Matrix4().makeRotationY(dir * up * a).setPosition(x, 0, zz)
     gb.addBox(dir > 0 ? 0 : -pw, y0 + 0.01, -t / 2, dir > 0 ? pw : 0, y1 - 0.035, t / 2, m)
     if (i > 0) p.metal.addBox(x - 0.007, y0 + 0.2, zz - 0.007, x + 0.007, y1 - 0.25, zz + 0.007)
     x += dir * pw * Math.cos(a)
-    zz += up * pw * Math.sin(a)
+    zz -= up * pw * Math.sin(a)
   }
   const hy = Math.min(y0 + 1.0, (y0 + y1) / 2)
   p.metal.addBox(x - dir * 0.04 - 0.01, hy - 0.01, zz - 0.04, x - dir * 0.04 + 0.01, hy + 0.01, zz + 0.04)

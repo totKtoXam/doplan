@@ -29,5 +29,8 @@ describe('2D footprints', () => {
     expect(sketchKind(model('asset_sf_curtain_7187', 'textile'))).toBe('curtain')
     expect(sketchKind(byId('asset_soundbar'))).toBe('soundbar')
     expect(sketchKind(byId('asset_tv_55_stand'))).toBe('tv')
+    // the item's own variant wins over the asset default
+    expect(sketchKind(byId('asset_tv_55_stand'), { variant: 'bracket' })).toBe('bracket')
+    expect(sketchKind(byId('asset_soundbar'), { variant: 'tv' })).toBe('tv')
   })
 })

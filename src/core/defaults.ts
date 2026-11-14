@@ -568,24 +568,28 @@ const KITCHEN_MORE: Asset[] = [
 
 /**
  * TVs and media. Panel W×H×D (no stand / with stand) follow 2024–25 Samsung / LG spec sheets,
- * rounded to the nearest 5 mm. Wall TVs hang so the screen centre is at ~1.1–1.2 m.
+ * rounded to the nearest 5 mm. Wall TVs hang so the screen centre is at TV_CENTRE_MM (seated eye level).
  */
-type TvSpec = [inch: number, wall: [number, number, number], stand: [number, number, number], elevWall: number]
+type TvSpec = [inch: number, wall: [number, number, number], stand: [number, number, number]]
 const TV_SPECS: TvSpec[] = [
-  [32, [720, 80, 430], [716, 180, 470], 1000],
-  [43, [960, 60, 560], [965, 200, 625], 1000],
-  [50, [1117, 60, 646], [1117, 250, 710], 950],
-  [55, [1230, 60, 710], [1232, 250, 770], 950],
-  [65, [1450, 60, 830], [1451, 300, 890], 900],
-  [75, [1673, 60, 957], [1673, 330, 1030], 850],
+  [32, [720, 80, 430], [716, 180, 470]],
+  [43, [960, 60, 560], [965, 200, 625]],
+  [50, [1117, 60, 646], [1117, 250, 710]],
+  [55, [1230, 60, 710], [1232, 250, 770]],
+  [65, [1450, 60, 830], [1451, 300, 890]],
+  [75, [1673, 60, 957], [1673, 330, 1030]],
 ]
+/** screen centre of a wall TV above the floor, mm */
+export const TV_CENTRE_MM = 1150
+/** elevation (bottom edge) of a wall TV of panel height h, rounded to 10 mm */
+export const tvWallElevation = (h: number): number => Math.round((TV_CENTRE_MM - h / 2) / 10) * 10
 const TV_SLOTS = { body: M.plasticBlack, screen: M.glassBlack }
 const TV_LEGACY = new Set([43, 55, 65])
 const ELECTRONICS_MORE: Asset[] = [
-  ...TV_SPECS.filter(([inch]) => !TV_LEGACY.has(inch)).map(([inch, s, , elev]) =>
+  ...TV_SPECS.filter(([inch]) => !TV_LEGACY.has(inch)).map(([inch, s]) =>
     asset(`tv_${inch}`, `TV ${inch}"`, `Телевизор ${inch}" настенный`, 'electronics', 'tv', s, TV_SLOTS, {
       mount: 'wall',
-      elevation: elev,
+      elevation: tvWallElevation(s[2]),
       params: { stand: false },
       tags: ['телевизор'],
     }),
@@ -605,20 +609,21 @@ const ELECTRONICS_MORE: Asset[] = [
     tags: ['саундбар', 'акустика'],
   }),
   asset('soundbar_wall', 'Soundbar, wall-mounted', 'Саундбар настенный', 'electronics', 'tv', [1000, 110, 60], { body: M.plasticBlack, screen: M.glassBlack }, {
+    // under a 55–65" wall TV (bottom edge ≈ 740–800)
     mount: 'wall',
-    elevation: 820,
+    elevation: 640,
     params: { variant: 'soundbar' },
     tags: ['саундбар', 'акустика'],
   }),
   asset('tv_bracket_fixed', 'TV wall bracket, fixed', 'Кронштейн для ТВ фиксированный', 'electronics', 'tv', [450, 30, 320], { body: M.blackMetal, metal: M.blackMetal }, {
     mount: 'wall',
-    elevation: 1100,
+    elevation: TV_CENTRE_MM - 160,
     params: { variant: 'bracket' },
     tags: ['кронштейн', 'телевизор'],
   }),
   asset('tv_bracket_arm', 'TV wall bracket, articulating', 'Кронштейн для ТВ поворотный', 'electronics', 'tv', [420, 450, 300], { body: M.blackMetal, metal: M.blackMetal }, {
     mount: 'wall',
-    elevation: 1100,
+    elevation: TV_CENTRE_MM - 150,
     params: { variant: 'bracket' },
     tags: ['кронштейн', 'телевизор'],
   }),
@@ -899,6 +904,11 @@ export const BUILTIN_ASSETS: Asset[] = [
     params: { seatHeight: 750, arms: false, back: true },
     tags: ['стул', 'барный'],
   }),
+  // counter-height stool for 900 mm islands and worktops: seat 650, slab underside ≈ 860
+  asset('chair_counter', 'Counter stool', 'Полубарный стул', 'chair', 'chair', [420, 450, 950], { ...CHAIR, legs: M.blackMetal }, {
+    params: { seatHeight: 650, arms: false, back: true },
+    tags: ['стул', 'полубарный', 'барный', 'остров'],
+  }),
   asset('chair_office', 'Office chair', 'Офисное кресло', 'office', 'chair', [620, 620, 1150], { body: M.plasticBlack, fabric: 'mat_fabric_graphite', legs: M.chrome }, {
     params: { seatHeight: 480, arms: true, back: true, type: 'office' },
     tags: ['кресло', 'кабинет'],
@@ -1006,19 +1016,19 @@ export const BUILTIN_ASSETS: Asset[] = [
   // ── electronics ──
   asset('tv_43', 'TV 43"', 'Телевизор 43"', 'electronics', 'tv', [960, 60, 560], { body: M.plasticBlack, screen: M.glassBlack }, {
     mount: 'wall',
-    elevation: 1000,
+    elevation: tvWallElevation(560),
     params: { stand: false },
     tags: ['телевизор'],
   }),
   asset('tv_55', 'TV 55"', 'Телевизор 55"', 'electronics', 'tv', [1230, 60, 710], { body: M.plasticBlack, screen: M.glassBlack }, {
     mount: 'wall',
-    elevation: 950,
+    elevation: tvWallElevation(710),
     params: { stand: false },
     tags: ['телевизор'],
   }),
   asset('tv_65', 'TV 65"', 'Телевизор 65"', 'electronics', 'tv', [1450, 60, 830], { body: M.plasticBlack, screen: M.glassBlack }, {
     mount: 'wall',
-    elevation: 900,
+    elevation: tvWallElevation(830),
     params: { stand: false },
     tags: ['телевизор'],
   }),

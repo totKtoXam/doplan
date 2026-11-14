@@ -418,6 +418,12 @@ async function processModels(mf: Manifest, assets: Asset[]): Promise<void> {
       if (local && m.fix) local = await fixModel(srcRel, m.fix)
       log(`  ${local ? 'ok  ' : 'FAIL'} ${m.id}`)
     }
+    // a model that needs a repair is never offered as a remote download of the raw file: the app
+    // would render it broken (wrong front, spec/gloss materials) and fit it to a size measured after the fix
+    if (m.fix && !local) {
+      log(`  WARN ${m.id}: skipped — download or repair failed, the raw model is not usable as is`)
+      return
+    }
     const th = await ensureThumb(
       id,
       m.thumb ??

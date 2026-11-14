@@ -3,6 +3,7 @@ import { Clock, Download, Star, Trash, Upload } from 'lucide-react'
 import type { Asset, AssetCategory } from '@core/types'
 import { uiStore, useUi } from '@/store/ui'
 import { useT } from '@/i18n'
+import '@/ui/catalogI18n'
 import { Button, cn, focusRing, SearchInput, Spinner, Thumb, fmtNum } from '@/ui/kit'
 import { assetIcon } from '../common/assetIcons'
 import { ASSET_CATEGORIES, ASSET_CATEGORY_RU } from '../common/labels'
@@ -140,12 +141,12 @@ function KitchenPresets() {
       <div className="pt-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">{t('Готовые кухни')}</div>
       <div className="grid grid-cols-2 gap-1.5">
         {KITCHEN_PRESETS.map((p) => (
-          <Button key={p.id} onClick={() => placeKitchenPreset(p)} title={t('Выделите стену — гарнитур встанет вдоль неё')}>
+          <Button key={p.id} onClick={() => void placeKitchenPreset(p)} title={t('Выделите стену или комнату — гарнитур встанет вдоль стены')}>
             {lang === 'en' ? p.name : p.nameRu}
           </Button>
         ))}
       </div>
-      <p className="text-[10px] leading-snug text-[var(--muted)]">{t('Выделите стену — гарнитур встанет вдоль неё; без выделения — рядом с планом. Модули можно менять по одному.')}</p>
+      <p className="text-[10px] leading-snug text-[var(--muted)]">{t('Выделите стену или комнату — гарнитур встанет вдоль стены, если помещается; без выделения — рядом с планом. Модули можно менять по одному.')}</p>
     </div>
   )
 }

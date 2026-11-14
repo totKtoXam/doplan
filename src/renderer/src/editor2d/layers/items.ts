@@ -84,7 +84,7 @@ export class ItemsLayer {
         if (overhead) dashedEdge(target, c[i].x, c[i].y, c[j].x, c[j].y)
         else target.push(c[i].x, c[i].y, c[j].x, c[j].y)
       }
-      if (!poly) drawItemSketch(sketchKind(asset), it.size.w, it.size.d, sk)
+      if (!poly) drawItemSketch(sketchKind(asset, it.params), it.size.w, it.size.d, sk)
     }
 
     strokeSegments(g, sketch, pal.itemSketch, 0.9)

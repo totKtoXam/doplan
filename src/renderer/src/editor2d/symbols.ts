@@ -48,10 +48,11 @@ const MODEL_KIND: [RegExp, string][] = [
   [/stool/, 'chair'],
 ]
 
-export function sketchKind(asset: Asset | undefined): string {
+/** plan symbol of an asset; `params` are the item's own (a TV switched to a soundbar or bracket) */
+export function sketchKind(asset: Asset | undefined, params?: Record<string, unknown>): string {
   if (!asset) return 'unknown'
   if (asset.procedural === 'tv') {
-    const v = asset.defaultParams?.variant
+    const v = params?.variant ?? asset.defaultParams?.variant
     return v === 'soundbar' ? 'soundbar' : v === 'bracket' ? 'bracket' : 'tv'
   }
   if (asset.procedural) return asset.procedural

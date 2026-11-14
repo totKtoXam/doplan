@@ -81,14 +81,17 @@ export function createPencilTool(ctx: EditorCtx): Tool {
     cursor: 'crosshair',
     activate() {
       pts = null
+      marksStore.getState().setPrompt(null)
       idleHint()
     },
     deactivate() {
       pts = null
+      marksStore.getState().setPrompt(null)
       ctx.setHint('')
     },
     pointerDown(e) {
       if (e.button !== 0) return
+      marksStore.getState().setPrompt(null)
       start = e.plan
       pts = [e.plan]
     },
@@ -120,7 +123,9 @@ export function createPencilTool(ctx: EditorCtx): Tool {
       // a free line that comes back to its start becomes a zone
       const closed = shape !== 'free' || (drawn.length >= 8 && dist(drawn[0], drawn[drawn.length - 1]) <= ctx.mm(16))
       if (closed && drawn.length < 3) return
-      addMark(ctx.levelId(), closed ? 'zone' : 'stroke', drawn)
+      const id = addMark(ctx.levelId(), closed ? 'zone' : 'stroke', drawn)
+      // like a text selection in Claude: a small field to say what to do with this place
+      marksStore.getState().setPrompt({ id, x: e.client.x, y: e.client.y })
       idleHint()
     },
     keyDown(e) {

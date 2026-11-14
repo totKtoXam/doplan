@@ -13,16 +13,27 @@ export type PencilShape = 'free' | 'lasso' | 'rect'
 export interface MarksState {
   shape: PencilShape
   selected: Id | null
+  /** the mini «what to do here?» field next to a mark just drawn (client px) */
+  prompt: { id: Id; x: number; y: number } | null
   setShape(s: PencilShape): void
   select(id: Id | null): void
+  setPrompt(p: { id: Id; x: number; y: number } | null): void
 }
 
 export const marksStore = createStore<MarksState>()((set) => ({
   shape: 'free',
   selected: null,
+  prompt: null,
   setShape: (shape) => set({ shape }),
   select: (selected) => set({ selected }),
+  setPrompt: (prompt) => set({ prompt }),
 }))
+
+/** numbers already taken outside the document (marks drawn on chat images), so ①② never repeat */
+let takenElsewhere: () => number = () => 0
+export function setMarkNumberFloor(fn: () => number): void {
+  takenElsewhere = fn
+}
 
 export function useMarks<T>(selector: (s: MarksState) => T): T {
   return useStore(marksStore, selector)
@@ -35,7 +46,7 @@ export function getMark(id: Id | null | undefined): Annotation | undefined {
 /** adds a mark (undoable) and selects it */
 export function addMark(levelId: Id, shape: Annotation['shape'], points: Vec2[]): Id {
   const id = newId('pm')
-  const n = nextMarkNumber(docStore.getState().doc)
+  const n = Math.max(nextMarkNumber(docStore.getState().doc), takenElsewhere() + 1)
   docStore.getState().transact(`Пометка ${markBadge(n)}`, (d) => {
     ;(d.annotations ??= {})[id] = { id, levelId, n, shape, points: points.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) })) }
   })

@@ -40,6 +40,7 @@ import {
   answerApproval,
   applyDraft,
   cancelLogin,
+  consumeInsert,
   discardDraft,
   dismissLogin,
   newChat,
@@ -895,6 +896,21 @@ function Composer() {
     if (focusTick) ta.current?.focus()
   }, [focusTick])
 
+  // a note from the mini field next to a pencil mark: append it (and send right away if asked)
+  const insert = useAi((s) => s.composeInsert)
+  const textRef = useRef(text)
+  textRef.current = text
+  useEffect(() => {
+    if (!insert) return
+    consumeInsert()
+    const cur = textRef.current.replace(/\s+$/, '')
+    const next = cur ? `${cur}\n${insert.text}` : insert.text
+    if (insert.send && !running) {
+      setText('')
+      void send(next)
+    } else setText(next)
+  }, [insert, running])
+
   // auto-grow up to ~10 lines
   useLayoutEffect(() => {
     const el = ta.current
@@ -935,12 +951,11 @@ function Composer() {
       {marking !== null && images[marking] && (
         <ImageMarkup
           image={images[marking]}
-          onClose={() => setMarking(null)}
-          onDone={(img) => {
-            replaceImage(marking, img)
+          onClose={() => {
             setMarking(null)
             ta.current?.focus()
           }}
+          onChange={(img) => replaceImage(marking, img)}
         />
       )}
       {slash.length > 0 && (

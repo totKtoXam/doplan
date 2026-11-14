@@ -16,6 +16,8 @@ export interface MarkupShape {
   color: string
   /** pen: the stroke; rect / arrow: [start, end] */
   points: MarkupPt[]
+  /** badge number; numbers run on from the plan marks and other pictures so they never repeat */
+  n?: number
 }
 
 export const MARKUP_COLORS = ['#e5484d', '#f5a524', '#3b82f6', '#30a46c'] as const
@@ -106,7 +108,7 @@ export function drawMarkup(c: CanvasRenderingContext2D, shapes: MarkupShape[], k
     c.strokeStyle = '#ffffff'
     c.stroke()
     c.fillStyle = '#ffffff'
-    c.fillText(String(i + 1), p.x * k, p.y * k + r * 0.05)
+    c.fillText(String(s.n ?? i + 1), p.x * k, p.y * k + r * 0.05)
   })
   c.restore()
 }

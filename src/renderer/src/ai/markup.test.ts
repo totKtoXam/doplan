@@ -40,3 +40,28 @@ describe('image markup helpers', () => {
     expect(big.badge).toBeCloseTo(72)
   })
 })
+
+describe('mark numbers never repeat between the plan and chat pictures', () => {
+  it('a picture mark takes the number after the plan marks and other pictures; a plan mark after the pictures', async () => {
+    const { createEmptyDoc } = await import('@core')
+    const { docStore } = await import('@/store/document')
+    const { addMark } = await import('@/store/marks')
+    const { aiStore, nextImageMarkNumber } = await import('./store')
+    const doc = createEmptyDoc('T')
+    const lv = doc.levelOrder[0]
+    docStore.getState().load(doc, null)
+    addMark(lv, 'stroke', [{ x: 0, y: 0 }, { x: 1000, y: 0 }])
+    addMark(lv, 'stroke', [{ x: 0, y: 500 }, { x: 1000, y: 500 }])
+    // plan ①②: the first mark on a picture is ③
+    expect(nextImageMarkNumber([])).toBe(3)
+    const shape: MarkupShape = { kind: 'rect', color: red, points: [{ x: 0, y: 0 }, { x: 50, y: 50 }], n: 3 }
+    aiStore.setState({ images: [{ mime: 'image/png', data: '', url: 'data:image/png;base64,', markup: { base: '', shapes: [shape] } }] })
+    // another picture (or the same one) goes on with ④
+    expect(nextImageMarkNumber([])).toBe(4)
+    expect(nextImageMarkNumber([{ ...shape, n: 7 }])).toBe(8)
+    // and the next plan mark skips the picture's ③
+    const id = addMark(lv, 'stroke', [{ x: 0, y: 900 }, { x: 1000, y: 900 }])
+    expect(docStore.getState().doc.annotations?.[id].n).toBe(4)
+    aiStore.setState({ images: [] })
+  })
+})

@@ -993,7 +993,7 @@ const OPENING_MAP: Record<SpecOpeningType, OpeningKind> = {
   balconyDoor: 'balconyDoor',
   balconyBlock: 'balconyBlock',
   pocketDoor: 'slidingDoor',
-  foldingDoor: 'door',
+  foldingDoor: 'slidingDoor',
   passage: 'opening',
   panoramicWindow: 'frenchWindow',
 }
@@ -1920,6 +1920,8 @@ export function compilePlanSpecDetailed(spec: PlanSpec, opts: CompileOptions = {
 
     const patch: Partial<import('./types').Opening> = { width, height, sill, hinge, swing }
     if (o.sashes !== undefined) patch.sashes = o.sashes
+    if (o.type === 'pocketDoor') patch.slide = 'pocket'
+    else if (o.type === 'foldingDoor') patch.slide = 'folding'
     const id = addOpening(doc, wall.id, kind, offset, patch)
     openingIds.push(id)
   })

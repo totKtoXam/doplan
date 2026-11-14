@@ -32,9 +32,58 @@ const CATEGORY_KIND: Record<AssetCategory, string> = {
   other: 'box',
 }
 
+/** catalog models whose category sketch is wrong, matched by id keywords */
+const MODEL_KIND: [RegExp, string][] = [
+  [/toilet/, 'toilet'],
+  [/towel_rail|radiator/, 'radiator'],
+  [/mirror/, 'mirror'],
+  [/picture_frame|painting/, 'picture'],
+  [/curtain/, 'curtain'],
+  [/washing_machine/, 'washingMachine'],
+  [/fridge|refrigerator/, 'fridge'],
+  [/soundbar/, 'soundbar'],
+  [/bookcase|bookshelf|shelves/, 'shelf'],
+  [/wardrobe|cabinet/, 'wardrobe'],
+  [/desk(?!_lamp)/, 'table'],
+  [/stool/, 'chair'],
+]
+
 export function sketchKind(asset: Asset | undefined): string {
   if (!asset) return 'unknown'
-  return asset.procedural ?? CATEGORY_KIND[asset.category] ?? 'box'
+  if (asset.procedural === 'tv') {
+    const v = asset.defaultParams?.variant
+    return v === 'soundbar' ? 'soundbar' : v === 'bracket' ? 'bracket' : 'tv'
+  }
+  if (asset.procedural) return asset.procedural
+  if (asset.kind === 'model') for (const [re, kind] of MODEL_KIND) if (re.test(asset.id)) return kind
+  return CATEGORY_KIND[asset.category] ?? 'box'
+}
+
+/**
+ * Footprint of items that are not a plain rectangle, as a local polygon (same frame as the sketches),
+ * or null for the rectangle: L-shaped kitchen corner units fill the back strip and one side strip.
+ */
+export function footprintPolygon(asset: Asset | undefined, params: Record<string, unknown> | undefined, w: number, d: number): [number, number][] | null {
+  if (!asset || (asset.procedural !== 'kitchenBase' && asset.procedural !== 'kitchenWall')) return null
+  const p = { ...asset.defaultParams, ...params }
+  const isL = p.corner === 'L' || ((p.corner === true || p.corner === 'true') && p.cornerType === 'L')
+  if (!isL) return null
+  const hw = w / 2
+  const hd = d / 2
+  const leg = Number(p.legDepth)
+  const dep = Math.min(Math.max(Number.isFinite(leg) ? leg : asset.procedural === 'kitchenBase' ? 600 : 320, 200), Math.min(w, d) - 100)
+  if (!(dep > 0)) return null
+  // left: the side leg runs along x = -w/2; right: along x = +w/2 (back at -y)
+  const s = p.cornerSide === 'right' ? 1 : -1
+  const pts: [number, number][] = [
+    [-hw, -hd],
+    [hw, -hd],
+    [hw, s > 0 ? hd : -hd + dep],
+    [s > 0 ? hw - dep : -hw + dep, s > 0 ? hd : -hd + dep],
+    [s > 0 ? hw - dep : -hw + dep, s > 0 ? -hd + dep : hd],
+    [-hw, s > 0 ? -hd + dep : hd],
+  ]
+  return pts
 }
 
 export function drawItemSketch(kind: string, w: number, d: number, sk: Sketch): void {
@@ -129,6 +178,29 @@ export function drawItemSketch(kind: string, w: number, d: number, sk: Sketch): 
       const r = m * 0.3
       sk.ellipse(0, 0, r, r)
       sk.ellipse(0, 0, r * 0.6, r * 0.6)
+      break
+    }
+    case 'soundbar': {
+      sk.rect(-hw * 0.96, -hd * 0.6, w * 0.96, d * 0.6)
+      for (const x of [-0.6, -0.2, 0.2, 0.6]) sk.ellipse(x * hw, 0, Math.min(d * 0.18, 18), Math.min(d * 0.18, 18))
+      break
+    }
+    case 'bracket': {
+      sk.rect(-hw * 0.7, -hd, w * 0.7 * 2, Math.min(d, 20))
+      sk.line(0, -hd, 0, hd)
+      sk.line(-hw * 0.5, hd, hw * 0.5, hd)
+      break
+    }
+    case 'curtain': {
+      sk.line(-hw, -hd + Math.min(30, d * 0.1), hw, -hd + Math.min(30, d * 0.1))
+      const n = Math.max(4, Math.round(w / 150))
+      for (let i = 0; i < n; i++) {
+        const x1 = -hw + (w * i) / n
+        const x2 = -hw + (w * (i + 0.5)) / n
+        const x3 = -hw + (w * (i + 1)) / n
+        sk.line(x1, 0, x2, hd * 0.6)
+        sk.line(x2, hd * 0.6, x3, 0)
+      }
       break
     }
     case 'tv': {
@@ -257,6 +329,11 @@ export class SegmentSketch implements Sketch {
     this.cos = Math.cos(rotationRad)
     this.sin = Math.sin(rotationRad)
     this.mirror = mirrored ? -1 : 1
+  }
+
+  /** local point → target space */
+  point(x: number, y: number): { x: number; y: number } {
+    return { x: this.px(x, y), y: this.py(x, y) }
   }
 
   private px(x: number, y: number): number {

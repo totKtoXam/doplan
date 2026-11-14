@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { OpeningPreset } from '@/contracts'
 import { FileUp, ImageUp, ScanText } from 'lucide-react'
 import type { DocSettings, OpeningKind, RoomType, Vec2, WallKind } from '@core/types'
 import { addWall, defaultRoom, OPENING_DEFAULTS, polylabel } from '@core'
@@ -47,7 +48,11 @@ export function ConstructionTab() {
     uiStore.getState().set({ tool: 'wall', wallKind: k, ...(d.thickness ? { wallThickness: d.thickness } : {}), ...(d.height ? { wallHeight: d.height } : {}) })
   }
   const pickOpening = (k: OpeningKind) => {
-    uiStore.getState().set({ tool: isWindowKind(k) ? 'window' : 'door', openingKind: k })
+    uiStore.getState().set({ tool: isWindowKind(k) ? 'window' : 'door', openingKind: k, openingPreset: null })
+  }
+  const openingPreset = useUi((s) => s.openingPreset)
+  const pickPreset = (p: OpeningPreset) => {
+    uiStore.getState().set({ tool: 'door', openingKind: p.kind, openingPreset: p })
   }
 
   return (
@@ -97,8 +102,23 @@ export function ConstructionTab() {
               icon={<OpeningKindIcon kind={k} />}
               label={t(OPENING_KIND_RU[k])}
               sub={sizeLabel(k)}
-              active={(tool === 'door' || tool === 'window') && openingKind === k}
+              active={(tool === 'door' || tool === 'window') && openingKind === k && !openingPreset}
               onClick={() => pickOpening(k)}
+            />
+          ))}
+        </CardGrid>
+      </Section>
+
+      <Section title={t('Варианты дверей')} id="left.doorPresets">
+        <CardGrid>
+          {DOOR_PRESETS.map((p) => (
+            <ToolCard
+              key={p.id}
+              icon={<OpeningKindIcon kind={p.kind} />}
+              label={t(p.label)}
+              sub={`${fmtNum((p.patch.width ?? OPENING_DEFAULTS[p.kind].width) / 10, 0)}×${fmtNum((p.patch.height ?? OPENING_DEFAULTS[p.kind].height) / 10, 0)}`}
+              active={tool === 'door' && openingPreset?.id === p.id}
+              onClick={() => pickPreset(p)}
             />
           ))}
         </CardGrid>
@@ -136,6 +156,24 @@ export function ConstructionTab() {
     </div>
   )
 }
+
+/** ready door looks; width / height / style can be changed in the inspector afterwards */
+const DOOR_PRESETS: (OpeningPreset & { label: string })[] = [
+  { id: 'flush', label: 'Гладкая', kind: 'door', patch: { style: 'flush', width: 800, leafMaterialId: 'mat_wood_white' } },
+  { id: 'panel', label: 'Филёнчатая', kind: 'door', patch: { style: 'panel', width: 800, leafMaterialId: 'mat_wood_oak_bleached' } },
+  { id: 'glazed', label: 'Остеклённая', kind: 'door', patch: { style: 'glazed', width: 800, leafMaterialId: 'mat_wood_white' } },
+  { id: 'insert', label: 'Царговая', kind: 'door', patch: { style: 'insert', width: 800, leafMaterialId: 'mat_wood_ash_grey' } },
+  { id: 'glass', label: 'Стеклянная', kind: 'door', patch: { style: 'glass', width: 800, leafMaterialId: 'mat_glass_frosted', frameMaterialId: 'mat_metal_aluminium' } },
+  { id: 'narrow', label: 'В санузел 600', kind: 'door', patch: { style: 'flush', width: 600, height: 2000 } },
+  { id: 'tall', label: 'Высокая 2300', kind: 'door', patch: { style: 'flush', width: 900, height: 2300, leafMaterialId: 'mat_wood_walnut' } },
+  { id: 'double-glazed', label: 'Двустворчатая остеклённая', kind: 'doubleDoor', patch: { style: 'glazed', width: 1300 } },
+  { id: 'pocket', label: 'Пенал в стену', kind: 'slidingDoor', patch: { slide: 'pocket', style: 'flush', width: 800 } },
+  { id: 'barn', label: 'Амбарная', kind: 'slidingDoor', patch: { slide: 'barn', style: 'flush', width: 900, leafMaterialId: 'mat_wood_oak_natural' } },
+  { id: 'glass-slide', label: 'Стеклянное купе', kind: 'slidingDoor', patch: { slide: 'surface', style: 'glass', width: 900, leafMaterialId: 'mat_glass_frosted' } },
+  { id: 'folding', label: 'Гармошка', kind: 'slidingDoor', patch: { slide: 'folding', width: 800, leafMaterialId: 'mat_plastic_white' } },
+  { id: 'steel', label: 'Входная стальная', kind: 'entranceDoor', patch: { style: 'flush', width: 960, height: 2050, leafMaterialId: 'mat_metal_black', frameMaterialId: 'mat_metal_black' } },
+  { id: 'steel-glazed', label: 'Входная со стеклом', kind: 'entranceDoor', patch: { style: 'glazed', width: 960, height: 2050, leafMaterialId: 'mat_paint_anthracite', frameMaterialId: 'mat_metal_black' } },
+]
 
 function sizeLabel(k: OpeningKind): string {
   const d = OPENING_DEFAULTS[k]

@@ -18,6 +18,9 @@ import { fileURLToPath } from 'node:url'
 import sharp from 'sharp'
 import { unzipSync } from 'fflate'
 import type { Asset, AssetCategory, Catalog, Hdri, Material, MaterialCategory, MountKind } from '../../src/core/types'
+import { NodeIO } from '@gltf-transform/core'
+import { ALL_EXTENSIONS } from '@gltf-transform/extensions'
+import { getBounds, metalRough, prune, textureCompress } from '@gltf-transform/functions'
 import { gltfExtents, implausibleSize, sizeFromGltf, type GltfJson } from './sizes'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -71,6 +74,23 @@ interface MModel {
   /** uniform correction of a model built at the wrong scale (sizeNote says why) */
   sizeScale?: number
   sizeNote?: string
+  /** catalog size [w, d, h] in mm when the source scale is arbitrary (Sketchfab uploads): skips the glTF bounds */
+  sizeMm?: [number, number, number]
+  /** placement overrides of the category defaults (mountFor) */
+  mount?: MountKind
+  elevation?: number
+  /** repair applied right after download; entries with a fix are always bundled (the app downloads remote files as is) */
+  fix?: MFix
+}
+interface MFix {
+  /** degrees about +Y that turn the model's front to +Z */
+  rotateY?: number
+  /** drop tiny flat helper meshes (ground planes, shadow discs): <= 64 vertices and ~zero height */
+  dropFlat?: boolean
+  /** convert KHR_materials_pbrSpecularGlossiness (unsupported by three.js) to metal/roughness */
+  metalRough?: boolean
+  /** downscale textures to this many pixels on the long side */
+  maxTexture?: number
 }
 interface MMaterial {
   id: string; name: string; nameRu?: string; category: string; source: string; licence: string
@@ -328,12 +348,56 @@ function modelPrefix(id: string): string {
   return p === 'ph' ? 'ph' : p === 'khr' ? 'khr' : p === 'kaykit' ? 'kk' : p
 }
 
+/** applies a manifest `fix` to a downloaded .glb once (a marker next to it records the applied fix) */
+async function fixModel(rel: string, fix: MFix): Promise<boolean> {
+  const marker = abs(rel) + '.fix.json'
+  const want = JSON.stringify(fix)
+  try { if ((await readFile(marker, 'utf8')) === want) return true } catch { /* not fixed yet */ }
+  try {
+    const io = new NodeIO().registerExtensions(ALL_EXTENSIONS)
+    const doc = await io.read(abs(rel))
+    if (fix.metalRough) await doc.transform(metalRough())
+    if (fix.dropFlat) {
+      for (const scene of doc.getRoot().listScenes()) {
+        const all = getBounds(scene)
+        const size = Math.max(...all.max.map((v, k) => v - all.min[k]))
+        for (const node of doc.getRoot().listNodes()) {
+          const mesh = node.getMesh()
+          if (!mesh) continue
+          const verts = mesh.listPrimitives().reduce((n, p) => n + (p.getAttribute('POSITION')?.getCount() ?? 0), 0)
+          const b = getBounds(node)
+          if (verts <= 64 && b.max[1] - b.min[1] < size * 1e-3) node.setMesh(null)
+        }
+      }
+    }
+    if (fix.rotateY) {
+      const a = (fix.rotateY * Math.PI) / 360
+      for (const scene of doc.getRoot().listScenes()) {
+        const pivot = doc.createNode('doplan_front').setRotation([0, Math.sin(a), 0, Math.cos(a)])
+        for (const child of scene.listChildren()) {
+          scene.removeChild(child)
+          pivot.addChild(child)
+        }
+        scene.addChild(pivot)
+      }
+    }
+    if (fix.maxTexture) await doc.transform(textureCompress({ encoder: sharp, targetFormat: 'webp', quality: 82, resize: [fix.maxTexture, fix.maxTexture] }))
+    await doc.transform(prune())
+    await io.write(abs(rel), doc)
+    await writeFile(marker, want)
+    return true
+  } catch (e) {
+    fail(`fix ${rel}`, e)
+    return false
+  }
+}
+
 async function processModels(mf: Manifest, assets: Asset[]): Promise<void> {
   let list = mf.models.filter((m) => {
     if (m.zip) { log(`  skip ${m.id}: archive needs offline OBJ/FBX->glTF conversion (not fetched)`); return false }
     return !!(m.gltf || m.url)
   })
-  const bundledOf = (m: MModel) => FLAG_ALL || BUNDLE_MODELS.has(m.id)
+  const bundledOf = (m: MModel) => FLAG_ALL || BUNDLE_MODELS.has(m.id) || !!m.fix
   if (LIMIT) list = list.filter(bundledOf).slice(0, LIMIT)
   log(`models: ${list.length} entries, ${list.filter(bundledOf).length} to download`)
   const results: (Asset | undefined)[] = new Array(list.length)
@@ -351,6 +415,7 @@ async function processModels(mf: Manifest, assets: Asset[]): Promise<void> {
     if (bundledOf(m)) {
       const oks = await Promise.all(fileList.map((f) => download(f.url, f.path)))
       local = oks.every(Boolean)
+      if (local && m.fix) local = await fixModel(srcRel, m.fix)
       log(`  ${local ? 'ok  ' : 'FAIL'} ${m.id}`)
     }
     const th = await ensureThumb(
@@ -364,9 +429,9 @@ async function processModels(mf: Manifest, assets: Asset[]): Promise<void> {
     )
     // size of what the app renders: the glTF bounds (first variant of a collection), not the API
     // dimensions, which cover the whole source scene (see sizes.ts)
-    const g = local ? await readGltfJson(srcRel) : await remoteGltfJson(mainUrl, slugify(m.id))
+    const g = m.sizeMm ? null : local ? await readGltfJson(srcRel) : await remoteGltfJson(mainUrl, slugify(m.id))
     const ext = g ? gltfExtents(g) : null
-    let size = ext ? sizeFromGltf(ext, m.dimensionsM, UNIT_SCALE[modelPrefix(m.id)] ?? 1) : null
+    let size = m.sizeMm ? { w: m.sizeMm[0], d: m.sizeMm[1], h: m.sizeMm[2] } : ext ? sizeFromGltf(ext, m.dimensionsM, UNIT_SCALE[modelPrefix(m.id)] ?? 1) : null
     if (!size && m.dimensionsM) size = { w: Math.round(m.dimensionsM[0] * 1000), d: Math.round(m.dimensionsM[1] * 1000), h: Math.round(m.dimensionsM[2] * 1000) }
     if (!size) {
       const d = DEFAULT_SIZE[m.category] ?? [500, 500, 500]
@@ -380,7 +445,9 @@ async function processModels(mf: Manifest, assets: Asset[]): Promise<void> {
     if (odd) log(`  WARN ${m.id}: implausible size, ${odd} (set sizeScale in the manifest if the model is mis-scaled)`)
     const lic = m.id.startsWith('ph:') ? { licence: 'CC0', author: 'Poly Haven' } : parseLicence(m.licence)
     const cat = ASSET_CAT[m.category] ?? 'other'
-    const { mount, elevation } = mountFor(m.category, m.id, size.h / 1000)
+    const byCat = mountFor(m.category, m.id, size.h / 1000)
+    const mount = m.mount ?? byCat.mount
+    const elevation = m.elevation ?? (m.mount ? undefined : byCat.elevation)
     const a: Asset = {
       id,
       name: m.name,
@@ -582,10 +649,29 @@ Machine-readable per-entry licence/author fields are in \`catalog.json\`.
 ## KayKit Furniture Bits (https://github.com/KayKit-Game-Assets/KayKit-Furniture-Bits-1.0)
 - Licence: **CC0 1.0**. Stylised low-poly, on-demand only.
 
+## Sketchfab (https://sketchfab.com), via the Objaverse mirror (https://huggingface.co/datasets/allenai/objaverse)
+- Furniture, lamps, plants, bathroom fittings and appliances. Licence: **CC-BY-4.0** for every entry (checked against the
+  Sketchfab API). Attribution REQUIRED: the list below is generated from the catalog, and the app shows the author, source
+  and licence of each model in the catalog card and the item inspector («Источник»).
+- Most of them are on-demand downloads. Models that needed a repair (front turned to +Z, ground planes removed,
+  spec/gloss materials converted, textures cut to 1K) are bundled in their repaired form; the change is listed as
+  "modified" below, as CC-BY asks.
+
+@@SKETCHFAB@@
+
 ## Not fetched by the script
 - Quaternius "Ultimate House Interior Pack" and Kenney "Furniture Pack" (CC0, OpenGameArt) are listed in the manifest
   but need an offline OBJ/FBX to glTF conversion, so they are not part of the catalog.
 `
+
+function licensesMd(assets: Asset[], mf: Manifest): string {
+  const fixed = new Set(mf.models.filter((m) => m.fix).map((m) => `asset_${modelPrefix(m.id)}_${slugify(rawId(m.id))}`))
+  const rows = assets
+    .filter((a) => a.source?.includes('sketchfab.com'))
+    .sort((a, b) => (a.nameRu ?? a.name).localeCompare(b.nameRu ?? b.name, 'ru'))
+    .map((a) => `- ${a.nameRu ?? a.name}: "${a.name}" by ${a.author ?? 'unknown'}, ${a.source}, ${a.licence}${fixed.has(a.id) ? ' (modified: repaired for doplan)' : ''}`)
+  return LICENSES_MD.replace('@@SKETCHFAB@@', rows.join('\n') || '- (none)')
+}
 
 // ───────────────────────────── main ─────────────────────────────
 async function main(): Promise<void> {
@@ -621,7 +707,7 @@ async function main(): Promise<void> {
     catalog.hdris = merge(prev.hdris, hdris)
   }
   await writeFile(catalogPath, JSON.stringify(catalog, null, 1))
-  await writeFile(path.join(OUT, 'LICENSES.md'), LICENSES_MD)
+  await writeFile(path.join(OUT, 'LICENSES.md'), licensesMd(catalog.assets, mf))
 
   // verification
   const missing: string[] = []

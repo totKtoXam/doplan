@@ -2,6 +2,8 @@ import type {
   AssetCategory,
   CeilingKind,
   CurtainKind,
+  DoorLeafStyle,
+  DoorSlide,
   LightKind,
   MaterialCategory,
   MountKind,
@@ -41,6 +43,23 @@ export const DOOR_KINDS: OpeningKind[] = ['door', 'doubleDoor', 'slidingDoor', '
 export const isWindowKind = (k: OpeningKind) => WINDOW_KINDS.includes(k)
 /** kinds that have a swinging leaf */
 export const hasLeaf = (k: OpeningKind) => k !== 'arch' && k !== 'opening'
+/** door kinds whose leaf look (style) can be chosen */
+export const DOOR_LOOK_KINDS: ReadonlySet<OpeningKind> = new Set<OpeningKind>(['door', 'doubleDoor', 'slidingDoor', 'entranceDoor'])
+
+export const DOOR_LEAF_STYLE_RU: Record<DoorLeafStyle, string> = {
+  flush: 'Гладкое',
+  panel: 'Филёнчатое',
+  glazed: 'Остеклённое',
+  insert: 'Царговое со вставками',
+  glass: 'Стеклянное',
+}
+
+export const DOOR_SLIDE_RU: Record<DoorSlide, string> = {
+  surface: 'Купе по стене',
+  pocket: 'Пенал (уходит в стену)',
+  barn: 'Амбарная, открытый рельс',
+  folding: 'Складная (гармошка)',
+}
 
 export const CURTAIN_KIND_RU: Record<CurtainKind, string> = {
   none: 'Нет',

@@ -370,6 +370,274 @@ const CHAIR = { body: M.oak, fabric: M.fabricBeige, legs: M.oak }
 const APPLIANCE = { body: M.whiteMetal, front: M.whiteMetal, glass: M.glassTinted, metal: M.chrome }
 const APPLIANCE_STEEL = { body: M.steel, front: M.steel, glass: M.glassBlack, metal: M.chrome }
 
+/**
+ * Extra kitchen modules. Sizes follow common store listings (IKEA METOD / Леруа / Hoff):
+ * base units 600 deep incl. fronts, 720 carcass + 100–150 plinth + 38–40 worktop ≈ 900;
+ * wall units 320 deep, 720 / 900 tall, bottom at 1400; tall units 2120 / 2300 / 2400.
+ */
+const SAGE_FRONT = 'mat_paint_sage'
+const IVORY_FRONT = 'mat_paint_ivory'
+const ANTHRACITE_FRONT = 'mat_paint_anthracite'
+const BASE_TAGS = ['кухня', 'нижний модуль']
+const WALL_TAGS = ['кухня', 'верхний модуль']
+const KITCHEN_MORE: Asset[] = [
+  // ── base ──
+  asset('kitchen_base_150_bottle', 'Bottle rack 150', 'Бутылочница 150', 'kitchen', 'kitchenBase', [150, 600, 900], KITCHEN, {
+    params: { layout: 'doors', doors: 1, plinth: 100, worktop: true },
+    tags: [...BASE_TAGS, 'бутылочница', 'карго'],
+  }),
+  asset('kitchen_base_300_open', 'Open end shelf unit 300', 'Открытая торцевая тумба 300', 'kitchen', 'kitchenBase', [300, 600, 900], KITCHEN, {
+    params: { layout: 'open', plinth: 100, worktop: true },
+    tags: [...BASE_TAGS, 'открытая', 'торцевая'],
+  }),
+  asset('kitchen_base_450', 'Base unit 450', 'Кухонная тумба 450', 'kitchen', 'kitchenBase', [450, 600, 900], KITCHEN, {
+    params: { layout: 'doors', doors: 1, plinth: 100, worktop: true },
+    tags: BASE_TAGS,
+  }),
+  asset('kitchen_base_mixed_600', 'Base unit 600, drawer + door', 'Тумба 600 с ящиком и дверцей', 'kitchen', 'kitchenBase', [600, 600, 900], KITCHEN, {
+    params: { layout: 'mixed', doors: 1, drawers: 1, plinth: 100, worktop: true },
+    tags: BASE_TAGS,
+  }),
+  asset('kitchen_base_drawers_400', 'Drawer unit 400', 'Тумба с ящиками 400', 'kitchen', 'kitchenBase', [400, 600, 900], KITCHEN, {
+    params: { layout: 'drawers', drawers: 4, plinth: 100, worktop: true },
+    tags: [...BASE_TAGS, 'ящики'],
+  }),
+  asset('kitchen_base_sink_600', 'Sink unit 600', 'Тумба под мойку 600', 'kitchen', 'kitchenBase', [600, 600, 900], KITCHEN, {
+    params: { layout: 'doors', doors: 1, plinth: 100, worktop: true, cutout: 'sink' },
+    tags: [...BASE_TAGS, 'мойка'],
+  }),
+  asset('kitchen_base_hob_600', 'Hob unit 600 with drawers', 'Тумба под варочную панель 600', 'kitchen', 'kitchenBase', [600, 600, 900], KITCHEN, {
+    params: { layout: 'drawers', drawers: 3, plinth: 100, worktop: true, cutout: 'hob', hob: 'induction' },
+    tags: [...BASE_TAGS, 'варочная панель'],
+  }),
+  asset('kitchen_base_oven_600', 'Base unit for built-in oven 600', 'Тумба под духовой шкаф 600', 'kitchen', 'kitchenBase', [600, 600, 900], { ...KITCHEN, glass: M.glassBlack }, {
+    params: { layout: 'oven', plinth: 100, worktop: true, cutout: 'hob', hob: 'induction' },
+    tags: [...BASE_TAGS, 'духовка'],
+  }),
+  asset('kitchen_base_dishwasher_600', 'Integrated dishwasher 600 with front', 'Посудомоечная машина встроенная 600 (фасад)', 'kitchen', 'kitchenBase', [600, 600, 900], KITCHEN, {
+    params: { layout: 'dishwasher', plinth: 100, worktop: true },
+    tags: [...BASE_TAGS, 'посудомойка', 'встроенная'],
+  }),
+  asset('kitchen_base_dishwasher_450', 'Integrated dishwasher 450 with front', 'Посудомоечная машина встроенная 450 (фасад)', 'kitchen', 'kitchenBase', [450, 600, 900], KITCHEN, {
+    params: { layout: 'dishwasher', plinth: 100, worktop: true },
+    tags: [...BASE_TAGS, 'посудомойка', 'встроенная'],
+  }),
+  asset('kitchen_base_corner_l_900', 'L-shaped corner base unit 900×900', 'Угловая тумба Г-образная 900×900', 'kitchen', 'kitchenBase', [900, 900, 900], KITCHEN, {
+    params: { corner: true, cornerType: 'L', cornerSide: 'left', legDepth: 600, plinth: 100, worktop: true },
+    tags: [...BASE_TAGS, 'угловой модуль'],
+  }),
+  asset('kitchen_base_corner_blind_1000', 'Blind corner base unit 1000', 'Угловая тумба с глухой частью 1000', 'kitchen', 'kitchenBase', [1000, 600, 900], KITCHEN, {
+    params: { corner: true, cornerType: 'blind', cornerSide: 'left', doors: 1, plinth: 100, worktop: true },
+    tags: [...BASE_TAGS, 'угловой модуль'],
+  }),
+  asset('kitchen_base_shaker_600', 'Shaker base unit 600', 'Тумба «Шейкер» 600', 'kitchen', 'kitchenBase', [600, 600, 900], { ...KITCHEN, front: SAGE_FRONT, worktop: M.oak, metal: 'mat_metal_brass' }, {
+    params: { layout: 'mixed', doors: 1, drawers: 1, frontStyle: 'shaker', handle: 'cup', plinth: 100, worktop: true },
+    tags: [...BASE_TAGS, 'шейкер'],
+  }),
+  asset('kitchen_base_classic_800', 'Classic base unit 800', 'Тумба классика 800', 'kitchen', 'kitchenBase', [800, 600, 900], { ...KITCHEN, front: IVORY_FRONT, worktop: 'mat_marble_white', metal: 'mat_metal_brass' }, {
+    params: { layout: 'doors', doors: 2, frontStyle: 'classic', handle: 'knob', plinth: 100, worktop: true },
+    tags: [...BASE_TAGS, 'классика'],
+  }),
+  asset('kitchen_base_gola_800', 'Handleless drawer unit 800 (Gola)', 'Тумба без ручек Gola 800', 'kitchen', 'kitchenBase', [800, 600, 900], { ...KITCHEN, front: ANTHRACITE_FRONT, worktop: 'mat_concrete_microcement' }, {
+    params: { layout: 'drawers', drawers: 3, frontStyle: 'flat', handle: 'gola', plinth: 100, worktop: true },
+    tags: [...BASE_TAGS, 'без ручек', 'gola'],
+  }),
+
+  // ── wall ──
+  asset('kitchen_wall_300', 'Wall unit 300', 'Навесной шкаф 300', 'kitchen', 'kitchenWall', [300, 320, 720], KITCHEN, {
+    mount: 'wall',
+    elevation: 1400,
+    params: { layout: 'doors', doors: 1 },
+    tags: WALL_TAGS,
+  }),
+  asset('kitchen_wall_600_900', 'Tall wall unit 600×900', 'Навесной шкаф 600 высокий (900)', 'kitchen', 'kitchenWall', [600, 320, 900], KITCHEN, {
+    mount: 'wall',
+    elevation: 1400,
+    params: { layout: 'doors', doors: 1 },
+    tags: WALL_TAGS,
+  }),
+  asset('kitchen_wall_800_900', 'Tall wall unit 800×900', 'Навесной шкаф 800 высокий (900)', 'kitchen', 'kitchenWall', [800, 320, 900], KITCHEN, {
+    mount: 'wall',
+    elevation: 1400,
+    params: { layout: 'doors', doors: 2 },
+    tags: WALL_TAGS,
+  }),
+  asset('kitchen_wall_lift_800', 'Wall unit 800 with lift-up front', 'Навесной шкаф 800 с подъёмным фасадом', 'kitchen', 'kitchenWall', [800, 320, 360], KITCHEN, {
+    mount: 'wall',
+    elevation: 1760,
+    params: { layout: 'lift' },
+    tags: [...WALL_TAGS, 'подъёмный'],
+  }),
+  asset('kitchen_wall_lift2_800', 'Wall unit 800 with two lift-up fronts', 'Навесной шкаф 800 с двумя подъёмными фасадами', 'kitchen', 'kitchenWall', [800, 320, 720], KITCHEN, {
+    mount: 'wall',
+    elevation: 1400,
+    params: { layout: 'lift2' },
+    tags: [...WALL_TAGS, 'подъёмный'],
+  }),
+  asset('kitchen_wall_glass_800', 'Glazed wall unit 800', 'Навесной шкаф со стеклом 800', 'kitchen', 'kitchenWall', [800, 320, 720], { ...KITCHEN, glass: M.glass }, {
+    mount: 'wall',
+    elevation: 1400,
+    params: { layout: 'glass', doors: 2, underLight: true },
+    tags: [...WALL_TAGS, 'витрина'],
+  }),
+  asset('kitchen_wall_open_600', 'Open wall unit 600', 'Открытая навесная полка 600', 'kitchen', 'kitchenWall', [600, 320, 720], { ...KITCHEN, body: M.oak }, {
+    mount: 'wall',
+    elevation: 1400,
+    params: { layout: 'open' },
+    tags: [...WALL_TAGS, 'открытая'],
+  }),
+  asset('kitchen_wall_corner_l_600', 'L-shaped corner wall unit 600×600', 'Угловой навесной шкаф Г-образный 600×600', 'kitchen', 'kitchenWall', [600, 600, 720], KITCHEN, {
+    mount: 'wall',
+    elevation: 1400,
+    params: { corner: true, cornerType: 'L', cornerSide: 'left', legDepth: 320 },
+    tags: [...WALL_TAGS, 'угловой модуль'],
+  }),
+  asset('kitchen_wall_shaker_600', 'Shaker wall unit 600', 'Навесной шкаф «Шейкер» 600', 'kitchen', 'kitchenWall', [600, 320, 720], { ...KITCHEN, front: SAGE_FRONT, metal: 'mat_metal_brass' }, {
+    mount: 'wall',
+    elevation: 1400,
+    params: { layout: 'doors', doors: 1, frontStyle: 'shaker', handle: 'knob' },
+    tags: [...WALL_TAGS, 'шейкер'],
+  }),
+
+  // ── tall ──
+  asset('kitchen_tall_pantry_450', 'Pantry unit 450', 'Пенал-кладовая 450', 'kitchen', 'kitchenTall', [450, 600, 2120], KITCHEN, {
+    params: { layout: 'pantry', doors: 1, plinth: 100 },
+    tags: ['кухня', 'пенал'],
+  }),
+  asset('kitchen_tall_600_2300', 'Tall unit 600×2300', 'Шкаф-пенал 600 (2300)', 'kitchen', 'kitchenTall', [600, 600, 2300], KITCHEN, {
+    params: { layout: 'doors', doors: 1, plinth: 100 },
+    tags: ['кухня', 'пенал'],
+  }),
+  asset('kitchen_tall_600_2400', 'Tall unit 600×2400', 'Шкаф-пенал 600 (2400)', 'kitchen', 'kitchenTall', [600, 600, 2400], KITCHEN, {
+    params: { layout: 'doors', doors: 1, plinth: 100 },
+    tags: ['кухня', 'пенал'],
+  }),
+  asset('kitchen_tall_oven_only_600', 'Tall unit for oven only 600', 'Пенал под духовой шкаф без СВЧ 600', 'kitchen', 'kitchenTall', [600, 600, 2120], { ...KITCHEN, glass: M.glassBlack }, {
+    params: { layout: 'oven', doors: 1, plinth: 100, microwave: false },
+    tags: ['кухня', 'пенал', 'духовка'],
+  }),
+  asset('kitchen_tall_fridge_600_2300', 'Fridge column 600×2300', 'Пенал под встроенный холодильник 600 (2300)', 'kitchen', 'kitchenTall', [600, 600, 2300], KITCHEN, {
+    params: { layout: 'fridge', plinth: 100 },
+    tags: ['кухня', 'пенал', 'холодильник'],
+  }),
+
+  // ── worktops & backsplash ──
+  asset('worktop_2400', 'Worktop 2400', 'Столешница 2400', 'kitchen', 'worktop', [2400, 600, 38], { worktop: M.quartz }, {
+    mount: 'surface',
+    elevation: 862,
+    tags: ['кухня', 'столешница'],
+  }),
+  asset('worktop_4100', 'Worktop 4100', 'Столешница 4100', 'kitchen', 'worktop', [4100, 600, 38], { worktop: M.oak }, {
+    mount: 'surface',
+    elevation: 862,
+    tags: ['кухня', 'столешница'],
+  }),
+  asset('kitchen_backsplash_tile_2400', 'Backsplash panel, tiles 2400', 'Кухонный фартук плитка 2400', 'kitchen', 'box', [2400, 8, 500], { body: 'mat_tile_metro_white' }, {
+    mount: 'wall',
+    elevation: 900,
+    tags: ['кухня', 'фартук'],
+  }),
+  asset('kitchen_backsplash_stone_3000', 'Backsplash panel, stone 3000', 'Кухонный фартук камень 3000', 'kitchen', 'box', [3000, 12, 500], { body: 'mat_marble_white' }, {
+    mount: 'wall',
+    elevation: 900,
+    tags: ['кухня', 'фартук'],
+  }),
+  asset('kitchen_plinth_board', 'Plinth board 2400', 'Цоколь кухонный 2400', 'kitchen', 'box', [2400, 16, 100], { body: M.white }, {
+    tags: ['кухня', 'цоколь'],
+  }),
+
+  // ── hoods ──
+  asset('hood_inclined', 'Inclined hood 600', 'Вытяжка наклонная 600', 'appliance', 'hood', [600, 380, 900], { body: M.steel, metal: M.steel, glass: M.glassBlack }, {
+    mount: 'wall',
+    elevation: 1500,
+    params: { type: 'inclined' },
+    tags: ['кухня', 'вытяжка'],
+  }),
+  asset('hood_900', 'Chimney hood 900', 'Вытяжка купольная 900', 'appliance', 'hood', [900, 500, 800], { body: M.steel, metal: M.steel, glass: M.glassBlack }, {
+    mount: 'wall',
+    elevation: 1600,
+    params: { type: 'chimney' },
+    tags: ['кухня', 'вытяжка'],
+  }),
+  asset('hood_island', 'Island hood 900', 'Вытяжка островная 900', 'appliance', 'hood', [900, 600, 1050], { body: M.steel, metal: M.steel, glass: M.glassBlack }, {
+    mount: 'ceiling',
+    params: { type: 'island' },
+    tags: ['кухня', 'вытяжка', 'остров'],
+  }),
+]
+
+/**
+ * TVs and media. Panel W×H×D (no stand / with stand) follow 2024–25 Samsung / LG spec sheets,
+ * rounded to the nearest 5 mm. Wall TVs hang so the screen centre is at ~1.1–1.2 m.
+ */
+type TvSpec = [inch: number, wall: [number, number, number], stand: [number, number, number], elevWall: number]
+const TV_SPECS: TvSpec[] = [
+  [32, [720, 80, 430], [716, 180, 470], 1000],
+  [43, [960, 60, 560], [965, 200, 625], 1000],
+  [50, [1117, 60, 646], [1117, 250, 710], 950],
+  [55, [1230, 60, 710], [1232, 250, 770], 950],
+  [65, [1450, 60, 830], [1451, 300, 890], 900],
+  [75, [1673, 60, 957], [1673, 330, 1030], 850],
+]
+const TV_SLOTS = { body: M.plasticBlack, screen: M.glassBlack }
+const TV_LEGACY = new Set([43, 55, 65])
+const ELECTRONICS_MORE: Asset[] = [
+  ...TV_SPECS.filter(([inch]) => !TV_LEGACY.has(inch)).map(([inch, s, , elev]) =>
+    asset(`tv_${inch}`, `TV ${inch}"`, `Телевизор ${inch}" настенный`, 'electronics', 'tv', s, TV_SLOTS, {
+      mount: 'wall',
+      elevation: elev,
+      params: { stand: false },
+      tags: ['телевизор'],
+    }),
+  ),
+  ...TV_SPECS.map(([inch, , s]) =>
+    asset(`tv_${inch}_stand`, `TV ${inch}" on stand`, `Телевизор ${inch}" на подставке`, 'electronics', 'tv', s, TV_SLOTS, {
+      mount: 'surface',
+      elevation: 450,
+      params: { stand: true, standStyle: inch >= 55 ? 'feet' : 'pedestal' },
+      tags: ['телевизор'],
+    }),
+  ),
+  asset('soundbar', 'Soundbar', 'Саундбар', 'electronics', 'tv', [900, 100, 65], { body: M.plasticBlack, screen: M.glassBlack }, {
+    mount: 'surface',
+    elevation: 450,
+    params: { variant: 'soundbar' },
+    tags: ['саундбар', 'акустика'],
+  }),
+  asset('soundbar_wall', 'Soundbar, wall-mounted', 'Саундбар настенный', 'electronics', 'tv', [1000, 110, 60], { body: M.plasticBlack, screen: M.glassBlack }, {
+    mount: 'wall',
+    elevation: 820,
+    params: { variant: 'soundbar' },
+    tags: ['саундбар', 'акустика'],
+  }),
+  asset('tv_bracket_fixed', 'TV wall bracket, fixed', 'Кронштейн для ТВ фиксированный', 'electronics', 'tv', [450, 30, 320], { body: M.blackMetal, metal: M.blackMetal }, {
+    mount: 'wall',
+    elevation: 1100,
+    params: { variant: 'bracket' },
+    tags: ['кронштейн', 'телевизор'],
+  }),
+  asset('tv_bracket_arm', 'TV wall bracket, articulating', 'Кронштейн для ТВ поворотный', 'electronics', 'tv', [420, 450, 300], { body: M.blackMetal, metal: M.blackMetal }, {
+    mount: 'wall',
+    elevation: 1100,
+    params: { variant: 'bracket' },
+    tags: ['кронштейн', 'телевизор'],
+  }),
+  asset('tv_stand_wall_1800', 'Floating TV unit 1800', 'ТВ-тумба подвесная 1800', 'storage', 'wardrobe', [1800, 400, 350], { ...WARDROBE, body: M.walnut, front: M.walnut }, {
+    mount: 'wall',
+    elevation: 300,
+    params: { doors: 3, sliding: false, drawers: 0, handle: 'none' },
+    tags: ['тумба', 'гостиная', 'тв'],
+  }),
+  asset('tv_stand_2000', 'TV stand 2000 on legs', 'ТВ-тумба 2000 на ножках', 'storage', 'wardrobe', [2000, 420, 500], { ...WARDROBE, front: 'mat_wood_oak_natural', metal: 'mat_metal_brass' }, {
+    params: { doors: 4, sliding: false, drawers: 0, legs: true, frontStyle: 'shaker', handle: 'knob' },
+    tags: ['тумба', 'гостиная', 'тв'],
+  }),
+  asset('media_shelf_tall', 'Media tower shelf', 'Стеллаж для ТВ-зоны', 'storage', 'shelf', [450, 350, 1800], { body: M.walnut }, {
+    params: { shelves: 5, back: true },
+    tags: ['стеллаж', 'гостиная', 'тв'],
+  }),
+]
+
 export const BUILTIN_ASSETS: Asset[] = [
   // ── structure ──
   asset('box', 'Box', 'Короб', 'structure', 'box', [400, 300, 2700], { body: M.paintWhite }, { tags: ['короб', 'ниша'] }),
@@ -470,6 +738,7 @@ export const BUILTIN_ASSETS: Asset[] = [
     params: { doors: 2, plinth: 100, fridge: true },
     tags: ['кухня', 'пенал', 'холодильник'],
   }),
+  ...KITCHEN_MORE,
   asset('worktop_2000', 'Worktop 2000', 'Столешница 2000', 'kitchen', 'worktop', [2000, 600, 40], { worktop: M.quartz }, {
     mount: 'surface',
     elevation: 860,
@@ -753,6 +1022,7 @@ export const BUILTIN_ASSETS: Asset[] = [
     params: { stand: false },
     tags: ['телевизор'],
   }),
+  ...ELECTRONICS_MORE,
   asset('monitor', 'Monitor 27"', 'Монитор 27"', 'electronics', 'tv', [610, 200, 450], { body: M.plasticBlack, screen: M.glassBlack }, {
     mount: 'surface',
     elevation: 750,
@@ -896,6 +1166,14 @@ export const BUILTIN_ASSETS: Asset[] = [
     tags: ['растение', 'цветок'],
   }),
 ]
+
+// every kitchen module exposes its front style and handle in the inspector (the generator defaults)
+for (const a of BUILTIN_ASSETS) {
+  if (a.procedural !== 'kitchenBase' && a.procedural !== 'kitchenWall' && a.procedural !== 'kitchenTall') continue
+  const p = (a.defaultParams ??= {})
+  if (p.frontStyle === undefined) p.frontStyle = 'flat'
+  if (p.handle === undefined) p.handle = 'bar'
+}
 
 // ───────────────────────────── openings, rooms, curtains ─────────────────────────────
 

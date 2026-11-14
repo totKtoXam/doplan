@@ -81,6 +81,7 @@ export const uiStore = createStore<UiStoreState>()((set, get) => ({
   wallThickness: firstDoc.settings.wallThickness,
   wallHeight: firstDoc.settings.wallHeight,
   openingKind: 'door',
+  openingPreset: null,
   placingAssetId: null,
   paintFinish: null,
   catalog: safeBuiltinCatalog(),

@@ -1,12 +1,15 @@
 import { ArrowLeftRight, DoorOpen, FlipVertical2 } from 'lucide-react'
-import type { CurtainKind, CurtainSpec, Id, Opening, OpeningKind } from '@core/types'
-import { defaultCurtain, OPENING_DEFAULTS } from '@core'
+import type { CurtainKind, CurtainSpec, DoorLeafStyle, DoorSlide, Id, Opening, OpeningKind } from '@core/types'
+import { defaultCurtain, DOOR_LEAF_STYLES, DOOR_SLIDES, OPENING_DEFAULTS } from '@core'
 import { useDoc } from '@/store/document'
 import { useT } from '@/i18n'
 import { Button, NumberInput, Row, Section, Segmented, Select, Slider, Toggle, fmtNum } from '@/ui/kit'
 import { MaterialPicker } from '../common/MaterialPicker'
 import {
   CURTAIN_KIND_RU,
+  DOOR_LEAF_STYLE_RU,
+  DOOR_LOOK_KINDS,
+  DOOR_SLIDE_RU,
   FABRIC_CATEGORIES,
   FRAME_CATEGORIES,
   hasLeaf,
@@ -77,6 +80,36 @@ export function OpeningInspector({ id }: { id: Id }) {
               {t('Открывание')}
             </Button>
           </div>
+        )}
+        {DOOR_LOOK_KINDS.has(o.kind) && (
+          <>
+            <Row label={t('Полотно')}>
+              <Select<DoorLeafStyle | 'auto'>
+                value={o.style ?? 'auto'}
+                options={[{ value: 'auto', label: t('По материалу') }, ...optionsOf(DOOR_LEAF_STYLE_RU, DOOR_LEAF_STYLES)]}
+                onChange={(v) => set('Вид полотна', (x) => (v === 'auto' ? delete x.style : (x.style = v)))}
+              />
+            </Row>
+            {o.kind === 'slidingDoor' && (
+              <Row label={t('Раздвижение')}>
+                <Select<DoorSlide> value={o.slide ?? 'surface'} options={optionsOf(DOOR_SLIDE_RU, DOOR_SLIDES)} onChange={(v) => set('Тип раздвижной двери', (x) => (v === 'surface' ? delete x.slide : (x.slide = v)))} />
+              </Row>
+            )}
+            <Row label={t('Ширина полотна')}>
+              <Segmented<string>
+                value={String(o.width)}
+                onChange={(v) => set('Ширина проёма', (x) => (x.width = Number(v)))}
+                options={(o.kind === 'doubleDoor' ? [1200, 1300, 1400, 1600] : o.kind === 'entranceDoor' ? [860, 900, 960, 1000] : [600, 700, 800, 900]).map((v) => ({ value: String(v), label: String(v) }))}
+              />
+            </Row>
+            <Row label={t('Высота')}>
+              <Segmented<string>
+                value={String(o.height)}
+                onChange={(v) => set('Высота проёма', (x) => (x.height = Math.min(Number(v), Math.max(100, wall.height - x.sill))))}
+                options={[2000, 2100, 2300].map((v) => ({ value: String(v), label: String(v) }))}
+              />
+            </Row>
+          </>
         )}
       </Section>
 

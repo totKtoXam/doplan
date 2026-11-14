@@ -2,11 +2,14 @@
 import type { Id, Vec2 } from '@core/types'
 import { handles as appHandles } from '@/store/handles'
 import type { EditorCtx } from './context'
+import { nodeRays, sectorsOf } from './angles'
 import { add, mid, mul } from './geom'
 import { dimensionLine, frameOfOpening, framePoint, itemFront, itemToPlan } from './shapes'
 
 export type Handle =
   | { type: 'node'; pos: Vec2; nodeId: Id }
+  /** "+" next to a single selected node: drag (or click) it to draw a new wall from that node */
+  | { type: 'nodeAdd'; pos: Vec2; nodeId: Id; node: Vec2 }
   | { type: 'wallMid'; pos: Vec2; wallId: Id }
   | { type: 'openingEnd'; pos: Vec2; openingId: Id; end: 'a' | 'b' }
   | { type: 'itemResize'; pos: Vec2; itemId: Id; sx: number; sy: number }
@@ -69,7 +72,12 @@ export function computeHandles(ctx: EditorCtx): Handle[] {
 
   if (sel.length === 1) {
     const r = sel[0]
-    if (r.kind === 'wall') {
+    if (r.kind === 'node') {
+      const n = doc.nodes[r.id]
+      if (n && n.levelId === ctx.levelId()) {
+        out.push({ type: 'nodeAdd', pos: nodeAddPos(ctx, r.id, n), nodeId: r.id, node: { x: n.x, y: n.y } })
+      }
+    } else if (r.kind === 'wall') {
       const g = derived.wallGeoms[r.id]
       if (g) out.push({ type: 'wallMid', pos: mid(g.a, g.b), wallId: r.id })
     } else if (r.kind === 'opening') {
@@ -117,6 +125,15 @@ export function computeHandles(ctx: EditorCtx): Handle[] {
   return out
 }
 
+/** "+" handle position: on the bisector of the widest free angle around the node, a fixed px distance away */
+function nodeAddPos(ctx: EditorCtx, nodeId: Id, n: Vec2): Vec2 {
+  const sectors = sectorsOf(nodeRays(ctx.doc(), nodeId))
+  // a lone node: up-right
+  const dir = sectors.length ? sectors.reduce((a, b) => (b.sweep > a.sweep ? b : a)).mid : -Math.PI / 4
+  const d = ctx.mm(26)
+  return { x: n.x + Math.cos(dir) * d, y: n.y + Math.sin(dir) * d }
+}
+
 export function handleAt(ctx: EditorCtx, list: readonly Handle[], screen: Vec2, tolPx = 9): Handle | null {
   // edit handles win over the 3D camera gizmo
   for (const cameraPass of [false, true]) {
@@ -142,6 +159,8 @@ export function handleKey(h: Handle): string {
   switch (h.type) {
     case 'node':
       return `node:${h.nodeId}`
+    case 'nodeAdd':
+      return `nodeAdd:${h.nodeId}`
     case 'wallMid':
       return `wallMid:${h.wallId}`
     case 'openingEnd':
@@ -171,6 +190,8 @@ export function handleCursor(h: Handle): string {
     case 'camera':
     case 'cameraTarget':
       return 'grab'
+    case 'nodeAdd':
+      return 'copy'
     default:
       return 'move'
   }

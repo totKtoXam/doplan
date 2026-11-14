@@ -1,6 +1,7 @@
 /** Selection / hover highlights, edit handles, snap feedback and the 3D camera gizmo (screen space). */
-import type { EntityRef } from '@core/types'
+import type { EntityRef, Id } from '@core/types'
 import { type EditorCtx, sameRef } from '../context'
+import { drawNodeAngles } from './angles'
 import { DEG } from '../geom'
 import { cameraGizmo, type Handle, handleKey } from '../handles'
 import type { Painter } from '../painter'
@@ -37,6 +38,16 @@ export function drawSelection(ctx: EditorCtx, p: Painter, handleList: readonly H
   if (hover && !sel.some((r) => sameRef(r, hover))) highlight(ctx, p, hover, pal.hover, false)
   for (const ref of sel) highlight(ctx, p, ref, pal.accent, true)
 
+  // angles between the walls at selected / dragged / hovered junctions (select tool only:
+  // drawing tools show their own)
+  if (ui.tool === 'select') {
+    const ids: Id[] = []
+    for (const r of sel) if (r.kind === 'node' && ids.length < 8) ids.push(r.id)
+    if (activeHandle?.type === 'node' && !ids.includes(activeHandle.nodeId)) ids.push(activeHandle.nodeId)
+    drawNodeAngles(ctx, p, ids, pal.accent)
+    if (hover?.kind === 'node' && !ids.includes(hover.id)) drawNodeAngles(ctx, p, [hover.id], pal.hover, 0.85)
+  }
+
   const activeKey = activeHandle ? handleKey(activeHandle) : null
   for (const h of handleList) {
     const active = activeKey !== null && handleKey(h) === activeKey
@@ -61,6 +72,19 @@ export function drawSelection(ctx: EditorCtx, p: Painter, handleList: readonly H
       case 'dimOffset':
         p.diamond(h.pos, 6, pal.handleStroke, 2)
         break
+      case 'nodeAdd': {
+        const s = p.S(h.pos)
+        const n = p.S(h.node)
+        p.sdashed(n.x, n.y, s.x, s.y, pal.accent, 1, 0.7, 3, 3)
+        p.g.circle(s.x, s.y, 8).fill({ color: pal.accent }).stroke({ width: 1.5, color: pal.bg })
+        p.g
+          .moveTo(s.x - 4, s.y)
+          .lineTo(s.x + 4, s.y)
+          .moveTo(s.x, s.y - 4)
+          .lineTo(s.x, s.y + 4)
+          .stroke({ width: 2, color: pal.bg })
+        break
+      }
       default:
         break
     }

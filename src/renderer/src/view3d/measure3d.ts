@@ -70,7 +70,8 @@ export function createMeasure3D(container: HTMLElement, camera: THREE.Camera): M
       if (g.dist < 1) continue
       segs.push({ a: g.from, b: g.to, text: formatLen(g.dist, units), color: OK })
     }
-    size = { item: sel, text: `${formatLen(sel.size.w, units)} × ${formatLen(sel.size.d, units)} × ${formatLen(sel.size.h, units)}` }
+    const elev = sel.elevation > 0.5 ? `  ↑ ${formatLen(sel.elevation, units)}` : ''
+    size = { item: sel, text: `${formatLen(sel.size.w, units)} × ${formatLen(sel.size.d, units)} × ${formatLen(sel.size.h, units)}${elev}` }
   }
 
   function project(x: number, y: number, z: number, w: number, h: number): { x: number; y: number } | null {

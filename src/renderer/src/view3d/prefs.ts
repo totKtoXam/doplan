@@ -15,12 +15,39 @@ import { useStore } from 'zustand'
  */
 export type TraceMode = 'off' | 'manual' | 'auto'
 
+/**
+ * Denoiser of the traced image: 'auto' filters strongly at low sample counts and fades out as the
+ * image converges, 'on' always filters fully, 'off' shows the raw image.
+ */
+export type DenoiseMode = 'auto' | 'on' | 'off'
+
 interface Prefs3D {
   traceMode: TraceMode
   setTraceMode(m: TraceMode): void
+  denoiseMode: DenoiseMode
+  setDenoiseMode(m: DenoiseMode): void
 }
 
 const TRACE_KEY = 'doplan.traceMode'
+const DENOISE_KEY = 'doplan.denoiseMode'
+
+function readDenoiseMode(): DenoiseMode {
+  try {
+    const v = globalThis.localStorage?.getItem(DENOISE_KEY)
+    if (v === 'auto' || v === 'on' || v === 'off') return v
+  } catch {
+    /* storage unavailable */
+  }
+  return 'auto'
+}
+
+function save(key: string, value: string): void {
+  try {
+    globalThis.localStorage?.setItem(key, value)
+  } catch {
+    /* storage unavailable: the choice lasts for this session */
+  }
+}
 
 function readTraceMode(): TraceMode {
   try {
@@ -35,12 +62,13 @@ function readTraceMode(): TraceMode {
 export const prefs3dStore = createStore<Prefs3D>()((set) => ({
   traceMode: readTraceMode(),
   setTraceMode(m) {
-    try {
-      globalThis.localStorage?.setItem(TRACE_KEY, m)
-    } catch {
-      /* storage unavailable: the choice lasts for this session */
-    }
+    save(TRACE_KEY, m)
     set({ traceMode: m })
+  },
+  denoiseMode: readDenoiseMode(),
+  setDenoiseMode(m) {
+    save(DENOISE_KEY, m)
+    set({ denoiseMode: m })
   },
 }))
 

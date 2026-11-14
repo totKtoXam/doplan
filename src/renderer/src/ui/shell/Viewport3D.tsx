@@ -24,12 +24,13 @@ import { docStore, useDoc } from '@/store/document'
 import { handles, setHandle } from '@/store/handles'
 import { pathTracingDone, uiStore, useUi } from '@/store/ui'
 import type { Engine3DHandle } from '@/contracts'
-import { prefs3dStore, usePrefs3d, type TraceMode } from '@/view3d/prefs'
+import { prefs3dStore, usePrefs3d, type DenoiseMode, type TraceMode } from '@/view3d/prefs'
 import { IconBtn, MiniSelect, Segmented, TextBtn } from './primitives'
 
 const QUALITY: QualityPreset[] = ['low', 'medium', 'high', 'ultra']
 const QUALITY_NAMES: Record<QualityPreset, string> = { low: 'Низкое', medium: 'Среднее', high: 'Высокое', ultra: 'Ультра' }
 const PT_TARGETS = [64, 256, 1024, 4096]
+const DENOISE_NAMES: Record<DenoiseMode, string> = { auto: 'Шумодав: авто', on: 'Шумодав: вкл', off: 'Шумодав: выкл' }
 
 addTranslations('en', {
   Выкл: 'Off',
@@ -40,6 +41,11 @@ addTranslations('en', {
     'Path tracing with the button; the realtime frame shows while the camera moves or the project changes',
   'Трассировка запускается сама, когда камера и проект в покое': 'Path tracing starts by itself once the camera and the project rest',
   'Остановить трассировку': 'Stop path tracing',
+  'Шумодав: авто': 'Denoise: auto',
+  'Шумодав: вкл': 'Denoise: on',
+  'Шумодав: выкл': 'Denoise: off',
+  'Шумоподавление трассировки: «авто» сглаживает шум на малом числе сэмплов и ослабевает по мере накопления':
+    'Path tracing denoiser: "auto" smooths the noise at low sample counts and fades as samples accumulate',
 })
 
 /** Global flag read by the 3D engine when it picks a backend ('webgpu' | 'webgl'). */
@@ -58,6 +64,7 @@ function Overlay({ engine, hidden }: { engine: Engine3DHandle; hidden?: boolean 
   const [target, setTarget] = useState(256)
   const ptDone = pathTracingDone(pt)
   const traceMode = usePrefs3d((s) => s.traceMode)
+  const denoiseMode = usePrefs3d((s) => s.denoiseMode)
   const canTrace = engine.backend === 'webgpu'
   // "Авто": a stop with the button holds until the next edit of the document
   const [autoHeld, setAutoHeld] = useState(false)
@@ -146,6 +153,14 @@ function Overlay({ engine, hidden }: { engine: Engine3DHandle; hidden?: boolean 
               { value: 'manual', label: t('Вручную'), title: t('Трассировка по кнопке; при движении камеры и правках показывается обычный кадр') },
               { value: 'auto', label: t('Авто'), title: t('Трассировка запускается сама, когда камера и проект в покое') },
             ]}
+          />
+        )}
+        {canTrace && traceMode !== 'off' && (
+          <MiniSelect
+            title={t('Шумоподавление трассировки: «авто» сглаживает шум на малом числе сэмплов и ослабевает по мере накопления')}
+            value={denoiseMode}
+            options={(['auto', 'on', 'off'] as DenoiseMode[]).map((m) => ({ value: m, label: t(DENOISE_NAMES[m]) }))}
+            onChange={(m) => prefs3dStore.getState().setDenoiseMode(m)}
           />
         )}
         {traceMode === 'off' || !canTrace ? null : ptDone ? (

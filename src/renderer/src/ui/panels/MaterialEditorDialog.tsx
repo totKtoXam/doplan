@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ImagePlus, Link2, Link2Off, Wallpaper, X } from 'lucide-react'
 import type { Material, MaterialCategory, PriceUnit, ProductRef } from '@core/types'
-import { newId } from '@core'
+import { localDate, newId } from '@core'
 import { docStore } from '@/store/document'
 import { useT } from '@/i18n'
 import { Button, ColorInput, Dialog, IconButton, Input, NumberInput, Row, Select, Slider, Toggle, fmtNum } from '@/ui/kit'
@@ -77,7 +77,7 @@ function productOf(d: Draft): Pick<Material, 'product' | 'wallpaper' | 'paint'> 
   const hasProduct = Object.keys(product).length > 0
   if (hasProduct) {
     product.source = product.url ? 'link' : 'manual'
-    product.updatedAt = new Date().toISOString().slice(0, 10)
+    product.updatedAt = localDate()
   }
   const wallpaper =
     d.category === 'wallpaper' && d.rollW && d.rollL

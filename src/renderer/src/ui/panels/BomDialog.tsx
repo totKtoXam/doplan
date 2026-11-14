@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { ExternalLink, FileDown, FileSpreadsheet, FileUp } from 'lucide-react'
 import type { BomRow, Catalog } from '@core'
-import { bomToCsv, bomTotals, computeBom, CURRENCIES, currencySymbol, formatMoney, mergeCatalog, parsePriceListCsv, priceListToCsv } from '@core'
+import { bomToCsv, bomTotals, computeBom, CURRENCIES, currencySymbol, formatMoney, localDate, mergeCatalog, parsePriceListCsv, priceListToCsv } from '@core'
 import type { PriceUnit, ProductRef } from '@core/types'
 import { useDoc } from '@/store/document'
 import { useUi } from '@/store/ui'
@@ -24,7 +24,7 @@ addTranslations('en', {
   'Валюта проекта': 'Project currency',
   'Импорт прайс-листа': 'Import price list',
   'без цены': 'without price',
-  'позиций с ценой': 'priced items',
+  'с ценой': 'priced',
   'Цены из прайс-листа проекта; правьте прямо в таблице или выгрузите прайс-лист, заполните и загрузите обратно.':
     'Prices come from the project price list: edit them in the table, or export the price list, fill it in and import it back.',
   'Загружено цен': 'Prices imported',
@@ -107,7 +107,7 @@ export function BomDialog({ open, onClose }: DialogPropsBase) {
         const list = (design.priceList ??= {})
         const prev = list[refId]
         const unit = prev?.priceUnit ?? r.priceUnit ?? asPriceUnit(r.unit)
-        const next: ProductRef = { ...(prev ?? {}), price: v, source: 'manual', updatedAt: new Date().toISOString().slice(0, 10) }
+        const next: ProductRef = { ...(prev ?? {}), price: v, source: 'manual', updatedAt: localDate() }
         if (unit) next.priceUnit = unit
         list[refId] = next
       },
@@ -279,8 +279,8 @@ export function BomDialog({ open, onClose }: DialogPropsBase) {
                 </th>
                 <td className="py-1.5 pr-2 text-right text-[12px] font-semibold tabular-nums">{money(totals.total)}</td>
                 <td className="py-1.5 text-[10px] text-[var(--muted)]">
-                  {totals.priced} {t('позиций с ценой')}
-                  {totals.unpriced ? `, ${totals.unpriced} ${t('без цены')}` : ''}
+                  {t('с ценой')}: {totals.priced}
+                  {totals.unpriced ? `, ${t('без цены')}: ${totals.unpriced}` : ''}
                 </td>
               </tr>
             </tfoot>

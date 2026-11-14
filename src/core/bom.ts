@@ -331,16 +331,19 @@ export function computeBom(doc: Doc, catalog?: Catalog, opts: BomOptions = {}): 
 
   const rows: BomRow[] = []
   const sortedRooms = (s: Set<string>) => [...s].sort((a, b) => a.localeCompare(b, 'ru'))
-  /** pack size of the product when it is bought in `unit` packs (or the pack is given without a unit) */
-  const packOf = (refId: Id, unit: PriceUnit): number | undefined => {
+  /**
+   * Pack size of the product (m² per box, litres per can) when it is priced per pack, per its
+   * content unit, or without a unit; a price per piece of something else leaves the pack unknown.
+   */
+  const packOf = (refId: Id, packUnit: PriceUnit, contentUnit: PriceUnit): number | undefined => {
     const p = productFor(doc, catalog, refId)
-    return p?.pack && (!p.priceUnit || p.priceUnit === unit) ? p.pack : undefined
+    return p?.pack && (!p.priceUnit || p.priceUnit === packUnit || p.priceUnit === contentUnit) ? p.pack : undefined
   }
   const paintRow = (group: BomGroup, m: Material, id: Id, area: number): BomRow => {
     const k = m.paint?.coats ?? coats
     const cov = m.paint?.coverage ?? coverage
     const litres = round((area * k) / cov, 1)
-    const can = packOf(id, 'шт')
+    const can = packOf(id, 'шт', 'л')
     const alt: BomRow['alt'] = { л: litres }
     if (can) alt['шт'] = Math.ceil(litres / can)
     return {
@@ -356,7 +359,7 @@ export function computeBom(doc: Doc, catalog?: Catalog, opts: BomOptions = {}): 
   }
   const tileRow = (group: BomGroup, m: Material | undefined, id: Id, tile: { w: number; h: number; grout: number }, area: number, waste: number, cell: number): BomRow => {
     const count = Math.ceil((area * (1 + waste)) / cell)
-    const pack = packOf(id, 'уп.')
+    const pack = packOf(id, 'уп.', 'м²')
     const alt: BomRow['alt'] = { шт: count, 'м²': round(count * cell) }
     if (pack) alt['уп.'] = Math.ceil((count * cell) / pack)
     return {
@@ -382,7 +385,7 @@ export function computeBom(doc: Doc, catalog?: Catalog, opts: BomOptions = {}): 
     if (planks && (m?.category === 'laminate' || m?.category === 'parquet' || !tile || a.pattern?.type === 'planks')) {
       const waste = wasteFor(a.pattern?.type ?? 'planks', a.pattern ?? m?.pattern)
       const need = a.area * (1 + waste)
-      const pack = packOf(a.materialId, 'уп.') ?? packArea
+      const pack = packOf(a.materialId, 'уп.', 'м²') ?? packArea
       const packs = Math.ceil(need / pack)
       rows.push({
         group: 'Полы',
@@ -463,7 +466,7 @@ export function computeBom(doc: Doc, catalog?: Catalog, opts: BomOptions = {}): 
   for (const c of cornice.values()) {
     const refId = `cornice:${Math.round(c.profile)}`
     const len = round(c.length * 1.05)
-    const piece = packOf(refId, 'шт') ?? 2
+    const piece = packOf(refId, 'шт', 'м') ?? 2
     rows.push({
       group: 'Потолки',
       name: `Карниз потолочный ${Math.round(c.profile)} мм`,
@@ -482,7 +485,7 @@ export function computeBom(doc: Doc, catalog?: Catalog, opts: BomOptions = {}): 
     const m = lookupMaterial(doc, catalog, s.materialId)
     const need = s.length * 1.05
     const refId = `skirting:${s.materialId ?? ''}:${Math.round(s.height)}`
-    const piece = packOf(refId, 'шт') ?? plank
+    const piece = packOf(refId, 'шт', 'м') ?? plank
     const pieces = Math.ceil(need / piece)
     rows.push({
       group: 'Плинтус',
@@ -737,7 +740,13 @@ export interface PriceListImport {
 }
 
 /** Read a price list CSV (`;` or `,` separated; header row with an `id` column). */
-export function parsePriceListCsv(text: string, today = new Date().toISOString().slice(0, 10)): PriceListImport {
+/** today's date in the user's time zone, YYYY-MM-DD (toISOString would give the UTC date) */
+export function localDate(d = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
+export function parsePriceListCsv(text: string, today = localDate()): PriceListImport {
   const lines = text.replace(/^﻿/, '').split(/\r?\n/)
   const res: PriceListImport = { entries: {}, skipped: [] }
   const headerLine = lines.findIndex((l) => l.trim() !== '')

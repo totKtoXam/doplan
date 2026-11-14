@@ -6,6 +6,7 @@ import {
   bomTotals,
   computeBom,
   formatMoney,
+  localDate,
   parsePriceListCsv,
   priceListToCsv,
   productFor,
@@ -131,6 +132,19 @@ describe('estimate: prices', () => {
     expect(t.byGroup['Полы']).toBeCloseTo(tile.total!, 2)
     expect(t.priced).toBe(1)
     expect(t.unpriced).toBeGreaterThan(0)
+  })
+
+  it('a box size is used even when the tile is priced per m²', () => {
+    const { doc } = withFloorTile(GRID)
+    doc.design = { priceList: { [TILE.id]: { price: 7900.5, priceUnit: 'м²', pack: 1.44 } } }
+    const tile = floorTileRow(computeBom(doc))
+    expect(tile.alt!['уп.']).toBe(Math.ceil(tile.alt!['м²']! / 1.44))
+    expect(tile.note).toContain('уп. по 1,44 м²')
+    expect(tile.priceUnit).toBe('м²')
+  })
+
+  it('price dates are local, not UTC', () => {
+    expect(localDate(new Date(2026, 10, 15, 0, 30))).toBe('2026-11-15')
   })
 
   it('a price without a unit goes on the purchase row in its own unit', () => {

@@ -3,6 +3,7 @@ import { Copy, Trash } from 'lucide-react'
 import { actions } from '@/actions'
 import { useT } from '@/i18n'
 import { IconButton } from '@/ui/kit'
+import { AddToChatButton } from '@/ai/AddToChatButton' // ai-chat
 
 /** inspector header: icon, title, subtitle and the common duplicate/delete buttons */
 export function InspectorHeader({
@@ -29,6 +30,7 @@ export function InspectorHeader({
         {subtitle && <div className="truncate text-[10px] text-[var(--muted)]">{subtitle}</div>}
       </div>
       {extra}
+      <AddToChatButton />
       {canDuplicate && <IconButton icon={<Copy />} label={t('Дублировать (Ctrl+D)')} onClick={() => void actions.duplicateSelection()} />}
       {canDelete && <IconButton icon={<Trash />} variant="danger" label={t('Удалить (Del)')} onClick={() => void actions.deleteSelection()} />}
     </div>

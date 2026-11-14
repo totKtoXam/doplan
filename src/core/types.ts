@@ -319,6 +319,23 @@ export interface Label {
   size: number
 }
 
+/**
+ * «Карандаш»: a freehand mark drawn over the plan to point at a zone in the AI chat
+ * («в ① ширина 180 см»). Editor-only: not exported, not shown in 3D.
+ */
+export interface Annotation {
+  id: Id
+  levelId: Id
+  /** badge number shown as ①, ② … */
+  n: number
+  /** stroke = open freehand line; zone = closed lasso / rectangle */
+  shape: 'stroke' | 'zone'
+  /** plan points, mm */
+  points: Vec2[]
+  /** the measurements given for this mark were applied */
+  done?: boolean
+}
+
 /** Background image for tracing. */
 export interface Underlay {
   id: Id
@@ -595,6 +612,8 @@ export interface Doc {
   lights: Record<Id, Light>
   dimensions: Record<Id, Dimension>
   labels: Record<Id, Label>
+  /** pencil marks (editor-only, see Annotation) */
+  annotations?: Record<Id, Annotation>
   underlays: Record<Id, Underlay>
   cameras: Record<Id, CameraBookmark>
   /** project-local (custom / embedded) materials and assets; builtin ones live in the Catalog */

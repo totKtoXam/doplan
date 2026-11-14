@@ -4,6 +4,9 @@
  */
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import type { DoplanApi, MenuCommand } from '../shared/ipc'
+// ── ai-chat block ──
+import type { AiLoginEvent, AiProviderId, AiRunEvent, AiToolCall } from '../shared/aiChat'
+// ── end ai-chat block ──
 import { CH, VERSION_ARG } from '../main/channels'
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> => ipcRenderer.invoke(channel, ...args) as Promise<T>
@@ -106,6 +109,27 @@ const api: DoplanApi = {
   ai: {
     planFromImage: (image, mime, hint) => invoke(CH.aiPlanFromImage, image, mime, hint ?? ''),
   },
+
+  // ── ai-chat block ──
+  aiChat: {
+    providers: (refresh) => invoke(CH.aiChatProviders, !!refresh),
+    run: (req) => invoke(CH.aiChatRun, req),
+    stop: (runId) => invoke(CH.aiChatStop, runId),
+    onEvent: (cb) => subscribe<[string, AiRunEvent]>(CH.evAiChatEvent, (runId, ev) => cb(runId, ev)),
+    onToolCall: (cb) => subscribe<[AiToolCall]>(CH.evAiChatToolCall, (call) => cb(call)),
+    toolResult: (callId, result) => ipcRenderer.send(CH.aiChatToolResult, callId, result),
+    listChats: (projectPath) => invoke(CH.aiChatList, projectPath),
+    loadChat: (projectPath, chatId) => invoke(CH.aiChatLoad, projectPath, chatId),
+    saveChat: (projectPath, chat) => invoke(CH.aiChatSave, projectPath, chat),
+    deleteChat: (projectPath, chatId) => invoke(CH.aiChatDelete, projectPath, chatId),
+    getSettings: (projectPath) => invoke(CH.aiChatGetSettings, projectPath),
+    setSettings: (projectPath, s) => invoke(CH.aiChatSetSettings, projectPath, s),
+    login: (provider) => invoke(CH.aiChatLogin, provider),
+    loginInput: (text) => invoke(CH.aiChatLoginInput, text),
+    loginCancel: () => invoke(CH.aiChatLoginCancel),
+    onLogin: (cb) => subscribe<[AiProviderId, AiLoginEvent]>(CH.evAiChatLogin, (provider, ev) => cb(provider, ev)),
+  },
+  // ── end ai-chat block ──
 
   window: {
     setTitle: (title, dirty) => ipcRenderer.send(CH.windowSetTitle, title, dirty),

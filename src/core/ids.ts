@@ -6,7 +6,7 @@ import type { Id } from './types'
  *  n node · w wall · o opening · r room · i item · l light · d dimension · t label (text) ·
  *  u underlay · c camera · m material · a asset · lv level
  */
-export type IdPrefix = 'n' | 'w' | 'o' | 'r' | 'i' | 'l' | 'd' | 't' | 'u' | 'c' | 'm' | 'a' | 'lv'
+export type IdPrefix = 'n' | 'w' | 'o' | 'r' | 'i' | 'l' | 'd' | 't' | 'u' | 'c' | 'm' | 'a' | 'lv' | 'pm'
 
 /** `${prefix}_${nanoid(10)}` */
 export function newId(prefix: IdPrefix): Id {

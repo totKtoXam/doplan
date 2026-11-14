@@ -9,6 +9,9 @@
  * `catalog.load()` returns entries whose `src` / `maps.*` / `thumb` are already absolute doplan-asset:// URLs.
  */
 import type { Asset, Catalog, Hdri, Material } from '../core/types'
+// ── ai-chat block ──
+import type { AiChatApi } from './aiChat'
+// ── end ai-chat block ──
 
 export interface FileFilter {
   name: string
@@ -210,6 +213,11 @@ export interface DoplanApi {
     /** in-app photo → PlanSpec using the stored Anthropic API key; returns PlanSpec JSON text */
     planFromImage(image: ArrayBuffer, mime: string, hint?: string): Promise<string>
   }
+
+  // ── ai-chat block ──
+  /** AI chat: providers (Claude Code / Codex / Anthropic API), runs, doc tool bridge, chat storage */
+  aiChat: AiChatApi
+  // ── end ai-chat block ──
 
   window: {
     setTitle(title: string, dirty: boolean): void

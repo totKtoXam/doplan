@@ -1,0 +1,176 @@
+/**
+ * doplan AI chat: types shared by main (providers, MCP server, chat storage) and the renderer
+ * (chat panel, tool executor). Exposed as `window.doplan.aiChat` (see ipc.ts).
+ */
+
+export type AiProviderId = 'claude' | 'codex' | 'gemini' | 'api'
+
+export interface AiProviderInfo {
+  id: AiProviderId
+  label: string
+  available: boolean
+  /** resolved binary path (CLIs) */
+  path?: string
+  version?: string
+  /** why it is unavailable */
+  reason?: string
+  /** model choices; '' = provider default */
+  models: { id: string; label: string }[]
+  /** effort / reasoning levels the provider understands ('' = default) */
+  efforts: string[]
+  /** reports $ cost */
+  reportsCost: boolean
+  /** supports image attachments */
+  images: boolean
+}
+
+/** Per-project chat settings (persisted with the project's chats). */
+export interface AiChatSettings {
+  provider: AiProviderId
+  /** model id per provider ('' = default) */
+  models: Partial<Record<AiProviderId, string>>
+  effort: '' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+  /** Claude Code: append the `ultracode` keyword (multi-agent workflows) */
+  ultracode: boolean
+  /** document edits: ask = approve each change, auto = apply immediately */
+  permission: 'ask' | 'auto'
+  /** plan mode: changes are collected on a draft and applied by the user */
+  planMode: boolean
+}
+
+export const DEFAULT_AI_SETTINGS: AiChatSettings = {
+  provider: 'claude',
+  models: {},
+  effort: '',
+  ultracode: false,
+  permission: 'auto',
+  planMode: false,
+}
+
+export interface AiImage {
+  mime: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'
+  /** base64 without data: prefix */
+  data: string
+  name?: string
+}
+
+/** Context chip attached from the selection ("Добавить в чат"). */
+export interface AiChip {
+  kind: string
+  id: string
+  label: string
+  /** one-line summary shown on the chip and sent to the agent */
+  summary: string
+}
+
+/** Request to start one agent turn. */
+export interface AiRunRequest {
+  runId: string
+  chatId: string
+  /** null for unsaved projects */
+  projectPath: string | null
+  /** project folder if the app knows one (project.root()) */
+  projectRoot?: string | null
+  settings: AiChatSettings
+  text: string
+  images: AiImage[]
+  chips: AiChip[]
+  /** provider session id to resume (Claude / Codex) */
+  resumeId?: string
+  /** Anthropic API provider: prior conversation (opaque JSON kept by the chat) */
+  apiHistory?: unknown[]
+}
+
+/** Normalised stream of a running turn (main → renderer). */
+export type AiRunEvent =
+  | { type: 'status'; text: string }
+  | { type: 'session'; id: string }
+  | { type: 'text'; partId: string; delta: string }
+  | { type: 'thinking'; partId: string; delta: string }
+  /** provider-side tool (not a doplan doc tool), e.g. Read / Agent / web search */
+  | { type: 'tool'; partId: string; name: string; input?: unknown; status: 'running' | 'done' | 'error'; output?: string }
+  | { type: 'usage'; inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; costUsd?: number }
+  | { type: 'notice'; level: 'info' | 'warning' | 'error'; text: string }
+  /** Anthropic API provider: updated conversation to persist */
+  | { type: 'apiHistory'; messages: unknown[] }
+  | { type: 'done'; ok: boolean; stopped?: boolean; error?: string }
+
+/** A doc tool call forwarded from the MCP server / API provider to the renderer. */
+export interface AiToolCall {
+  callId: string
+  runId: string
+  tool: string
+  args: unknown
+}
+
+export interface AiToolResult {
+  ok: boolean
+  text: string
+  image?: { mime: 'image/png' | 'image/jpeg'; data: string }
+}
+
+// ───────────── persisted chats ─────────────
+
+export type AiPart =
+  | { type: 'text'; text: string }
+  | { type: 'thinking'; text: string }
+  | {
+      type: 'tool'
+      id: string
+      name: string
+      title: string
+      /** doc = doplan tool executed in the app; ext = provider tool */
+      origin: 'doc' | 'ext'
+      args?: unknown
+      status: 'running' | 'pending' | 'done' | 'error' | 'rejected' | 'proposed'
+      /** human summary of the change / result */
+      result?: string
+      /** what changed (doc tools) */
+      changes?: string[]
+      /** thumbnail data URL for render_snapshot */
+      image?: string
+    }
+  | { type: 'notice'; level: 'info' | 'warning' | 'error'; text: string }
+
+export interface AiMessage {
+  id: string
+  role: 'user' | 'assistant'
+  createdAt: string
+  parts: AiPart[]
+  chips?: AiChip[]
+  /** attached images (data URLs, thumbnails only in storage) */
+  images?: string[]
+  usage?: { inputTokens?: number; outputTokens?: number; costUsd?: number }
+  error?: string
+}
+
+export interface AiChatMeta {
+  id: string
+  title: string
+  provider: AiProviderId
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AiChatRecord extends AiChatMeta {
+  /** provider resume id (Claude session id / Codex thread id), per provider */
+  resume?: Partial<Record<AiProviderId, string>>
+  apiHistory?: unknown[]
+  messages: AiMessage[]
+  totals?: { inputTokens: number; outputTokens: number; costUsd: number }
+}
+
+export interface AiChatApi {
+  providers(refresh?: boolean): Promise<AiProviderInfo[]>
+  run(req: AiRunRequest): Promise<void>
+  stop(runId: string): Promise<void>
+  onEvent(cb: (runId: string, ev: AiRunEvent) => void): () => void
+  onToolCall(cb: (call: AiToolCall) => void): () => void
+  toolResult(callId: string, result: AiToolResult): void
+  listChats(projectPath: string | null): Promise<AiChatMeta[]>
+  loadChat(projectPath: string | null, chatId: string): Promise<AiChatRecord | null>
+  saveChat(projectPath: string | null, chat: AiChatRecord): Promise<void>
+  deleteChat(projectPath: string | null, chatId: string): Promise<void>
+  getSettings(projectPath: string | null): Promise<AiChatSettings>
+  setSettings(projectPath: string | null, s: AiChatSettings): Promise<void>
+}

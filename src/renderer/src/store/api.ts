@@ -4,6 +4,7 @@
  * everything else resolves to a harmless "nothing happened" value.
  */
 import type { AppSettings, DoplanApi, FileFilter, MenuCommand } from '@shared/ipc'
+import { DEFAULT_AI_SETTINGS } from '@shared/aiChat'
 
 const SETTINGS_KEY = 'doplan.settings'
 
@@ -207,6 +208,32 @@ function createFallbackApi(): DoplanApi {
         throw new Error('Распознавание плана по фото доступно только в настольном приложении')
       },
     },
+    // ── ai-chat block ──
+    aiChat: {
+      async providers() {
+        return []
+      },
+      async run() {
+        throw new Error('ИИ-чат доступен только в настольном приложении')
+      },
+      async stop() {},
+      onEvent: noopUnsub,
+      onToolCall: noopUnsub,
+      toolResult() {},
+      async listChats() {
+        return []
+      },
+      async loadChat() {
+        return null
+      },
+      async saveChat() {},
+      async deleteChat() {},
+      async getSettings() {
+        return { ...DEFAULT_AI_SETTINGS, models: {} }
+      },
+      async setSettings() {},
+    },
+    // ── end ai-chat block ──
     window: {
       setTitle(title: string, dirty: boolean) {
         document.title = `${dirty ? '• ' : ''}${title} — doplan`

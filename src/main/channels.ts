@@ -29,6 +29,21 @@ export const CH = {
 
   aiPlanFromImage: 'ai:planFromImage',
 
+  // ── ai-chat block ──
+  aiChatProviders: 'aiChat:providers',
+  aiChatRun: 'aiChat:run',
+  aiChatStop: 'aiChat:stop',
+  aiChatToolResult: 'aiChat:toolResult',
+  aiChatList: 'aiChat:list',
+  aiChatLoad: 'aiChat:load',
+  aiChatSave: 'aiChat:save',
+  aiChatDelete: 'aiChat:delete',
+  aiChatGetSettings: 'aiChat:getSettings',
+  aiChatSetSettings: 'aiChat:setSettings',
+  evAiChatEvent: 'ev:aiChatEvent',
+  evAiChatToolCall: 'ev:aiChatToolCall',
+  // ── end ai-chat block ──
+
   // renderer → main (fire and forget)
   windowSetTitle: 'window:setTitle',
   windowConfirmClose: 'window:confirmClose',

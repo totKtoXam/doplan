@@ -46,6 +46,11 @@ export interface ProjectOpenResult {
   kind?: 'folder' | 'zip' | 'json'
   /** folder projects: the folder is a git repository */
   git?: boolean
+  /**
+   * folders: the folder came with a git repository doplan did not create and the user has not trusted
+   * yet. No git command runs there until project.trustGit() (git may run programs from a repo's config).
+   */
+  untrustedGit?: boolean
 }
 
 export interface ProjectSaveOptions {
@@ -71,6 +76,8 @@ export interface ProjectInfo {
   gitAvailable: boolean
   /** the open folder is a git repository */
   repo: boolean
+  /** false when the folder's repository is not trusted yet (history, tags and commits are off) */
+  trusted: boolean
   gitVersion: string
 }
 
@@ -163,8 +170,15 @@ export interface DoplanApi {
     openFolder(): Promise<ProjectOpenResult | null>
     /** save dialog → single-file .doplan zip (export / sharing); does not change the open project */
     exportZip(doc: unknown): Promise<string | null>
-    /** makes a folder the open project without reading it (after restoring a recovery snapshot) */
+    /**
+     * Makes `path` the open project; resolves true when it is a project folder. Call it with the path of
+     * open()/openFolder() after the document passed validation: only then are its assets loaded and the
+     * folder becomes project.root(). Any other path (a recovery snapshot of a folder) only sets the root;
+     * null detaches the folder.
+     */
     attach(path: string | null): Promise<boolean>
+    /** trusts the git repository that came with the open project folder (see ProjectOpenResult.untrustedGit) */
+    trustGit(): Promise<boolean>
     /** git log of the open project folder, newest first */
     history(): Promise<ProjectVersion[]>
     /** plan.json of an old version (unvalidated); its assets become available under doplan-asset://project/ */

@@ -24,8 +24,9 @@ import {
   stableStringify,
 } from '../shared/projectFormat'
 import { atomicWrite, cleanFileName, ensureDir, exists, rmrf } from './fsutil'
-import { findGit, gitCommit, gitInit, gitListDir, gitShowFile, isRepo } from './git'
+import { findGit, gitCommit, gitInit, gitListDir, gitShowFile, hasGitEntry, isRepo } from './git'
 import { paths } from './paths'
+import { isTrustedRepo, msg, trustRepo } from './settings'
 
 export const ASSET_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
 /** names produced by addProjectAsset: sha256.ext — only these are ever deleted from assets/ */
@@ -68,7 +69,7 @@ export function parseJsonText(bytes: Uint8Array): unknown {
   try {
     return JSON.parse(text)
   } catch (err) {
-    throw new Error(`Файл повреждён: некорректный JSON (${(err as Error).message})`)
+    throw new Error(msg(`Файл повреждён: некорректный JSON (${(err as Error).message})`, `The file is damaged: invalid JSON (${(err as Error).message})`))
   }
 }
 
@@ -91,8 +92,25 @@ export function referencedAssets(json: string): string[] {
 // ───────────── detection ─────────────
 
 /**
- * Resolves a user path to a project folder root: the folder itself, or the folder of a `plan.json`.
- * Returns null for anything else (a .doplan archive, a PlanSpec .json…).
+ * true when `dir` is a doplan project folder: it has plan.json and a manifest.json of format
+ * 'doplan-folder'. A stray plan.json (Downloads, a web app with its own manifest.json) is not a project.
+ */
+export async function isProjectFolder(dir: string): Promise<boolean> {
+  if (!(await exists(join(dir, PLAN_FILE)))) return false
+  try {
+    const raw = await fsp.readFile(join(dir, MANIFEST_FILE))
+    if (raw.length > 4 * 1024 * 1024) return false
+    const m = parseJsonText(new Uint8Array(raw)) as Partial<FolderManifest> | null
+    return !!m && typeof m === 'object' && m.format === 'doplan-folder'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Resolves a user path to a project folder root: the folder itself, or the folder of a `plan.json`,
+ * when that folder is a doplan project folder (see isProjectFolder). Returns null for anything else
+ * (a .doplan archive, a PlanSpec .json, a plan.json that is not inside a project folder…).
  */
 export async function folderRootOf(p: string): Promise<string | null> {
   let st: import('node:fs').Stats
@@ -101,9 +119,30 @@ export async function folderRootOf(p: string): Promise<string | null> {
   } catch {
     return null
   }
-  if (st.isDirectory()) return (await exists(join(p, PLAN_FILE))) ? resolve(p) : null
-  if (basename(p).toLowerCase() === PLAN_FILE) return resolve(dirname(p))
-  return null
+  const dir = st.isDirectory() ? p : basename(p).toLowerCase() === PLAN_FILE ? dirname(p) : null
+  if (!dir) return null
+  return (await isProjectFolder(dir)) ? resolve(dir) : null
+}
+
+// ───────────── git trust ─────────────
+
+/**
+ * 'none': no repository yet (doplan creates one on save); 'trusted': created by doplan or confirmed by
+ * the user; 'untrusted': a repository that came with the folder. Git may run programs named in a
+ * repository's own config (filters, textconv…), so doplan runs no git command in an untrusted one.
+ */
+export async function gitTrust(root: string): Promise<'none' | 'trusted' | 'untrusted'> {
+  if (!hasGitEntry(root)) return 'none'
+  return isRepo(root) && (await isTrustedRepo(root)) ? 'trusted' : 'untrusted'
+}
+
+export function untrustedError(): Error {
+  return new Error(
+    msg(
+      'История версий этой папки не подтверждена: репозиторий git пришёл вместе с папкой. Откройте «История версий» и нажмите «Доверять этой папке».',
+      'The version history of this folder is not trusted: its git repository came with the folder. Open Version history and choose “Trust this folder”.',
+    ),
+  )
 }
 
 export async function isDirectory(p: string): Promise<boolean> {
@@ -116,18 +155,27 @@ export async function isDirectory(p: string): Promise<boolean> {
 
 // ───────────── read ─────────────
 
-/** reads plan.json and loads the folder's assets into the open-project asset directory */
-export async function readFolderProject(root: string): Promise<unknown> {
+/**
+ * Reads plan.json of a project folder. Does not touch the open-project state: the assets are loaded
+ * by loadFolderAssets once the renderer has accepted the document.
+ */
+export async function readFolderPlan(root: string): Promise<unknown> {
   const planPath = join(root, PLAN_FILE)
   const bytes = new Uint8Array(await fsp.readFile(planPath))
   const manifestPath = join(root, MANIFEST_FILE)
   if (await exists(manifestPath)) {
     const m = parseJsonText(new Uint8Array(await fsp.readFile(manifestPath))) as Partial<FolderManifest> | null
     if (m && typeof m.formatVersion === 'number' && m.formatVersion > FOLDER_FORMAT_VERSION) {
-      throw new Error('Проект создан более новой версией doplan. Обновите приложение.')
+      throw new Error(msg('Проект создан более новой версией doplan. Обновите приложение.', 'The project was made by a newer doplan. Please update the app.'))
     }
   }
   const doc = parseJsonText(bytes)
+  knownPlanHash.set(key(root), sha256(bytes))
+  return doc
+}
+
+/** replaces the open-project asset directory with the folder's assets/ */
+export async function loadFolderAssets(root: string): Promise<void> {
   await rmrf(paths.projectAssets)
   await ensureDir(paths.projectAssets)
   const assetsDir = join(root, ASSETS_DIR)
@@ -147,8 +195,6 @@ export async function readFolderProject(root: string): Promise<unknown> {
       console.warn('[doplan] asset copy failed', name, err)
     }
   }
-  knownPlanHash.set(key(root), sha256(bytes))
-  return doc
 }
 
 /** remembers the on-disk plan.json as "seen" (e.g. after restoring a recovery snapshot of this folder) */
@@ -235,10 +281,15 @@ export async function writeFolderProject(root: string, doc: unknown): Promise<vo
   knownPlanHash.set(key(root), sha256(plan))
 }
 
-/** git commit of the whole folder; null when git is missing or nothing changed */
+/** git commit of the whole folder; null when git is missing or nothing changed. Throws for an untrusted repository. */
 export async function commitFolder(root: string, message: string, onlyPaths?: string[]): Promise<string | null> {
   if (!(await findGit())) return null
-  if (!(await isRepo(root))) await gitInit(root)
+  const trust = await gitTrust(root)
+  if (trust === 'untrusted') throw untrustedError()
+  if (trust === 'none') {
+    await gitInit(root)
+    await trustRepo(root)
+  }
   return gitCommit(root, message, onlyPaths)
 }
 
@@ -248,13 +299,30 @@ export interface CreateResult {
   commit: string | null
 }
 
+/** folders being created right now: a second request for the same folder fails instead of racing */
+const creating = new Set<string>()
+
 /** creates `<parent>/<name>/` with the scaffold, plan.json, assets, `git init` and the first commit */
 export async function createFolderProject(parent: string, name: string, doc: unknown): Promise<CreateResult> {
-  const folderName = cleanFileName(name, 'Проект')
+  const folderName = cleanFileName(name, msg('Проект', 'Project'))
   const root = resolve(join(parent, folderName))
+  const notEmpty = msg(
+    `Папка «${folderName}» уже существует и не пуста. Выберите другое название или место.`,
+    `Folder “${folderName}” already exists and is not empty. Choose another name or location.`,
+  )
+  if (creating.has(key(root))) throw new Error(notEmpty)
+  creating.add(key(root))
+  try {
+    return await createFolderProjectAt(root, name, doc, notEmpty)
+  } finally {
+    creating.delete(key(root))
+  }
+}
+
+async function createFolderProjectAt(root: string, name: string, doc: unknown, notEmpty: string): Promise<CreateResult> {
   if (await exists(root)) {
     const entries = await fsp.readdir(root).catch(() => ['?'])
-    if (entries.length) throw new Error(`Папка «${folderName}» уже существует и не пуста. Выберите другое название или место.`)
+    if (entries.length) throw new Error(notEmpty)
   }
   await ensureDir(root)
   await writeFolderProject(root, doc)
@@ -263,8 +331,9 @@ export async function createFolderProject(parent: string, name: string, doc: unk
   try {
     if (await findGit()) {
       await gitInit(root)
+      await trustRepo(root)
       git = true
-      commit = await gitCommit(root, `Создан проект «${docName(doc) ?? name}»`)
+      commit = await gitCommit(root, msg(`Создан проект «${docName(doc) ?? name}»`, `Created project “${docName(doc) ?? name}”`))
     }
   } catch (err) {
     console.warn('[doplan] git init failed', err)
@@ -289,7 +358,7 @@ export async function writeInstructions(root: string, text: string): Promise<str
   await atomicWrite(join(root, AGENTS_FILE), normalized.endsWith('\n') ? normalized : `${normalized}\n`)
   await writeIfMissing(join(root, CLAUDE_FILE), CLAUDE_MD)
   try {
-    return await commitFolder(root, 'Инструкции для ИИ', [AGENTS_FILE])
+    return await commitFolder(root, msg('Инструкции для ИИ', 'AI instructions'), [AGENTS_FILE])
   } catch (err) {
     console.warn('[doplan] commit of AGENTS.md failed', err)
     return null
@@ -300,8 +369,9 @@ export async function writeInstructions(root: string, text: string): Promise<str
 
 /** plan.json of a commit; its assets are copied into the open-project asset directory */
 export async function readVersion(root: string, sha: string): Promise<unknown> {
+  if ((await gitTrust(root)) !== 'trusted') throw untrustedError()
   const plan = await gitShowFile(root, sha, PLAN_FILE)
-  if (!plan) throw new Error('В этой версии нет plan.json')
+  if (!plan) throw new Error(msg('В этой версии нет plan.json', 'This version has no plan.json'))
   const doc = parseJsonText(new Uint8Array(plan))
   await ensureDir(paths.projectAssets)
   const wanted = new Set(referencedAssets(JSON.stringify(doc)))

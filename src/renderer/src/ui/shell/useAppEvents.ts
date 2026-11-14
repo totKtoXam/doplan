@@ -131,6 +131,9 @@ function onKeyDown(e: KeyboardEvent): void {
 }
 
 function onMenu(cmd: MenuCommand): void {
+  // native menu items and their accelerators reach here even while a dialog is open; keyboard
+  // shortcuts are ignored then (onKeyDown), and so are menu commands — they would act behind the dialog
+  if (anyDialogOpen()) return
   switch (cmd) {
     case 'new':
       void actions.newProject()

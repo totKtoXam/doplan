@@ -3,7 +3,7 @@
  * AGENTS.md editor, the banner shown while an old version is open, and the inspector section.
  */
 import { Bot, FolderOpen, FolderPlus, History, RotateCcw, Tag, Undo2 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ProjectInfo, ProjectVersion } from '@shared/ipc'
 import { tagNameFrom } from '@shared/projectFormat'
 import {
@@ -14,6 +14,7 @@ import {
   restoreVersion,
   viewVersion,
   createProjectFolder,
+  offerTrustGit,
 } from '@/actions/project'
 import { useT } from '@/i18n'
 import { api } from '@/store/api'
@@ -68,12 +69,20 @@ function CreateProjectDialog({ mode }: { mode: 'new' | 'saveAs' }) {
     }
   }
 
+  // a ref, not the state: two Enter presses in one frame must not start two creates
+  const running = useRef(false)
   const submit = async () => {
+    if (running.current || !name.trim() || !location) return
+    running.current = true
     setBusy(true)
     setError('')
-    const err = await createProjectFolder(mode, name, parent)
-    setBusy(false)
-    if (err) setError(err)
+    try {
+      const err = await createProjectFolder(mode, name, parent)
+      if (err) setError(err)
+    } finally {
+      running.current = false
+      setBusy(false)
+    }
   }
 
   return (
@@ -205,6 +214,24 @@ function HistoryDialog() {
             https://git-scm.com/downloads
           </a>
         </div>
+      ) : info && info.repo && !info.trusted ? (
+        <div className="flex flex-col gap-2 text-[12px] leading-relaxed">
+          {error && <div className="text-[11px] text-[#ff8589]">{error}</div>}
+          <div>
+            {t('Репозиторий git пришёл вместе с папкой, его создал не doplan. Пока вы не доверяете папке, doplan не запускает в ней git и история версий выключена.')}
+          </div>
+          <div>
+            <Button variant="primary" 
+              onClick={() =>
+                run(async () => {
+                  if (await offerTrustGit()) projectStore.setState({ dialog: 'history' })
+                })
+              }
+            >
+              {t('Доверять этой папке…')}
+            </Button>
+          </div>
+        </div>
       ) : (
         <div className="flex flex-col gap-2">
           {error && <div className="text-[11px] text-[#ff8589]">{error}</div>}
@@ -297,7 +324,15 @@ function InstructionsDialog() {
   const [orig, setOrig] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  /** a close was requested with unsaved edits: the footer asks what to do with them */
+  const [asking, setAsking] = useState(false)
   const close = () => projectStore.setState({ dialog: null })
+  const changed = text !== null && text !== orig
+  const requestClose = () => {
+    if (busy) return
+    if (changed) setAsking(true)
+    else close()
+  }
 
   useEffect(() => {
     let alive = true
@@ -331,23 +366,43 @@ function InstructionsDialog() {
     }
   }
 
-  const changed = text !== null && text !== orig
   return (
     <Dialog
       open
-      onClose={close}
+      onClose={requestClose}
       modalLock={busy}
       title={t('Инструкции для ИИ (AGENTS.md)')}
       width="max-w-3xl"
       footer={
-        <>
-          {error && <span className="mr-auto text-[11px] text-[#ff8589]">{error}</span>}
-          <Button onClick={() => root && void api.files.reveal(`${root}${root.includes('\\') ? '\\' : '/'}AGENTS.md`)}>{t('Показать файл')}</Button>
-          <Button onClick={close}>{t('Отмена')}</Button>
-          <Button variant="primary" loading={busy} disabled={!changed} onClick={() => void save()}>
-            {t('Сохранить')}
-          </Button>
-        </>
+        asking ? (
+          <>
+            <span className="mr-auto text-[12px]">{t('Сохранить изменения в AGENTS.md?')}</span>
+            <Button onClick={() => setAsking(false)}>{t('Отмена')}</Button>
+            <Button variant="danger" onClick={close}>
+              {t('Не сохранять')}
+            </Button>
+            <Button
+              variant="primary"
+              loading={busy}
+              autoFocus
+              onClick={() => {
+                setAsking(false)
+                void save()
+              }}
+            >
+              {t('Сохранить')}
+            </Button>
+          </>
+        ) : (
+          <>
+            {error && <span className="mr-auto text-[11px] text-[#ff8589]">{error}</span>}
+            <Button onClick={() => root && void api.files.reveal(`${root}${root.includes('\\') ? '\\' : '/'}AGENTS.md`)}>{t('Показать файл')}</Button>
+            <Button onClick={requestClose}>{t('Отмена')}</Button>
+            <Button variant="primary" loading={busy} disabled={!changed} onClick={() => void save()}>
+              {t('Сохранить')}
+            </Button>
+          </>
+        )
       }
     >
       <div className="flex flex-col gap-2">
@@ -421,6 +476,7 @@ export function ProjectFolderSection() {
   const t = useT()
   const root = useProject((s) => s.root)
   const git = useProject((s) => s.git)
+  const untrustedGit = useProject((s) => s.untrustedGit)
   const filePath = useDoc((s) => s.filePath)
   if (api.platform === 'browser') return null
   return (
@@ -430,7 +486,11 @@ export function ProjectFolderSection() {
           <div className="truncate font-mono text-[11px] text-[var(--muted)] select-text" title={root}>
             {root}
           </div>
-          {!git && <div className="text-[11px] text-[var(--muted)]">{t('Git не найден — история версий недоступна')}</div>}
+          {untrustedGit ? (
+            <div className="text-[11px] text-[var(--muted)]">{t('История версий выключена: папке не доверяют')}</div>
+          ) : (
+            !git && <div className="text-[11px] text-[var(--muted)]">{t('Git не найден — история версий недоступна')}</div>
+          )}
           <div className="flex flex-wrap gap-1">
             <Button size="sm" icon={<History size={11} />} onClick={() => void openHistory()}>
               {t('История версий')}

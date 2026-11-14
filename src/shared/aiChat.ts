@@ -75,7 +75,7 @@ export interface AiRunRequest {
   chatId: string
   /** null for unsaved projects */
   projectPath: string | null
-  /** project folder if the app knows one (project.root()) */
+  /** informational only: main runs the agent in the project folder it opened itself (never a path from the renderer) */
   projectRoot?: string | null
   settings: AiChatSettings
   text: string

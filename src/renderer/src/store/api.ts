@@ -157,7 +157,7 @@ function createFallbackApi(): DoplanApi {
         throw new Error('Папки проектов доступны только в настольном приложении')
       },
       async info() {
-        return { root: null, gitAvailable: false, repo: false, gitVersion: '' }
+        return { root: null, gitAvailable: false, repo: false, trusted: true, gitVersion: '' }
       },
       async defaultLocation() {
         return ''
@@ -179,6 +179,9 @@ function createFallbackApi(): DoplanApi {
         return 'project.doplan.json'
       },
       async attach() {
+        return false
+      },
+      async trustGit() {
         return false
       },
       async history() {

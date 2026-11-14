@@ -20,7 +20,7 @@ function kindOfPath(path: string | null): ProjectKind | null {
 }
 
 /** Load a document into the store and reset the per-document UI state. */
-export function loadDocument(doc: Doc, filePath: string | null, project?: { kind?: ProjectKind | null; git?: boolean }): void {
+export function loadDocument(doc: Doc, filePath: string | null, project?: { kind?: ProjectKind | null; git?: boolean; untrustedGit?: boolean }): void {
   docStore.getState().load(doc, filePath)
   const d = docStore.getState().doc
   uiStore.getState().set({
@@ -34,7 +34,14 @@ export function loadDocument(doc: Doc, filePath: string | null, project?: { kind
   })
   const kind = filePath ? (project?.kind ?? kindOfPath(filePath)) : null
   const root = kind === 'folder' ? filePath : null
-  projectStore.setState({ root, kind, git: root ? !!project?.git : false, commitMarker: historyPosition(), viewing: null })
+  projectStore.setState({
+    root,
+    kind,
+    git: root ? !!project?.git : false,
+    untrustedGit: root ? !!project?.untrustedGit : false,
+    commitMarker: historyPosition(),
+    viewing: null,
+  })
   // a document that does not come from a folder detaches the folder in main (AI chat cwd, instructions)
   if (!root) void api.project.attach(null).catch(() => {})
   requestAnimationFrame(() => handles.editor2d?.zoomToFit())
@@ -58,6 +65,16 @@ export async function confirmDiscard(): Promise<boolean> {
 /** "Новый проект": asks for a name and a location, creates the folder (git init + first commit). */
 export async function newProject(): Promise<void> {
   if (!(await confirmDiscard())) return
+  if (api.platform === 'browser') {
+    // no project folders in the web build: start an empty unsaved document as before
+    try {
+      await api.project.reset()
+    } catch (err) {
+      console.warn('[doplan] project.reset failed', err)
+    }
+    loadDocument(createEmptyDoc(t('Новый проект')), null)
+    return
+  }
   await openCreateDialog('new')
 }
 
@@ -96,7 +113,7 @@ export async function createProjectFolder(mode: 'new' | 'saveAs', name: string, 
       if (store.doc.meta.name !== clean) store.transact(t('Название проекта'), (d) => void (d.meta.name = clean))
       const res = await api.project.create(docStore.getState().doc, clean, parent)
       docStore.getState().markSaved(res.path)
-      projectStore.setState({ root: res.path, kind: 'folder', git: !!res.git, commitMarker: historyPosition(), viewing: null })
+      projectStore.setState({ root: res.path, kind: 'folder', git: !!res.git, untrustedGit: false, commitMarker: historyPosition(), viewing: null })
       void api.project.clearRecovery().catch(() => {})
     }
     refreshRecent()
@@ -119,9 +136,17 @@ async function afterOpen(res: Awaited<ReturnType<typeof api.project.open>>): Pro
     await alertDialog(t('Файл проекта повреждён или имеет неверный формат'), errorText(err))
     return
   }
-  loadDocument(doc, res.path, { kind: res.kind ?? kindOfPath(res.path), git: res.git })
+  // main switches the project root and assets only now, after the document was validated
+  try {
+    await api.project.attach(res.path)
+  } catch (err) {
+    await alertDialog(t('Не удалось открыть проект'), errorText(err))
+    return
+  }
+  loadDocument(doc, res.path, { kind: res.kind ?? kindOfPath(res.path), git: res.git, untrustedGit: res.untrustedGit })
   refreshRecent()
   toast(t('Проект открыт'), 'success')
+  if (res.untrustedGit) await offerTrustGit()
   if (res.kind === 'zip' && api.platform !== 'browser') {
     const choice = await choiceDialog(
       t('Проект в одном файле .doplan'),
@@ -132,6 +157,32 @@ async function afterOpen(res: Awaited<ReturnType<typeof api.project.open>>): Pro
       ],
     )
     if (choice === 'folder') await openCreateDialog('saveAs')
+  }
+}
+
+/**
+ * The opened folder already had a .git that doplan did not create: its config and hooks are not trusted,
+ * so doplan runs no git commands there until the user says the folder is theirs.
+ */
+export async function offerTrustGit(): Promise<boolean> {
+  const choice = await choiceDialog(
+    t('В папке уже есть репозиторий git'),
+    t('Эту папку создал не doplan, и в её настройках git могут быть чужие команды. Пока вы не доверяете папке, doplan не запускает в ней git: история версий выключена, сохранение пишет только файлы. Доверяйте, только если папка ваша или получена из надёжного источника.'),
+    [
+      { id: 'no', label: t('Не доверять') },
+      { id: 'yes', label: t('Доверять этой папке'), variant: 'primary' },
+    ],
+  )
+  if (choice !== 'yes') return false
+  try {
+    const ok = await api.project.trustGit()
+    if (!ok) return false
+    const info = await api.project.info()
+    projectStore.setState((s) => ({ git: info.gitAvailable && info.repo && info.trusted, untrustedGit: !info.trusted, historyRev: s.historyRev + 1 }))
+    return true
+  } catch (err) {
+    await alertDialog(t('Не удалось включить историю версий'), errorText(err))
+    return false
   }
 }
 
@@ -232,7 +283,7 @@ async function saveFileLegacy(target: string | null): Promise<boolean> {
     const res = await api.project.save(doc, target)
     if (!res) return false
     docStore.getState().markSaved(res.path)
-    projectStore.setState({ root: null, kind: kindOfPath(res.path), git: false, commitMarker: historyPosition(), viewing: null })
+    projectStore.setState({ root: null, kind: kindOfPath(res.path), git: false, untrustedGit: false, commitMarker: historyPosition(), viewing: null })
     void api.project.clearRecovery().catch(() => {})
     refreshRecent()
     toast(t('Проект сохранён'), 'success')
@@ -289,8 +340,8 @@ export async function viewVersion(v: ProjectVersion): Promise<boolean> {
     await alertDialog(t('Не удалось открыть версию'), errorText(err))
     return false
   }
-  const git = projectStore.getState().git
-  loadDocument(doc, root, { kind: 'folder', git })
+  const { git, untrustedGit } = projectStore.getState()
+  loadDocument(doc, root, { kind: 'folder', git, untrustedGit })
   projectStore.setState({ viewing: v, dialog: null })
   toast(t('Открыта версия от {date}', { date: versionDate(v) }), 'info')
   return true
@@ -392,8 +443,13 @@ export async function offerRecovery(): Promise<boolean> {
     isFolder = await api.project.attach(snap.path).catch(() => false)
   }
   let git = false
-  if (isFolder) git = (await api.project.info().catch(() => null))?.repo ?? false
-  loadDocument(doc, isFolder || kindOfPath(snap.path) !== 'folder' ? snap.path : null, { kind: isFolder ? 'folder' : undefined, git })
+  let untrustedGit = false
+  if (isFolder) {
+    const info = await api.project.info().catch(() => null)
+    git = !!info && info.gitAvailable && info.repo && info.trusted
+    untrustedGit = !!info && !info.trusted
+  }
+  loadDocument(doc, isFolder || kindOfPath(snap.path) !== 'folder' ? snap.path : null, { kind: isFolder ? 'folder' : undefined, git, untrustedGit })
   docStore.getState().setDirty(true)
   toast(t('Проект восстановлен'), 'success')
   return true

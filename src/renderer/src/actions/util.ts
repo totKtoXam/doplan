@@ -1,5 +1,6 @@
 import type { Doc, Id } from '@core/types'
 import { docStore } from '@/store/document'
+import { t } from '@/i18n'
 import { uiStore } from '@/store/ui'
 
 export function currentDoc(): Doc {
@@ -36,9 +37,9 @@ export function extOf(name: string): string {
   return m ? m[1].toLowerCase() : ''
 }
 
+/** message of an error; known Russian texts (e.g. the web-build fallbacks in store/api) are translated */
 export function errorText(err: unknown): string {
-  if (err instanceof Error) return err.message
-  return String(err)
+  return t(err instanceof Error ? err.message : String(err))
 }
 
 export const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp']

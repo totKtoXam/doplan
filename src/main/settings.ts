@@ -1,4 +1,4 @@
-import { basename, isAbsolute } from 'node:path'
+import { basename, isAbsolute, resolve } from 'node:path'
 import { safeStorage } from 'electron'
 import type { AppSettings, RecentProject } from '../shared/ipc'
 import { atomicWrite, readJson } from './fsutil'
@@ -12,6 +12,8 @@ interface StoredSettings {
   recent: RecentProject[]
   /** default parent folder for new projects; absent → Documents/doplan */
   projectsDir?: string
+  /** project folders whose existing git repository the user trusts (or that doplan created), lower-cased */
+  trustedRepos?: string[]
   /** base64 of safeStorage-encrypted API key */
   apiKeyEnc?: string
 }
@@ -54,6 +56,7 @@ function sanitize(raw: Partial<StoredSettings> | null | undefined): StoredSettin
         : DEFAULTS.autosaveSec,
     recent,
     projectsDir: typeof r.projectsDir === 'string' && isAbsolute(r.projectsDir) ? r.projectsDir : undefined,
+    trustedRepos: Array.isArray(r.trustedRepos) ? r.trustedRepos.filter((x): x is string => typeof x === 'string' && isAbsolute(x)).slice(-500) : undefined,
     apiKeyEnc: typeof r.apiKeyEnc === 'string' && r.apiKeyEnc ? r.apiKeyEnc : undefined,
   }
 }
@@ -111,10 +114,37 @@ export async function setSettings(patch: unknown): Promise<AppSettings> {
   next.recent = cur.recent
   // a custom projects folder is chosen only through the main-process folder picker (setProjectsDir);
   // the renderer may only reset it to the default
+  next.trustedRepos = cur.trustedRepos
   next.projectsDir = 'projectsDir' in p && p.projectsDir == null ? undefined : cur.projectsDir
   await persist(next)
   emit(next)
   return toPublic(next)
+}
+
+/** UI language as last stored (main-process messages follow it); 'ru' before the settings are loaded */
+export function uiLang(): 'ru' | 'en' {
+  return cache?.lang ?? 'ru'
+}
+
+/** picks the Russian or English text of a main-process message by the UI language */
+export function msg(ru: string, en: string): string {
+  return uiLang() === 'en' ? en : ru
+}
+
+const repoKey = (root: string) => resolve(root).toLowerCase()
+
+/** true when the git repository in this project folder is trusted (created by doplan or confirmed by the user) */
+export async function isTrustedRepo(root: string): Promise<boolean> {
+  const k = repoKey(root)
+  return ((await load()).trustedRepos ?? []).includes(k)
+}
+
+export async function trustRepo(root: string): Promise<void> {
+  const cur = await load()
+  const k = repoKey(root)
+  const list = (cur.trustedRepos ?? []).filter((x) => x !== k)
+  list.push(k)
+  await persist({ ...cur, trustedRepos: list.slice(-500) })
 }
 
 /** custom default parent folder for new projects, or null (→ Documents/doplan) */

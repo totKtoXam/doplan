@@ -15,8 +15,10 @@ export interface ProjectState {
   /** project folder (null: unsaved document or a .doplan / .json file) */
   root: string | null
   kind: ProjectKind | null
-  /** the folder is a git repository */
+  /** the folder is a git repository doplan may use */
   git: boolean
+  /** the folder came with a .git that the user has not trusted yet (doplan runs no git there) */
+  untrustedGit: boolean
   /** document history position of the last commit; labels after it make the next commit message */
   commitMarker: number
   /** an old version loaded from history (Ctrl+S restores it as a new commit) */
@@ -30,6 +32,7 @@ export const projectStore = createStore<ProjectState>()(() => ({
   root: null,
   kind: null,
   git: false,
+  untrustedGit: false,
   commitMarker: 0,
   viewing: null,
   dialog: null,

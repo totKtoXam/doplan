@@ -8,8 +8,10 @@
  * history is unavailable (the UI says how to install git).
  */
 import { execFile } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, statSync } from 'node:fs'
+import { delimiter, isAbsolute, join } from 'node:path'
+import { app } from 'electron'
+import { msg } from './settings'
 
 export interface GitVersion {
   sha: string
@@ -24,31 +26,89 @@ export interface GitVersion {
 let gitExe: string | null | undefined
 let gitVersionText = ''
 
-function candidates(): string[] {
-  const list = ['git']
-  if (process.platform === 'win32') {
+/**
+ * Absolute paths only. The bare name `git` is never spawned: on Windows the process search looks in
+ * the spawn cwd (the project folder) before PATH, so a git.exe planted in a project folder would run.
+ * PATH is therefore resolved here, skipping relative entries.
+ */
+export function gitCandidates(): string[] {
+  const list: string[] = []
+  const win = process.platform === 'win32'
+  const pathVar = process.env[win ? 'Path' : 'PATH'] ?? process.env['PATH'] ?? ''
+  for (const raw of pathVar.split(delimiter)) {
+    const dir = raw.trim().replace(/^"(.*)"$/, '$1')
+    if (!dir || !isAbsolute(dir)) continue
+    list.push(join(dir, win ? 'git.exe' : 'git'))
+  }
+  if (win) {
     const pf = [process.env['ProgramFiles'], process.env['ProgramW6432'], process.env['ProgramFiles(x86)']].filter(Boolean) as string[]
     for (const p of pf) list.push(join(p, 'Git', 'cmd', 'git.exe'))
     if (process.env['LOCALAPPDATA']) list.push(join(process.env['LOCALAPPDATA'], 'Programs', 'Git', 'cmd', 'git.exe'))
   } else {
     list.push('/usr/bin/git', '/usr/local/bin/git', '/opt/homebrew/bin/git')
   }
-  return list
+  return [...new Set(list)].filter((p) => isAbsolute(p))
+}
+
+function isFile(p: string): boolean {
+  try {
+    return statSync(p).isFile()
+  } catch {
+    return false
+  }
 }
 
 function probe(exe: string): Promise<string | null> {
   return new Promise((resolve) => {
-    if (exe !== 'git' && !existsSync(exe)) return resolve(null)
-    execFile(exe, ['--version'], { windowsHide: true, timeout: 10000 }, (err, stdout) => {
+    if (!isAbsolute(exe) || !isFile(exe)) return resolve(null)
+    execFile(exe, ['--version'], { windowsHide: true, timeout: 10000, cwd: app.getPath('userData') }, (err, stdout) => {
       resolve(err ? null : String(stdout).trim())
     })
   })
 }
 
+/** an always-empty hooks directory: repository hooks (post-commit, reference-transaction…) never run */
+function emptyHooksDir(): string {
+  const dir = join(app.getPath('userData'), 'git-no-hooks')
+  try {
+    mkdirSync(dir, { recursive: true })
+  } catch {
+    /* exists */
+  }
+  return dir
+}
+
+/**
+ * `-c` flags on every call: no hooks, no fsmonitor command, no signing programs, stable UTF-8 output.
+ * Command-line config wins over the repository's own .git/config. Commands that could still run
+ * programs from a repository's config (clean/smudge filters, textconv) are avoided or switched off
+ * per call; repositories not created by doplan additionally need the user's trust (see projectFolder).
+ */
+function hardeningArgs(): string[] {
+  return [
+    '-c', `core.hooksPath=${emptyHooksDir()}`,
+    '-c', 'core.fsmonitor=false',
+    '-c', 'core.sshCommand=',
+    '-c', 'commit.gpgSign=false',
+    '-c', 'tag.gpgSign=false',
+    '-c', 'tag.forceSignAnnotated=false',
+    '-c', 'core.quotepath=off',
+    '-c', 'i18n.logOutputEncoding=utf-8',
+    '-c', 'i18n.commitEncoding=utf-8',
+  ]
+}
+
+/** process environment without GIT_* variables that could point git at another repository or config */
+function gitEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  for (const [k, v] of Object.entries(process.env)) if (!/^GIT_/i.test(k)) env[k] = v
+  return { ...env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '', GCM_INTERACTIVE: 'never', LC_ALL: 'C' }
+}
+
 /** path of a working git executable, or null. Cached after the first successful probe. */
 export async function findGit(): Promise<string | null> {
   if (gitExe) return gitExe
-  for (const c of candidates()) {
+  for (const c of gitCandidates()) {
     const v = await probe(c)
     if (v) {
       gitExe = c
@@ -83,8 +143,8 @@ interface RunOpts {
 
 async function run(root: string, args: string[], opts: RunOpts = {}): Promise<{ code: number; out: Buffer; err: string }> {
   const exe = await findGit()
-  if (!exe) throw new Error('Git не найден. Установите Git (https://git-scm.com), чтобы вести историю версий.')
-  const fullArgs = ['-c', 'core.quotepath=off', '-c', 'i18n.logOutputEncoding=utf-8', '-c', 'i18n.commitEncoding=utf-8', ...args]
+  if (!exe) throw new Error(msg('Git не найден. Установите Git (https://git-scm.com), чтобы вести историю версий.', 'Git not found. Install Git (https://git-scm.com) to keep the version history.'))
+  const fullArgs = [...hardeningArgs(), ...args]
   return new Promise((resolve, reject) => {
     const child = execFile(
       exe,
@@ -95,7 +155,7 @@ async function run(root: string, args: string[], opts: RunOpts = {}): Promise<{ 
         encoding: 'buffer',
         maxBuffer: 1024 * 1024 * 1024,
         timeout: 120000,
-        env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '', GCM_INTERACTIVE: 'never', LC_ALL: 'C' },
+        env: gitEnv(),
       },
       (error, stdout, stderr) => {
         const code = error ? (typeof (error as { code?: unknown }).code === 'number' ? ((error as { code: number }).code as number) : 1) : 0
@@ -118,11 +178,22 @@ async function run(root: string, args: string[], opts: RunOpts = {}): Promise<{ 
 
 const text = async (root: string, args: string[], opts?: RunOpts) => (await run(root, args, opts)).out.toString('utf8')
 
-/** true when `root` itself is the top of a git work tree (not merely inside some parent repository) */
-export async function isRepo(root: string): Promise<boolean> {
-  if (!existsSync(join(root, '.git'))) return false
-  const r = await run(root, ['rev-parse', '--is-inside-work-tree'], { allowFail: true })
-  return r.code === 0 && r.out.toString('utf8').trim() === 'true'
+/**
+ * true when `root` has its own repository directory (`.git/`). Checked without running git, so it
+ * is safe on folders that are not trusted yet. A `.git` file (gitdir pointer to elsewhere) is not
+ * treated as a project repository.
+ */
+export function isRepo(root: string): boolean {
+  try {
+    return statSync(join(root, '.git')).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+/** true when `root` has some `.git` entry (directory or gitdir file) */
+export function hasGitEntry(root: string): boolean {
+  return existsSync(join(root, '.git'))
 }
 
 /** identity used when the user has none configured (commits must never fail because of it) */
@@ -146,10 +217,10 @@ export async function gitInit(root: string): Promise<void> {
  * when nothing changed since the last commit. `paths` limits the commit to those files.
  */
 export async function gitCommit(root: string, message: string, paths?: string[]): Promise<string | null> {
-  const msg = message.trim() || 'Сохранение'
+  const subject = message.trim() || msg('Сохранение', 'Save')
   if (paths?.length) await run(root, ['add', '--', ...paths])
   else await run(root, ['add', '-A'])
-  const diffArgs = ['diff', '--cached', '--quiet']
+  const diffArgs = ['diff', '--cached', '--quiet', '--no-ext-diff', '--no-textconv']
   // an unborn branch has nothing to diff against: always commit
   const hasHead = (await run(root, ['rev-parse', '--verify', '--quiet', 'HEAD'], { allowFail: true })).code === 0
   if (hasHead) {
@@ -159,7 +230,7 @@ export async function gitCommit(root: string, message: string, paths?: string[])
   const id = await identityArgs(root)
   const args = [...id, 'commit', '--quiet', '--no-verify', '-F', '-']
   if (paths?.length) args.push('--', ...paths)
-  await run(root, args, { input: `${msg}\n` })
+  await run(root, args, { input: `${subject}\n` })
   return (await text(root, ['rev-parse', 'HEAD'])).trim()
 }
 
@@ -200,25 +271,25 @@ export async function gitTags(root: string): Promise<{ name: string; sha: string
 }
 
 export async function gitTag(root: string, sha: string, name: string, message: string): Promise<void> {
-  if (!/^[0-9a-f]{7,64}$/i.test(sha)) throw new Error('Некорректная версия')
+  if (!/^[0-9a-f]{7,64}$/i.test(sha)) throw new Error(msg('Некорректная версия', 'Invalid version'))
   const check = await run(root, ['check-ref-format', `refs/tags/${name}`], { allowFail: true })
-  if (check.code !== 0 || !name) throw new Error('Недопустимое имя метки')
+  if (check.code !== 0 || !name) throw new Error(msg('Недопустимое имя метки', 'Invalid tag name'))
   const exists = await run(root, ['rev-parse', '--verify', '--quiet', `refs/tags/${name}`], { allowFail: true })
-  if (exists.code === 0) throw new Error(`Метка «${name}» уже есть`)
+  if (exists.code === 0) throw new Error(msg(`Метка «${name}» уже есть`, `Tag “${name}” already exists`))
   const id = await identityArgs(root)
   await run(root, [...id, 'tag', '-a', '-F', '-', name, sha], { input: `${message.trim() || name}\n` })
 }
 
 /** a file's content at a commit; null when the file did not exist there */
 export async function gitShowFile(root: string, sha: string, path: string): Promise<Buffer | null> {
-  if (!/^[0-9a-f]{7,64}$/i.test(sha)) throw new Error('Некорректная версия')
+  if (!/^[0-9a-f]{7,64}$/i.test(sha)) throw new Error(msg('Некорректная версия', 'Invalid version'))
   const r = await run(root, ['show', `${sha}:${path}`], { allowFail: true, binary: true })
   return r.code === 0 ? r.out : null
 }
 
 /** file names directly inside `dir` at a commit */
 export async function gitListDir(root: string, sha: string, dir: string): Promise<string[]> {
-  if (!/^[0-9a-f]{7,64}$/i.test(sha)) throw new Error('Некорректная версия')
+  if (!/^[0-9a-f]{7,64}$/i.test(sha)) throw new Error(msg('Некорректная версия', 'Invalid version'))
   const r = await run(root, ['ls-tree', '--name-only', '-z', sha, `${dir}/`], { allowFail: true })
   if (r.code !== 0) return []
   return r.out

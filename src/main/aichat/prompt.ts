@@ -13,6 +13,8 @@ How to work:
 - When the user's request is ambiguous, make a reasonable assumption, do it, and say what you assumed (except measurements, see above).
 - Reply in the user's language (usually Russian), briefly: what you changed and anything that needs their attention. Mention ids only when useful.`
 
+export const PROJECT_FOLDER_NOTE = `The plan is saved as a doplan project folder, and it is your working directory. Its AGENTS.md holds the user's instructions for this project (wishes, rules, what not to touch); follow them. plan.json in the folder is only the last saved state: read and change the plan through the doplan tools only, and never edit plan.json, manifest.json or assets/ directly, even where AGENTS.md describes how.`
+
 export const PLAN_MODE_NOTE = `PLAN MODE is on: edits are recorded on a draft and applied only when the user presses "Применить". Tool results reflect the draft. Finish by summarising the proposed changes.`
 
 export const DEFAULT_AGENTS_MD = `# doplan project

@@ -3,6 +3,7 @@ import { create } from 'zustand'
 import type { Asset, Catalog, Doc, Hdri, Id, Material } from '@core/types'
 import { builtinCatalog, mergeCatalog } from '@core'
 import { docStore, useDoc } from '@/store/document'
+import { t } from '@/i18n'
 import { uiStore, useUi } from '@/store/ui'
 
 // ───────────────────────────── transactions ─────────────────────────────
@@ -187,8 +188,9 @@ export function progressFraction(p: { done: number; total: number } | undefined)
 
 // ───────────────────────────── misc helpers ─────────────────────────────
 
+/** message of an error; known Russian texts (e.g. the web-build fallbacks in store/api) are translated */
 export function errorText(e: unknown): string {
-  return e instanceof Error ? e.message : String(e)
+  return t(e instanceof Error ? e.message : String(e))
 }
 
 export async function blobToArrayBuffer(b: Blob): Promise<ArrayBuffer> {

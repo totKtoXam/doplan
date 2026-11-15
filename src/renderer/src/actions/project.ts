@@ -182,8 +182,8 @@ export async function createProjectFolder(mode: 'new' | 'saveAs', name: string, 
   }
 }
 
-/** `loadId`: of the document open when the reload began (another project loaded meanwhile: not a reload) */
-async function afterOpen(res: Awaited<ReturnType<typeof api.project.open>>, reload: DocReload = null, loadId?: number): Promise<void> {
+/** `from`: the file open when the reload began (another file open by now: not a reload) */
+async function afterOpen(res: Awaited<ReturnType<typeof api.project.open>>, reload: DocReload = null, from: string | null = null): Promise<void> {
   if (!res) return
   let doc: Doc
   try {
@@ -201,10 +201,10 @@ async function afterOpen(res: Awaited<ReturnType<typeof api.project.open>>, relo
   }
   // the same project read again keeps the id it has in memory, like viewVersion: an opened copy got its
   // own id that plan.json does not hold until the next save. Taken now, after the waits: the claim of
-  // that copy may have answered meanwhile. Another project opened during the waits: this is an open of
-  // its own, the id in memory is that other project's (the same project loaded again meanwhile, by a
-  // reload or a version view, is still this one)
-  if (reload && otherProjectLoaded(loadId, res.path)) reload = null
+  // that copy may have answered meanwhile. Another file open by the end of the waits (another project
+  // opened, or a Save As of this one): this is an open of its own, the id in memory is that file's. The
+  // same project loaded again meanwhile, by a reload or a version view, is still this one
+  if (reload && otherFileOpen(from)) reload = null
   if (reload) doc = keepId(doc)
   loadDocument(doc, res.path, { kind: res.kind ?? kindOfPath(res.path), git: res.git, untrustedGit: res.untrustedGit || res.untrustedFolder, gitFile: res.gitFile, unsafeGit: res.unsafeGit, reload })
   refreshRecent()
@@ -356,8 +356,8 @@ export async function ensureAiFolderTrust(): Promise<boolean> {
 export async function openProject(path?: string, opts?: { skipConfirm?: boolean; reload?: DocReload }): Promise<void> {
   if (!opts?.skipConfirm && !(await confirmDiscard())) return
   try {
-    const loadId = docStore.getState().loadId
-    await afterOpen(await api.project.open(path), opts?.reload ?? null, loadId)
+    const from = docStore.getState().filePath
+    await afterOpen(await api.project.open(path), opts?.reload ?? null, from)
   } catch (err) {
     await alertDialog(t('Не удалось открыть проект'), errorText(err))
   }
@@ -510,7 +510,7 @@ export async function viewVersion(v: ProjectVersion): Promise<boolean> {
   const root = projectStore.getState().root
   if (!root) return false
   if (!(await confirmDiscard())) return false
-  const loadId = docStore.getState().loadId
+  const from = docStore.getState().filePath
   let doc: Doc
   try {
     doc = parseDoc(await api.project.versionDoc(v.sha))
@@ -519,7 +519,7 @@ export async function viewVersion(v: ProjectVersion): Promise<boolean> {
     return false
   }
   // another project was opened while the version was read: it is not a version of that one
-  if (otherProjectLoaded(loadId, root) || projectStore.getState().root !== root) return false
+  if (otherFileOpen(from) || projectStore.getState().root !== root) return false
   // an old version is the same project: it keeps the project's id (and so its AI chats), even one
   // written before documents had an id
   doc = keepId(doc)
@@ -548,14 +548,13 @@ export async function leaveVersion(): Promise<void> {
   await openProject(root, { skipConfirm: true, reload: 'version' })
 }
 
-/** since `loadId`, a document of another file than `path` was loaded */
-function otherProjectLoaded(loadId: number | undefined, path: string): boolean {
-  const s = docStore.getState()
-  return s.loadId !== loadId && !sameFile(s.filePath, path)
+/** the open document is no longer of the file `from` (another project opened, a Save As) */
+function otherFileOpen(from: string | null): boolean {
+  return !sameFile(docStore.getState().filePath, from)
 }
 
-function sameFile(a: string | null, b: string): boolean {
-  if (!a) return false
+function sameFile(a: string | null, b: string | null): boolean {
+  if (!a || !b) return false
   const norm = (p: string) => {
     const q = p.replace(/\\/g, '/').replace(/\/+$/, '')
     return api.platform === 'linux' ? q : q.toLowerCase()

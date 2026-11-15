@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,7 +7,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest'
 const root = mkdtempSync(join(tmpdir(), 'doplan-chats-'))
 vi.mock('electron', () => ({ app: { getPath: () => root } }))
 
-const { agentWorkDir, claimDocument, dropChats, getChatSettings, listChats, loadChat, moveChats, projectKey, saveChat, setChatSettings } = await import('./store')
+const { agentWorkDir, agentWorkDirPath, claimDocument, dropChats, getChatSettings, listChats, loadChat, moveChats, projectKey, saveChat, setChatSettings } = await import('./store')
 
 afterAll(() => rmSync(root, { recursive: true, force: true }))
 
@@ -62,6 +62,23 @@ describe('chat storage follows the project', () => {
     await agentWorkDir('id:own-dst-1')
     expect((await moveChats('id:own-src-1', 'id:own-dst-1', false, null)).sessionsKept).toBe(false)
     expect((await loadChat('id:own-dst-1', 'chat-o'))?.resume).toBeUndefined()
+  })
+
+  it('a session that remembers its folder (a trusted project folder) survives the move', async () => {
+    const folderPath = join(root, 'Проект')
+    await saveChat(folderPath, { ...chat('chat-f', 'f', { claude: 'F-1', codex: 'X-1' }), resumeCwd: { claude: folderPath } })
+    // the agent ran in the folder: there is no ai-work folder for the old reference
+    expect((await moveChats(folderPath, 'id:folder-id-1', false, folderPath)).sessionsKept).toBe(false)
+    const rec = await loadChat('id:folder-id-1', 'chat-f')
+    expect(rec?.resume).toEqual({ claude: 'F-1' })
+    expect(rec?.resumeCwd).toEqual({ claude: folderPath })
+  })
+
+  it('the agent folder can be looked up without creating it', async () => {
+    const p = await agentWorkDirPath('id:lookup-only-1')
+    expect(existsSync(p)).toBe(false)
+    expect(await agentWorkDir('id:lookup-only-1')).toBe(p)
+    expect(existsSync(join(p, 'AGENTS.md'))).toBe(true)
   })
 
   it('a chat already at the target is not overwritten', async () => {

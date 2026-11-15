@@ -189,6 +189,7 @@ export function initAi(): void {
   api.aiChat.onToolCall((call) => void onToolCall(call))
   api.aiChat.onLogin(onLoginEvent)
   let lastLoad: number | undefined
+  let lastPath: string | null = null
   /** the open document has never been written to a file: its chats go when it does */
   let unsavedDoc = false
   const sync = () => {
@@ -197,6 +198,11 @@ export function initAi(): void {
     if (loadId === lastLoad) return
     const first = lastLoad === undefined
     lastLoad = loadId
+    const samePath = filePath === lastPath
+    lastPath = filePath
+    // the same project loaded again (an old version viewed, back to the current one, plan.json reloaded
+    // after the agent changed it): the open chat and a running turn go on
+    if (!first && samePath && filePath !== null && docRef() === get().projectPath) return
     const gone = !first && unsavedDoc ? get().projectPath : null
     unsavedDoc = filePath === null
     looseRef = ''
@@ -313,16 +319,22 @@ async function moveProject(to: string, copy: boolean, path: string | null): Prom
   if (moving === wait) moving = null
   // agent sessions resume only in the folder and project they were made in: the open chat drops them
   // too (Save As: the copy starts its own; a target with a folder of its own), and so does a running turn
+  // a move keeps the sessions that remember their folder (main checks it on every run); a copy keeps none
   if (!sessionsKept) {
     const r = get().running
     if (!get().legacy) {
       patchChat((c) => {
-        delete c.resume
-        delete c.resumeCwd
+        if (copy) {
+          delete c.resume
+          delete c.resumeCwd
+          return
+        }
+        for (const p of Object.keys(c.resume ?? {}) as AiProviderId[]) if (!c.resumeCwd?.[p]) delete c.resume![p]
       })
-      if (r) voidSessions.add(r.runId)
+      // the running turn's session comes with its folder: only a copy must not continue it
+      if (r && copy) voidSessions.add(r.runId)
     }
-    for (const s of stoppedRuns.values()) if (s.ref === from) s.noSession = true
+    if (copy) for (const s of stoppedRuns.values()) if (s.ref === from) s.noSession = true
   }
   if (!copy) for (const s of stoppedRuns.values()) if (s.ref === from) s.ref = to
   if (get().projectPath !== to) return

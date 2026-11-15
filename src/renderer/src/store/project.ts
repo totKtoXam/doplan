@@ -52,13 +52,24 @@ export function useProject<T>(selector: (s: ProjectState) => T): T {
 // ── awaitable "create project folder" dialog (Ctrl+S on an unsaved document waits for it) ──
 
 let pendingCreate: ((saved: boolean) => void) | null = null
+let createFork = false
 
-export function openCreateDialog(mode: 'new' | 'saveAs'): Promise<boolean> {
+/**
+ * `fork` (Save As of a saved file): the folder becomes a new project with an id and chats of its own.
+ * Otherwise (Ctrl+S on a .json, a .doplan turned into a folder, the first save) it is the same project.
+ */
+export function openCreateDialog(mode: 'new' | 'saveAs', fork = false): Promise<boolean> {
   pendingCreate?.(false)
+  createFork = fork
   return new Promise((resolve) => {
     pendingCreate = resolve
     projectStore.setState({ dialog: mode })
   })
+}
+
+/** the open create dialog makes a new project out of a saved one (see openCreateDialog) */
+export function createDialogForks(): boolean {
+  return createFork
 }
 
 export function finishCreateDialog(saved: boolean): void {

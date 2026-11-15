@@ -7,7 +7,7 @@ import { api } from '@/store/api'
 import { docStore, historyPosition, undoLabelsSince } from '@/store/document'
 import { handles } from '@/store/handles'
 import { alertDialog, choiceDialog, confirmDialog, promptDialog, toast } from '@/store/notify'
-import { finishCreateDialog, openCreateDialog, type ProjectKind, projectStore } from '@/store/project'
+import { createDialogForks, finishCreateDialog, openCreateDialog, type ProjectKind, projectStore } from '@/store/project'
 import { runProjectHooks } from '@/store/projectHooks'
 import { buildSampleApartment } from '@/store/sample'
 import { uiStore } from '@/store/ui'
@@ -155,13 +155,14 @@ export async function createProjectFolder(mode: 'new' | 'saveAs', name: string, 
       const store = docStore.getState()
       if (store.doc.meta.name !== clean) store.transact(t('Название проекта'), (d) => void (d.meta.name = clean))
       const doc = docStore.getState().doc
-      const id = saveId(doc, docStore.getState().filePath, true)
+      const fork = createDialogForks()
+      const id = saveId(doc, docStore.getState().filePath, fork)
       const res = await api.project.create(withId(doc, id), clean, parent)
       docStore.getState().markSaved(res.path, id)
       projectStore.setState({ root: res.path, kind: 'folder', git: !!res.git, untrustedGit: false, gitFile: false, commitMarker: historyPosition(), viewing: null })
       void api.project.clearRecovery().catch(() => {})
-      // the chats follow the document (a copy of a saved file gets its own); awaited like any save
-      await runProjectHooks('saved', true)
+      // the chats follow the document (a Save As copy gets its own); awaited like any save
+      await runProjectHooks('saved', fork)
     }
     refreshRecent()
     projectStore.setState((s) => ({ historyRev: s.historyRev + 1 }))
@@ -311,7 +312,8 @@ export async function saveProject(saveAs = false, opts?: { message?: string; ove
   const folder = ps.kind === 'folder' && !!filePath
   if (saveAs || !filePath || (!folder && ps.kind !== 'zip' && api.platform !== 'browser')) {
     if (api.platform === 'browser') return saveFileLegacy(null)
-    return openCreateDialog('saveAs')
+    // only Save As of a saved file is a new project; Ctrl+S on a .json turns that file into a folder
+    return openCreateDialog('saveAs', saveAs && !!filePath)
   }
   if (!folder) return saveFileLegacy(filePath)
 

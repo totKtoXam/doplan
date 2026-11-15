@@ -165,6 +165,47 @@ describe('folder trust', { timeout: 30_000 }, async () => {
     expect(existsSync(marker)).toBe(false)
   })
 
+  it.skipIf(!git)('the driver with an empty name ([filter ""], `filter=` in .gitattributes) is switched off', async () => {
+    const marker = join(base, 'empty-ran').replace(/\\/g, '/')
+    const foreign = folder('filters-empty', {
+      'plan.json': '{}',
+      'manifest.json': MANIFEST,
+      '.gitattributes': '* filter=\n',
+      'evil.sh': `echo ran >> '${marker}'\ncat\n`,
+    })
+    gitIn(foreign, 'init', '-q')
+    gitIn(foreign, 'config', 'filter..clean', 'sh ./evil.sh')
+    expect(await filterOffArgs(foreign)).toEqual(expect.arrayContaining(['filter..clean=']))
+    await trustFolder(foreign)
+    expect(await commitFolder(foreign, 'x')).toBeTruthy()
+    expect(existsSync(marker)).toBe(false)
+  })
+
+  it.skipIf(!git)("drivers from files the user's own config includes stay on (git-lfs set up through include.path)", async () => {
+    const home = folder('home', {
+      '.gitconfig': '[include]\n\tpath = lfs.inc\n',
+      'lfs.inc': '[filter "mylfs"]\n\tclean = cat\n\tsmudge = cat\n',
+    })
+    const repo = folder('filters-include', { 'plan.json': '{}', 'manifest.json': MANIFEST })
+    gitIn(repo, 'init', '-q')
+    const saved = { HOME: process.env['HOME'], USERPROFILE: process.env['USERPROFILE'], XDG: process.env['XDG_CONFIG_HOME'] }
+    process.env['HOME'] = home
+    process.env['USERPROFILE'] = home
+    delete process.env['XDG_CONFIG_HOME']
+    try {
+      const args = await filterOffArgs(repo)
+      expect(args.some((a) => a.startsWith('filter.mylfs.'))).toBe(false)
+      // the same driver defined by the repository itself is switched off
+      gitIn(repo, 'config', 'filter.mylfs.clean', 'sh ./other.sh')
+      expect(await filterOffArgs(repo)).toEqual(expect.arrayContaining(['filter.mylfs.clean=']))
+    } finally {
+      for (const [k, v] of [['HOME', saved.HOME], ['USERPROFILE', saved.USERPROFILE], ['XDG_CONFIG_HOME', saved.XDG]] as const) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+    }
+  })
+
   it.skipIf(!git)('a filter driver that cannot be switched off stops the commit', async () => {
     const foreign = folder('filters-eq', { 'plan.json': '{}', 'manifest.json': MANIFEST })
     gitIn(foreign, 'init', '-q')

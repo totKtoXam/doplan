@@ -94,13 +94,25 @@ function withoutResume(rec: AiChatRecord): AiChatRecord {
 }
 
 /**
+ * A moved record keeps the sessions that know their folder (resumeCwd: the run checks it, see
+ * aichat/index.ts resumesHere, so one made in a trusted project folder resumes there) and drops the
+ * older ones, which counted as made in the project's ai-work folder.
+ */
+function withoutUnplacedResume(rec: AiChatRecord): AiChatRecord {
+  const kept = Object.entries(rec.resume ?? {}).filter(([p]) => rec.resumeCwd?.[p as keyof typeof rec.resume])
+  const { resume: _drop, ...rest } = rec
+  return kept.length ? { ...rest, resume: Object.fromEntries(kept) } : rest
+}
+
+/**
  * The open document got a new reference. `copy` (Save As, a copied file): the chats are copied without
  * their agent sessions, so the two files do not continue one Claude Code / Codex conversation. Otherwise
  * they move and the agent keeps its old working folder, so a stored session still resumes; where that
- * cannot be (the target has a folder of its own) the moved chats start fresh sessions. Chats already at
+ * cannot be (the target has a folder of its own) the moved chats start fresh sessions, except those made
+ * in a folder they remember (withoutUnplacedResume). Chats already at
  * the target win. `path`: the file the document is saved to now (its chats are never dropped as those
- * of an abandoned document). Resolves whether agent sessions still resume at the target: when not, the
- * renderer drops them from the chat it holds open too.
+ * of an abandoned document). Resolves whether agent sessions without a remembered folder still resume
+ * at the target: when not, the renderer drops those from the chat it holds open too.
  */
 export async function moveChats(from: string, to: string, copy: boolean, path: string | null): Promise<{ sessionsKept: boolean }> {
   if (!from || !to || projectKey(from) === SHARED || projectKey(to) === SHARED) throw new Error('Неверная ссылка на проект')
@@ -139,7 +151,7 @@ export async function moveChats(from: string, to: string, copy: boolean, path: s
     if (!sessionsKept && !copy) {
       for (const f of moved) {
         const rec = await readJson<AiChatRecord | null>(f, null)
-        if (rec?.resume) await atomicWrite(f, JSON.stringify(withoutResume(rec)))
+        if (rec?.resume) await atomicWrite(f, JSON.stringify(withoutUnplacedResume(rec)))
       }
     }
   }
@@ -274,6 +286,11 @@ export async function agentWorkDir(projectPath: string | null): Promise<string> 
   const claude = join(dir, 'CLAUDE.md')
   if (!(await exists(claude))) await atomicWrite(claude, '@AGENTS.md\n')
   return dir
+}
+
+/** agentWorkDir without creating or seeding anything: where a project's agent folder is or would be */
+export async function agentWorkDirPath(projectPath: string | null): Promise<string> {
+  return (await existingWorkDir(projectPath)) ?? ownWorkDir(projectPath)
 }
 
 export function tempDir(): string {

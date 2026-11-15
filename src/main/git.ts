@@ -187,7 +187,8 @@ const text = async (root: string, args: string[], opts?: RunOpts) => (await run(
  * Resolves null when git could not read it (exit 1 only means "no such keys").
  */
 async function filterKeys(root: string, scope: '--global' | '--system' | null): Promise<Map<string, string> | null> {
-  const r = await run(root, ['config', ...(scope ? [scope] : []), '-z', '--get-regexp', '^filter\\.'], { allowFail: true })
+  // --includes: the user's own files include others (include.path, includeIf) just as the effective view follows them
+  const r = await run(root, ['config', ...(scope ? [scope, '--includes'] : []), '-z', '--get-regexp', '^filter\\.'], { allowFail: true })
   if (r.code !== 0 && r.code !== 1) return null
   const keys = new Map<string, string>()
   for (const rec of r.out.toString('utf8').split('\0')) {
@@ -214,9 +215,10 @@ export async function filterOffArgs(root: string): Promise<string[]> {
   const names = new Set<string>()
   for (const [key, value] of all) {
     if (own.get(key) === value) continue
-    // filter.<subsection>.<variable>: the subsection is everything between the first and the last dot
+    // filter.<subsection>.<variable>: the subsection is everything between the first and the last dot.
+    // It may be empty: [filter ""] is the driver of the paths .gitattributes marks `filter=`
     const last = key.lastIndexOf('.')
-    if (!key.toLowerCase().startsWith('filter.') || last <= 'filter.'.length) continue
+    if (!key.toLowerCase().startsWith('filter.') || last < 'filter.'.length) continue
     names.add(key.slice('filter.'.length, last))
   }
   const out: string[] = []

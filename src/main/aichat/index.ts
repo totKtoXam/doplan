@@ -19,7 +19,7 @@ import { binVersion, findOnPath, killTree, type ResolvedBin } from './detect'
 import { authStatus, cancelLogin, isAuthError, loginInput, startLogin } from './login'
 import { closeMcpServer, openEndpoint, revokeRun } from './mcpServer'
 import { AGENT_SYSTEM_PROMPT, PLAN_MODE_NOTE, PROJECT_FOLDER_NOTE, PROJECT_INSTRUCTIONS_NOTE, UNTRUSTED_FOLDER_NOTE } from './prompt'
-import { agentWorkDir, claimDocument, deleteChat, dropChats, getChatSettings, listChats, loadChat, moveChats, sanitizeSettings, saveChat, setChatSettings } from './store'
+import { agentWorkDir, agentWorkDirPath, claimDocument, deleteChat, dropChats, getChatSettings, listChats, loadChat, moveChats, sanitizeSettings, saveChat, setChatSettings } from './store'
 
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 
@@ -202,7 +202,7 @@ function systemPrompt(req: AiRunRequest, place: AgentPlace | null): string {
  */
 async function resumesHere(req: AiRunRequest, cwd: string): Promise<boolean> {
   if (!req.resumeId || req.settings.provider !== 'claude') return true
-  const madeIn = req.resumeCwd ?? (await agentWorkDir(req.projectPath))
+  const madeIn = req.resumeCwd ?? (await agentWorkDirPath(req.projectPath))
   const norm = (p: string) => (process.platform === 'win32' ? resolve(p).toLowerCase() : resolve(p))
   return norm(madeIn) === norm(cwd)
 }

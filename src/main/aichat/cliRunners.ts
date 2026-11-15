@@ -56,6 +56,11 @@ interface ProcOutcome {
 function runProcess(ctx: RunCtx, bin: ResolvedBin, args: string[], env: NodeJS.ProcessEnv, stdin: string, onStdout: (s: string) => void): Promise<ProcOutcome> {
   return new Promise((resolve) => {
     let stderr = ''
+    // Stop pressed while the run was still preparing (endpoint, temp files): never start the CLI
+    if (ctx.signal.aborted) {
+      resolve({ code: null, stderr: '' })
+      return
+    }
     let child: ChildProcess
     try {
       child = spawnBin(bin, args, { cwd: ctx.cwd, env, stdio: ['pipe', 'pipe', 'pipe'] })
@@ -202,12 +207,15 @@ export async function runGemini(ctx: RunCtx, bin: ResolvedBin): Promise<void> {
     JSON.stringify({ mcpServers: { doplan: { httpUrl: endpoint.url, headers: { Authorization: `Bearer ${endpoint.token}` }, timeout: Number(TOOL_TIMEOUT_MS), trust: true } } }),
     { mode: 0o600 },
   )
-  const args = ['-p', `<doplan-instructions>\n${ctx.systemPrompt}\n</doplan-instructions>\n\n${ctx.userText}`, '--allowed-mcp-server-names', 'doplan']
+  // the prompt goes through stdin (Gemini appends the -p text to it): a long message or many mark
+  // chips would overflow the Windows command line (32767 chars) as an argument
+  const prompt = `<doplan-instructions>\n${ctx.systemPrompt}\n</doplan-instructions>\n\n${ctx.userText}`
+  const args = ['-p', 'Complete the request above.', '--allowed-mcp-server-names', 'doplan']
   if (req.settings.models.gemini) args.push('-m', req.settings.models.gemini)
   const env = { ...process.env, GEMINI_CLI_SYSTEM_SETTINGS_PATH: settingsPath }
   emit({ type: 'status', text: 'Gemini CLI запущен…' })
   const partId = `g${Date.now()}`
-  const out = await runProcess(ctx, bin, args, env, '', (d) => emit({ type: 'text', partId, delta: d }))
+  const out = await runProcess(ctx, bin, args, env, prompt, (d) => emit({ type: 'text', partId, delta: d }))
   await rm(settingsPath, { force: true }).catch(() => {})
   if (ctx.signal.aborted) return emit({ type: 'done', ok: false, stopped: true })
   if (out.code === 0) return emit({ type: 'done', ok: true })

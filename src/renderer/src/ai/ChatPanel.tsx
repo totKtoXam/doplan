@@ -30,7 +30,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { type ClipboardEvent, type KeyboardEvent, type ReactNode, type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { AiChatSettings, AiMessage, AiPart, AiProviderInfo } from '@shared/aiChat'
+import type { AiChatMeta, AiChatSettings, AiMessage, AiPart, AiProviderInfo } from '@shared/aiChat'
 import { useDoc } from '@/store/document'
 import { useUi } from '@/store/ui'
 import { cn, Popover } from '@/ui/kit'
@@ -46,6 +46,7 @@ import {
   newChat,
   openChat,
   QUICK_ACTIONS,
+  quickCmd,
   refreshProviders,
   removeChat,
   removeChip,
@@ -58,7 +59,9 @@ import {
   updateSettings,
   useAi,
 } from './store'
+import { pluralKey, tAi } from './i18n'
 import { ImageMarkup } from './ImageMarkup'
+import { t } from '@/i18n'
 
 type ToolPart = Extract<AiPart, { type: 'tool' }>
 type Effort = AiChatSettings['effort']
@@ -76,13 +79,9 @@ const EFFORT_HINT: Record<string, string> = {
 const fmtTok = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
 const fmtUsd = (v: number) => `$${v.toFixed(v < 0.1 ? 4 : 2)}`
 
-/** 1 действие, 3 действия, 5 действий */
+/** «Выполнено {n} действие / действия / действий», each form a dictionary key */
 function plural(n: number, one: string, few: string, many: string): string {
-  const m10 = n % 10
-  const m100 = n % 100
-  if (m10 === 1 && m100 !== 11) return one
-  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few
-  return many
+  return t(pluralKey(n, one, few, many), { n })
 }
 
 const rowBtn = 'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-hover disabled:opacity-40 disabled:hover:bg-transparent'
@@ -159,13 +158,13 @@ function StatusIcon({ status }: { status: ToolPart['status'] }) {
 /** one tool call inside an expanded activity group */
 function ToolRow({ part }: { part: ToolPart }) {
   const [open, setOpen] = useState(false)
-  const statusText = { running: 'выполняется', pending: 'ждёт подтверждения', done: '', error: 'ошибка', rejected: 'отклонено', proposed: 'в черновике' }[part.status]
+  const statusText = t({ running: 'выполняется', pending: 'ждёт подтверждения', done: '', error: 'ошибка', rejected: 'отклонено', proposed: 'в черновике' }[part.status])
   const hasDetails = part.args !== undefined || !!part.result
   return (
     <div className="text-[11px]">
       <button type="button" className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left hover:bg-hover" onClick={() => hasDetails && setOpen((o) => !o)}>
         {part.origin === 'doc' ? <Sparkles size={12} className="shrink-0 text-accent" /> : <Wrench size={12} className="shrink-0 text-muted" />}
-        <span className="min-w-0 flex-1 truncate">{part.title}</span>
+        <span className="min-w-0 flex-1 truncate">{t(part.title)}</span>
         {statusText && <span className="text-[10px] text-muted">{statusText}</span>}
         <StatusIcon status={part.status} />
       </button>
@@ -184,7 +183,7 @@ function ApprovalCard({ part }: { part: ToolPart }) {
   return (
     <div className="my-1.5 rounded-lg border border-warning/50 bg-warning/5 px-2.5 py-2 text-[11px]">
       <div className="mb-1 flex items-center gap-1.5 font-medium">
-        <CircleAlert size={12} className="text-warning" /> {part.title}
+        <CircleAlert size={12} className="text-warning" /> {t(part.title)}
       </div>
       {part.changes?.length ? (
         <ul className="mb-1.5 text-text">
@@ -199,10 +198,10 @@ function ApprovalCard({ part }: { part: ToolPart }) {
       )}
       <div className="flex gap-1.5">
         <button type="button" className="rounded-md bg-accent px-2.5 py-0.5 text-accent-fg hover:bg-accent-hover" onClick={() => answerApproval(part.id, true)}>
-          Применить
+          {t('Применить')}
         </button>
         <button type="button" className="rounded-md border border-border px-2.5 py-0.5 hover:bg-hover" onClick={() => answerApproval(part.id, false)}>
-          Отклонить
+          {t('Отклонить')}
         </button>
       </div>
     </div>
@@ -223,17 +222,17 @@ function ActivityGroup({ items, live }: { items: Activity[]; live: boolean }) {
   const onlyThinking = !tools.length
 
   let label: string
-  if (running) label = running.title
-  else if (onlyThinking) label = 'Размышления'
-  else if (tools.length === 1) label = tools[0].title
-  else label = `Выполнено ${tools.length} ${plural(tools.length, 'действие', 'действия', 'действий')}`
+  if (running) label = t(running.title)
+  else if (onlyThinking) label = t('Размышления')
+  else if (tools.length === 1) label = t(tools[0].title)
+  else label = plural(tools.length, 'Выполнено {n} действие', 'Выполнено {n} действия', 'Выполнено {n} действий')
 
   return (
     <div className="my-1">
       <button type="button" className="group flex max-w-full items-center gap-1.5 rounded-md py-0.5 text-[11.5px] text-muted hover:text-text" onClick={() => setOpen((o) => !o)}>
         {running ? <LoaderCircle size={12} className="dp-spin shrink-0 text-accent" /> : onlyThinking ? <Brain size={12} className="shrink-0" /> : null}
         <span className={cn('truncate', running && 'animate-pulse')}>{label}</span>
-        {errors > 0 && !running && <span className="text-danger">· {errors === 1 ? 'ошибка' : `ошибок: ${errors}`}</span>}
+        {errors > 0 && !running && <span className="text-danger">· {errors === 1 ? t('ошибка') : t('ошибок: {n}', { n: errors })}</span>}
         {open ? <ChevronDown size={12} className="shrink-0" /> : <ChevronRight size={12} className="shrink-0" />}
       </button>
       {open && (
@@ -256,7 +255,7 @@ function ActivityGroup({ items, live }: { items: Activity[]; live: boolean }) {
               {c}
             </li>
           ))}
-          {changes.length > 8 && <li className="text-muted">… ещё {changes.length - 8}</li>}
+          {changes.length > 8 && <li className="text-muted">{t('… ещё {n}', { n: changes.length - 8 })}</li>}
         </ul>
       )}
       {images.map((src, i) => (
@@ -280,10 +279,10 @@ function Notice({ part }: { part: Extract<AiPart, { type: 'notice' }> }) {
       )}
     >
       <Icon size={12} className="mt-0.5 shrink-0" />
-      <span className="min-w-0 flex-1 break-words whitespace-pre-wrap select-text">{text}</span>
+      <span className="min-w-0 flex-1 break-words whitespace-pre-wrap select-text">{tAi(text)}</span>
       {login && (
         <button type="button" className="shrink-0 rounded-md bg-accent px-2 py-0.5 text-accent-fg hover:bg-accent-hover" onClick={() => void startLogin(login)}>
-          Войти
+          {t('Войти')}
         </button>
       )}
     </div>
@@ -307,7 +306,7 @@ function Message({ m, live }: { m: AiMessage; live: boolean }) {
             <div className="mb-1 flex flex-wrap gap-1">
               {m.chips.map((c) => (
                 <span key={c.id} className="rounded bg-[color-mix(in_srgb,var(--accent)_18%,transparent)] px-1.5 text-[10px]" title={c.summary}>
-                  {c.label}
+                  {t(c.label)}
                 </span>
               ))}
             </div>
@@ -342,7 +341,7 @@ function Message({ m, live }: { m: AiMessage; live: boolean }) {
       )}
       {live && !lastIsText && !m.parts.some((p) => p.type === 'tool' && p.status === 'running') && (
         <div className="my-1 flex items-center gap-1.5 text-[11.5px] text-muted">
-          <LoaderCircle size={12} className="dp-spin text-accent" /> <span className="animate-pulse">Думаю…</span>
+          <LoaderCircle size={12} className="dp-spin text-accent" /> <span className="animate-pulse">{t('Думаю…')}</span>
         </div>
       )}
     </div>
@@ -351,10 +350,34 @@ function Message({ m, live }: { m: AiMessage; live: boolean }) {
 
 // ───────────── header: chat title + history ─────────────
 
+function ChatRow({ c, active, legacy, onPick }: { c: AiChatMeta; active: boolean; legacy: boolean; onPick(): void }) {
+  return (
+    <div className={cn('group flex items-center gap-1 rounded-md hover:bg-hover', active && 'bg-active')}>
+      <button
+        type="button"
+        className="min-w-0 flex-1 px-2 py-1.5 text-left"
+        title={c.title}
+        onClick={() => {
+          onPick()
+          void openChat(c.id, legacy)
+        }}
+      >
+        <div className="truncate">{c.title || t('Без названия')}</div>
+        <div className="text-[10px] text-faint">{new Date(c.updatedAt).toLocaleString()}</div>
+      </button>
+      <button type="button" title={t('Удалить чат')} aria-label={t('Удалить чат')} className="mr-1 hidden rounded p-1 text-muted group-hover:block hover:text-danger" onClick={() => void removeChat(c.id, legacy)}>
+        <Trash2 size={12} />
+      </button>
+    </div>
+  )
+}
+
 function ChatHeader() {
   const title = useAi((s) => s.chat.title)
   const chats = useAi((s) => s.chats)
+  const legacyChats = useAi((s) => s.legacyChats)
   const cur = useAi((s) => s.chat.id)
+  const curLegacy = useAi((s) => s.legacy)
   const [open, setOpen] = useState(false)
   const anchor = useRef<HTMLButtonElement>(null)
   return (
@@ -364,37 +387,31 @@ function ChatHeader() {
         type="button"
         className={cn('flex min-w-0 flex-1 items-center gap-1 rounded-md px-1.5 py-1 text-left text-xs font-medium hover:bg-hover', open && 'bg-hover')}
         onClick={() => setOpen((o) => !o)}
-        title="Чаты этого проекта"
+        title={t('Чаты этого проекта')}
       >
-        <span className="truncate">{title || 'Новый чат'}</span>
+        <span className="truncate">{title || t('Новый чат')}</span>
         <ChevronDown size={12} className="shrink-0 text-muted" />
       </button>
-      <button type="button" title="Новый чат" aria-label="Новый чат" className="rounded-md p-1.5 text-muted hover:bg-hover hover:text-text" onClick={() => newChat()}>
+      <button type="button" title={t('Новый чат')} aria-label={t('Новый чат')} className="rounded-md p-1.5 text-muted hover:bg-hover hover:text-text" onClick={() => newChat()}>
         <SquarePen size={14} />
       </button>
-      <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchor} width={280} aria-label="Чаты">
+      <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchor} width={280} aria-label={t('Чаты')}>
         <div className="p-1">
-          <div className="px-2 pt-1 pb-1.5 text-[11px] text-muted">Чаты этого проекта</div>
-          {!chats.length && <div className="px-2 pb-2 text-faint">Пока нет сохранённых чатов</div>}
+          <div className="px-2 pt-1 pb-1.5 text-[11px] text-muted">{t('Чаты этого проекта')}</div>
+          {!chats.length && <div className="px-2 pb-2 text-faint">{t('Пока нет сохранённых чатов')}</div>}
           {chats.map((c) => (
-            <div key={c.id} className={cn('group flex items-center gap-1 rounded-md hover:bg-hover', c.id === cur && 'bg-active')}>
-              <button
-                type="button"
-                className="min-w-0 flex-1 px-2 py-1.5 text-left"
-                title={c.title}
-                onClick={() => {
-                  setOpen(false)
-                  void openChat(c.id)
-                }}
-              >
-                <div className="truncate">{c.title || 'Без названия'}</div>
-                <div className="text-[10px] text-faint">{new Date(c.updatedAt).toLocaleString()}</div>
-              </button>
-              <button type="button" title="Удалить чат" aria-label="Удалить чат" className="mr-1 hidden rounded p-1 text-muted group-hover:block hover:text-danger" onClick={() => void removeChat(c.id)}>
-                <Trash2 size={12} />
-              </button>
-            </div>
+            <ChatRow key={c.id} c={c} active={!curLegacy && c.id === cur} legacy={false} onPick={() => setOpen(false)} />
           ))}
+          {legacyChats.length > 0 && (
+            <>
+              <div className="mt-1 border-t border-border px-2 pt-2 pb-1.5 text-[11px] text-muted" title={t('Чаты несохранённых проектов из версий до 0.6. Они общие для всех проектов и удаляются только вручную.')}>
+                {t('Ранние чаты (общие)')}
+              </div>
+              {legacyChats.map((c) => (
+                <ChatRow key={c.id} c={c} active={curLegacy && c.id === cur} legacy onPick={() => setOpen(false)} />
+              ))}
+            </>
+          )}
         </div>
       </Popover>
     </div>
@@ -424,10 +441,11 @@ function LoginCard({ prov }: { prov: AiProviderInfo | undefined }) {
       <div className="mx-2 mb-1.5 flex items-center gap-2 rounded-xl border border-border bg-panel-2 px-3 py-2 text-[11.5px]">
         <KeyRound size={14} className="shrink-0 text-warning" />
         <span className="min-w-0 flex-1">
-          <span className="font-medium">{label}</span>: нужен вход в аккаунт
+          <span className="font-medium">{label}</span>
+          {t(': нужен вход в аккаунт')}
         </span>
         <button type="button" className="shrink-0 rounded-md bg-accent px-2.5 py-1 text-accent-fg hover:bg-accent-hover" onClick={() => prov && void startLogin(prov.id)}>
-          Войти
+          {t('Войти')}
         </button>
       </div>
     )
@@ -439,6 +457,8 @@ function LoginCard({ prov }: { prov: AiProviderInfo | undefined }) {
     .split(/\r?\n/)
     .filter((l) => l.trim() && !/https?:\/\//.test(l))
     .slice(-2)
+    // the app's own lines (terminal fallback) in the UI language; the CLI's stay as printed
+    .map((l) => tAi(l.trim()))
     .join('\n')
   return (
     <div className="mx-2 mb-1.5 rounded-xl border border-border bg-panel-2 px-3 py-2 text-[11.5px]">
@@ -451,24 +471,24 @@ function LoginCard({ prov }: { prov: AiProviderInfo | undefined }) {
           <CircleAlert size={14} className="shrink-0 text-danger" />
         )}
         <span className="min-w-0 flex-1 font-medium">
-          {login.phase === 'running' ? `Вход в ${label}…` : login.phase === 'done' ? `${label}: вход выполнен` : `${label}: вход не удался`}
+          {t(login.phase === 'running' ? 'Вход в {name}…' : login.phase === 'done' ? '{name}: вход выполнен' : '{name}: вход не удался', { name: label ?? '' })}
         </span>
         {login.phase === 'running' ? (
           <button type="button" className="shrink-0 rounded-md px-2 py-0.5 text-muted hover:bg-hover hover:text-text" onClick={() => cancelLogin()}>
-            Отмена
+            {t('Отмена')}
           </button>
         ) : (
-          <button type="button" aria-label="Закрыть" className="shrink-0 rounded p-0.5 text-muted hover:text-text" onClick={() => dismissLogin()}>
+          <button type="button" aria-label={t('Закрыть')} className="shrink-0 rounded p-0.5 text-muted hover:text-text" onClick={() => dismissLogin()}>
             <X size={13} />
           </button>
         )}
       </div>
       {login.phase === 'running' && (
         <>
-          <div className="mt-1 text-muted">Браузер откроет страницу входа. Подтвердите доступ; если страница покажет код — вставьте его сюда.</div>
+          <div className="mt-1 text-muted">{t('Браузер откроет страницу входа. Подтвердите доступ; если страница покажет код — вставьте его сюда.')}</div>
           {login.url && (
             <a href={login.url} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-accent hover:underline">
-              <ExternalLink size={11} /> Открыть страницу входа
+              <ExternalLink size={11} /> {t('Открыть страницу входа')}
             </a>
           )}
           <form
@@ -483,20 +503,20 @@ function LoginCard({ prov }: { prov: AiProviderInfo | undefined }) {
               value={code}
               onChange={(e) => setCode(e.target.value)}
               onKeyDown={(e) => e.stopPropagation()}
-              placeholder="Код со страницы входа"
+              placeholder={t('Код со страницы входа')}
               className="min-w-0 flex-1 rounded-md border border-border bg-input px-2 py-1 text-[11px] outline-none focus:border-accent"
             />
             <button type="submit" disabled={!code.trim()} className="rounded-md border border-border px-2 py-1 hover:bg-hover disabled:opacity-40">
-              Отправить
+              {t('Отправить')}
             </button>
           </form>
         </>
       )}
       {login.phase === 'error' && (
         <div className="mt-1 flex items-start gap-2">
-          <span className="min-w-0 flex-1 font-mono text-[10px] break-words whitespace-pre-wrap text-muted select-text">{login.error}</span>
+          <span className="min-w-0 flex-1 font-mono text-[10px] break-words whitespace-pre-wrap text-muted select-text">{tAi(login.error)}</span>
           <button type="button" className="shrink-0 rounded-md bg-accent px-2 py-0.5 text-accent-fg hover:bg-accent-hover" onClick={() => void startLogin(login.provider)}>
-            Повторить
+            {t('Повторить')}
           </button>
         </div>
       )}
@@ -537,19 +557,19 @@ function ModeButton() {
         type="button"
         className={cn('flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted hover:bg-hover hover:text-text', open && 'bg-hover text-text', cur === 'plan' && 'text-accent')}
         onClick={() => setOpen((o) => !o)}
-        title="Режим"
+        title={t('Режим')}
       >
-        {MODES.find((m) => m.key === cur)?.label}
+        {t(MODES.find((m) => m.key === cur)?.label ?? '')}
         <ChevronDown size={11} />
       </button>
-      <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchor} width={270} aria-label="Режим">
+      <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchor} width={270} aria-label={t('Режим')}>
         <div className="p-1">
-          <div className="px-2 pt-1 pb-1 text-[11px] text-muted">Режим</div>
+          <div className="px-2 pt-1 pb-1 text-[11px] text-muted">{t('Режим')}</div>
           {MODES.map((m, i) => (
             <button key={m.key} type="button" className={rowBtn} onClick={() => pick(i)}>
               <span className="min-w-0 flex-1">
-                <span className="block font-medium">{m.label}</span>
-                <span className="block text-[10.5px] text-muted">{m.hint}</span>
+                <span className="block font-medium">{t(m.label)}</span>
+                <span className="block text-[10.5px] text-muted">{t(m.hint)}</span>
               </span>
               {m.key === cur && <Check size={13} className="shrink-0 text-accent" />}
               <span className="w-3 shrink-0 text-right text-[10px] text-faint">{i + 1}</span>
@@ -594,26 +614,26 @@ function ProviderList({ onPicked }: { onPicked(): void }) {
               updateSettings({ provider: p.id })
               onPicked()
             }}
-            title={p.available ? p.version : p.reason}
+            title={p.available ? p.version : tAi(p.reason)}
           >
             <span className="min-w-0 flex-1">
               <span className="block">{p.label}</span>
               <span className={cn('block truncate text-[10.5px]', p.auth === 'required' ? 'text-warning' : 'text-muted')}>
-                {!p.available ? p.reason ?? 'недоступен' : p.auth === 'required' ? 'нужен вход' : p.account ?? p.version ?? ''}
+                {!p.available ? tAi(p.reason) || t('недоступен') : p.auth === 'required' ? t('нужен вход') : p.account ?? p.version ?? ''}
               </span>
             </span>
             {p.id === current && <Check size={13} className="shrink-0 text-accent" />}
           </button>
           {p.available && p.canLogin && (
             <button type="button" className="mr-1 shrink-0 rounded-md border border-border px-1.5 py-0.5 text-[10.5px] text-muted hover:bg-hover hover:text-text" onClick={() => void startLogin(p.id)}>
-              {p.auth === 'required' ? 'Войти' : 'Перевойти'}
+              {p.auth === 'required' ? t('Войти') : t('Перевойти')}
             </button>
           )}
         </div>
       ))}
       <div className="my-1 border-t border-border" />
       <button type="button" className={rowBtn} onClick={() => void refreshProviders(true)}>
-        <RefreshCw size={12} className="text-muted" /> Проверить снова
+        <RefreshCw size={12} className="text-muted" /> {t('Проверить снова')}
       </button>
     </>
   )
@@ -623,7 +643,8 @@ function modelLabel(prov: AiProviderInfo | undefined, id: string | undefined): s
   if (!prov) return '—'
   if (!id) return prov.label
   // chats saved with the CLI's aliases ('opus') still show the versioned name
-  return (prov.models.find((m) => m.id === id) ?? prov.models.find((m) => m.id && m.id.includes(`-${id}-`)))?.label ?? id
+  const label = (prov.models.find((m) => m.id === id) ?? prov.models.find((m) => m.id && m.id.includes(`-${id}-`)))?.label
+  return label ? tAi(label) : id
 }
 
 function ModelButton() {
@@ -653,28 +674,28 @@ function ModelButton() {
         type="button"
         className={cn('flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted hover:bg-hover hover:text-text', open && 'bg-hover text-text')}
         onClick={() => (open ? close() : setOpen(true))}
-        title="Модель и провайдер"
+        title={t('Модель и провайдер')}
       >
         {prov?.auth === 'required' && <KeyRound size={11} className="shrink-0 text-warning" />}
         <span className="truncate">{modelLabel(prov, modelId)}</span>
-        {effort && <span className="shrink-0 text-faint">{EFFORT_LABEL[effort]}</span>}
+        {effort && <span className="shrink-0 text-faint">{t(EFFORT_LABEL[effort])}</span>}
         {settings.ultracode && settings.provider === 'claude' && <Zap size={11} className="shrink-0 text-accent" />}
         <ChevronDown size={11} className="shrink-0" />
       </button>
-      <Popover open={open} onClose={close} anchorRef={anchor} width={250} placement="bottom-end" aria-label="Модель">
+      <Popover open={open} onClose={close} anchorRef={anchor} width={250} placement="bottom-end" aria-label={t('Модель')}>
         <div className="p-1">
-          <div className="px-2 pt-1 pb-1 text-[11px] text-muted">{prov?.label ?? 'Модель'}</div>
+          <div className="px-2 pt-1 pb-1 text-[11px] text-muted">{prov?.label ?? t('Модель')}</div>
           {models.map((m, i) => (
             <button key={m.id || '_'} type="button" disabled={running} className={rowBtn} onClick={() => pick(i)} onMouseEnter={() => setFly(null)}>
-              <span className="flex-1">{m.id ? m.label : `${m.label}`}</span>
+              <span className="flex-1">{tAi(m.label)}</span>
               {(m.id === modelId || (!!modelId && !!m.id && m.id.includes(`-${modelId}-`))) && <Check size={13} className="shrink-0 text-accent" />}
               {i < 9 && <span className="w-3 shrink-0 text-right text-[10px] text-faint">{i + 1}</span>}
             </button>
           ))}
           <div className="my-1 border-t border-border" />
           {prov && prov.efforts.length > 0 && (
-            <FlyoutRow label="Уровень усилий" value={EFFORT_LABEL[settings.effort]} open={fly === 'effort'} setOpen={(v) => setFly(v ? 'effort' : null)} width={250}>
-              <div className="px-2 pt-1 pb-1 text-[11px] text-muted">Уровень усилий</div>
+            <FlyoutRow label={t('Уровень усилий')} value={t(EFFORT_LABEL[settings.effort] ?? '')} open={fly === 'effort'} setOpen={(v) => setFly(v ? 'effort' : null)} width={250}>
+              <div className="px-2 pt-1 pb-1 text-[11px] text-muted">{t('Уровень усилий')}</div>
               {(['', ...prov.efforts] as Effort[]).map((e) => (
                 <button
                   key={e || '_'}
@@ -686,23 +707,23 @@ function ModelButton() {
                   }}
                 >
                   <span className="min-w-0 flex-1">
-                    <span className="block">{EFFORT_LABEL[e] ?? e}</span>
-                    <span className="block text-[10.5px] text-muted">{EFFORT_HINT[e] ?? ''}</span>
+                    <span className="block">{EFFORT_LABEL[e] ? t(EFFORT_LABEL[e]) : e}</span>
+                    <span className="block text-[10.5px] text-muted">{EFFORT_HINT[e] ? t(EFFORT_HINT[e]) : ''}</span>
                   </span>
                   {e === settings.effort && <Check size={13} className="shrink-0 text-accent" />}
                 </button>
               ))}
             </FlyoutRow>
           )}
-          <FlyoutRow label="Провайдер" value={prov?.label} open={fly === 'provider'} setOpen={(v) => setFly(v ? 'provider' : null)} width={270}>
+          <FlyoutRow label={t('Провайдер')} value={prov?.label} open={fly === 'provider'} setOpen={(v) => setFly(v ? 'provider' : null)} width={270}>
             <ProviderList onPicked={close} />
           </FlyoutRow>
           {settings.provider === 'claude' && (
             <button type="button" className={rowBtn} onClick={() => updateSettings({ ultracode: !settings.ultracode })} onMouseEnter={() => setFly(null)}>
               <Zap size={12} className={settings.ultracode ? 'text-accent' : 'text-muted'} />
               <span className="min-w-0 flex-1">
-                <span className="block">Ультракод</span>
-                <span className="block text-[10.5px] text-muted">Мультиагентный режим для больших задач</span>
+                <span className="block">{t('Ультракод')}</span>
+                <span className="block text-[10.5px] text-muted">{t('Мультиагентный режим для больших задач')}</span>
               </span>
               {settings.ultracode && <Check size={13} className="shrink-0 text-accent" />}
             </button>
@@ -730,8 +751,8 @@ function ContextButton() {
       <button
         ref={anchor}
         type="button"
-        aria-label="Использование контекста"
-        title="Использование контекста"
+        aria-label={t('Использование контекста')}
+        title={t('Использование контекста')}
         className={cn('flex items-center gap-1 rounded-md px-1 py-1 text-[10.5px] text-faint hover:bg-hover hover:text-text', open && 'bg-hover')}
         onClick={() => setOpen((o) => !o)}
       >
@@ -741,15 +762,15 @@ function ContextButton() {
         </svg>
         {ctx > 0 && fmtTok(ctx)}
       </button>
-      <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchor} width={240} placement="bottom-end" aria-label="Контекст">
+      <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchor} width={240} placement="bottom-end" aria-label={t('Контекст')}>
         <div className="space-y-1.5 p-3 text-[11.5px]">
-          <div className="font-medium">Контекст</div>
-          <Row k="Последний запрос" v={ctx ? `${fmtTok(ctx)} токенов` : '—'} />
-          <div className="border-t border-border pt-1.5 font-medium">Этот чат</div>
-          <Row k="Входящие" v={totals ? fmtTok(totals.inputTokens) : '—'} />
-          <Row k="Ответы" v={totals ? fmtTok(totals.outputTokens) : '—'} />
-          {prov?.reportsCost && <Row k="Стоимость" v={totals?.costUsd ? fmtUsd(totals.costUsd) : '—'} />}
-          <div className="pt-1 text-[10.5px] text-faint">Сообщений: {chat.messages.length}. Новый чат начинает контекст заново.</div>
+          <div className="font-medium">{t('Контекст')}</div>
+          <Row k={t('Последний запрос')} v={ctx ? t('{n} токенов', { n: fmtTok(ctx) }) : '—'} />
+          <div className="border-t border-border pt-1.5 font-medium">{t('Этот чат')}</div>
+          <Row k={t('Входящие')} v={totals ? fmtTok(totals.inputTokens) : '—'} />
+          <Row k={t('Ответы')} v={totals ? fmtTok(totals.outputTokens) : '—'} />
+          {prov?.reportsCost && <Row k={t('Стоимость')} v={totals?.costUsd ? fmtUsd(totals.costUsd) : '—'} />}
+          <div className="pt-1 text-[10.5px] text-faint">{t('Сообщений: {n}. Новый чат начинает контекст заново.', { n: chat.messages.length })}</div>
         </div>
       </Popover>
     </>
@@ -776,7 +797,7 @@ function DraftBar() {
   return (
     <div className="mx-2 mb-1.5 rounded-xl border border-accent/40 bg-accent-soft px-3 py-2 text-xs">
       <div className="mb-1 flex items-center gap-1.5 font-medium">
-        <Sparkles size={12} className="text-accent" /> Черновик: {count} {plural(count, 'изменение', 'изменения', 'изменений')}
+        <Sparkles size={12} className="text-accent" /> {plural(count, 'Черновик: {n} изменение', 'Черновик: {n} изменения', 'Черновик: {n} изменений')}
       </div>
       <ul className="mb-1.5 max-h-24 overflow-y-auto text-[11px] text-muted">
         {changes.slice(-12).map((c, i) => (
@@ -792,13 +813,13 @@ function DraftBar() {
           className="rounded-md bg-accent px-2.5 py-0.5 text-accent-fg hover:bg-accent-hover disabled:opacity-50"
           onClick={() => {
             const r = applyDraft()
-            setMsg(!r ? '' : r.ok ? (r.stale ? 'Применено (план менялся во время работы агента — проверьте результат).' : 'Изменения применены. Отменить — Ctrl+Z.') : 'Не удалось применить: документ сильно изменился.')
+            setMsg(!r ? '' : t(r.ok ? (r.stale ? 'Применено (план менялся во время работы агента — проверьте результат).' : 'Изменения применены. Отменить — Ctrl+Z.') : 'Не удалось применить: документ сильно изменился.'))
           }}
         >
-          Применить
+          {t('Применить')}
         </button>
         <button type="button" disabled={running} className="rounded-md border border-border px-2.5 py-0.5 hover:bg-hover disabled:opacity-50" onClick={() => discardDraft()}>
-          Отменить
+          {t('Отклонить')}
         </button>
       </div>
     </div>
@@ -830,14 +851,14 @@ function PlusMenu({ onQuick }: { onQuick(cmd: string): void }) {
       <button
         ref={anchor}
         type="button"
-        aria-label="Добавить"
-        title="Добавить"
+        aria-label={t('Добавить')}
+        title={t('Добавить')}
         className={cn('rounded-lg p-1 text-muted hover:bg-hover hover:text-text', open && 'bg-hover text-text')}
         onClick={() => setOpen((o) => !o)}
       >
         <Plus size={16} />
       </button>
-      <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchor} width={250} aria-label="Добавить">
+      <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchor} width={250} aria-label={t('Добавить')}>
         <div className="p-1">
           <button
             type="button"
@@ -848,7 +869,7 @@ function PlusMenu({ onQuick }: { onQuick(cmd: string): void }) {
               file.current?.click()
             }}
           >
-            <Paperclip size={13} className="text-muted" /> Приложить изображение
+            <Paperclip size={13} className="text-muted" /> {t('Приложить изображение')}
           </button>
           <button
             type="button"
@@ -859,10 +880,10 @@ function PlusMenu({ onQuick }: { onQuick(cmd: string): void }) {
               void addUnderlayImage()
             }}
           >
-            <ImageIcon size={13} className="text-muted" /> Приложить подложку плана
+            <ImageIcon size={13} className="text-muted" /> {t('Приложить подложку плана')}
           </button>
           <div className="my-1 border-t border-border" />
-          <div className="px-2 pt-0.5 pb-1 text-[11px] text-muted">Быстрые команды</div>
+          <div className="px-2 pt-0.5 pb-1 text-[11px] text-muted">{t('Быстрые команды')}</div>
           {QUICK_ACTIONS.map((q) => (
             <button
               key={q.cmd}
@@ -870,11 +891,11 @@ function PlusMenu({ onQuick }: { onQuick(cmd: string): void }) {
               className={rowBtn}
               onClick={() => {
                 setOpen(false)
-                onQuick(q.cmd)
+                onQuick(quickCmd(q))
               }}
             >
-              <span className="flex-1">{q.label}</span>
-              <span className="font-mono text-[10px] text-faint">{q.cmd}</span>
+              <span className="flex-1">{t(q.label)}</span>
+              <span className="font-mono text-[10px] text-faint">{quickCmd(q)}</span>
             </button>
           ))}
         </div>
@@ -919,7 +940,7 @@ function Composer() {
     el.style.height = `${Math.min(200, el.scrollHeight)}px`
   }, [text])
 
-  const slash = text.startsWith('/') && !text.includes('\n') ? QUICK_ACTIONS.filter((q) => q.cmd.startsWith(text.trim().toLowerCase()) || text.trim() === '/') : []
+  const slash = text.startsWith('/') && !text.includes('\n') ? QUICK_ACTIONS.filter((q) => text.trim() === '/' || [quickCmd(q), q.cmd].some((c) => c.toLowerCase().startsWith(text.trim().toLowerCase()))) : []
   const canSend = !running && (!!text.trim() || images.length > 0)
 
   const submit = () => {
@@ -961,9 +982,9 @@ function Composer() {
       {slash.length > 0 && (
         <div className="absolute inset-x-0 bottom-full mb-1 rounded-xl border border-border-strong bg-panel p-1 shadow-pop">
           {slash.map((q) => (
-            <button key={q.cmd} type="button" className={rowBtn} onClick={() => setText(q.cmd + ' ')}>
-              <span className="font-mono text-accent">{q.cmd}</span>
-              <span className="text-muted">{q.label}</span>
+            <button key={q.cmd} type="button" className={rowBtn} onClick={() => setText(quickCmd(q) + ' ')}>
+              <span className="font-mono text-accent">{quickCmd(q)}</span>
+              <span className="text-muted">{t(q.label)}</span>
             </button>
           ))}
         </div>
@@ -973,7 +994,7 @@ function Composer() {
           <div className="flex flex-wrap gap-1.5 px-2.5 pt-2.5">
             {images.map((im, i) => (
               <span key={i} className="group relative">
-                <button type="button" title="Нарисовать пометки на картинке" className="block" onClick={() => setMarking(i)}>
+                <button type="button" title={t('Нарисовать пометки на картинке')} className="block" onClick={() => setMarking(i)}>
                   <img src={im.url} alt="" className="h-12 w-12 rounded-lg border border-border object-cover" />
                   <span
                     className={cn(
@@ -986,7 +1007,7 @@ function Composer() {
                 </button>
                 <button
                   type="button"
-                  aria-label="Убрать"
+                  aria-label={t('Убрать')}
                   className="absolute -top-1.5 -right-1.5 hidden rounded-full border border-border bg-panel p-0.5 text-muted group-hover:block hover:text-text"
                   onClick={() => removeImage(i)}
                 >
@@ -996,8 +1017,8 @@ function Composer() {
             ))}
             {chips.map((c) => (
               <span key={c.id} className="flex h-6 max-w-full items-center gap-1 self-end rounded-md border border-border bg-panel-2 pr-1 pl-1.5 text-[11px]" title={c.summary}>
-                <span className="truncate">{c.label}</span>
-                <button type="button" aria-label="Убрать" className="text-muted hover:text-text" onClick={() => removeChip(c.id)}>
+                <span className="truncate">{t(c.label)}</span>
+                <button type="button" aria-label={t('Убрать')} className="text-muted hover:text-text" onClick={() => removeChip(c.id)}>
                   <X size={11} />
                 </button>
               </span>
@@ -1009,7 +1030,7 @@ function Composer() {
           data-ai-input
           value={text}
           rows={1}
-          placeholder="Что изменить в плане?"
+          placeholder={t('Что изменить в плане?')}
           className="block max-h-[200px] min-h-[38px] w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-[12.5px] leading-relaxed outline-none placeholder:text-faint"
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKey}
@@ -1017,16 +1038,16 @@ function Composer() {
         />
         <div className="flex items-center gap-1 px-1.5 pb-1.5">
           <PlusMenu onQuick={(cmd) => setText(cmd + ' ')} />
-          <span className="min-w-0 flex-1 truncate px-1 text-[10px] text-faint">«/» — команды, Ctrl+L — выделенное</span>
+          <span className="min-w-0 flex-1 truncate px-1 text-[10px] text-faint">{t('«/» — команды, Ctrl+L — выделенное')}</span>
           {running ? (
-            <button type="button" aria-label="Стоп" title="Остановить" className="flex h-7 w-7 items-center justify-center rounded-lg bg-text text-panel hover:opacity-85" onClick={() => stop()}>
+            <button type="button" aria-label={t('Стоп')} title={t('Остановить')} className="flex h-7 w-7 items-center justify-center rounded-lg bg-text text-panel hover:opacity-85" onClick={() => stop()}>
               <Square size={11} fill="currentColor" />
             </button>
           ) : (
             <button
               type="button"
-              aria-label="Отправить"
-              title="Отправить (Enter)"
+              aria-label={t('Отправить')}
+              title={t('Отправить (Enter)')}
               className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent text-accent-fg hover:bg-accent-hover disabled:bg-panel-3 disabled:text-faint"
               disabled={!canSend}
               onClick={submit}
@@ -1046,12 +1067,12 @@ function EmptyState() {
   return (
     <div className="mt-10 px-4 text-center">
       <Sparkles size={22} className="mx-auto mb-2 text-accent" />
-      <div className="mb-1 text-[13px] font-medium">Чем помочь с планом?</div>
-      <div className="text-[11.5px] text-muted">«добавь стену от n_… до n_…», «поставь холодильник на кухне». Правки видны сразу и отменяются Ctrl+Z.</div>
+      <div className="mb-1 text-[13px] font-medium">{t('Чем помочь с планом?')}</div>
+      <div className="text-[11.5px] text-muted">{t('«добавь стену от n_… до n_…», «поставь холодильник на кухне». Правки видны сразу и отменяются Ctrl+Z.')}</div>
       <div className="mt-4 flex flex-wrap justify-center gap-1.5">
         {QUICK_ACTIONS.map((q) => (
-          <button key={q.cmd} type="button" className="rounded-full border border-border px-2.5 py-1 text-[11px] hover:bg-hover" onClick={() => void send(q.cmd)}>
-            {q.label}
+          <button key={q.cmd} type="button" className="rounded-full border border-border px-2.5 py-1 text-[11px] hover:bg-hover" onClick={() => void send(quickCmd(q))}>
+            {t(q.label)}
           </button>
         ))}
       </div>
@@ -1091,13 +1112,13 @@ export function ChatPanel({ className }: { className?: string }) {
       </div>
       {prov && !prov.available && (
         <div className="mx-2 mb-1.5 flex items-center gap-1.5 rounded-xl border border-border bg-panel-2 px-3 py-1.5 text-[11px] text-warning">
-          <TriangleAlert size={12} className="shrink-0" /> <span className="min-w-0 flex-1">{prov.reason}</span>
-          <button type="button" title="Проверить снова" className="text-muted hover:text-text" onClick={() => void refreshProviders(true)}>
+          <TriangleAlert size={12} className="shrink-0" /> <span className="min-w-0 flex-1">{tAi(prov.reason)}</span>
+          <button type="button" title={t('Проверить снова')} className="text-muted hover:text-text" onClick={() => void refreshProviders(true)}>
             <RefreshCw size={12} />
           </button>
         </div>
       )}
-      {running && status && <div className="mx-3 mb-1 truncate text-[10.5px] text-faint">{status}</div>}
+      {running && status && <div className="mx-3 mb-1 truncate text-[10.5px] text-faint">{tAi(status)}</div>}
       <LoginCard prov={prov} />
       <DraftBar />
       <Composer />

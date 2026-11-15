@@ -4,9 +4,10 @@
  */
 import { derivePlan, markBadge, markTargets } from '@core'
 import { Check, Lasso, MessageSquarePlus, Pencil, Square, Trash2 } from 'lucide-react'
+import '@/ai/i18n'
 import { MarkPrompt } from '@/ai/MarkPrompt'
 import { addMarkToChat, insertIntoComposer, useAi } from '@/ai/store'
-import { useT } from '@/i18n'
+import { t, useT } from '@/i18n'
 import { docStore, useDoc } from '@/store/document'
 import { clearMarks, deleteMark, marksStore, type PencilShape, useMarks } from '@/store/marks'
 import { useUi } from '@/store/ui'
@@ -23,11 +24,11 @@ function markQuote(id: string): string {
   const { doc, derived } = docStore.getState()
   const m = doc.annotations?.[id]
   if (!m) return ''
-  const t = markTargets(doc, derived[m.levelId] ?? derivePlan(doc, m.levelId), m)
-  const run = t.runs[0]
-  if (run) return `«${run.roomName}», стена ${Math.round(run.length)} мм${t.runs.length > 1 ? ` и ещё ${t.runs.length - 1}` : ''}`
-  if (t.rooms.length) return t.rooms.map((r) => `«${r.name}»`).join(', ')
-  return 'место на плане'
+  const tg = markTargets(doc, derived[m.levelId] ?? derivePlan(doc, m.levelId), m)
+  const run = tg.runs[0]
+  if (run) return t('«{room}», стена {len} мм', { room: run.roomName, len: Math.round(run.length) }) + (tg.runs.length > 1 ? t(' и ещё {n}', { n: tg.runs.length - 1 }) : '')
+  if (tg.rooms.length) return tg.rooms.map((r) => `«${r.name}»`).join(', ')
+  return t('место на плане')
 }
 
 /** the mini «what to do here?» field next to a mark just drawn */

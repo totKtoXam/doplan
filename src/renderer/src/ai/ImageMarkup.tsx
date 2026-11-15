@@ -8,7 +8,10 @@
 import { ArrowUpRight, Pencil, RotateCcw, Square, Trash2, Undo2, X } from 'lucide-react'
 import { type PointerEvent as ReactPointerEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useT } from '@/i18n'
 import { cn } from '@/ui/kit'
+import './i18n'
+import { tAi } from './i18n'
 import { MarkPrompt } from './MarkPrompt'
 import { drawMarkup, isMeaningful, MARKUP_COLORS, type MarkupShape, type MarkupTool, markupBadge, markupMetrics } from './markup'
 import { insertIntoComposer, nextImageMarkNumber, type PendingImage, useAi } from './store'
@@ -25,7 +28,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image()
     img.onload = () => resolve(img)
-    img.onerror = () => reject(new Error('Не удалось открыть изображение'))
+    img.onerror = () => reject(new Error(tAi('Не удалось открыть изображение')))
     img.src = src
   })
 }
@@ -65,6 +68,7 @@ export function ImageMarkup({ image, onChange, onClose }: { image: PendingImage;
   const initial = useRef(image).current
   const base = initial.markup?.base ?? initial.url
   const busy = useAi((s) => !!s.running)
+  const tr = useT()
   const [img, setImg] = useState<HTMLImageElement | null>(null)
   const [error, setError] = useState('')
   const [shapes, setShapes] = useState<MarkupShape[]>(initial.markup?.shapes ?? [])
@@ -204,19 +208,19 @@ export function ImageMarkup({ image, onChange, onClose }: { image: PendingImage;
       className="fixed top-0 bottom-0 left-0 z-[200] flex flex-col bg-black/80 text-xs text-text outline-none"
       style={{ right: area.right }}
       role="dialog"
-      aria-label="Пометки на картинке"
+      aria-label={tr('Пометки на картинке')}
     >
       <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-border bg-panel px-3 py-2" style={{ minHeight: TOOLBAR_H }}>
-        <span className="mr-1 font-medium">Пометки на картинке</span>
+        <span className="mr-1 font-medium">{tr('Пометки на картинке')}</span>
         {TOOLS.map((t) => (
           <button
             key={t.id}
             type="button"
-            title={`${t.label} (${t.key})`}
+            title={`${tr(t.label)} (${t.key})`}
             className={cn('flex items-center gap-1 rounded-md border px-2 py-1', tool === t.id ? 'border-accent bg-accent-soft' : 'border-border text-muted hover:text-text')}
             onClick={() => setTool(t.id)}
           >
-            <t.icon size={13} /> {t.label}
+            <t.icon size={13} /> {tr(t.label)}
           </button>
         ))}
         <span className="mx-1 h-5 w-px bg-border" />
@@ -224,19 +228,19 @@ export function ImageMarkup({ image, onChange, onClose }: { image: PendingImage;
           <button
             key={c}
             type="button"
-            aria-label={`Цвет ${c}`}
+            aria-label={tr('Цвет {c}', { c })}
             className={cn('h-5 w-5 rounded-full border-2', color === c ? 'border-text' : 'border-transparent')}
             style={{ background: c }}
             onClick={() => setColor(c)}
           />
         ))}
         <span className="mx-1 h-5 w-px bg-border" />
-        <button type="button" title="Убрать последнюю пометку (Ctrl+Z)" disabled={!shapes.length} className="rounded-md p-1 text-muted hover:text-text disabled:opacity-40" onClick={undo}>
+        <button type="button" title={tr('Убрать последнюю пометку (Ctrl+Z)')} disabled={!shapes.length} className="rounded-md p-1 text-muted hover:text-text disabled:opacity-40" onClick={undo}>
           <Undo2 size={14} />
         </button>
         <button
           type="button"
-          title="Стереть все пометки"
+          title={tr('Стереть все пометки')}
           disabled={!shapes.length}
           className="rounded-md p-1 text-muted hover:text-danger disabled:opacity-40"
           onClick={() => {
@@ -248,16 +252,16 @@ export function ImageMarkup({ image, onChange, onClose }: { image: PendingImage;
         </button>
         <span className="ml-2 min-w-0 flex-1 truncate text-muted">
           {shapes.length
-            ? `Пометки ${shapes.map((s, i) => markupBadge(s.n ?? i + 1)).join(' ')} уже на картинке в чате — напишите, что сделать`
-            : 'Обведите или укажите стрелкой, что изменить — рядом откроется поле для комментария'}
+            ? tr('Пометки {list} уже на картинке в чате — напишите, что сделать', { list: shapes.map((s, i) => markupBadge(s.n ?? i + 1)).join(' ') })
+            : tr('Обведите или укажите стрелкой, что изменить — рядом откроется поле для комментария')}
         </span>
-        <button type="button" title="Вернуть картинку как была до открытия" className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-muted hover:text-text" onClick={revert}>
-          <RotateCcw size={12} /> Отменить правки
+        <button type="button" title={tr('Вернуть картинку как была до открытия')} className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-muted hover:text-text" onClick={revert}>
+          <RotateCcw size={12} /> {tr('Отменить правки')}
         </button>
         <button type="button" className="rounded-md bg-accent px-3 py-1 text-accent-fg hover:bg-accent-hover" onClick={onClose}>
-          Готово
+          {tr('Готово')}
         </button>
-        <button type="button" aria-label="Закрыть" className="rounded-md p-1 text-muted hover:text-text" onClick={onClose}>
+        <button type="button" aria-label={tr('Закрыть')} className="rounded-md p-1 text-muted hover:text-text" onClick={onClose}>
           <X size={14} />
         </button>
       </div>
@@ -285,7 +289,7 @@ export function ImageMarkup({ image, onChange, onClose }: { image: PendingImage;
           x={ask.x}
           y={ask.y}
           badge={markupBadge(ask.n)}
-          quote="пометка на картинке"
+          quote={tr('пометка на картинке')}
           busy={busy}
           onClose={() => {
             setAsk(null)

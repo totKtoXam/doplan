@@ -6,6 +6,8 @@
 import { ArrowUp, Plus } from 'lucide-react'
 import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useT } from '@/i18n'
+import './i18n'
 
 const W = 340
 
@@ -28,6 +30,7 @@ export function MarkPrompt({
   onSubmit(text: string, send: boolean): void
   onClose(): void
 }) {
+  const tr = useT()
   const [text, setText] = useState('')
   const card = useRef<HTMLDivElement>(null)
   const ta = useRef<HTMLTextAreaElement>(null)
@@ -88,24 +91,24 @@ export function MarkPrompt({
           ref={ta}
           rows={1}
           value={text}
-          placeholder={busy ? 'Что здесь сделать? (ИИ занят — добавится в сообщение)' : 'Что здесь сделать?'}
+          placeholder={tr(busy ? 'Что здесь сделать? (ИИ занят — добавится в сообщение)' : 'Что здесь сделать?')}
           className="min-h-[22px] flex-1 resize-none bg-transparent py-0.5 text-[12.5px] leading-snug outline-none placeholder:text-faint"
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKey}
         />
-        <button type="button" title="Добавить в сообщение, не отправляя (Ctrl+Enter)" className="rounded-md p-1 text-muted hover:bg-hover hover:text-text" onClick={() => submit(false)}>
+        <button type="button" title={tr('Добавить в сообщение, не отправляя (Ctrl+Enter)')} className="rounded-md p-1 text-muted hover:bg-hover hover:text-text" onClick={() => submit(false)}>
           <Plus size={14} />
         </button>
         <button
           type="button"
-          title={busy ? 'ИИ занят — добавится в сообщение' : 'Отправить (Enter)'}
+          title={tr(busy ? 'ИИ занят — добавится в сообщение' : 'Отправить (Enter)')}
           className="rounded-full bg-accent p-1 text-accent-fg hover:bg-accent-hover"
           onClick={() => submit(true)}
         >
           <ArrowUp size={13} />
         </button>
       </div>
-      <div className="mt-1 px-0.5 text-[10.5px] text-faint">Enter — отправить · Ctrl+Enter — в сообщение · Esc — закрыть</div>
+      <div className="mt-1 px-0.5 text-[10.5px] text-faint">{tr('Enter — отправить · Ctrl+Enter — в сообщение · Esc — закрыть')}</div>
     </div>,
     document.body,
   )

@@ -4,7 +4,7 @@
  * only throws (with a readable Russian message) when the input is not a doplan document at all.
  */
 import { DEFAULT_MATERIALS, OPENING_DEFAULTS, ROOM_TYPE_NAMES, createEmptyDoc, defaultRenderSettings, defaultSettings } from './defaults'
-import { newId, type IdPrefix } from './ids'
+import { newId, PROJECT_ID_RE, type IdPrefix } from './ids'
 import { normalize, syncRooms, type PinnedNode } from './ops'
 import {
   DOC_VERSION,
@@ -594,6 +594,9 @@ export function parseDoc(json: unknown): Doc {
   const fallbackLevel = doc.levels[doc.levelOrder[0]]
   doc.meta.createdAt = str(meta.createdAt, doc.meta.createdAt)
   doc.meta.modifiedAt = str(meta.modifiedAt, doc.meta.modifiedAt)
+  // older files have no id: their chats stay keyed by the file path until the next save gives them one
+  if (typeof meta.id === 'string' && PROJECT_ID_RE.test(meta.id)) doc.meta.id = meta.id
+  else delete doc.meta.id
 
   // ── settings & render ──
   const s = isObj(raw.settings) ? raw.settings : {}

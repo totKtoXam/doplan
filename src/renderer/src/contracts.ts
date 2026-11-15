@@ -41,6 +41,8 @@ export interface DocState {
   derived: Record<Id, DerivedPlan>
   /** monotonically increasing; bumped on every commit/undo/redo/load */
   revision: number
+  /** bumped only by load/newDoc: another document is open (a save keeps it, even when filePath changes) */
+  loadId: number
   filePath: string | null
   dirty: boolean
   canUndo: boolean
@@ -59,7 +61,10 @@ export interface DocState {
   redo(): void
   load(doc: Doc, filePath: string | null): void
   newDoc(name?: string): void
-  markSaved(filePath: string): void
+  /** `id`: the Doc.meta.id the file was written with */
+  markSaved(filePath: string, id?: string): void
+  /** a copy of another file was opened: it gets an id of its own (written with its next save; not an edit) */
+  setDocId(id: string): void
 }
 
 export type ToolId =

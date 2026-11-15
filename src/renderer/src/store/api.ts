@@ -236,6 +236,13 @@ function createFallbackApi(): DoplanApi {
         return { ...DEFAULT_AI_SETTINGS, models: {} }
       },
       async setSettings() {},
+      async moveChats() {
+        return { sessionsKept: true }
+      },
+      async dropChats() {},
+      async claimDocument(ref) {
+        return ref
+      },
       async login() {},
       async loginInput() {},
       async loginCancel() {},

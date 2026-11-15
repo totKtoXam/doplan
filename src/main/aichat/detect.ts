@@ -5,7 +5,7 @@
  */
 import { execFile, spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { delimiter, dirname, join } from 'node:path'
+import { delimiter, dirname, isAbsolute, join } from 'node:path'
 
 export interface ResolvedBin {
   /** what was found on PATH */
@@ -39,6 +39,8 @@ export function findOnPath(name: string, env: NodeJS.ProcessEnv = process.env): 
   const win = process.platform === 'win32'
   const exts = win ? ['.exe', '.cmd', '.bat', ''] : ['']
   for (const d of dirs) {
+    // relative entries ('.', 'bin') would resolve against the app's current folder
+    if (!isAbsolute(d)) continue
     for (const ext of exts) {
       const p = join(d, name + ext)
       if (!isFile(p)) continue

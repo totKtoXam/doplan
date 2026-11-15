@@ -9,7 +9,8 @@ import { DEFAULT_AI_SETTINGS } from '@shared/aiChat'
 const fake = vi.hoisted(() => {
   const files = new Map<string, unknown>()
   const claims = new Map<string, string>()
-  const calls: { claim: [string, string][]; stop: string[] } = { claim: [], stop: [] }
+  const calls: { claim: [string, string][]; stop: string[]; run: string[] } = { claim: [], stop: [], run: [] }
+  const events: { emit: (runId: string, ev: unknown) => void } = { emit: () => {} }
   const fallback = (o: Record<string, unknown>) =>
     new Proxy(o, { get: (t, k: string) => (k in t ? t[k] : async () => undefined) })
   const api = {
@@ -23,7 +24,11 @@ const fake = vi.hoisted(() => {
         return claims.get(`${ref}|${path}`) ?? ref
       },
       stop: async (runId: string) => void calls.stop.push(runId),
-      onEvent: () => () => {},
+      onEvent: (cb: (runId: string, ev: unknown) => void) => {
+        events.emit = cb
+        return () => {}
+      },
+      run: async (req: { runId: string }) => void calls.run.push(req.runId),
       onToolCall: () => () => {},
       onLogin: () => () => {},
     }),
@@ -33,7 +38,7 @@ const fake = vi.hoisted(() => {
       versionDoc: async (sha: string) => files.get(`version:${sha}`),
     }),
   }
-  return { api, files, claims, calls }
+  return { api, files, claims, calls, events }
 })
 
 vi.mock('@/store/api', () => ({ api: fake.api }))
@@ -41,7 +46,7 @@ vi.mock('@/store/api', () => ({ api: fake.api }))
 const { docStore } = await import('@/store/document')
 const { projectStore } = await import('@/store/project')
 const { leaveVersion, openProject, viewVersion } = await import('@/actions/project')
-const { aiStore, initAi } = await import('./store')
+const { aiStore, initAi, send, updateSettings } = await import('./store')
 
 function planWithId(id: string): unknown {
   const doc: Doc = createEmptyDoc('План')
@@ -67,6 +72,7 @@ beforeAll(() => {
 beforeEach(async () => {
   fake.calls.claim.length = 0
   fake.calls.stop.length = 0
+  fake.calls.run.length = 0
   aiStore.setState({ running: null, draftCount: 0 })
   await settle()
 })
@@ -164,5 +170,26 @@ describe('AI chat across reloads of the same project', () => {
     expect(fake.calls.stop).toEqual(['r5'])
     expect(fake.calls.claim).toEqual([['id:origKKKK', 'C:/p/orig.json']])
     expect(aiStore.getState().chat.messages).toEqual([])
+  })
+
+  it('a live turn after a plan-mode turn that proposed nothing goes on after a disk reload', async () => {
+    fake.files.set('C:/p/P', planWithId('planPPPP'))
+    await openProject('C:/p/P', { skipConfirm: true })
+    await settle()
+    aiStore.setState({ providers: [{ id: 'api', available: true }] as never, chat: { ...aiStore.getState().chat, messages: [] } })
+    updateSettings({ provider: 'api', planMode: true })
+    await send('предложи план')
+    const planRun = fake.calls.run.at(-1)!
+    fake.events.emit(planRun, { type: 'done', ok: true })
+    expect(aiStore.getState().running).toBeNull()
+
+    updateSettings({ planMode: false })
+    await send('поменяй стену')
+    const liveRun = fake.calls.run.at(-1)!
+    expect(aiStore.getState().running?.runId).toBe(liveRun)
+    await openProject('C:/p/P', { skipConfirm: true, reload: 'disk' })
+    await settle()
+    expect(aiStore.getState().running?.runId).toBe(liveRun)
+    expect(fake.calls.stop).toEqual([])
   })
 })

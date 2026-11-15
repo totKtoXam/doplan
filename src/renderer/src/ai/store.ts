@@ -345,9 +345,9 @@ async function moveProject(to: string, copy: boolean, path: string | null): Prom
   else await refreshLists()
 }
 
-/** the plan-mode draft holds proposals (or the turn already started one) */
+/** the plan-mode draft holds proposals (an empty DraftHost left by a plan-mode turn is no draft) */
 function hasDraft(): boolean {
-  return !!draft || get().draftCount > 0 || get().draftChanges.length > 0
+  return (!!draft && !draft.empty) || get().draftCount > 0 || get().draftChanges.length > 0
 }
 
 /** leaving the current chat: a running turn stops (unless `stopTurn` is false), the plan-mode draft is
@@ -418,9 +418,8 @@ export function setDockTab(tab: DockTab): void {
 
 export function updateSettings(patch: Partial<AiChatSettings>): void {
   const settings = { ...get().settings, ...patch, models: { ...get().settings.models, ...(patch.models ?? {}) } }
-  if (patch.planMode === false && draft && !draft.empty) {
-    // leaving plan mode keeps the proposal until the user applies or discards it
-  }
+  // leaving plan mode keeps a proposal until the user applies or discards it; an empty one goes
+  if (patch.planMode === false && draft?.empty) draft = null
   settingsRev++
   set({ settings })
   void api.aiChat.setSettings(get().projectPath, settings).catch(() => {})
@@ -730,7 +729,8 @@ export async function send(raw: string): Promise<void> {
   }
   const asst: AiMessage = { id: uid(), role: 'assistant', createdAt: now(), parts: [] }
   const settings = st.settings
-  if (settings.planMode && !draft) draft = new DraftHost()
+  // an empty draft left by an earlier turn was taken from the plan as it was then
+  if (settings.planMode && (!draft || draft.empty)) draft = new DraftHost()
   partIndex = new Map()
   patchChat((c) => {
     c.messages.push(userMsg, asst)
@@ -844,6 +844,8 @@ function finishTurn(ev: Extract<AiRunEvent, { type: 'done' }>, save: boolean): v
     c.updatedAt = now()
   })
   set({ running: null, status: '' })
+  // a plan-mode turn that proposed nothing leaves no draft
+  if (draft?.empty) draft = null
   if (ev.authRequired) void refreshProviders(false)
   if (save) void persist()
 }

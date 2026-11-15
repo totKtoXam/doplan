@@ -56,7 +56,8 @@ electronFuses:
   grantFileProtocolExtraPrivileges: false
 npmRebuild: false
 # GitHub Releases feed for electron-updater: electron-builder writes latest.yml next to the NSIS installer
-# and app-update.yml into resources. Builds never upload on their own (`pnpm dist` passes --publish never).
+# and app-update.yml into resources. Builds never upload on their own (`pnpm dist` passes --publish never);
+# on a `v*` tag, .github/workflows/release.yml uploads the files with `gh release create` (docs/RELEASING.md).
 publish:
   provider: github
   owner: totKtoXam

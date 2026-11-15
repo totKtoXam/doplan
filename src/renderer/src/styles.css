@@ -188,9 +188,72 @@ button {
   text-align: center;
 }
 
-.dp-divider {
-  cursor: col-resize;
+/* ───────────── sashes (resizable panel borders, ui/kit/Sash.tsx) ───────────── */
+
+/* the hit area is 6px wide and centred on the border; the visible line is 2px and only shows on
+   hover (after a short delay, as in VS Code), while dragging and when focused from the keyboard */
+.dp-sash {
+  position: absolute;
+  z-index: 35;
   touch-action: none;
+  outline: none;
+}
+.dp-sash-v {
+  top: 0;
+  bottom: 0;
+  width: 6px;
+}
+.dp-sash-h {
+  left: 0;
+  right: 0;
+  height: 6px;
+}
+.dp-sash-at-left {
+  left: -3px;
+}
+.dp-sash-at-right {
+  right: -3px;
+}
+.dp-sash-at-top {
+  top: -3px;
+}
+.dp-sash::after {
+  content: '';
+  position: absolute;
+  background: transparent;
+  transition: background-color 0.1s ease-out;
+}
+.dp-sash-v::after {
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+}
+.dp-sash-h::after {
+  left: 0;
+  right: 0;
+  top: 2px;
+  height: 2px;
+}
+.dp-sash:hover::after {
+  background: var(--accent);
+  transition-delay: 0.2s;
+}
+.dp-sash[data-dragging]::after,
+.dp-sash:focus-visible::after {
+  background: var(--accent);
+  transition-delay: 0s;
+}
+.dp-sash:focus-visible::after {
+  box-shadow: 0 0 0 1px var(--accent-soft);
+}
+.dp-sash-shield {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+}
+body.dp-sash-dragging {
+  user-select: none;
 }
 
 .dp-drop-overlay {

@@ -6,7 +6,9 @@ import { t, useT } from '@/i18n'
 import { api } from '@/store/api'
 import { dialogStore, type DialogKey, useDialogs } from '@/store/dialogs'
 import { buildSampleApartment } from '@/store/sample'
+import { usePanelSize } from '@/store/layout'
 import { uiStore, useUi } from '@/store/ui'
+import { ResizablePanel } from '@/ui/kit/Sash'
 import {
   AboutDialog,
   BomDialog,
@@ -130,6 +132,8 @@ export function App() {
   const booted = useUi((s) => s.booted)
   const leftOpen = useUi((s) => s.leftPanelOpen)
   const rightOpen = useUi((s) => s.rightPanelOpen)
+  const leftSize = usePanelSize('left')
+  const rightSize = usePanelSize('right')
   const [recoveryChecked, setRecoveryChecked] = useState(false)
   const { dragOver } = useAppEvents(booted)
 
@@ -151,14 +155,21 @@ export function App() {
       <TopBar />
       <div className="flex min-h-0 flex-1">
         <ToolRail />
-        {leftOpen && (
-          <aside className="flex w-[300px] shrink-0 flex-col overflow-hidden border-r border-border bg-panel">
-            <Boundary name={tr('Каталог')}>
-              <LeftPanel />
-            </Boundary>
-          </aside>
-        )}
-        <main className="flex min-w-0 flex-1 flex-col">
+        <ResizablePanel
+          side="left"
+          id="dp-left-panel"
+          label={tr('Ширина каталога')}
+          className="border-r border-border"
+          open={leftOpen}
+          onOpenChange={(v) => uiStore.setState({ leftPanelOpen: v })}
+          {...leftSize}
+        >
+          <Boundary name={tr('Каталог')}>
+            <LeftPanel />
+          </Boundary>
+        </ResizablePanel>
+        {/* the viewports fill the rest; a narrow window shrinks the side panels before them */}
+        <main data-panel-fill className="flex min-w-[240px] flex-1 basis-0 flex-col">
           <div className="flex shrink-0 items-stretch border-b border-border bg-panel">
             <div className="flex items-center border-r border-border px-0.5">
               <IconBtn
@@ -183,13 +194,20 @@ export function App() {
           <Workspace />
           <LevelTabs />
         </main>
-        {rightOpen && (
-          <aside className="flex w-[320px] shrink-0 flex-col overflow-hidden border-l border-border bg-panel">
-            <Boundary name={tr('Свойства')}>
-              <RightDock />
-            </Boundary>
-          </aside>
-        )}
+        <ResizablePanel
+          side="right"
+          id="dp-right-panel"
+          label={tr('Ширина панели свойств')}
+          // chat images and wide content never spill past the panel edge, whatever the width
+          className="border-l border-border [&_img]:max-w-full"
+          open={rightOpen}
+          onOpenChange={(v) => uiStore.setState({ rightPanelOpen: v })}
+          {...rightSize}
+        >
+          <Boundary name={tr('Свойства')}>
+            <RightDock />
+          </Boundary>
+        </ResizablePanel>
       </div>
       <StatusBar />
       <Dialogs />

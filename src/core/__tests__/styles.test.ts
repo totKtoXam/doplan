@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { enablePatches, produceWithPatches } from 'immer'
 import { compilePlanSpecDetailed, parsePlanSpec } from '../planspec'
 import { BUILTIN_MATERIALS } from '../defaults'
-import { BUILTIN_STYLES, applyStyle, findStyle, styleMaterialIds, stylePalette } from '../styles'
+import { BUILTIN_STYLES, applyStyle, findStyle, remapAccentFace, styleMaterialIds, stylePalette } from '../styles'
+import { splitWall } from '../ops'
 import { STYLE_MATERIALS } from '../styleMaterials'
 import { newId } from '../ids'
 import { builtinCatalog, findAsset } from '../catalog'
@@ -217,5 +218,58 @@ describe('applyStyle', () => {
     applyStyle(doc, style, { rooms: 'all', parts: { finishes: false, accent: true, openings: false, furniture: false, lights: false } })
     expect(JSON.stringify(doc.walls)).toBe(before)
     void roomIds
+  })
+
+  describe('moving accent without a valid remembered face', () => {
+    const ACCENT_ONLY = { finishes: false, accent: true, openings: false, furniture: false, lights: false }
+    const accentFaces = (doc: Doc) =>
+      Object.values(doc.walls).flatMap((w) => (['left', 'right'] as const).filter((k) => w[k].materialId === style.finishes.wallAccent).map((k) => ({ w, k })))
+    const cutWindow = (doc: Doc, wallId: Id, id: string) => {
+      const win = Object.values(doc.openings).find((o) => o.kind === 'window')!
+      doc.openings[id] = { ...win, id, wallId }
+    }
+
+    for (const [name, spoil] of [
+      ['saved before the key existed', (d: Doc, room: Id) => delete d.rooms[room].design!.accentFace],
+      ['stale key (copied room)', (d: Doc, room: Id) => (d.rooms[room].design!.accentFace = 'w_elsewhere:left')],
+    ] as const) {
+      it(name, () => {
+        const { doc, roomIds } = build()
+        applyStyle(doc, style, { rooms: [roomIds.living] })
+        const [first] = accentFaces(doc)
+        spoil(doc, roomIds.living)
+        cutWindow(doc, first.w.id, 'o_new')
+        applyStyle(doc, style, { rooms: [roomIds.living], parts: ACCENT_ONLY })
+        expect(accentFaces(doc)).toHaveLength(1)
+        expect(first.w[first.k].materialId).not.toBe(style.finishes.wallAccent)
+      })
+    }
+
+    it('both pieces of a split accent wall are reset', () => {
+      const { doc, roomIds } = build()
+      applyStyle(doc, style, { rooms: [roomIds.living] })
+      const [first] = accentFaces(doc)
+      const a = doc.nodes[first.w.a]
+      const b = doc.nodes[first.w.b]
+      const node = splitWall(doc, first.w.id, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
+      const halves = accentFaces(doc)
+      expect(halves).toHaveLength(2)
+      const second = halves.map((h) => h.w.id).find((id) => id !== first.w.id)!
+      expect([doc.walls[second].a, doc.walls[second].b]).toContain(node)
+      cutWindow(doc, first.w.id, 'o_1')
+      cutWindow(doc, second, 'o_2')
+      applyStyle(doc, style, { rooms: [roomIds.living], parts: ACCENT_ONLY })
+      const now = accentFaces(doc)
+      expect(now).toHaveLength(1)
+      expect([first.w.id, second]).not.toContain(now[0].w.id)
+    })
+
+    it('remapAccentFace points a copied room at the copied wall', () => {
+      const room = { design: { styleId: 's', accentFace: 'w_a:right' } } as unknown as Parameters<typeof remapAccentFace>[0]
+      remapAccentFace(room, new Map([['w_a', 'w_b']]))
+      expect(room.design?.accentFace).toBe('w_b:right')
+      remapAccentFace(room, new Map())
+      expect(room.design).toEqual({ styleId: 's' })
+    })
   })
 })

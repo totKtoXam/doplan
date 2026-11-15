@@ -9,8 +9,13 @@ import type { AiLoginEvent, AiProviderId, AiRunEvent, AiToolCall } from '../shar
 // ── end ai-chat block ──
 import type { UpdateState } from '../shared/updater'
 import { CH, VERSION_ARG } from '../main/channels'
+import { cleanIpcError } from '../shared/ipcError'
 
-const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> => ipcRenderer.invoke(channel, ...args) as Promise<T>
+/** errors from main come back with their message only, without Electron's "Error invoking remote method…" */
+const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> =>
+  (ipcRenderer.invoke(channel, ...args) as Promise<T>).catch((err: unknown) => {
+    throw cleanIpcError(err)
+  })
 
 /** main may hand back a Uint8Array/Buffer view; the contract promises a standalone ArrayBuffer */
 function asArrayBuffer(x: unknown): ArrayBuffer {

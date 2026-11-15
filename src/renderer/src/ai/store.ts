@@ -756,7 +756,7 @@ export async function send(raw: string): Promise<void> {
       apiHistory: settings.provider === 'api' ? chat.apiHistory : undefined,
     })
   } catch (e) {
-    onRunEvent(runId, { type: 'done', ok: false, error: (e as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') })
+    onRunEvent(runId, { type: 'done', ok: false, error: (e as Error).message })
   }
 }
 

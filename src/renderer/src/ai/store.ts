@@ -198,10 +198,11 @@ export function initAi(): void {
     const first = lastLoad === undefined
     lastLoad = loadId
     // the same project loaded again (an old version viewed or left, plan.json reloaded after the agent
-    // changed it): the chat stays open. A plan-mode draft was made against the plan that is gone, and a
-    // turn would go on editing an old version, so those end (the turn goes on after a plain reload)
+    // changed it): the chat stays open. A plan-mode draft was made against the plan that is gone, so it
+    // ends, and with it the turn that made it (it would go on proposing changes to proposals that are
+    // gone); a turn would also go on editing an old version. A live turn goes on after a plain reload
     if (!first && reload && docRef() === get().projectPath) {
-      leaveChat(reload === 'version')
+      leaveChat(reload === 'version' || hasDraft())
       return
     }
     const gone = !first && unsavedDoc ? get().projectPath : null
@@ -342,6 +343,11 @@ async function moveProject(to: string, copy: boolean, path: string | null): Prom
   // the current chat (also when a save of it raced the move) and the list of the new place
   if (get().chat.messages.length && !get().legacy) await persist()
   else await refreshLists()
+}
+
+/** the plan-mode draft holds proposals (or the turn already started one) */
+function hasDraft(): boolean {
+  return !!draft || get().draftCount > 0 || get().draftChanges.length > 0
 }
 
 /** leaving the current chat: a running turn stops (unless `stopTurn` is false), the plan-mode draft is

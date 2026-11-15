@@ -232,6 +232,48 @@ describe('folder trust', { timeout: 30_000 }, async () => {
     }
   })
 
+  it.skipIf(!git)('drivers that ~/.config/git/config includes only for some repositories (includeIf) stay on', async () => {
+    const repo = folder('filters-includeif', { 'plan.json': '{}', 'manifest.json': MANIFEST })
+    gitIn(repo, 'init', '-q')
+    gitIn(repo, 'symbolic-ref', 'HEAD', 'refs/heads/main')
+    gitIn(repo, 'remote', 'add', 'origin', 'https://example.com/team/plan.git')
+    const slash = (p: string) => p.replace(/\\/g, '/')
+    const home = folder('home-includeif', {
+      '.gitconfig': '[user]\n\tname = someone\n',
+      '.config/git/config': [
+        `[includeIf "gitdir:${slash(repo)}/"]\n\tpath = gitdir.inc`,
+        `[includeIf "gitdir/i:${slash(base)}/**"]\n\tpath = wild.inc`,
+        '[includeIf "onbranch:main"]\n\tpath = branch.inc',
+        '[includeIf "hasconfig:remote.*.url:https://example.com/**"]\n\tpath = remote.inc',
+        '',
+      ].join('\n'),
+      '.config/git/gitdir.inc': '[filter "gd"]\n\tclean = cat\n',
+      '.config/git/wild.inc': '[filter "wd"]\n\tclean = cat\n',
+      '.config/git/branch.inc': '[filter "br"]\n\tclean = cat\n',
+      '.config/git/remote.inc': '[filter "rm"]\n\tclean = cat\n',
+    })
+    // the repository's own conditional include is still the repository's
+    const evil = folder('repo-included', { 'evil.inc': '[filter "ev"]\n\tclean = sh ./evil.sh\n' })
+    gitIn(repo, 'config', 'includeIf.hasconfig:remote.*.url:https://example.com/**.path', `${slash(evil)}/evil.inc`)
+    const saved = { HOME: process.env['HOME'], USERPROFILE: process.env['USERPROFILE'], XDG: process.env['XDG_CONFIG_HOME'] }
+    process.env['HOME'] = home
+    process.env['USERPROFILE'] = home
+    delete process.env['XDG_CONFIG_HOME']
+    try {
+      // git itself applies all four includes in this repository
+      const effective = gitIn(repo, 'config', '--get-regexp', '^filter\\.')
+      for (const n of ['gd', 'wd', 'br', 'rm', 'ev']) expect(effective).toContain(`filter.${n}.clean`)
+      const args = await filterOffArgs(repo)
+      for (const n of ['gd', 'wd', 'br', 'rm']) expect(args.some((a) => a.startsWith(`filter.${n}.`))).toBe(false)
+      expect(args).toEqual(expect.arrayContaining(['filter.ev.clean=']))
+    } finally {
+      for (const [k, v] of [['HOME', saved.HOME], ['USERPROFILE', saved.USERPROFILE], ['XDG_CONFIG_HOME', saved.XDG]] as const) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+    }
+  })
+
   it.skipIf(!git)('a filter driver that cannot be switched off stops the commit', async () => {
     const foreign = folder('filters-eq', { 'plan.json': '{}', 'manifest.json': MANIFEST })
     gitIn(foreign, 'init', '-q')

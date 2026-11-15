@@ -50,10 +50,10 @@ function planWithId(id: string): unknown {
 
 const settle = () => new Promise((r) => setTimeout(r, 10))
 
-/** a chat with one message and a turn running in it, plus a plan-mode draft */
-function busyChat(runId: string): string {
+/** a chat with one message and a turn running in it, plus (unless `draft` is false) a plan-mode draft */
+function busyChat(runId: string, draft = true): string {
   const chat = { ...aiStore.getState().chat, id: `chat-${runId}`, messages: [{ id: 'm1', role: 'user', parts: [{ type: 'text', text: 'привет' }], at: 0 }] }
-  aiStore.setState({ chat: chat as never, running: { runId, msgId: 'm1' }, draftCount: 1 })
+  aiStore.setState({ chat: chat as never, running: { runId, msgId: 'm1' }, draftCount: draft ? 1 : 0 })
   return chat.id
 }
 
@@ -72,7 +72,7 @@ beforeEach(async () => {
 })
 
 describe('AI chat across reloads of the same project', () => {
-  it('an opened copy keeps its own id when its folder is read again; the turn goes on after a disk reload', async () => {
+  it('an opened copy keeps its own id when its folder is read again; a live turn goes on after a disk reload', async () => {
     // F is a copy: plan.json still holds the original's id, the claim gives it its own (in memory only)
     fake.files.set('C:/p/F', planWithId('origXXXX'))
     fake.claims.set('id:origXXXX|C:/p/F', 'id:copyYYYY')
@@ -81,16 +81,30 @@ describe('AI chat across reloads of the same project', () => {
     expect(aiStore.getState().projectPath).toBe('id:copyYYYY')
     expect(docStore.getState().doc.meta.id).toBe('copyYYYY')
 
-    const chatId = busyChat('r1')
+    const chatId = busyChat('r1', false)
     await openProject('C:/p/F', { skipConfirm: true, reload: 'disk' })
     await settle()
     expect(docStore.getState().doc.meta.id).toBe('copyYYYY')
     expect(aiStore.getState().projectPath).toBe('id:copyYYYY')
     expect(aiStore.getState().chat.id).toBe(chatId)
     expect(aiStore.getState().running?.runId).toBe('r1')
-    // the plan-mode draft was made against the plan that is gone
-    expect(aiStore.getState().draftCount).toBe(0)
     expect(fake.calls.stop).toEqual([])
+  })
+
+  it('a disk reload drops a plan-mode draft and stops the turn that was making it; the chat stays', async () => {
+    fake.files.set('C:/p/F', planWithId('origXXXX'))
+    fake.claims.set('id:origXXXX|C:/p/F', 'id:copyYYYY')
+    await openProject('C:/p/F', { skipConfirm: true })
+    await settle()
+
+    const chatId = busyChat('r6')
+    await openProject('C:/p/F', { skipConfirm: true, reload: 'disk' })
+    await settle()
+    expect(aiStore.getState().chat.id).toBe(chatId)
+    expect(aiStore.getState().chat.messages.length).toBeGreaterThan(0)
+    expect(aiStore.getState().draftCount).toBe(0)
+    expect(aiStore.getState().running).toBeNull()
+    expect(fake.calls.stop).toEqual(['r6'])
   })
 
   it('viewing a version and going back keep the chat open but stop the turn and drop the draft', async () => {

@@ -9,7 +9,7 @@
  */
 import { execFile } from 'node:child_process'
 import { mkdirSync, statSync } from 'node:fs'
-import { delimiter, dirname, isAbsolute, join } from 'node:path'
+import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path'
 import { app } from 'electron'
 import { msg } from './settings'
 
@@ -185,50 +185,78 @@ async function run(root: string, args: string[], opts: RunOpts = {}): Promise<{ 
 
 const text = async (root: string, args: string[], opts?: RunOpts) => (await run(root, args, opts)).out.toString('utf8')
 
+/** `-z` records of `git config --show-origin`: "origin\0key\nvalue\0" */
+function originRecords(out: Buffer): { origin: string; key: string; value: string }[] {
+  const parts = out.toString('utf8').split('\0')
+  const recs: { origin: string; key: string; value: string }[] = []
+  for (let i = 0; i + 1 < parts.length; i += 2) {
+    const kv = parts[i + 1]
+    const nl = kv.indexOf('\n')
+    recs.push({ origin: parts[i], key: nl < 0 ? kv : kv.slice(0, nl), value: nl < 0 ? '' : kv.slice(nl + 1) })
+  }
+  return recs
+}
+
+/** a config file path as git printed it (relative ones are relative to where git ran), comparable */
+function configFileKey(origin: string, cwd: string): string | null {
+  if (!origin.startsWith('file:')) return null
+  const p = resolve(cwd, origin.slice('file:'.length))
+  return process.platform === 'win32' ? p.toLowerCase() : p
+}
+
 /**
- * `filter.*` keys of one config view (`-z`: records "key\nvalue\0"), last value wins as in git.
- * `scope` null reads the effective config of the repository (all files, includes followed).
- * '--global' / '--system': that file of the user's, with what it includes as seen from the repository
- * (`includeIf "gitdir:…"` matches it). 'user': everything git reads outside any repository: system,
- * both global files (~/.gitconfig and ~/.config/git/config), Git for Windows' ProgramData config.
- * Resolves null when git could not read it (exit 1 only means "no such keys").
+ * The user's own config files: everything git reads outside any repository (system, Git for Windows'
+ * ProgramData config, ~/.gitconfig, ~/.config/git/config) and every file they include, directly or
+ * through other files, whatever the condition of an `includeIf` (gitdir:, onbranch:, hasconfig:…):
+ * which of them apply to the repository is up to git, but whatever they say is the user's.
  */
-async function filterKeys(root: string, scope: '--global' | '--system' | 'user' | null): Promise<Map<string, string> | null> {
-  const args = ['config', ...(scope === '--global' || scope === '--system' ? [scope, '--includes'] : []), '-z', '--get-regexp', '^filter\\.']
-  let opts: RunOpts = { allowFail: true }
-  if (scope === 'user') {
-    // an always-empty folder of doplan's own, and git may not look above it for a repository
-    const outside = emptyHooksDir()
-    opts = { allowFail: true, cwd: outside, env: { GIT_CEILING_DIRECTORIES: dirname(outside) } }
+async function userConfigFiles(root: string): Promise<Set<string>> {
+  // an always-empty folder of doplan's own, and git may not look above it for a repository
+  const outside = emptyHooksDir()
+  const r = await run(root, ['config', '--show-origin', '-z', '--list'], { allowFail: true, cwd: outside, env: { GIT_CEILING_DIRECTORIES: dirname(outside) } })
+  const files = new Set<string>()
+  const queue: string[] = []
+  const add = (p: string | null) => {
+    if (p && !files.has(p)) {
+      files.add(p)
+      queue.push(p)
+    }
   }
-  const r = await run(root, args, opts)
-  if (r.code !== 0 && r.code !== 1) return null
-  const keys = new Map<string, string>()
-  for (const rec of r.out.toString('utf8').split('\0')) {
-    if (!rec) continue
-    const nl = rec.indexOf('\n')
-    keys.set(nl < 0 ? rec : rec.slice(0, nl), nl < 0 ? '' : rec.slice(nl + 1))
+  if (r.code === 0) for (const rec of originRecords(r.out)) add(configFileKey(rec.origin, outside))
+  // include.path / includeIf.<condition>.path: relative to the including file, `~/` expanded by --path
+  for (let n = 0; n < queue.length && n < 64; n++) {
+    const file = queue[n]
+    const inc = await run(root, ['config', '--file', file, '--path', '-z', '--get-regexp', '^include(if\..*)?\.path$'], { allowFail: true, cwd: outside })
+    if (inc.code !== 0) continue
+    for (const rec of inc.out.toString('utf8').split('\0')) {
+      const nl = rec.indexOf('\n')
+      const p = nl < 0 ? '' : rec.slice(nl + 1)
+      if (p) add(configFileKey(`file:${isAbsolute(p) ? p : join(dirname(file), p)}`, outside))
+    }
   }
-  return keys
+  return files
 }
 
 /**
  * `-c` flags that switch off every clean/smudge/process filter driver the repository has a say in:
- * `git add` would otherwise run those programs. A driver whose keys all come from the user's global
- * or system config unchanged (git-lfs…) is the user's own and stays; one the repository defines or
- * overrides (.git/config, the files it includes) is switched off. Works the same on any git version.
+ * `git add` would otherwise run those programs. Every `filter.*` key of the effective config is
+ * traced to the file it comes from (`--show-origin`, git 2.8+): a driver whose keys all come from the
+ * user's own files (see userConfigFiles; git-lfs…) stays, one the repository defines or overrides
+ * (.git/config, the files it includes) is switched off.
  * Throws when the drivers cannot be told apart: doplan then does not commit at all.
  */
 export async function filterOffArgs(root: string): Promise<string[]> {
-  const all = await filterKeys(root, null)
-  if (!all) throw new GitError(msg('Не удалось прочитать настройки git репозитория', 'Could not read the repository git config'), -1, '')
+  const r = await run(root, ['config', '--show-origin', '-z', '--get-regexp', '^filter\.'], { allowFail: true })
+  // exit 1 only means "no such keys"
+  if (r.code !== 0 && r.code !== 1) throw new GitError(msg('Не удалось прочитать настройки git репозитория', 'Could not read the repository git config'), -1, '')
+  // the last value of a key wins, as in git
+  const all = new Map<string, string | null>()
+  for (const rec of originRecords(r.out)) all.set(rec.key, configFileKey(rec.origin, root))
   if (!all.size) return []
-  // what the user's own config says, in any of its views (unreadable counts as none: more gets switched off)
-  const own = new Set<string>()
-  for (const view of ['--system', '--global', 'user'] as const) for (const [k, v] of (await filterKeys(root, view)) ?? []) own.add(`${k}\0${v}`)
+  const own = await userConfigFiles(root)
   const names = new Set<string>()
-  for (const [key, value] of all) {
-    if (own.has(`${key}\0${value}`)) continue
+  for (const [key, file] of all) {
+    if (file && own.has(file)) continue
     // filter.<subsection>.<variable>: the subsection is everything between the first and the last dot.
     // It may be empty: [filter ""] is the driver of the paths .gitattributes marks `filter=`
     const last = key.lastIndexOf('.')

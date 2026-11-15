@@ -270,7 +270,10 @@ export interface Room {
 export interface RoomDesign {
   /** id of the style preset last applied to the room (BUILTIN_STYLES or a project style) */
   styleId?: Id
-  /** the wall face (`wallId:side`) the style made the accent wall, so a later apply can move it */
+  /**
+   * the wall face (`wallId:side`) the style made the accent wall, so a later apply can move it;
+   * '' = the style was applied without an accent wall. Missing in projects saved by 0.8.0.
+   */
   accentFace?: string
 }
 

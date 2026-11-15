@@ -1,0 +1,52 @@
+import { addTranslations } from '@/i18n'
+
+/** English for the furnishing-variant UI and actions (Russian is the key). */
+addTranslations('en', {
+  'Вариант 1': 'Variant 1',
+  'Варианты обстановки': 'Furnishing variants',
+  'Варианты обстановки: мебель, свет, отделка и стиль. Стены, проёмы и помещения общие.':
+    'Furnishing variants: furniture, lights, finishes and style. Walls, openings and rooms are shared.',
+  'Новый вариант': 'New variant',
+  'Копия текущего': 'Copy of the current one',
+  'Пустой (без мебели и света)': 'Empty (no furniture or lights)',
+  'Отделка копируется из текущего варианта': 'Finishes are copied from the current variant',
+  'Копия варианта': 'Copy variant',
+  'Название варианта': 'Variant name',
+  копия: 'copy',
+  'Вариант: {name}': 'Variant: {name}',
+  'Переименовать вариант': 'Rename variant',
+  'Порядок вариантов': 'Variant order',
+  'Удалить вариант': 'Delete variant',
+  'Удалить вариант?': 'Delete the variant?',
+  'Нельзя удалить единственный вариант': 'The only variant cannot be deleted',
+  'Вариант «{name}» будет удалён: предметов — {items}, светильников — {lights}, его отделка. Стены и помещения квартиры останутся. Отменить можно через Ctrl+Z.':
+    'Variant “{name}” will be deleted: {items} items, {lights} lights and its finishes. The walls and rooms stay. Ctrl+Z undoes it.',
+  'Сравнить варианты': 'Compare variants',
+  'Сравнить…': 'Compare…',
+  'Дублировать вариант': 'Duplicate variant',
+  'Сдвинуть влево': 'Move left',
+  'Сдвинуть вправо': 'Move right',
+  'Выделить предметы вне помещений': 'Select items outside the rooms',
+  'Вне помещений: {n}': 'Outside the rooms: {n}',
+  '{n} вне помещений — показать': '{n} outside the rooms — show',
+  'После правки стен вне помещений оказались предметы: {list}': 'After the wall edit, items ended up outside the rooms: {list}',
+  Показать: 'Show',
+  'Следующий вариант': 'Next variant',
+  'Предыдущий вариант': 'Previous variant',
+  // compare dialog
+  Этаж: 'Level',
+  Активный: 'Active',
+  Открыть: 'Open',
+  'Сделать активным': 'Make active',
+  Предметов: 'Items',
+  Светильников: 'Lights',
+  'Стоимость по смете': 'Estimate total',
+  'нет цен': 'no prices',
+  'Экспорт плана': 'Export plan',
+  'Планы активного этажа; предметы и стоимость — по смете каждого варианта.':
+    'Plans of the chosen level; items and totals come from the estimate of each variant.',
+  Стиль: 'Style',
+  Отличия: 'Differences',
+  'только здесь: {n}': 'only here: {n}',
+  'переставлено: {n}': 'moved: {n}',
+})

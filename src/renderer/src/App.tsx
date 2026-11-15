@@ -19,6 +19,7 @@ import {
 } from '@/ui/panels'
 import { RightDock } from '@/ai' // ai-chat: «Свойства | ИИ» tabs
 import { LevelTabs } from '@/ui/shell/LevelTabs'
+import { VariantCompareDialog } from '@/ui/variants/VariantCompareDialog'
 import { ProjectFolderDialogs } from '@/ui/panels/ProjectFolderDialogs'
 import { AppLogo } from '@/ui/shell/AppLogo'
 import { Overlays } from '@/ui/shell/Overlays'
@@ -94,6 +95,7 @@ const DIALOGS: [DialogKey, ComponentType<{ open: boolean; onClose(): void }>][] 
   ['photoPlan', PhotoPlanDialog],
   ['render', RenderDialog],
   ['about', AboutDialog],
+  ['variants', VariantCompareDialog],
 ]
 
 function Dialogs() {

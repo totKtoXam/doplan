@@ -44,16 +44,9 @@ const LIMIT = Number(argv.find((a) => a.startsWith('--limit='))?.slice(8) ?? '0'
 const want = (k: 'models' | 'materials' | 'hdris') => !ONLY || ONLY === k
 
 // ───────────────────────────── bundled core pack ─────────────────────────────
-const BUNDLE_MODELS = new Set([
-  'ph:sofa_02', 'ph:sofa_03', 'ph:Sofa_01', 'ph:modern_arm_chair_01', 'ph:mid_century_lounge_chair',
-  'ph:dining_chair_02', 'ph:bar_chair_round_01', 'ph:dining_table', 'ph:modern_coffee_table_01',
-  'ph:coffee_table_round_01', 'ph:side_table_01', 'ph:ClassicNightstand_01', 'ph:GothicBed_01',
-  'ph:modern_wooden_cabinet', 'ph:drawer_cabinet', 'ph:steel_frame_shelves_01', 'ph:wooden_display_shelves_01',
-  'ph:ClassicConsole_01', 'ph:modern_ceiling_lamp_01', 'ph:desk_lamp_arm_01', 'ph:hanging_industrial_lamp',
-  'ph:industrial_wall_lamp', 'ph:potted_plant_02', 'ph:potted_plant_04', 'ph:ceramic_vase_01',
-  'ph:hanging_picture_frame_01', 'ph:throw_pillows_01', 'ph:Television_01', 'ph:electric_stove',
-  'ph:metal_office_desk', 'khr:SheenChair', 'khr:GlassVaseFlowers',
-])
+// Poly Haven models are on-demand downloads (installer size): the box keeps the models that need a repair at
+// fetch time (`fix` in the manifest, always bundled: the raw download is not usable as is) and these two.
+const BUNDLE_MODELS = new Set(['khr:SheenChair', 'khr:GlassVaseFlowers'])
 const BUNDLE_MATERIALS = new Set([
   'ph:herringbone_parquet', 'ph:laminate_floor_02', 'ph:wood_floor', 'ph:oak_veneer_01', 'ph:american_walnut_veneer',
   'ph:white_oak_veneer', 'ph:plank_flooring', 'ph:dark_wooden_planks', 'ph:long_white_tiles', 'ph:terrazzo_tiles',

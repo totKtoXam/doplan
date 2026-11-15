@@ -180,6 +180,15 @@ export type AiLoginEvent =
   | { type: 'url'; url: string }
   | { type: 'done'; ok: boolean; error?: string }
 
+/** what claimDocument found for an opened file */
+export interface AiClaim {
+  /** the reference the file's chats live under (another id: a copy of another file) */
+  ref: string
+  /** the chats of `ref` lost their agent sessions (the document was moved or renamed outside the app):
+   * a stopped turn's late session must not be written back */
+  sessionsDropped: boolean
+}
+
 export interface AiChatApi {
   providers(refresh?: boolean): Promise<AiProviderInfo[]>
   run(req: AiRunRequest): Promise<void>
@@ -206,7 +215,7 @@ export interface AiChatApi {
    * another file that is still there gets one of its own (its chats copied without agent sessions);
    * it reaches the file with the next save.
    */
-  claimDocument(ref: string, path: string): Promise<string>
+  claimDocument(ref: string, path: string): Promise<AiClaim>
   /** start signing the CLI in; progress arrives through onLogin */
   login(provider: AiProviderId): Promise<void>
   /** paste the code shown by the sign-in page (when the CLI asks for one) */

@@ -32,7 +32,9 @@ const save = async (p: string, id: string) => {
   await rename(`${p}.tmp`, p)
 }
 /** opening a file as the app does: the id inside it is claimed for its path */
-const open = async (p: string) => claimDocument(`id:${await fileId(p)}`, p)
+const claim = async (p: string) => claimDocument(`id:${await fileId(p)}`, p)
+const open = async (p: string) => (await claim(p)).ref
+const claimRef = async (ref: string, p: string) => (await claimDocument(ref, p)).ref
 
 describe('chat storage follows the project', () => {
   it('a document id names the folder (renaming the file keeps it); settings carry over to new projects', async () => {
@@ -243,14 +245,29 @@ describe('chat storage follows the project', () => {
     await docFile(orig, 'stay-id-1')
     await open(orig)
     await saveChat('id:stay-id-1', chat('chat-stay', 's', { claude: 'S-1' }))
-    expect(await open(orig)).toBe('id:stay-id-1')
+    expect(await claim(orig)).toEqual({ ref: 'id:stay-id-1', sessionsDropped: false })
     expect((await loadChat('id:stay-id-1', 'chat-stay'))?.resume).toEqual({ claude: 'S-1' })
+  })
+
+  it('the claim says when the chats it keeps lost their sessions (moved), and only then', async () => {
+    const orig = join(root, 'flag.doplan')
+    await docFile(orig, 'flag-id-1')
+    expect(await claim(orig)).toEqual({ ref: 'id:flag-id-1', sessionsDropped: true })
+    expect(await claim(orig)).toEqual({ ref: 'id:flag-id-1', sessionsDropped: false })
+    const copy = join(root, 'flag - Copy.doplan')
+    await cp(orig, copy)
+    const theCopy = await claim(copy)
+    expect(theCopy.ref).not.toBe('id:flag-id-1')
+    // the original's chats keep theirs: its stopped turns may still report a session
+    expect(theCopy.sessionsDropped).toBe(false)
+    await rename(orig, join(root, 'flag-moved.doplan'))
+    expect(await claim(join(root, 'flag-moved.doplan'))).toEqual({ ref: 'id:flag-id-1', sessionsDropped: true })
   })
 
   it('reads the id of a .doplan archive and of a project folder; a project it cannot read counts as still there', async () => {
     const zipped = join(root, 'zipped.doplan')
     await writeFile(zipped, zipSync({ 'doc.json': strToU8(JSON.stringify({ meta: { id: 'zip-id-1' } })) }))
-    expect(await claimDocument('id:zip-id-1', zipped)).toBe('id:zip-id-1')
+    expect(await claimRef('id:zip-id-1', zipped)).toBe('id:zip-id-1')
     await docFile(join(root, 'zipped-copy.json'), 'zip-id-1')
     expect(await open(join(root, 'zipped-copy.json'))).not.toBe('id:zip-id-1')
     // saved with another id: the archive is no longer this document, the next one to open takes the id
@@ -260,7 +277,7 @@ describe('chat storage follows the project', () => {
     const folder = join(root, 'Flat project')
     await mkdir(folder, { recursive: true })
     await docFile(join(folder, 'plan.json'), 'folder-id-1')
-    expect(await claimDocument('id:folder-id-1', folder)).toBe('id:folder-id-1')
+    expect(await claimRef('id:folder-id-1', folder)).toBe('id:folder-id-1')
     await docFile(join(root, 'folder-export.json'), 'folder-id-1')
     expect(await open(join(root, 'folder-export.json'))).not.toBe('id:folder-id-1')
 
@@ -301,10 +318,10 @@ describe('chat storage follows the project', () => {
     const before = join(root, 'room-old.doplan')
     const after = join(root, 'room-new.doplan')
     await saveChat('id:renamed-id-1', chat('chat-r', 'r'))
-    expect(await claimDocument('id:renamed-id-1', before)).toBe('id:renamed-id-1')
-    expect(await claimDocument('id:renamed-id-1', after)).toBe('id:renamed-id-1')
+    expect(await claimRef('id:renamed-id-1', before)).toBe('id:renamed-id-1')
+    expect(await claimRef('id:renamed-id-1', after)).toBe('id:renamed-id-1')
     // now the new path is the file: opening it from the old one again (that file does not exist) also keeps them
-    expect(await claimDocument('id:renamed-id-1', after)).toBe('id:renamed-id-1')
+    expect(await claimRef('id:renamed-id-1', after)).toBe('id:renamed-id-1')
   })
 
   it('an abandoned unsaved document loses its chats, a saved project never does', async () => {

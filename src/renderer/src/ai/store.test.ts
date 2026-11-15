@@ -12,7 +12,7 @@ describe('claiming a copy', () => {
     initAi()
     await settle()
     let answer: (v: string) => void = () => {}
-    const claim = vi.spyOn(api.aiChat, 'claimDocument').mockImplementationOnce(() => new Promise((r) => (answer = r)))
+    const claim = vi.spyOn(api.aiChat, 'claimDocument').mockImplementationOnce(() => new Promise((r) => (answer = (ref) => r({ ref, sessionsDropped: false }))))
     const doc = createEmptyDoc('Flat')
     const id = doc.meta.id
     expect(id).toBeTruthy()
@@ -31,7 +31,7 @@ describe('claiming a copy', () => {
 
   it('an opened copy takes its own id, and is changed until the user saves it (nothing is written on open)', async () => {
     const doc = createEmptyDoc('Flat')
-    vi.spyOn(api.aiChat, 'claimDocument').mockResolvedValueOnce('id:copy-own-id-2')
+    vi.spyOn(api.aiChat, 'claimDocument').mockResolvedValueOnce({ ref: 'id:copy-own-id-2', sessionsDropped: false })
     const save = vi.spyOn(api.project, 'save')
     docStore.getState().load(structuredClone(doc), '/flats/flat - Copy 2.doplan')
     await settle()
@@ -43,7 +43,7 @@ describe('claiming a copy', () => {
   /** a copy opened with its claim not answered yet; resolves the answer function */
   async function openCopy(path: string) {
     let answer: (v: string) => void = () => {}
-    vi.spyOn(api.aiChat, 'claimDocument').mockImplementationOnce(() => new Promise((r) => (answer = r)))
+    vi.spyOn(api.aiChat, 'claimDocument').mockImplementationOnce(() => new Promise((r) => (answer = (ref) => r({ ref, sessionsDropped: false }))))
     const doc = createEmptyDoc('Flat')
     docStore.getState().load(structuredClone(doc), path)
     await settle()

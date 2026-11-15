@@ -409,7 +409,17 @@ async function setProject(gone: string | null): Promise<void> {
     const opened = ref
     // the document this claim is for: another file opened meanwhile can carry the same id (the original
     // of the copy being claimed), and must not get the copy's id
-    const job = queueWrite(() => api.aiChat.claimDocument(opened, filePath)).catch((e) => {
+    const job = queueWrite(async () => {
+      const c = await api.aiChat.claimDocument(opened, filePath)
+      // the chats it keeps lost their agent sessions (moved outside the app): a stopped turn of this id
+      // that reports its session late must not write it back. Done in the queue, before any later write
+      if (c.sessionsDropped) {
+        for (const s of stoppedRuns.values()) if (s.ref === opened) s.noSession = true
+        const r = get().running
+        if (r && chatRef() === opened) voidSessions.add(r.runId)
+      }
+      return c.ref
+    }).catch((e) => {
       console.error('[doplan] claiming the document failed', e)
       return null
     })
@@ -868,6 +878,8 @@ function onStoppedRunEvent(runId: string, ev: AiRunEvent): void {
   }
   // the user moved on to another chat: update the saved record, after the save that leaving it issued
   void queueWrite(async () => {
+    // a claim queued before this write may have ended the id's sessions meanwhile
+    if (ev.type === 'session' && s.noSession) return
     const rec = await api.aiChat.loadChat(s.ref, s.chatId)
     if (rec) await api.aiChat.saveChat(s.ref, produce(rec, (c) => recordEvent(c, s.msgId, ev)))
   }).catch((e) => console.error('[doplan] saving a stopped turn failed', e))

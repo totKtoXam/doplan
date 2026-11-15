@@ -190,9 +190,6 @@ async function afterOpen(res: Awaited<ReturnType<typeof api.project.open>>, relo
     await alertDialog(t('Файл проекта повреждён или имеет неверный формат'), errorText(err))
     return
   }
-  // the same project read again keeps the id it has in memory, like viewVersion: an opened copy got its
-  // own id that plan.json does not hold until the next save
-  if (reload) doc = keepId(doc)
   // main switches the project root and assets only now, after the document was validated
   try {
     await api.project.attach(res.path)
@@ -200,6 +197,10 @@ async function afterOpen(res: Awaited<ReturnType<typeof api.project.open>>, relo
     await alertDialog(t('Не удалось открыть проект'), errorText(err))
     return
   }
+  // the same project read again keeps the id it has in memory, like viewVersion: an opened copy got its
+  // own id that plan.json does not hold until the next save. Taken now, after the waits: the claim of
+  // that copy may have answered meanwhile
+  if (reload) doc = keepId(doc)
   loadDocument(doc, res.path, { kind: res.kind ?? kindOfPath(res.path), git: res.git, untrustedGit: res.untrustedGit, gitFile: res.gitFile, reload })
   refreshRecent()
   toast(t('Проект открыт'), 'success')

@@ -314,7 +314,7 @@ export function registerAiChat(): void {
   )
   handleIpc(CH.aiChatDrop, (p: unknown) => dropChats(typeof p === 'string' ? p : null))
   handleIpc(CH.aiChatClaim, (ref: unknown, path: unknown) =>
-    typeof ref === 'string' && typeof path === 'string' ? claimDocument(ref, path) : String(ref),
+    typeof ref === 'string' && typeof path === 'string' ? claimDocument(ref, path) : { ref: String(ref), sessionsDropped: false },
   )
   handleIpc(CH.aiChatLogin, async (id: unknown) => {
     const prov = (await providers(false)).find((p) => p.info.id === id)

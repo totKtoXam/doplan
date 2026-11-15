@@ -9,6 +9,12 @@ import { DEFAULT_AI_SETTINGS } from '@shared/aiChat'
 const fake = vi.hoisted(() => {
   const files = new Map<string, unknown>()
   const claims = new Map<string, string>()
+  /** `ref|path` claims that keep the id but drop its agent sessions (moved outside the app) */
+  const dropped = new Set<string>()
+  /** chat records main holds, and what the app wrote back */
+  const records = new Map<string, unknown>()
+  const saved: [string | null, { id: string; resume?: unknown }][] = []
+  const listener: { cb: ((runId: string, ev: unknown) => void) | null } = { cb: null }
   const calls: { claim: [string, string][]; stop: string[]; move: [string, string, boolean, string | null][]; save: [string, string][] } = {
     claim: [],
     stop: [],
@@ -16,7 +22,7 @@ const fake = vi.hoisted(() => {
     save: [],
   }
   /** a claim answers only once `gate.wait` resolves; `gate.fail` makes it throw */
-  const gate: { wait: Promise<void> | null; fail: boolean } = { wait: null, fail: false }
+  const gate: { wait: Promise<void> | null; fail: boolean; attach: Promise<void> | null } = { wait: null, fail: false, attach: null }
   const fallback = (o: Record<string, unknown>) =>
     new Proxy(o, { get: (t, k: string) => (k in t ? t[k] : async () => undefined) })
   const api = {
@@ -29,19 +35,27 @@ const fake = vi.hoisted(() => {
         calls.claim.push([ref, path])
         if (gate.wait) await gate.wait
         if (gate.fail) throw new Error('EPERM')
-        return claims.get(`${ref}|${path}`) ?? ref
+        return { ref: claims.get(`${ref}|${path}`) ?? ref, sessionsDropped: dropped.has(`${ref}|${path}`) }
       },
+      loadChat: async (ref: string | null, chatId: string) => structuredClone(records.get(`${ref}|${chatId}`) ?? null),
+      saveChat: async (ref: string | null, chat: { id: string; resume?: unknown }) => void saved.push([ref, structuredClone(chat)]),
       moveChats: async (from: string, to: string, copy: boolean, path: string | null) => {
         calls.move.push([from, to, copy, path])
         return { sessionsKept: true }
       },
       stop: async (runId: string) => void calls.stop.push(runId),
-      onEvent: () => () => {},
+      onEvent: (cb: (runId: string, ev: unknown) => void) => {
+        listener.cb = cb
+        return () => {}
+      },
       onToolCall: () => () => {},
       onLogin: () => () => {},
     }),
     settings: fallback({ get: async () => ({}) }),
     project: fallback({
+      attach: async () => {
+        if (gate.attach) await gate.attach
+      },
       open: async (path: string) => (files.has(path) ? { path, doc: files.get(path), kind: /\.json$/.test(path) ? 'json' : 'folder', git: true } : null),
       versionDoc: async (sha: string) => files.get(`version:${sha}`),
       save: async (doc: { meta: { id: string } }, path: string) => {
@@ -54,7 +68,7 @@ const fake = vi.hoisted(() => {
       },
     }),
   }
-  return { api, files, claims, calls, gate }
+  return { api, files, claims, dropped, records, saved, listener, calls, gate }
 })
 
 vi.mock('@/store/api', () => ({ api: fake.api }))
@@ -92,6 +106,8 @@ beforeEach(async () => {
   fake.calls.save.length = 0
   fake.gate.wait = null
   fake.gate.fail = false
+  fake.gate.attach = null
+  fake.saved.length = 0
   aiStore.setState({ running: null, draftCount: 0 })
   await settle()
 })
@@ -266,5 +282,112 @@ describe('saves and reloads while a copy is being claimed', () => {
     await settle()
     expect(docStore.getState().doc.meta.id).toBe('copyDDDD')
     expect(docStore.getState().dirty).toBe(true)
+  })
+})
+
+/** holds main's switch to the next opened project until the returned function is called */
+function holdAttach(): () => Promise<void> {
+  let release!: () => void
+  fake.gate.attach = new Promise<void>((r) => (release = r))
+  return async () => {
+    release()
+    fake.gate.attach = null
+    await settle()
+  }
+}
+
+describe('a reload while the copy is being claimed (the claim answers before main switched the project)', () => {
+  for (const how of ['disk', 'version'] as const) {
+    it(`reload '${how}': one claim, the copy's id and the open chat stay`, async () => {
+      const path = `C:/p/R-${how}`
+      fake.files.set(path, planWithId(`orig${how}`))
+      fake.files.set('version:abc', planWithId(`orig${how}`))
+      fake.claims.set(`id:orig${how}|${path}`, `id:copy${how}`)
+      const releaseClaim = holdClaims()
+      await openProject(path, { skipConfirm: true })
+      await settle()
+      if (how === 'version') {
+        expect(await viewVersion(version)).toBe(true)
+        await settle()
+      }
+      const chatId = busyChat(`rr-${how}`)
+      aiStore.setState({ running: null })
+      const releaseAttach = holdAttach()
+      const reloading = how === 'disk' ? openProject(path, { skipConfirm: true, reload: 'disk' }) : leaveVersion()
+      await settle()
+      // the claim answers while main is still switching to the project read again
+      await releaseClaim()
+      expect(docStore.getState().doc.meta.id).toBe(`copy${how}`)
+      await releaseAttach()
+      await reloading
+      await settle()
+      expect(fake.calls.claim).toEqual([[`id:orig${how}`, path]])
+      expect(docStore.getState().doc.meta.id).toBe(`copy${how}`)
+      expect(aiStore.getState().projectPath).toBe(`id:copy${how}`)
+      expect(aiStore.getState().chat.id).toBe(chatId)
+      expect(docStore.getState().dirty).toBe(true)
+    })
+  }
+})
+
+describe('the original moved outside the app loses its agent sessions, also those a stopped turn reports late', () => {
+  const session = (id: string) => ({ type: 'session', id })
+
+  it('a turn stopped by opening the moved original does not write its session into the saved chat', async () => {
+    fake.files.set('C:/p/S', planWithId('origSSSS'))
+    await openProject('C:/p/S', { skipConfirm: true })
+    await settle()
+    const chatId = busyChat('rs1')
+    fake.records.set(`id:origSSSS|${chatId}`, { ...aiStore.getState().chat })
+    // the project was moved in Explorer: the same id at a new path, its sessions are dropped there
+    fake.files.set('C:/p/S-moved', planWithId('origSSSS'))
+    fake.dropped.add('id:origSSSS|C:/p/S-moved')
+    const release = holdClaims()
+    await openProject('C:/p/S-moved', { skipConfirm: true })
+    await settle()
+    expect(fake.calls.stop).toEqual(['rs1'])
+    // the stopped turn reports its session while the claim is still on its way
+    fake.listener.cb?.('rs1', session('LATE-1'))
+    await release()
+    await settle()
+    expect(aiStore.getState().projectPath).toBe('id:origSSSS')
+    expect(fake.saved.filter(([, c]) => c.id === chatId && c.resume)).toEqual([])
+    // and later, with that chat open again
+    aiStore.setState({ chat: { ...aiStore.getState().chat, id: chatId } })
+    fake.listener.cb?.('rs1', session('LATE-2'))
+    await settle()
+    expect(aiStore.getState().chat.resume).toBeUndefined()
+  })
+
+  it('a turn started before the claim answers does not keep its session', async () => {
+    fake.files.set('C:/p/T', planWithId('origTTTT'))
+    await openProject('C:/p/T', { skipConfirm: true })
+    await settle()
+    fake.files.set('C:/p/T-moved', planWithId('origTTTT'))
+    fake.dropped.add('id:origTTTT|C:/p/T-moved')
+    const release = holdClaims()
+    await openProject('C:/p/T-moved', { skipConfirm: true })
+    await settle()
+    busyChat('rt1')
+    await release()
+    fake.listener.cb?.('rt1', session('RUN-1'))
+    await settle()
+    expect(aiStore.getState().chat.resume).toBeUndefined()
+  })
+
+  it('a claim that keeps the sessions leaves a stopped turn its session', async () => {
+    fake.files.set('C:/p/U', planWithId('origUUUU'))
+    await openProject('C:/p/U', { skipConfirm: true })
+    await settle()
+    const chatId = busyChat('ru1')
+    fake.records.set(`id:origUUUU|${chatId}`, { ...aiStore.getState().chat })
+    fake.files.set('C:/p/U-same', planWithId('origUUUU'))
+    const release = holdClaims()
+    await openProject('C:/p/U-same', { skipConfirm: true })
+    await settle()
+    fake.listener.cb?.('ru1', session('KEEP-1'))
+    await release()
+    await settle()
+    expect(fake.saved.some(([ref, c]) => ref === 'id:origUUUU' && c.id === chatId && JSON.stringify(c.resume ?? {}).includes('KEEP-1'))).toBe(true)
   })
 })

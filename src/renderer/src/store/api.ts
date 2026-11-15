@@ -289,7 +289,7 @@ function createFallbackApi(): DoplanApi {
       },
       async dropChats() {},
       async claimDocument(ref) {
-        return ref
+        return { ref, sessionsDropped: false }
       },
       async login() {},
       async loginInput() {},

@@ -11,7 +11,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { readdir, realpath, rename, rm, stat } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import { app } from 'electron'
-import { type AiChatMeta, type AiChatRecord, type AiChatSettings, DEFAULT_AI_SETTINGS } from '../../shared/aiChat'
+import { type AiChatMeta, type AiChatRecord, type AiClaim, type AiChatSettings, DEFAULT_AI_SETTINGS } from '../../shared/aiChat'
 import { atomicWrite, ensureDir, exists, readJson } from '../fsutil'
 import { readDocId } from './docId'
 import { DEFAULT_AGENTS_MD } from './prompt'
@@ -217,23 +217,24 @@ async function carries(path: string, id: string): Promise<boolean> {
  * the chats, without sessions). Chats are never lost and never shown with a document that does not
  * carry their id, and no agent session resumes in another document.
  */
-export async function claimDocument(ref: string, path: string): Promise<string> {
+export async function claimDocument(ref: string, path: string): Promise<AiClaim> {
   const d = DOC_ID_RE.exec(ref)
-  if (!d || typeof path !== 'string' || !path) return ref
+  if (!d || typeof path !== 'string' || !path) return { ref, sessionsDropped: false }
   const here = await canonicalPath(path)
   const dir = chatsDir(ref)
   const saved = await readJson<{ path?: unknown } | null>(join(dir, SAVED_FILE), null)
   const owner = typeof saved?.path === 'string' ? await canonicalPath(saved.path) : null
-  if (owner && samePath(owner, here)) return ref
+  if (owner && samePath(owner, here)) return { ref, sessionsDropped: false }
   if (!owner || !(await carries(owner, d[1]))) {
     await ensureDir(dir)
     await dropSessions(dir)
     await atomicWrite(join(dir, SAVED_FILE), JSON.stringify({ path: here }))
-    return ref
+    return { ref, sessionsDropped: true }
   }
   const id = randomBytes(12).toString('base64url')
   await moveChats(ref, `id:${id}`, true, here)
-  return `id:${id}`
+  // the chats of `ref` keep their sessions: they stay the original's
+  return { ref: `id:${id}`, sessionsDropped: false }
 }
 
 /**

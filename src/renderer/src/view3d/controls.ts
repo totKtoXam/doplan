@@ -73,12 +73,6 @@ interface Transition {
   done: () => void
 }
 
-interface CutEntry {
-  object: THREE.Object3D
-  wallId: Id | null
-  ceiling: boolean
-}
-
 function isEditable(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null
   if (!el || !el.tagName) return false
@@ -409,7 +403,6 @@ export function createControls(ctx: EngineContext): CameraControlsEx {
       looking = false
     }
     mode = next
-    restoreCutaway()
     if (next === 'walk') {
       nearBeforeWalk = camera.near
       if (camera.near > 0.05) {
@@ -447,7 +440,6 @@ export function createControls(ctx: EngineContext): CameraControlsEx {
       goOrbitView(view.position, view.target, orbitFov, true)
     }
     configureOrbit()
-    cutDirty = true
     ctx.invalidate()
   }
 
@@ -560,124 +552,9 @@ export function createControls(ctx: EngineContext): CameraControlsEx {
     return moving
   }
 
-  // ── wall cut-away ──
-  let cutEntries: CutEntry[] | null = null
-  let cutDirty = true
-  const hiddenByMe = new Set<THREE.Object3D>()
-  const cutCamera = new Float32Array(6)
-  let lastCutFlag: boolean | null = null
-
-  function collectCutEntries(): CutEntry[] {
-    const entries: CutEntry[] = []
-    const doc = docStore.getState().doc
-    const visit = (o: THREE.Object3D): void => {
-      const ud = o.userData
-      const ref = ud?.ref as { kind?: string; id?: string } | undefined
-      if (ud?.surface === 'ceiling') {
-        entries.push({ object: o, wallId: null, ceiling: true })
-        return
-      }
-      if (ref && typeof ref.id === 'string') {
-        if (ref.kind === 'wall') {
-          entries.push({ object: o, wallId: ref.id, ceiling: false })
-          return
-        }
-        if (ref.kind === 'opening') {
-          const wallId = doc.openings[ref.id]?.wallId ?? null
-          if (wallId) entries.push({ object: o, wallId, ceiling: false })
-          return
-        }
-      }
-      for (const child of o.children) visit(child)
-    }
-    visit(ctx.roots.architecture)
-    return entries
-  }
-
-  function restoreCutaway(): void {
-    if (hiddenByMe.size === 0) return
-    for (const o of hiddenByMe) o.visible = true
-    hiddenByMe.clear()
-    shared.post?.kick()
-    ctx.invalidate()
-  }
-
-  function applyCutaway(): void {
-    const state = docStore.getState()
-    const flag = state.doc.render.wallCutaway === true && mode !== 'walk'
-    if (!flag) {
-      if (lastCutFlag !== false) restoreCutaway()
-      lastCutFlag = false
-      return
-    }
-    const cx = camera.position.x
-    const cy = camera.position.y
-    const cz = camera.position.z
-    const tx = orbit.target.x
-    const ty = orbit.target.y
-    const tz = orbit.target.z
-    if (
-      !cutDirty &&
-      lastCutFlag === true &&
-      cutCamera[0] === cx && cutCamera[1] === cy && cutCamera[2] === cz &&
-      cutCamera[3] === tx && cutCamera[4] === ty && cutCamera[5] === tz
-    ) {
-      return
-    }
-    cutCamera.set([cx, cy, cz, tx, ty, tz])
-    lastCutFlag = true
-    cutDirty = false
-    if (!cutEntries) cutEntries = collectCutEntries()
-    const plan = state.derived[activeLevelId()]
-    const bounds = safeBounds()
-    const horizontal = Math.hypot(cx - tx, cz - tz)
-    const elevation = Math.atan2(cy - ty, Math.max(horizontal, 1e-6))
-    // seen from steeply above nothing is in the way; keep the walls for context
-    const cutWalls = mode === 'orbit' && elevation < (68 * Math.PI) / 180
-    const cutCeilings = cy > bounds.max.y - 0.15
-    const decided = new Map<Id, boolean>()
-    let changed = false
-    for (const entry of cutEntries) {
-      let hide = false
-      if (entry.ceiling) {
-        hide = cutCeilings
-      } else if (entry.wallId && cutWalls && plan) {
-        let d = decided.get(entry.wallId)
-        if (d === undefined) {
-          d = false
-          const g = plan.wallGeoms[entry.wallId]
-          if (g && g.length > 1) {
-            const mx = (g.a.x + g.b.x) / 2
-            const my = (g.a.y + g.b.y) / 2
-            const nx = (g.b.y - g.a.y) / g.length
-            const ny = -(g.b.x - g.a.x) / g.length
-            const sc = (cx * 1000 - mx) * nx + (cz * 1000 - my) * ny
-            const st = (tx * 1000 - mx) * nx + (tz * 1000 - my) * ny
-            // the wall line separates the camera from what it looks at
-            d = sc * st < 0 && Math.abs(sc) > 150 && Math.abs(st) > 40
-          }
-          decided.set(entry.wallId, d)
-        }
-        hide = d
-      }
-      const o = entry.object
-      if (hide) {
-        if (o.visible) {
-          o.visible = false
-          hiddenByMe.add(o)
-          changed = true
-        }
-      } else if (hiddenByMe.has(o)) {
-        o.visible = true
-        hiddenByMe.delete(o)
-        changed = true
-      }
-    }
-    if (changed) {
-      shared.post?.kick()
-      ctx.invalidate()
-    }
-  }
+  // The wall cut-away (walls lowered to the cut height, ceilings hidden from above) belongs to
+  // build/architecture.ts `updateVisibility`, run by the engine every frame. A second cut-away here
+  // used to hide whole walls; it lost track of them on scene changes and left walls missing.
 
   // ── per-frame update ──
   function update(dt: number): boolean {
@@ -694,7 +571,6 @@ export function createControls(ctx: EngineContext): CameraControlsEx {
       moving = changed || orbitInteracting
       if (mode === 'orbit' && Math.abs(camera.fov - TOP_FOV) > 0.01) orbitFov = camera.fov
     }
-    applyCutaway()
     if (moving) ctx.invalidate()
     return moving
   }
@@ -797,18 +673,12 @@ export function createControls(ctx: EngineContext): CameraControlsEx {
   canvas.addEventListener('wheel', onWheel, { passive: false })
   canvas.addEventListener('contextmenu', onContextMenu)
 
-  const unsubScene = ctx.onSceneChanged(() => {
-    // objects were replaced: forget the old ones (they are gone together with their flags)
-    cutEntries = null
-    hiddenByMe.clear()
-    cutDirty = true
-  })
   let lastCutaway = docStore.getState().doc.render.wallCutaway
   const unsubDoc = docStore.subscribe((state) => {
     const flag = state.doc.render.wallCutaway
     if (flag !== lastCutaway) {
       lastCutaway = flag
-      cutDirty = true
+      // the engine re-applies the cut-away on the next frame
       ctx.invalidate()
     }
   })
@@ -847,8 +717,6 @@ export function createControls(ctx: EngineContext): CameraControlsEx {
     dispose() {
       if (disposed) return
       disposed = true
-      restoreCutaway()
-      unsubScene()
       unsubDoc()
       window.removeEventListener('keydown', onKeyDown, true)
       window.removeEventListener('keyup', onKeyUp, true)

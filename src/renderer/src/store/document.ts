@@ -231,6 +231,7 @@ export const docStore = createStore<DocStoreState>()((set, get) => {
     derived: deriveAll(initialDoc),
     revision: 0,
     loadId: 0,
+    reload: null,
     filePath: null,
     dirty: false,
     canUndo: false,
@@ -377,7 +378,7 @@ export const docStore = createStore<DocStoreState>()((set, get) => {
       setSelection(e.selAfter)
     },
 
-    load(doc, filePath) {
+    load(doc, filePath, reload = null) {
       transientBase = null
       transientPatches = []
       transientSel = []
@@ -391,6 +392,7 @@ export const docStore = createStore<DocStoreState>()((set, get) => {
         derived: deriveAll(prepared),
         revision: get().revision + 1,
         loadId: get().loadId + 1,
+        reload,
         filePath,
         dirty: false,
         transientActive: false,

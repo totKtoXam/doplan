@@ -9,7 +9,7 @@
  */
 import { execFile } from 'node:child_process'
 import { mkdirSync, statSync } from 'node:fs'
-import { delimiter, isAbsolute, join } from 'node:path'
+import { delimiter, dirname, isAbsolute, join } from 'node:path'
 import { app } from 'electron'
 import { msg } from './settings'
 
@@ -142,6 +142,10 @@ interface RunOpts {
   binary?: boolean
   /** do not throw on a non-zero exit code */
   allowFail?: boolean
+  /** git runs here instead of the repository root */
+  cwd?: string
+  /** added to the (GIT_*-free) environment */
+  env?: Record<string, string>
 }
 
 async function run(root: string, args: string[], opts: RunOpts = {}): Promise<{ code: number; out: Buffer; err: string }> {
@@ -153,12 +157,12 @@ async function run(root: string, args: string[], opts: RunOpts = {}): Promise<{ 
       exe,
       fullArgs,
       {
-        cwd: root,
+        cwd: opts.cwd ?? root,
         windowsHide: true,
         encoding: 'buffer',
         maxBuffer: 1024 * 1024 * 1024,
         timeout: 120000,
-        env: gitEnv(),
+        env: { ...gitEnv(), ...opts.env },
       },
       (error, stdout, stderr) => {
         const code = error ? (typeof (error as { code?: unknown }).code === 'number' ? ((error as { code: number }).code as number) : 1) : 0
@@ -184,11 +188,20 @@ const text = async (root: string, args: string[], opts?: RunOpts) => (await run(
 /**
  * `filter.*` keys of one config view (`-z`: records "key\nvalue\0"), last value wins as in git.
  * `scope` null reads the effective config of the repository (all files, includes followed).
+ * '--global' / '--system': that file of the user's, with what it includes as seen from the repository
+ * (`includeIf "gitdir:…"` matches it). 'user': everything git reads outside any repository: system,
+ * both global files (~/.gitconfig and ~/.config/git/config), Git for Windows' ProgramData config.
  * Resolves null when git could not read it (exit 1 only means "no such keys").
  */
-async function filterKeys(root: string, scope: '--global' | '--system' | null): Promise<Map<string, string> | null> {
-  // --includes: the user's own files include others (include.path, includeIf) just as the effective view follows them
-  const r = await run(root, ['config', ...(scope ? [scope, '--includes'] : []), '-z', '--get-regexp', '^filter\\.'], { allowFail: true })
+async function filterKeys(root: string, scope: '--global' | '--system' | 'user' | null): Promise<Map<string, string> | null> {
+  const args = ['config', ...(scope === '--global' || scope === '--system' ? [scope, '--includes'] : []), '-z', '--get-regexp', '^filter\\.']
+  let opts: RunOpts = { allowFail: true }
+  if (scope === 'user') {
+    // an always-empty folder of doplan's own, and git may not look above it for a repository
+    const outside = emptyHooksDir()
+    opts = { allowFail: true, cwd: outside, env: { GIT_CEILING_DIRECTORIES: dirname(outside) } }
+  }
+  const r = await run(root, args, opts)
   if (r.code !== 0 && r.code !== 1) return null
   const keys = new Map<string, string>()
   for (const rec of r.out.toString('utf8').split('\0')) {
@@ -210,11 +223,12 @@ export async function filterOffArgs(root: string): Promise<string[]> {
   const all = await filterKeys(root, null)
   if (!all) throw new GitError(msg('Не удалось прочитать настройки git репозитория', 'Could not read the repository git config'), -1, '')
   if (!all.size) return []
-  // the user's own view: system, then global over it (unreadable counts as none: more gets switched off)
-  const own = new Map([...((await filterKeys(root, '--system')) ?? []), ...((await filterKeys(root, '--global')) ?? [])])
+  // what the user's own config says, in any of its views (unreadable counts as none: more gets switched off)
+  const own = new Set<string>()
+  for (const view of ['--system', '--global', 'user'] as const) for (const [k, v] of (await filterKeys(root, view)) ?? []) own.add(`${k}\0${v}`)
   const names = new Set<string>()
   for (const [key, value] of all) {
-    if (own.get(key) === value) continue
+    if (own.has(`${key}\0${value}`)) continue
     // filter.<subsection>.<variable>: the subsection is everything between the first and the last dot.
     // It may be empty: [filter ""] is the driver of the paths .gitattributes marks `filter=`
     const last = key.lastIndexOf('.')

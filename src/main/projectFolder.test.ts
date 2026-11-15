@@ -206,6 +206,32 @@ describe('folder trust', { timeout: 30_000 }, async () => {
     }
   })
 
+  it.skipIf(!git)('drivers from ~/.config/git/config stay on while ~/.gitconfig exists too', async () => {
+    const home = folder('home-xdg', {
+      '.gitconfig': '[user]\n\tname = someone\n',
+      '.config/git/config': '[include]\n\tpath = lfs.inc\n[filter "xdglfs"]\n\tclean = cat\n',
+      '.config/git/lfs.inc': '[filter "inclfs"]\n\tclean = cat\n',
+    })
+    const repo = folder('filters-xdg', { 'plan.json': '{}', 'manifest.json': MANIFEST })
+    gitIn(repo, 'init', '-q')
+    const saved = { HOME: process.env['HOME'], USERPROFILE: process.env['USERPROFILE'], XDG: process.env['XDG_CONFIG_HOME'] }
+    process.env['HOME'] = home
+    process.env['USERPROFILE'] = home
+    delete process.env['XDG_CONFIG_HOME']
+    try {
+      const args = await filterOffArgs(repo)
+      expect(args.some((a) => a.startsWith('filter.xdglfs.') || a.startsWith('filter.inclfs.'))).toBe(false)
+      // the repository defining the same driver its own way is still switched off
+      gitIn(repo, 'config', 'filter.xdglfs.clean', 'sh ./other.sh')
+      expect(await filterOffArgs(repo)).toEqual(expect.arrayContaining(['filter.xdglfs.clean=']))
+    } finally {
+      for (const [k, v] of [['HOME', saved.HOME], ['USERPROFILE', saved.USERPROFILE], ['XDG_CONFIG_HOME', saved.XDG]] as const) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+    }
+  })
+
   it.skipIf(!git)('a filter driver that cannot be switched off stops the commit', async () => {
     const foreign = folder('filters-eq', { 'plan.json': '{}', 'manifest.json': MANIFEST })
     gitIn(foreign, 'init', '-q')

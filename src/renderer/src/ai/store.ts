@@ -189,20 +189,21 @@ export function initAi(): void {
   api.aiChat.onToolCall((call) => void onToolCall(call))
   api.aiChat.onLogin(onLoginEvent)
   let lastLoad: number | undefined
-  let lastPath: string | null = null
   /** the open document has never been written to a file: its chats go when it does */
   let unsavedDoc = false
   const sync = () => {
-    const { filePath, loadId } = docStore.getState()
+    const { filePath, loadId, reload } = docStore.getState()
     // a save keeps the document (the 'saved' hook moves its chats when its reference changes)
     if (loadId === lastLoad) return
     const first = lastLoad === undefined
     lastLoad = loadId
-    const samePath = filePath === lastPath
-    lastPath = filePath
-    // the same project loaded again (an old version viewed, back to the current one, plan.json reloaded
-    // after the agent changed it): the open chat and a running turn go on
-    if (!first && samePath && filePath !== null && docRef() === get().projectPath) return
+    // the same project loaded again (an old version viewed or left, plan.json reloaded after the agent
+    // changed it): the chat stays open. A plan-mode draft was made against the plan that is gone, and a
+    // turn would go on editing an old version, so those end (the turn goes on after a plain reload)
+    if (!first && reload && docRef() === get().projectPath) {
+      leaveChat(reload === 'version')
+      return
+    }
     const gone = !first && unsavedDoc ? get().projectPath : null
     unsavedDoc = filePath === null
     looseRef = ''
@@ -343,9 +344,10 @@ async function moveProject(to: string, copy: boolean, path: string | null): Prom
   else await refreshLists()
 }
 
-/** leaving the current chat: a running turn stops, and the conversation is saved as it stands */
-function leaveChat(): void {
-  const wasRunning = !!get().running
+/** leaving the current chat: a running turn stops (unless `stopTurn` is false), the plan-mode draft is
+ * dropped, and the conversation is saved as it stands */
+function leaveChat(stopTurn = true): void {
+  const wasRunning = stopTurn && !!get().running
   if (wasRunning) stop(false)
   const dropped = discardDraft()
   if (wasRunning || dropped) void persist()

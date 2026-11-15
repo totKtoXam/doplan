@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { availableMax, keyStep, resolveDrag, sanitizeSize } from './sashMath'
+import { availableMax, keyStep, resizeBox, resolveDrag, sanitizeSize } from './sashMath'
 
 const lim = { min: 200, max: 600, collapsible: true }
 
@@ -51,5 +51,27 @@ describe('sanitizeSize', () => {
     expect(sanitizeSize('420', 300, lim)).toBe(300)
     expect(sanitizeSize(Number.NaN, 300, lim)).toBe(300)
     expect(sanitizeSize(undefined, 300, lim)).toBe(300)
+  })
+})
+
+describe('resizeBox', () => {
+  const start = { w: 300, h: 200 }
+  const min = { w: 200, h: 120 }
+  const max = { w: 800, h: 600 }
+  it('moves only the axes of the dragged edge', () => {
+    expect(resizeBox(start, 'e', 50, 40, min, max)).toEqual({ w: 350, h: 200 })
+    expect(resizeBox(start, 's', 50, 40, min, max)).toEqual({ w: 300, h: 240 })
+    expect(resizeBox(start, 'se', 50, 40, min, max)).toEqual({ w: 350, h: 240 })
+  })
+  it('grows against the pointer on the west and north edges', () => {
+    expect(resizeBox(start, 'w', -50, 0, min, max)).toEqual({ w: 350, h: 200 })
+    expect(resizeBox(start, 'nw', 20, 30, min, max)).toEqual({ w: 280, h: 170 })
+  })
+  it('doubles the change of a centred box, so the edge follows the pointer', () => {
+    expect(resizeBox(start, 'e', 50, 0, min, max, 2)).toEqual({ w: 400, h: 200 })
+  })
+  it('stays inside the limits, the minimum winning over a smaller space', () => {
+    expect(resizeBox(start, 'se', -500, 900, min, max)).toEqual({ w: 200, h: 600 })
+    expect(resizeBox(start, 'e', 900, 0, min, { w: 150, h: 600 })).toEqual({ w: 200, h: 200 })
   })
 })

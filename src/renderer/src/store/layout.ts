@@ -29,9 +29,24 @@ export type PanelId = keyof typeof PANELS
 /** the 2D|3D split: share of the 2D view, and the least width each view keeps */
 export const SPLIT = { defaultRatio: 0.5, minPx: 200 } as const
 
+/**
+ * A floating panel or dialog the user resized: only the axes they dragged are kept, the other
+ * one stays automatic. Keyed by a stable name given by the caller (`float.*`, `dialog.*`).
+ */
+export interface BoxSize {
+  w?: number
+  h?: number
+}
+
+/** stored box sizes are checked against these bounds when read back */
+const BOX_BOUNDS = { min: 80, max: 6000 }
+
 interface LayoutState {
   sizes: Record<PanelId, number>
   setSize(id: PanelId, size: number): void
+  boxes: Record<string, BoxSize>
+  /** null forgets the size (double click on a frame edge) */
+  setBox(key: string, size: BoxSize | null): void
 }
 
 const KEY = 'doplan.layout'
@@ -41,6 +56,7 @@ interface Saved {
   leftOpen?: unknown
   rightOpen?: unknown
   split?: unknown
+  boxes?: unknown
 }
 
 function read(): Saved {
@@ -64,12 +80,43 @@ function initialSizes(): Record<PanelId, number> {
   return out
 }
 
+function cleanBox(v: unknown): BoxSize | null {
+  if (!v || typeof v !== 'object') return null
+  const o = v as Record<string, unknown>
+  const out: BoxSize = {}
+  for (const k of ['w', 'h'] as const) {
+    const n = o[k]
+    if (typeof n === 'number' && Number.isFinite(n)) out[k] = Math.round(Math.min(BOX_BOUNDS.max, Math.max(BOX_BOUNDS.min, n)))
+  }
+  return out.w === undefined && out.h === undefined ? null : out
+}
+
+function initialBoxes(): Record<string, BoxSize> {
+  const out: Record<string, BoxSize> = {}
+  if (saved.boxes && typeof saved.boxes === 'object') {
+    for (const [k, v] of Object.entries(saved.boxes as Record<string, unknown>)) {
+      const b = cleanBox(v)
+      if (b) out[k] = b
+    }
+  }
+  return out
+}
+
 export const layoutStore = createStore<LayoutState>()((set) => ({
   sizes: initialSizes(),
   setSize: (id, size) => {
     const p = PANELS[id]
     set((s) => ({ sizes: { ...s.sizes, [id]: sanitizeSize(size, p.defaultSize, { min: p.minSize, max: p.maxSize }) } }))
   },
+  boxes: initialBoxes(),
+  setBox: (key, size) =>
+    set((s) => {
+      const boxes = { ...s.boxes }
+      const b = size && cleanBox({ ...s.boxes[key], ...size })
+      if (b) boxes[key] = b
+      else delete boxes[key]
+      return { boxes }
+    }),
 }))
 
 export const useLayout = <T>(sel: (s: LayoutState) => T): T => useStore(layoutStore, sel)
@@ -78,6 +125,17 @@ export const useLayout = <T>(sel: (s: LayoutState) => T): T => useStore(layoutSt
 export function usePanelSize(id: PanelId) {
   const size = useLayout((s) => s.sizes[id])
   return { ...PANELS[id], size, onSizeChange: (v: number) => layoutStore.getState().setSize(id, v) }
+}
+
+/** the remembered size of a resizable box and its setter (no key: not resizable, nothing kept) */
+export function useBoxSize(key: string | undefined): { size: BoxSize | undefined; set(size: BoxSize | null): void } {
+  const size = useLayout((s) => (key ? s.boxes[key] : undefined))
+  return {
+    size,
+    set: (v) => {
+      if (key) layoutStore.getState().setBox(key, v)
+    },
+  }
 }
 
 export function clampRatio(r: unknown): number {
@@ -103,7 +161,7 @@ function save(): void {
     try {
       globalThis.localStorage?.setItem(
         KEY,
-        JSON.stringify({ sizes: layoutStore.getState().sizes, leftOpen: ui.leftPanelOpen, rightOpen: ui.rightPanelOpen, split: ui.splitRatio }),
+        JSON.stringify({ sizes: layoutStore.getState().sizes, boxes: layoutStore.getState().boxes, leftOpen: ui.leftPanelOpen, rightOpen: ui.rightPanelOpen, split: ui.splitRatio }),
       )
     } catch {
       /* private mode / quota: keep in memory */

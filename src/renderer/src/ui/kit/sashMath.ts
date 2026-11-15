@@ -51,3 +51,35 @@ export function sanitizeSize(v: unknown, fallback: number, { min, max }: PanelLi
   if (typeof v !== 'number' || !Number.isFinite(v)) return fallback
   return Math.round(Math.min(Math.max(min, max), Math.max(min, v)))
 }
+
+// ───────────── resizable boxes (floating panels, dialogs) ─────────────
+
+/** a box edge or corner that can be dragged: n / s / e / w and the four corners */
+export type BoxEdge = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw'
+
+export interface Box {
+  w: number
+  h: number
+}
+
+/** which way an edge grows the box: +1 along +x / +y, -1 against, 0 when it does not move that axis */
+export function edgeSigns(edge: BoxEdge): { x: -1 | 0 | 1; y: -1 | 0 | 1 } {
+  return {
+    x: edge.includes('e') ? 1 : edge.includes('w') ? -1 : 0,
+    y: edge.includes('s') ? 1 : edge.includes('n') ? -1 : 0,
+  }
+}
+
+/**
+ * The box size after dragging `edge` by (dx, dy). `factor` is 2 for a centred box (both sides
+ * move, so the dragged edge follows the pointer). The size stays inside [min, max]; when the
+ * space is smaller than the minimum, the minimum wins.
+ */
+export function resizeBox(start: Box, edge: BoxEdge, dx: number, dy: number, min: Box, max: Box, factor = 1): Box {
+  const s = edgeSigns(edge)
+  const clamp = (v: number, lo: number, hi: number) => Math.round(Math.min(Math.max(lo, hi), Math.max(lo, v)))
+  return {
+    w: s.x ? clamp(start.w + s.x * dx * factor, min.w, max.w) : start.w,
+    h: s.y ? clamp(start.h + s.y * dy * factor, min.h, max.h) : start.h,
+  }
+}

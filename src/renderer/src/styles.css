@@ -256,6 +256,121 @@ body.dp-sash-dragging {
   user-select: none;
 }
 
+/* resize frames of floating panels and dialogs (ui/kit/ResizeFrame.tsx): 6px edges centred on the
+   border that light up like a sash, 12px corners, and a faint grip in the main corner */
+.dp-rz {
+  position: absolute;
+  z-index: 30;
+  touch-action: none;
+  outline: none;
+}
+.dp-rz-n,
+.dp-rz-s {
+  left: 10px;
+  right: 10px;
+  height: 6px;
+}
+.dp-rz-e,
+.dp-rz-w {
+  top: 10px;
+  bottom: 10px;
+  width: 6px;
+}
+.dp-rz-n {
+  top: -3px;
+}
+.dp-rz-s {
+  bottom: -3px;
+}
+.dp-rz-e {
+  right: -3px;
+}
+.dp-rz-w {
+  left: -3px;
+}
+.dp-rz-ne,
+.dp-rz-nw,
+.dp-rz-se,
+.dp-rz-sw {
+  width: 14px;
+  height: 14px;
+}
+.dp-rz-ne {
+  top: -4px;
+  right: -4px;
+}
+.dp-rz-nw {
+  top: -4px;
+  left: -4px;
+}
+.dp-rz-se {
+  bottom: -4px;
+  right: -4px;
+}
+.dp-rz-sw {
+  bottom: -4px;
+  left: -4px;
+}
+.dp-rz::after {
+  content: '';
+  position: absolute;
+  background: transparent;
+  transition: background-color 0.1s ease-out;
+}
+.dp-rz-n::after,
+.dp-rz-s::after {
+  left: 0;
+  right: 0;
+  top: 2px;
+  height: 2px;
+}
+.dp-rz-e::after,
+.dp-rz-w::after {
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+}
+.dp-rz-n:hover::after,
+.dp-rz-s:hover::after,
+.dp-rz-e:hover::after,
+.dp-rz-w:hover::after {
+  background: var(--accent);
+  transition-delay: 0.2s;
+}
+.dp-rz[data-dragging]::after {
+  background: var(--accent);
+  transition-delay: 0s;
+}
+/* the grip: two short diagonal strokes inside the corner */
+.dp-rz-grip::before {
+  content: '';
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  opacity: 0.55;
+  background: linear-gradient(135deg, transparent 0 45%, var(--muted) 45% 55%, transparent 55% 70%, var(--muted) 70% 80%, transparent 80%);
+}
+.dp-rz-se.dp-rz-grip::before {
+  right: 5px;
+  bottom: 5px;
+}
+.dp-rz-sw.dp-rz-grip::before {
+  left: 5px;
+  bottom: 5px;
+  transform: scaleX(-1);
+}
+.dp-rz-grip:hover::before,
+.dp-rz-grip[data-dragging]::before,
+.dp-rz-grip:focus-visible::before {
+  opacity: 1;
+  background: linear-gradient(135deg, transparent 0 45%, var(--accent) 45% 55%, transparent 55% 70%, var(--accent) 70% 80%, transparent 80%);
+}
+.dp-rz-grip:focus-visible {
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
 .dp-drop-overlay {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   border: 2px dashed var(--accent);

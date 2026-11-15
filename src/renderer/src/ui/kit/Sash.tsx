@@ -49,6 +49,69 @@ function limitCursor(orientation: SashOrientation, limit: 'min' | 'max' | null |
   return towardsPlus ? 's-resize' : 'n-resize'
 }
 
+/**
+ * Pointer drag shared by sashes and resize frames: window listeners, one `move` per frame with
+ * the total offset since the press, Escape / pointercancel cancel. A full-window shield keeps
+ * the canvases (and their pointer handlers) out of the drag and holds the cursor while the
+ * pointer leaves the thin handle. Returns a function that stops the drag.
+ */
+export function startPointerDrag(
+  e: ReactPointerEvent,
+  cursor: string,
+  h: { move(dx: number, dy: number): void; end(cancelled: boolean): void },
+): (cancelled: boolean) => void {
+  // preventDefault also keeps the focus where it was: a mouse drag must not leave the line lit
+  e.preventDefault()
+  const ox = e.clientX
+  const oy = e.clientY
+  let pending: [number, number] | null = null
+  let raf = 0
+  let done = false
+  const shield = document.createElement('div')
+  shield.className = 'dp-sash-shield'
+  shield.style.cursor = cursor
+  document.body.appendChild(shield)
+  document.body.classList.add('dp-sash-dragging')
+  beginLiveResize()
+  const flush = () => {
+    raf = 0
+    if (pending) h.move(pending[0], pending[1])
+    pending = null
+  }
+  const move = (ev: PointerEvent) => {
+    pending = [ev.clientX - ox, ev.clientY - oy]
+    if (!raf) raf = requestAnimationFrame(flush)
+  }
+  const key = (ev: globalThis.KeyboardEvent) => {
+    if (ev.key !== 'Escape') return
+    ev.preventDefault()
+    ev.stopPropagation()
+    stop(true)
+  }
+  const stop = (cancelled: boolean) => {
+    if (done) return
+    done = true
+    if (raf) cancelAnimationFrame(raf)
+    if (!cancelled && pending) h.move(pending[0], pending[1])
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', up)
+    window.removeEventListener('pointercancel', cancel)
+    window.removeEventListener('keydown', key, true)
+    shield.remove()
+    document.body.classList.remove('dp-sash-dragging')
+    h.end(cancelled)
+    // after the final size is committed, so views redraw at it in full quality
+    requestAnimationFrame(endLiveResize)
+  }
+  const up = () => stop(false)
+  const cancel = () => stop(true)
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', up)
+  window.addEventListener('pointercancel', cancel)
+  window.addEventListener('keydown', key, true)
+  return stop
+}
+
 export function Sash({
   orientation = 'vertical',
   onDragStart,
@@ -77,57 +140,15 @@ export function Sash({
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 || e.detail > 1) return
     if (onDragStart?.() === false) return
-    // preventDefault also keeps the focus where it was: a mouse drag must not leave the line lit
-    e.preventDefault()
-    const origin = orientation === 'vertical' ? e.clientX : e.clientY
-    let pending: number | null = null
-    let raf = 0
-    // a full-window shield keeps the canvases (and their pointer handlers) out of the drag and
-    // holds the cursor while the pointer leaves the thin sash
-    const shield = document.createElement('div')
-    shield.className = 'dp-sash-shield'
-    shield.style.cursor = CURSOR[orientation]
-    document.body.appendChild(shield)
-    document.body.classList.add('dp-sash-dragging')
-    beginLiveResize()
     setDragging(true)
-    const flush = () => {
-      raf = 0
-      if (pending !== null) cbs.current.onDrag(pending)
-      pending = null
-    }
-    const move = (ev: PointerEvent) => {
-      pending = (orientation === 'vertical' ? ev.clientX : ev.clientY) - origin
-      if (!raf) raf = requestAnimationFrame(flush)
-    }
-    const key = (ev: globalThis.KeyboardEvent) => {
-      if (ev.key !== 'Escape') return
-      ev.preventDefault()
-      ev.stopPropagation()
-      stop(true)
-    }
-    const stop = (cancelled: boolean) => {
-      stopRef.current = null
-      if (raf) cancelAnimationFrame(raf)
-      if (!cancelled && pending !== null) cbs.current.onDrag(pending)
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-      window.removeEventListener('pointercancel', cancel)
-      window.removeEventListener('keydown', key, true)
-      shield.remove()
-      document.body.classList.remove('dp-sash-dragging')
-      setDragging(false)
-      cbs.current.onDragEnd?.(cancelled)
-      // after the final size is committed, so views redraw at it in full quality
-      requestAnimationFrame(endLiveResize)
-    }
-    const up = () => stop(false)
-    const cancel = () => stop(true)
-    stopRef.current = stop
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
-    window.addEventListener('pointercancel', cancel)
-    window.addEventListener('keydown', key, true)
+    stopRef.current = startPointerDrag(e, CURSOR[orientation], {
+      move: (dx, dy) => cbs.current.onDrag(orientation === 'vertical' ? dx : dy),
+      end: (cancelled) => {
+        stopRef.current = null
+        setDragging(false)
+        cbs.current.onDragEnd?.(cancelled)
+      },
+    })
   }
 
   return (

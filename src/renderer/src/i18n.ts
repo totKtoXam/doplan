@@ -403,6 +403,8 @@ const en: Record<string, string> = {
   'Ширина каталога': 'Catalogue width',
   'Ширина панели свойств': 'Properties panel width',
   'Ширина панели': 'Panel width',
+  'Размер окна': 'Window size',
+  'Размер панели': 'Panel size',
   'Качество рендера': 'Render quality',
 
   // ── room types ──

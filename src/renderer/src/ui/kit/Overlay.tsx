@@ -14,7 +14,9 @@ import { X } from 'lucide-react'
 import { cn, focusRing } from './cn'
 import { IconButton } from './Button'
 import { Sash } from './Sash'
-import { keyStep, resolveDrag } from './sashMath'
+import { ResizeFrame } from './ResizeFrame'
+import { type Box, keyStep, resolveDrag } from './sashMath'
+import { useBoxSize } from '@/store/layout'
 
 const FOCUSABLE =
   'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'
@@ -40,6 +42,16 @@ export interface DialogProps {
   drawer?: boolean
   /** makes a drawer resizable with a sash on its left edge (the caller keeps the size) */
   drawerSize?: DrawerSize
+  /**
+   * makes a centred dialog resizable from its edges and corners; the size is remembered under this
+   * name (double click on an edge restores the default). For dialogs with wide content: tables,
+   * images, previews.
+   */
+  resizeKey?: string
+  /** the smallest size of a resizable dialog */
+  minSize?: Box
+  /** aria label of the resize grip (translated by the caller) */
+  resizeLabel?: string
 }
 
 export interface DrawerSize {
@@ -50,6 +62,10 @@ export interface DrawerSize {
   maxSize: number
   label: string
 }
+
+/** px a resizable dialog keeps free around it (the backdrop padding) */
+const DIALOG_GAP = 32
+const ALL_EDGES = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'] as const
 
 /** px a resizable drawer leaves free on the left of the window */
 const DRAWER_GAP = 48
@@ -107,8 +123,24 @@ function DrawerSash({ d, target }: { d: DrawerSize; target: RefObject<HTMLDivEle
 }
 
 /** modal dialog: portal, Escape closes, focus trap, focus restore, labelled by its title */
-export function Dialog({ open, onClose, title, children, footer, width, modalLock, className, drawer, drawerSize }: DialogProps) {
+export function Dialog({
+  open,
+  onClose,
+  title,
+  children,
+  footer,
+  width,
+  modalLock,
+  className,
+  drawer,
+  drawerSize,
+  resizeKey,
+  minSize = { w: 360, h: 240 },
+  resizeLabel = 'Размер окна',
+}: DialogProps) {
   const ref = useRef<HTMLDivElement>(null)
+  const resizable = !!resizeKey && !drawer
+  const box = useBoxSize(resizable ? resizeKey : undefined)
   const titleId = useId()
   const closeRef = useRef(onClose)
   closeRef.current = onClose
@@ -175,10 +207,19 @@ export function Dialog({ open, onClose, title, children, footer, width, modalLoc
           'flex flex-col border border-[var(--border)] bg-[var(--panel)] text-[var(--text)] shadow-2xl outline-none',
           drawer
             ? cn('relative h-full border-y-0 border-r-0', drawerSize ? 'max-w-[calc(100vw-48px)] shrink-0' : 'w-full max-w-sm')
-            : cn('max-h-[90vh] w-full rounded-lg', width ?? 'max-w-lg'),
+            : cn('max-h-[90vh] w-full rounded-lg', width ?? 'max-w-lg', resizable && 'relative'),
           className,
         )}
-        style={drawer && drawerSize ? { width: drawerSize.size } : undefined}
+        style={
+          drawer && drawerSize
+            ? { width: drawerSize.size }
+            : resizable && box.size
+              ? {
+                  ...(box.size.w ? { width: box.size.w, maxWidth: `calc(100vw - ${DIALOG_GAP}px)` } : null),
+                  ...(box.size.h ? { height: box.size.h, maxHeight: `calc(100vh - ${DIALOG_GAP}px)` } : null),
+                }
+              : undefined
+        }
       >
         <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-[var(--border)] pl-4 pr-2">
           <h2 id={titleId} className="truncate text-sm font-semibold">
@@ -192,6 +233,19 @@ export function Dialog({ open, onClose, title, children, footer, width, modalLoc
         )}
         {/* last in the tab order: the dialog's first focus goes to its content */}
         {drawer && drawerSize && <DrawerSash d={drawerSize} target={ref} />}
+        {resizable && (
+          <ResizeFrame
+            target={ref}
+            edges={[...ALL_EDGES]}
+            grip="se"
+            factor={2}
+            min={minSize}
+            max={() => ({ w: window.innerWidth - DIALOG_GAP, h: window.innerHeight - DIALOG_GAP })}
+            onCommit={box.set}
+            onReset={() => box.set(null)}
+            label={resizeLabel}
+          />
+        )}
       </div>
     </div>,
     document.body,

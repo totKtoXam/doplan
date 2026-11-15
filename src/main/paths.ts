@@ -48,6 +48,12 @@ export const paths = {
   get rendererDir(): string {
     return join(mainDir, '..', 'renderer')
   },
+  /** app icon for unpackaged runs (resources/icon.ico); undefined when packaged or not found */
+  get devIcon(): string | undefined {
+    if (app.isPackaged) return undefined
+    const candidates = [join(app.getAppPath(), 'resources', 'icon.ico'), join(mainDir, '..', '..', 'resources', 'icon.ico')]
+    return candidates.find((c) => existsSync(c))
+  },
   get preload(): string {
     return join(mainDir, '..', 'preload', 'index.cjs')
   },

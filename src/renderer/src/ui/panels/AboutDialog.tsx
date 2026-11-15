@@ -9,6 +9,7 @@ import { useT } from '@/i18n'
 import { api } from '@/store/api'
 import { checkForUpdatesManually, installUpdate, openReleasePage, useUpdates } from '@/store/updates'
 import { Button, Dialog, Spinner } from '@/ui/kit'
+import { AppLogo } from '@/ui/shell/AppLogo'
 import { APP_GIT } from '@/ui/shell/appVersion'
 import type { DialogPropsBase } from './BomDialog'
 
@@ -103,11 +104,7 @@ export function AboutDialog({ open, onClose }: DialogPropsBase) {
     >
       <div className="flex flex-col gap-4 text-xs">
         <div className="flex items-center gap-3">
-          <svg width="40" height="40" viewBox="0 0 24 24" aria-hidden className="shrink-0">
-            <rect x="2" y="2" width="20" height="20" rx="5" fill="var(--accent)" />
-            <path d="M7 7h6v4h4v6H7z" fill="none" stroke="var(--accent-fg)" strokeWidth="1.8" strokeLinejoin="round" />
-            <path d="M13 7v4" stroke="var(--accent-fg)" strokeWidth="1.8" />
-          </svg>
+          <AppLogo size={40} className="shrink-0" />
           <div className="flex min-w-0 flex-col gap-0.5">
             <div className="text-sm font-semibold">doplan</div>
             <div className="text-[var(--muted)]">{t('Планировки, фотореалистичное 3D и дизайн интерьера')}</div>

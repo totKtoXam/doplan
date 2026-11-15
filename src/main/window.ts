@@ -91,6 +91,8 @@ export function createMainWindow(): BrowserWindow {
     show: false,
     title: 'doplan',
     backgroundColor: '#16181d',
+    // packaged builds take the icon embedded in doplan.exe; unpackaged runs would show Electron's own
+    ...(paths.devIcon ? { icon: paths.devIcon } : {}),
     autoHideMenuBar: false,
     webPreferences: {
       preload: paths.preload,

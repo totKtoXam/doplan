@@ -23,9 +23,9 @@ fileAssociations:
     description: doplan project
     mimeType: application/x-doplan
     role: Editor
-    icon: resources/icon.png
+    icon: resources/icon.ico
 win:
-  icon: resources/icon.png
+  icon: resources/icon.ico
   executableName: doplan
   target:
     - target: nsis

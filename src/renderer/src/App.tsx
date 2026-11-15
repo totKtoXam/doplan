@@ -20,6 +20,7 @@ import {
 import { RightDock } from '@/ai' // ai-chat: «Свойства | ИИ» tabs
 import { LevelTabs } from '@/ui/shell/LevelTabs'
 import { ProjectFolderDialogs } from '@/ui/panels/ProjectFolderDialogs'
+import { AppLogo } from '@/ui/shell/AppLogo'
 import { Overlays } from '@/ui/shell/Overlays'
 import { IconBtn } from '@/ui/shell/primitives'
 import { StatusBar } from '@/ui/shell/StatusBar'
@@ -114,11 +115,7 @@ function Splash() {
   return (
     <div className="flex h-full items-center justify-center bg-bg">
       <div className="flex flex-col items-center gap-3 text-muted">
-        <svg width="44" height="44" viewBox="0 0 24 24" aria-hidden>
-          <rect x="2" y="2" width="20" height="20" rx="5" fill="var(--accent)" />
-          <path d="M7 7h6v4h4v6H7z" fill="none" stroke="var(--accent-fg)" strokeWidth="1.8" strokeLinejoin="round" />
-          <path d="M13 7v4" stroke="var(--accent-fg)" strokeWidth="1.8" />
-        </svg>
+        <AppLogo size={44} />
         <div className="text-sm font-semibold text-text">doplan</div>
         <div className="h-1 w-32 overflow-hidden rounded bg-panel-3">
           <div className="dp-indeterminate h-full w-1/3 rounded bg-accent" />

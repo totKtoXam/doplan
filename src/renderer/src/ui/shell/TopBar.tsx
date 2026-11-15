@@ -35,16 +35,13 @@ import { useDoc } from '@/store/document'
 import { uiStore, useUi } from '@/store/ui'
 import { checkForUpdatesManually } from '@/store/updates'
 import type { ViewMode } from '@/contracts'
+import { AppLogo } from './AppLogo'
 import { DropdownMenu, IconBtn, type MenuEntry, Segmented, Sep, TextBtn, Tip } from './primitives'
 
 function Logo() {
   return (
     <div className="flex shrink-0 items-center gap-1.5 pr-1 pl-1">
-      <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden>
-        <rect x="2" y="2" width="20" height="20" rx="5" fill="var(--accent)" />
-        <path d="M7 7h6v4h4v6H7z" fill="none" stroke="var(--accent-fg)" strokeWidth="1.8" strokeLinejoin="round" />
-        <path d="M13 7v4" stroke="var(--accent-fg)" strokeWidth="1.8" />
-      </svg>
+      <AppLogo size={20} />
       <span className="text-[13px] font-semibold tracking-tight">doplan</span>
     </div>
   )

@@ -66,6 +66,9 @@ describe('styles: data', () => {
   })
 })
 
+/** only openings, furniture and lights: the wall-finish block does not run */
+const ACCENT_OFF_FINISHES_OFF = { finishes: false, accent: false }
+
 describe('applyStyle', () => {
   const style = findStyle('style_scandi')!
 
@@ -168,6 +171,24 @@ describe('applyStyle', () => {
     expect(patches).toEqual([])
   })
 
+  it('re-applying the same style to a 0.9/0.10 project changes nothing', () => {
+    enablePatches()
+    const { doc, roomIds } = build()
+    applyStyle(doc, style, { rooms: 'all' })
+    applyStyle(doc, style, { rooms: [roomIds.living], parts: { accent: false } })
+    // as 0.9.0/0.10.0 saved it: rooms without an accent wall carry no key
+    const file = JSON.parse(serializeDoc(doc)) as Doc
+    for (const r of Object.values(file.rooms)) if (r.design) r.design = { styleId: r.design.styleId }
+    const back = parseDoc(file)
+    expect(Object.values(back.rooms).every((r) => r.design && !('accentFace' in r.design))).toBe(true)
+    for (const parts of [{ accent: false }, ACCENT_OFF_FINISHES_OFF]) {
+      const [, patches] = produceWithPatches(back, (d) => {
+        applyStyle(d, style, { rooms: 'all', parts })
+      })
+      expect(patches).toEqual([])
+    }
+  })
+
   it('a new wall material drops the old wall layout', () => {
     const { doc } = build()
     for (const w of Object.values(doc.walls))
@@ -229,19 +250,46 @@ describe('applyStyle', () => {
       doc.openings[id] = { ...win, id, wallId }
     }
 
-    for (const [name, spoil] of [
-      ['saved before the key existed', (d: Doc, room: Id) => delete d.rooms[room].design!.accentFace],
-      ['stale key (copied room)', (d: Doc, room: Id) => (d.rooms[room].design!.accentFace = 'w_elsewhere:left')],
+    it('a room styled by 0.8.0 (no remembered face) resets nothing: the old accent stays', () => {
+      const { doc, roomIds } = build()
+      applyStyle(doc, style, { rooms: [roomIds.living] })
+      const [first] = accentFaces(doc)
+      delete doc.rooms[roomIds.living].design!.accentFace
+      cutWindow(doc, first.w.id, 'o_new')
+      applyStyle(doc, style, { rooms: [roomIds.living], parts: ACCENT_ONLY })
+      expect(accentFaces(doc)).toHaveLength(2)
+      expect(first.w[first.k].materialId).toBe(style.finishes.wallAccent)
+    })
+
+    for (const [name, prepare] of [
+      ['styled without an accent', (d: Doc, room: Id) => applyStyle(d, style, { rooms: [room], parts: { accent: false } })],
+      ['styled with finishes and accent off', (d: Doc, room: Id) => applyStyle(d, style, { rooms: [room], parts: ACCENT_OFF_FINISHES_OFF })],
+      ['never styled', () => undefined],
+      ['stale key (the accent wall was deleted)', (d: Doc, room: Id) => {
+        applyStyle(d, style, { rooms: [room], parts: { accent: false } })
+        d.rooms[room].design = { ...d.rooms[room].design, accentFace: 'w_gone:left' }
+      }],
+      ['0.9/0.10 file with an accent-free apply', (d: Doc, room: Id) => {
+        applyStyle(d, style, { rooms: [room], parts: { accent: false } })
+        const file = JSON.parse(serializeDoc(d)) as Doc
+        file.rooms[room].design = { styleId: style.id }
+        Object.assign(d, parseDoc(file))
+      }],
     ] as const) {
-      it(name, () => {
+      it(`hand-painted accent walls stay: ${name}`, () => {
         const { doc, roomIds } = build()
-        applyStyle(doc, style, { rooms: [roomIds.living] })
-        const [first] = accentFaces(doc)
-        spoil(doc, roomIds.living)
-        cutWindow(doc, first.w.id, 'o_new')
+        prepare(doc, roomIds.living)
+        const room = doc.rooms[roomIds.living]
+        const before = structuredClone(room.design)
+        // the user paints the longest bare living-room wall in the accent colour (located here by an
+        // accent-only apply whose remembered face is then put back), then cuts a window into it
         applyStyle(doc, style, { rooms: [roomIds.living], parts: ACCENT_ONLY })
-        expect(accentFaces(doc)).toHaveLength(1)
-        expect(first.w[first.k].materialId).not.toBe(style.finishes.wallAccent)
+        const [mine] = accentFaces(doc)
+        if (before) room.design = before
+        else delete room.design
+        cutWindow(doc, mine.w.id, 'o_mine')
+        applyStyle(doc, style, { rooms: [roomIds.living], parts: ACCENT_ONLY })
+        expect(mine.w[mine.k].materialId).toBe(style.finishes.wallAccent)
       })
     }
 
@@ -270,6 +318,46 @@ describe('applyStyle', () => {
       expect(room.design?.accentFace).toBe('w_b:right')
       remapAccentFace(room, new Map())
       expect(room.design).toEqual({ styleId: 's' })
+    })
+
+    it('a separate wall on the accent line (behind a niche) is not a piece of the accent', () => {
+      // living room 6000×4000 with a 1000 mm niche in the bottom wall: two collinear, separate walls
+      const r = compilePlanSpecDetailed(
+        parsePlanSpec({
+          ...SPEC,
+          rooms: [
+            {
+              id: 'liv',
+              name: 'Гостиная',
+              type: 'living',
+              polygon: [[0, 0], [6000, 0], [6000, 4000], [3500, 4000], [3500, 4300], [2500, 4300], [2500, 4000], [0, 4000]],
+            },
+          ],
+          openings: [
+            { id: 'w1', type: 'window', at: [3000, -150], width: 1200, sill: 850, height: 1500 },
+            { id: 'w2', type: 'window', at: [-150, 2000], width: 1200, sill: 850, height: 1500 },
+            { id: 'w3', type: 'window', at: [6150, 2000], width: 1200, sill: 850, height: 1500 },
+          ],
+        }),
+      )
+      const doc = r.doc
+      const room = Object.keys(doc.rooms)[0]
+      applyStyle(doc, style, { rooms: [room] })
+      const [w1] = accentFaces(doc)
+      const n = (id: Id) => doc.nodes[id]
+      const y = n(w1.w.a).y
+      expect(Math.abs(n(w1.w.b).y - y)).toBeLessThan(1)
+      // the other piece of the bottom line: same line, no shared node
+      const w2 = Object.values(doc.walls).find(
+        (w) => w.id !== w1.w.id && Math.abs(n(w.a).y - y) < 1 && Math.abs(n(w.b).y - y) < 1 && ![w.a, w.b].some((x) => x === w1.w.a || x === w1.w.b),
+      )!
+      expect(w2).toBeDefined()
+      w2[w1.k].materialId = style.finishes.wallAccent!
+      cutWindow(doc, w1.w.id, 'o_a')
+      cutWindow(doc, w2.id, 'o_b')
+      applyStyle(doc, style, { rooms: [room], parts: ACCENT_ONLY })
+      expect(w1.w[w1.k].materialId).not.toBe(style.finishes.wallAccent)
+      expect(w2[w1.k].materialId).toBe(style.finishes.wallAccent)
     })
   })
 })

@@ -4,6 +4,23 @@ import { downloadEntry, importMaterial, importModel, loadCatalog, removeEntry, s
 import { CH } from './channels'
 import { exportPdf, pickFiles, readFileBytes, readFileText, reveal, saveBinary, saveText } from './files'
 import { addProjectAsset, autosave, clearRecovery, openProject, recover, resetProjectAssets, saveProject } from './project'
+import {
+  attachProject,
+  createProject,
+  defaultLocation,
+  exportZip,
+  openProjectFolder,
+  pickLocation,
+  pickProjectsDir,
+  projectHistory,
+  projectInfo,
+  projectInstructions,
+  projectVersionDoc,
+  setProjectInstructions,
+  tagProjectVersion,
+  trustProjectFolder,
+} from './project'
+import { getProjectRoot } from './projectFolder'
 import { getSettings, setApiKey, setSettings } from './settings'
 import { confirmClose, getMainWindow, isTrustedUrl, setWindowTitle } from './window'
 
@@ -37,12 +54,29 @@ export { handle as handleIpc, on as onIpc }
 
 export function registerIpc(): void {
   handle(CH.projectOpen, (path?: unknown) => openProject(path))
-  handle(CH.projectSave, (doc: unknown, path: unknown) => saveProject(doc, path))
+  handle(CH.projectSave, (doc: unknown, path: unknown, opts: unknown) => saveProject(doc, path, opts))
   handle(CH.projectAutosave, (doc: unknown, path: unknown) => autosave(doc, path))
   handle(CH.projectRecover, () => recover())
   handle(CH.projectClearRecovery, () => clearRecovery())
   handle(CH.projectReset, () => resetProjectAssets())
   handle(CH.projectAddAsset, (data: unknown, ext: unknown) => addProjectAsset(data, ext))
+
+  // project folders + git versions
+  handle(CH.projectRoot, () => getProjectRoot())
+  handle(CH.projectInstructions, () => projectInstructions())
+  handle(CH.projectSetInstructions, (text: unknown) => setProjectInstructions(text))
+  handle(CH.projectInfo, () => projectInfo())
+  handle(CH.projectDefaultLocation, () => defaultLocation())
+  handle(CH.projectPickLocation, (defaultPath: unknown) => pickLocation(defaultPath))
+  handle(CH.projectPickProjectsDir, () => pickProjectsDir())
+  handle(CH.projectCreate, (doc: unknown, name: unknown, parent: unknown) => createProject(doc, name, parent))
+  handle(CH.projectOpenFolder, () => openProjectFolder())
+  handle(CH.projectExportZip, (doc: unknown) => exportZip(doc))
+  handle(CH.projectAttach, (path: unknown) => attachProject(path))
+  handle(CH.projectTrustFolder, () => trustProjectFolder())
+  handle(CH.projectHistory, () => projectHistory())
+  handle(CH.projectVersionDoc, (sha: unknown) => projectVersionDoc(sha))
+  handle(CH.projectTagVersion, (sha: unknown, label: unknown) => tagProjectVersion(sha, label))
 
   handle(CH.filesPick, (filters: unknown, multi: unknown) => pickFiles(filters, multi))
   handle(CH.filesRead, (path: unknown) => readFileBytes(path))

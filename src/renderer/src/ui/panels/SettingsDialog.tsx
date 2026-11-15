@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Eye, EyeOff, KeyRound } from 'lucide-react'
+import { Eye, EyeOff, FolderOpen, KeyRound } from 'lucide-react'
 import type { AppSettings } from '@shared/ipc'
 import { uiStore } from '@/store/ui'
 import { useT } from '@/i18n'
@@ -20,6 +20,8 @@ export function SettingsDialog({ open, onClose }: DialogPropsBase) {
   const [keyBusy, setKeyBusy] = useState(false)
   const [keyMsg, setKeyMsg] = useState('')
   const [backendChanged, setBackendChanged] = useState(false)
+  /** effective default folder for new projects (custom or Documents/doplan) */
+  const [projectsDir, setProjectsDir] = useState('')
 
   useEffect(() => {
     if (!open) return
@@ -33,6 +35,10 @@ export function SettingsDialog({ open, onClose }: DialogPropsBase) {
       .get()
       .then((v) => alive && setS(v))
       .catch((e) => alive && setError(errorText(e)))
+    void window.doplan.project
+      .defaultLocation()
+      .then((p) => alive && setProjectsDir(p))
+      .catch(() => {})
     return () => {
       alive = false
     }
@@ -46,6 +52,17 @@ export function SettingsDialog({ open, onClose }: DialogPropsBase) {
     if (patch.backend) setBackendChanged(true)
     try {
       setS(await window.doplan.settings.set(patch))
+    } catch (e) {
+      setError(errorText(e))
+    }
+  }
+
+  const changeProjectsDir = async (reset: boolean) => {
+    setError('')
+    try {
+      const next = reset ? await window.doplan.settings.set({ projectsDir: null }) : await window.doplan.project.pickProjectsDir()
+      if (next) setS(next)
+      setProjectsDir(await window.doplan.project.defaultLocation())
     } catch (e) {
       setError(errorText(e))
     }
@@ -132,6 +149,25 @@ export function SettingsDialog({ open, onClose }: DialogPropsBase) {
               <Row label={t('Автосохранение, с')} hint={t('Снимок для восстановления после сбоя; 0 — выключено.')}>
                 <NumberInput kind="number" value={s.autosaveSec} min={0} max={3600} step={10} round={1} onChange={(v) => void update({ autosaveSec: Math.round(v) })} />
               </Row>
+              {window.doplan.platform !== 'browser' && (
+                <Row label={t('Папка проектов')} hint={t('Здесь предлагается создавать новые проекты («Новый проект», «Сохранить как»).')}>
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <span className="truncate font-mono text-[11px] text-[var(--text)]" title={projectsDir}>
+                      {projectsDir || '…'}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <Button size="sm" icon={<FolderOpen className="size-3.5" />} onClick={() => void changeProjectsDir(false)}>
+                        {t('Изменить…')}
+                      </Button>
+                      {s.projectsDir && (
+                        <Button size="sm" variant="ghost" onClick={() => void changeProjectsDir(true)}>
+                          {t('По умолчанию')}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </Row>
+              )}
             </div>
           </Section>
 

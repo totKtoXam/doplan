@@ -11,6 +11,7 @@ import type { EntityRef, Id } from '@core/types'
 import type { AiChatMeta, AiChatRecord, AiChatSettings, AiChip, AiImage, AiLoginEvent, AiMessage, AiPart, AiProviderId, AiProviderInfo, AiRunEvent, AiToolCall } from '@shared/aiChat'
 import { DEFAULT_AI_SETTINGS } from '@shared/aiChat'
 import { AI_TOOL_TITLES, isAiToolName } from '@shared/aiTools'
+import { ensureAiFolderTrust } from '@/actions/project'
 import { t } from '@/i18n'
 import { api } from '@/store/api'
 import { docStore } from '@/store/document'
@@ -191,11 +192,18 @@ export function initAi(): void {
   /** the open document has never been written to a file: its chats go when it does */
   let unsavedDoc = false
   const sync = () => {
-    const { filePath, loadId } = docStore.getState()
+    const { filePath, loadId, reload } = docStore.getState()
     // a save keeps the document (the 'saved' hook moves its chats when its reference changes)
     if (loadId === lastLoad) return
     const first = lastLoad === undefined
     lastLoad = loadId
+    // the same project loaded again (an old version viewed or left, plan.json reloaded after the agent
+    // changed it): the chat stays open. A plan-mode draft was made against the plan that is gone, and a
+    // turn would go on editing an old version, so those end (the turn goes on after a plain reload)
+    if (!first && reload && docRef() === get().projectPath) {
+      leaveChat(reload === 'version')
+      return
+    }
     const gone = !first && unsavedDoc ? get().projectPath : null
     unsavedDoc = filePath === null
     looseRef = ''
@@ -312,15 +320,22 @@ async function moveProject(to: string, copy: boolean, path: string | null): Prom
   if (moving === wait) moving = null
   // agent sessions resume only in the folder and project they were made in: the open chat drops them
   // too (Save As: the copy starts its own; a target with a folder of its own), and so does a running turn
+  // a move keeps the sessions that remember their folder (main checks it on every run); a copy keeps none
   if (!sessionsKept) {
     const r = get().running
     if (!get().legacy) {
       patchChat((c) => {
-        delete c.resume
+        if (copy) {
+          delete c.resume
+          delete c.resumeCwd
+          return
+        }
+        for (const p of Object.keys(c.resume ?? {}) as AiProviderId[]) if (!c.resumeCwd?.[p]) delete c.resume![p]
       })
-      if (r) voidSessions.add(r.runId)
+      // the running turn's session comes with its folder: only a copy must not continue it
+      if (r && copy) voidSessions.add(r.runId)
     }
-    for (const s of stoppedRuns.values()) if (s.ref === from) s.noSession = true
+    if (copy) for (const s of stoppedRuns.values()) if (s.ref === from) s.noSession = true
   }
   if (!copy) for (const s of stoppedRuns.values()) if (s.ref === from) s.ref = to
   if (get().projectPath !== to) return
@@ -329,9 +344,10 @@ async function moveProject(to: string, copy: boolean, path: string | null): Prom
   else await refreshLists()
 }
 
-/** leaving the current chat: a running turn stops, and the conversation is saved as it stands */
-function leaveChat(): void {
-  const wasRunning = !!get().running
+/** leaving the current chat: a running turn stops (unless `stopTurn` is false), the plan-mode draft is
+ * dropped, and the conversation is saved as it stands */
+function leaveChat(stopTurn = true): void {
+  const wasRunning = stopTurn && !!get().running
   if (wasRunning) stop(false)
   const dropped = discardDraft()
   if (wasRunning || dropped) void persist()
@@ -663,10 +679,26 @@ export function currentProvider(): AiProviderInfo | undefined {
   return s.providers.find((p) => p.id === s.settings.provider)
 }
 
+/** a trust question is open (send() awaits it): a second send waits for nothing */
+let askingTrust = false
+
 export async function send(raw: string): Promise<void> {
-  if (get().running) return
+  if (get().running || askingTrust) return
   // a turn starts where the chats are, not halfway through moving them
   if (moving) await moving
+  if (currentProvider()?.id !== 'api' && currentProvider()?.available) {
+    // an agent CLI in a project folder the user has not trusted yet: ask once (see actions/project.ts)
+    askingTrust = true
+    try {
+      if (!(await ensureAiFolderTrust())) {
+        // the composer was cleared on Enter: a cancelled question gives the message back
+        insertIntoComposer(raw, false)
+        return
+      }
+    } finally {
+      askingTrust = false
+    }
+  }
   const st = get()
   if (st.running) return
   const { text, needsImage } = expandQuick(raw)
@@ -717,6 +749,7 @@ export async function send(raw: string): Promise<void> {
       images: images.map(({ mime, data, name }) => ({ mime, data, name })),
       chips,
       resumeId: chat.resume?.[settings.provider],
+      resumeCwd: chat.resumeCwd?.[settings.provider],
       apiHistory: settings.provider === 'api' ? chat.apiHistory : undefined,
     })
   } catch (e) {
@@ -748,7 +781,10 @@ const voidSessions = new Set<string>()
 
 /** the events of a turn that change the chat record itself (not what is shown while it runs) */
 function recordEvent(c: AiChatRecord, msgId: string, ev: AiRunEvent): void {
-  if (ev.type === 'session') c.resume = { ...(c.resume ?? {}), [c.provider]: ev.id }
+  if (ev.type === 'session') {
+    c.resume = { ...(c.resume ?? {}), [c.provider]: ev.id }
+    if (ev.cwd) c.resumeCwd = { ...(c.resumeCwd ?? {}), [c.provider]: ev.cwd }
+  }
   else if (ev.type === 'apiHistory') c.apiHistory = ev.messages
   else if (ev.type === 'usage') {
     const m = c.messages.find((x) => x.id === msgId)

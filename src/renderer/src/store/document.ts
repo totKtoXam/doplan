@@ -231,6 +231,7 @@ export const docStore = createStore<DocStoreState>()((set, get) => {
     derived: deriveAll(initialDoc),
     revision: 0,
     loadId: 0,
+    reload: null,
     filePath: null,
     dirty: false,
     canUndo: false,
@@ -377,7 +378,7 @@ export const docStore = createStore<DocStoreState>()((set, get) => {
       setSelection(e.selAfter)
     },
 
-    load(doc, filePath) {
+    load(doc, filePath, reload = null) {
       transientBase = null
       transientPatches = []
       transientSel = []
@@ -391,6 +392,7 @@ export const docStore = createStore<DocStoreState>()((set, get) => {
         derived: deriveAll(prepared),
         revision: get().revision + 1,
         loadId: get().loadId + 1,
+        reload,
         filePath,
         dirty: false,
         transientActive: false,
@@ -428,4 +430,16 @@ export const docStore = createStore<DocStoreState>()((set, get) => {
 /** React selector hook over `docStore`. */
 export function useDoc<T>(selector: (s: DocStoreState) => T): T {
   return useStore(docStore, selector)
+}
+
+// ───────────── project versions: undo labels since the last commit ─────────────
+
+/** id of the current history position (pass it back to `undoLabelsSince` later) */
+export function historyPosition(): number {
+  return currentId()
+}
+
+/** labels of the history entries made after position `since`, oldest first (undone entries excluded) */
+export function undoLabelsSince(since: number): string[] {
+  return undoStack.filter((e) => e.id > since).map((e) => e.label)
 }

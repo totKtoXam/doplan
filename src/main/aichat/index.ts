@@ -3,9 +3,10 @@
  * Wired from src/main/index.ts (registerAiChat on ready, shutdownAiChat on quit).
  */
 import type { ChildProcess } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { getProjectRoot, isDirectory, isFolderTrusted, readInstructions } from '../projectFolder'
 import { getApiKey } from '../settings'
 import type { AiChip, AiProviderId, AiProviderInfo, AiRunEvent, AiRunRequest } from '../../shared/aiChat'
 import { CH } from '../channels'
@@ -17,8 +18,8 @@ import { runClaude, runCodex, runGemini, type RunCtx } from './cliRunners'
 import { binVersion, findOnPath, killTree, type ResolvedBin } from './detect'
 import { authStatus, cancelLogin, isAuthError, loginInput, startLogin } from './login'
 import { closeMcpServer, openEndpoint, revokeRun } from './mcpServer'
-import { AGENT_SYSTEM_PROMPT, PLAN_MODE_NOTE } from './prompt'
-import { agentWorkDir, claimDocument, deleteChat, dropChats, getChatSettings, listChats, loadChat, moveChats, sanitizeSettings, saveChat, setChatSettings } from './store'
+import { AGENT_SYSTEM_PROMPT, PLAN_MODE_NOTE, PROJECT_FOLDER_NOTE, PROJECT_INSTRUCTIONS_NOTE, UNTRUSTED_FOLDER_NOTE } from './prompt'
+import { agentWorkDir, agentWorkDirPath, claimDocument, deleteChat, dropChats, getChatSettings, listChats, loadChat, moveChats, sanitizeSettings, saveChat, setChatSettings } from './store'
 
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 
@@ -136,15 +137,74 @@ function validRequest(raw: unknown): AiRunRequest {
     images,
     chips,
     resumeId: typeof r.resumeId === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(r.resumeId) ? r.resumeId : undefined,
+    resumeCwd: typeof r.resumeCwd === 'string' && r.resumeCwd.length < 4096 ? r.resumeCwd : undefined,
     apiHistory: Array.isArray(r.apiHistory) ? r.apiHistory : undefined,
   }
 }
 
-function systemPrompt(req: AiRunRequest): string {
+/** AGENTS.md of the project folder is cut to this size when it goes into the prompt (the prompt goes through a file or stdin, never argv) */
+const MAX_PROJECT_INSTRUCTIONS = 32 * 1024
+
+/** where the agent works and which project instructions it gets */
+interface AgentPlace {
+  /** working directory: the open project folder when it is trusted, else a per-project folder under userData (ai-work) */
+  cwd: string
+  /** the open project folder (main's own state; the renderer's word is not trusted for a cwd) */
+  root: string | null
+  /** the user trusts the folder (see projectFolder.folderTrust): its AGENTS.md is the user's own instructions */
+  trusted: boolean
+  /** the agent runs inside the folder (a trusted folder, CLI providers) */
+  inFolder: boolean
+  /** AGENTS.md of the folder to put into the prompt; null when the CLI loads it itself or there is none */
+  inline: string | null
+}
+
+/**
+ * An untrusted folder (one that came from elsewhere and the user has not confirmed) is never the
+ * agent's working directory: the agent CLIs load that folder's own settings (.claude/settings.json
+ * hooks, .codex/, .gemini/) and run git in its repository. The agent then works in ai-work and gets the
+ * folder's AGENTS.md as quoted text only.
+ */
+async function agentPlace(req: AiRunRequest): Promise<AgentPlace> {
+  const root = getProjectRoot()
+  if (!root || !(await isDirectory(root))) {
+    return { cwd: await agentWorkDir(req.projectPath), root: null, trusted: false, inFolder: false, inline: null }
+  }
+  const provider = req.settings.provider
+  const trusted = await isFolderTrusted(root)
+  const inFolder = trusted && provider !== 'api'
+  const cwd = inFolder ? root : await agentWorkDir(req.projectPath)
+  // Codex reads AGENTS.md from its working directory; Claude Code reads CLAUDE.md (which is "@AGENTS.md")
+  const native = inFolder && (provider === 'codex' || (provider === 'claude' && existsSync(join(root, 'CLAUDE.md'))))
+  if (native) return { cwd, root, trusted, inFolder, inline: null }
+  const text = (await readInstructions(root)).trim()
+  return { cwd, root, trusted, inFolder, inline: text ? text.slice(0, MAX_PROJECT_INSTRUCTIONS) : null }
+}
+
+function systemPrompt(req: AiRunRequest, place: AgentPlace | null): string {
   const parts = [AGENT_SYSTEM_PROMPT]
+  if (place?.root) {
+    parts.push(!place.trusted ? UNTRUSTED_FOLDER_NOTE : place.inFolder ? PROJECT_FOLDER_NOTE : PROJECT_INSTRUCTIONS_NOTE)
+    // a closing tag inside the file must not end the quoted block early
+    const quoted = place.inline?.replace(/<(\/?)project-instructions/gi, '&lt;$1project-instructions')
+    if (quoted) parts.push(`<project-instructions file="AGENTS.md">\n${quoted}\n</project-instructions>`)
+  }
   if (req.settings.planMode) parts.push(PLAN_MODE_NOTE)
   if (req.settings.permission === 'ask') parts.push('The user approves each document change in the app; a rejected change comes back as an error saying so.')
   return parts.join('\n\n')
+}
+
+/**
+ * Claude Code keeps its sessions per working folder: a session made in ai-work is not found from the
+ * project folder (the folder was trusted since, or saved as a project folder) and the other way round,
+ * and every turn would fail. A Claude session then starts anew. Records from before the folder was
+ * stored ran in the project's ai-work folder. Codex threads are global and always resume.
+ */
+async function resumesHere(req: AiRunRequest, cwd: string): Promise<boolean> {
+  if (!req.resumeId || req.settings.provider !== 'claude') return true
+  const madeIn = req.resumeCwd ?? (await agentWorkDirPath(req.projectPath))
+  const norm = (p: string) => (process.platform === 'win32' ? resolve(p).toLowerCase() : resolve(p))
+  return norm(madeIn) === norm(cwd)
 }
 
 async function startRun(raw: unknown): Promise<void> {
@@ -186,8 +246,9 @@ async function startRun(raw: unknown): Promise<void> {
 
   void (async () => {
     try {
+      const place = await agentPlace(req)
       if (prov.info.id === 'api') {
-        await runAnthropicApi({ req, emit, signal: run.abort.signal, systemPrompt: systemPrompt(req), userText })
+        await runAnthropicApi({ req, emit, signal: run.abort.signal, systemPrompt: systemPrompt(req, place), userText })
       } else {
         const endpoint = await openEndpoint(req.runId)
         // stopped while the endpoint was opening: the token is born revoked
@@ -196,12 +257,13 @@ async function startRun(raw: unknown): Promise<void> {
           return
         }
         const ctx: RunCtx = {
-          req,
-          emit,
+          req: (await resumesHere(req, place.cwd)) ? req : { ...req, resumeId: undefined },
+          // the renderer keeps the folder with the session id: a session resumes only where it was made
+          emit: (ev) => emit(ev.type === 'session' ? { ...ev, cwd: place.cwd } : ev),
           signal: run.abort.signal,
           endpoint,
-          cwd: await agentWorkDir(req.projectPath, req.projectRoot),
-          systemPrompt: systemPrompt(req),
+          cwd: place.cwd,
+          systemPrompt: systemPrompt(req, place),
           userText,
           track: (c) => {
             run.children.add(c)

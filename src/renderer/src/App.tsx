@@ -19,6 +19,7 @@ import {
 } from '@/ui/panels'
 import { RightDock } from '@/ai' // ai-chat: «Свойства | ИИ» tabs
 import { LevelTabs } from '@/ui/shell/LevelTabs'
+import { ProjectFolderDialogs } from '@/ui/panels/ProjectFolderDialogs'
 import { Overlays } from '@/ui/shell/Overlays'
 import { IconBtn } from '@/ui/shell/primitives'
 import { StatusBar } from '@/ui/shell/StatusBar'
@@ -195,6 +196,7 @@ export function App() {
       </div>
       <StatusBar />
       <Dialogs />
+      <ProjectFolderDialogs />
       <Overlays />
       {dragOver && (
         <div className="dp-drop-overlay pointer-events-none fixed inset-2 z-[940] flex items-center justify-center rounded-xl">

@@ -41,7 +41,8 @@ function Modal({ req }: { req: ModalRequest }) {
   }, [req, value, cancel, primary])
 
   return (
-    <div className="fixed inset-0 z-[950] flex items-center justify-center bg-black/45 p-4" onPointerDown={(e) => e.stopPropagation()}>
+    // above the kit Dialog layer (z-1000): a question asked while a dialog is open (unsaved AGENTS.md on window close) must be visible
+    <div className="fixed inset-0 z-[1050] flex items-center justify-center bg-black/45 p-4" onPointerDown={(e) => e.stopPropagation()}>
       <div role="dialog" aria-modal="true" aria-label={req.title} className="dp-fade-in w-full max-w-[460px] rounded-xl border border-border-strong bg-panel shadow-pop">
         <div className="px-5 pt-4 pb-2 text-sm font-semibold">{req.title}</div>
         {req.message && <div className="px-5 pb-2 text-xs leading-relaxed whitespace-pre-line text-muted">{req.message}</div>}

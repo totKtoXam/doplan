@@ -17,6 +17,7 @@ import type {
   FinishZone,
   Id,
   Material,
+  Room,
   RoomType,
   Vec2,
 } from './types'
@@ -559,6 +560,33 @@ function apronBands(doc: Doc, catalog: Catalog, dr: DerivedRoom): Map<string, { 
 /** same value (plain data): used to skip assignments that would only record an empty undo step */
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
 
+/** two walls lie on one straight line (within 1 mm) */
+function sameLine(doc: Doc, a: Id, b: Id): boolean {
+  if (a === b) return true
+  const wa = doc.walls[a]
+  const wb = doc.walls[b]
+  const p = doc.nodes[wa?.a]
+  const q = doc.nodes[wa?.b]
+  if (!p || !q || !wb) return false
+  const len = Math.hypot(q.x - p.x, q.y - p.y)
+  if (len <= 0) return false
+  const off = (id: Id) => {
+    const n = doc.nodes[id]
+    return n ? Math.abs((q.x - p.x) * (n.y - p.y) - (q.y - p.y) * (n.x - p.x)) / len : Infinity
+  }
+  return off(wb.a) <= 1 && off(wb.b) <= 1
+}
+
+/** after walls were copied under new ids: point a room's remembered accent face at the copy (or drop it) */
+export function remapAccentFace(room: Room, wallMap: ReadonlyMap<Id, Id>): void {
+  const key = room.design?.accentFace
+  if (!key || !room.design) return
+  const i = key.lastIndexOf(':')
+  const wallId = wallMap.get(key.slice(0, i))
+  if (wallId) room.design.accentFace = `${wallId}${key.slice(i)}`
+  else delete room.design.accentFace
+}
+
 function setOverride(overrides: Record<string, Id>, slot: string, materialId: Id, defaultId: Id): void {
   if (materialId === defaultId) delete overrides[slot]
   else overrides[slot] = materialId
@@ -631,13 +659,26 @@ export function applyStyle(doc: Doc, style: StylePreset, opts: ApplyStyleOptions
       }
       const accentKey = accent ? faceKey(accent.wallId, accent.side) : undefined
       const prevAccent = room.design?.accentFace
+      // the face the style made the accent last time, if it still is a face of this room (a copied
+      // room or level, or a deleted wall, leave a stale key)
+      const prevFace = faces.find((f) => faceKey(f.wallId, f.side) === prevAccent)
+      /**
+       * A face this style made the accent before: the remembered face and its pieces after a wall
+       * split (same line, same side of the room). Without a remembered face (projects saved before
+       * the key existed, or a stale key) every accent-material face of a room that takes an accent
+       * counts, as before.
+       */
+      const wasAccent = (f: Face): boolean => {
+        if (doc.walls[f.wallId][f.side].materialId !== F.wallAccent) return false
+        if (!prevFace) return ACCENT_ROOMS.includes(room.type)
+        return f.side === prevFace.side && sameLine(doc, f.wallId, prevFace.wallId)
+      }
       /** the finish the room's other walls have (most common), for the face that stops being the accent */
       const roomFinish = (): Id => {
         const n = new Map<Id, number>()
         for (const f of faces) {
-          const k = faceKey(f.wallId, f.side)
-          if (k === accentKey || k === prevAccent) continue
           const id = doc.walls[f.wallId][f.side].materialId
+          if (faceKey(f.wallId, f.side) === accentKey || id === F.wallAccent) continue
           if (id) n.set(id, (n.get(id) ?? 0) + 1)
         }
         let best: Id = F.wallMain
@@ -652,7 +693,7 @@ export function applyStyle(doc: Doc, style: StylePreset, opts: ApplyStyleOptions
         // with finishes off only the accent face is dressed, and the face this style made the accent
         // before (the accent moved, e.g. a window was cut into it) gets the room's wall finish back;
         // accent walls the user placed are left alone
-        const oldAccent = !parts.finishes && parts.accent && !isAccent && k === prevAccent && side.materialId === F.wallAccent
+        const oldAccent = !parts.finishes && parts.accent && !isAccent && wasAccent(f)
         if (!parts.finishes && !isAccent && !oldAccent) continue
         const materialId = wet ? F.wallWet : isAccent ? F.wallAccent! : oldAccent ? roomFinish() : F.wallMain
         if (side.materialId !== materialId) {

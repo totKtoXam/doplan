@@ -15,13 +15,13 @@ function feedWith(files: Record<string, string>, opts: { badSha?: boolean } = {}
   const index = {
     format: 'doplan-feed',
     version: 1,
-    entries: { asset_ph_sofa: { file: 'asset_ph_sofa.zip', sha256: opts.badSha ? '0'.repeat(64) : sha256(zip), bytes: zip.length } },
+    entries: { asset_ph_armchair_01: { file: 'asset_ph_armchair_01.zip', sha256: opts.badSha ? '0'.repeat(64) : sha256(zip), bytes: zip.length } },
   }
   const reads: string[] = []
   const read = async (loc: string) => {
     reads.push(loc)
     if (loc.endsWith('/index.json')) return strToU8(JSON.stringify(index))
-    if (loc.endsWith('/asset_ph_sofa.zip')) return zip
+    if (loc.endsWith('/asset_ph_armchair_01.zip')) return zip
     throw new Error(`404 ${loc}`)
   }
   return { read, reads }
@@ -82,22 +82,22 @@ describe('feed index and files', () => {
 
   it('takes only the expected files from a feed zip', async () => {
     const { read } = feedWith({ 'models/sofa/sofa_1k.gltf': 'g', 'models/sofa/sofa.bin': 'b', '../evil.exe': 'x' })
-    const files = await fromFeed('https://feed.example/', 'asset_ph_sofa', expectedFiles(spec), read)
+    const files = await fromFeed('https://feed.example/', 'asset_ph_armchair_01', expectedFiles(spec), read)
     expect(files && [...files.keys()].sort()).toEqual(['models/sofa/sofa.bin', 'models/sofa/sofa_1k.gltf'])
   })
 
   it('returns null when the feed does not have the entry, and reads index.json once', async () => {
     const { read, reads } = feedWith({ 'models/sofa/sofa_1k.gltf': 'g', 'models/sofa/sofa.bin': 'b' })
-    expect(await fromFeed('https://feed.example/', 'asset_other', ['x'], read)).toBeNull()
-    await fromFeed('https://feed.example/', 'asset_ph_sofa', expectedFiles(spec), read)
+    expect(await fromFeed('https://feed.example/', 'not-in-this-feed', ['x'], read)).toBeNull()
+    await fromFeed('https://feed.example/', 'asset_ph_armchair_01', expectedFiles(spec), read)
     expect(reads.filter((r) => r.endsWith('index.json'))).toHaveLength(1)
   })
 
   it('refuses a zip with a wrong checksum or missing files', async () => {
     const bad = feedWith({ 'models/sofa/sofa_1k.gltf': 'g', 'models/sofa/sofa.bin': 'b' }, { badSha: true })
-    await expect(fromFeed('https://a.example/', 'asset_ph_sofa', expectedFiles(spec), bad.read)).rejects.toThrow(/checksum/)
+    await expect(fromFeed('https://a.example/', 'asset_ph_armchair_01', expectedFiles(spec), bad.read)).rejects.toThrow(/checksum/)
     const partial = feedWith({ 'models/sofa/sofa_1k.gltf': 'g' })
-    await expect(fromFeed('https://b.example/', 'asset_ph_sofa', expectedFiles(spec), partial.read)).rejects.toThrow(/sofa\.bin/)
+    await expect(fromFeed('https://b.example/', 'asset_ph_armchair_01', expectedFiles(spec), partial.read)).rejects.toThrow(/sofa\.bin/)
     expect(() => takeExpected(strToU8('not a zip'), ['a'])).toThrow(/broken zip|lacks/)
   })
 
@@ -105,6 +105,6 @@ describe('feed index and files', () => {
     const read = async () => {
       throw new Error('ENOTFOUND')
     }
-    await expect(fromFeed('https://down.example/', 'asset_ph_sofa', ['a'], read)).rejects.toThrow(/index\.json: ENOTFOUND/)
+    await expect(fromFeed('https://down.example/', 'asset_ph_armchair_01', ['a'], read)).rejects.toThrow(/index\.json: ENOTFOUND/)
   })
 })

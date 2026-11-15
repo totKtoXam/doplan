@@ -8,9 +8,9 @@ import { createStore } from 'zustand/vanilla'
 import { useStore } from 'zustand'
 import { derivePlan, describeMark, markBadge, markTargets } from '@core'
 import type { EntityRef, Id } from '@core/types'
-import type { AiChatMeta, AiChatRecord, AiChatSettings, AiChip, AiImage, AiLoginEvent, AiMessage, AiPart, AiProviderId, AiProviderInfo, AiRunEvent, AiToolCall } from '@shared/aiChat'
+import type { AiChatMeta, AiChatRecord, AiChatSettings, AiChip, AiImage, AiLoginEvent, AiMessage, AiPart, AiProviderId, AiProviderInfo, AiQuestion, AiQuestionAnswer, AiRunEvent, AiToolCall } from '@shared/aiChat'
 import { DEFAULT_AI_SETTINGS } from '@shared/aiChat'
-import { AI_TOOL_TITLES, isAiToolName } from '@shared/aiTools'
+import { AI_TOOL_TITLES, formatAnswers, isAiToolName, parseToolArgs } from '@shared/aiTools'
 import { ensureAiFolderTrust } from '@/actions/project'
 import { t } from '@/i18n'
 import { api } from '@/store/api'
@@ -50,6 +50,8 @@ export interface AiState {
   /** the open chat is one of legacyChats (it is saved there and runs in their agent folder) */
   legacy: boolean
   running: { runId: string; msgId: string } | null
+  /** the agent's open ask_user call (the card above the input box); `draft`: what the user picked so far */
+  asking: { callId: string; runId: string; questions: AiQuestion[]; draft: AiQuestionAnswer[] } | null
   status: string
   chips: AiChip[]
   images: PendingImage[]
@@ -93,6 +95,7 @@ export const aiStore = createStore<AiState>()(() => ({
   chat: emptyChat(DEFAULT_AI_SETTINGS.provider),
   legacy: false,
   running: null,
+  asking: null,
   status: '',
   chips: [],
   images: [],
@@ -116,6 +119,8 @@ const set = (p: Partial<AiState>) => aiStore.setState(p)
 
 let draft: DraftHost | null = null
 const approvals = new Map<string, (yes: boolean) => void>()
+/** open ask_user calls: resolved with the answer, or null (declined / the turn ended) */
+const questions = new Map<string, (a: { answers: AiQuestionAnswer[]; note?: string } | null) => void>()
 /** provider part id → index in the assistant message parts (current run) */
 let partIndex = new Map<string, number>()
 
@@ -187,6 +192,11 @@ export function initAi(): void {
   void refreshProviders(false)
   api.aiChat.onEvent(onRunEvent)
   api.aiChat.onToolCall((call) => void onToolCall(call))
+  // main stopped waiting (nobody answered within the hour): the card goes, the agent has its result
+  api.aiChat.onToolCancel(({ callId }) => {
+    questions.get(callId)?.(null)
+    approvals.get(callId)?.(false)
+  })
   api.aiChat.onLogin(onLoginEvent)
   let lastLoad: number | undefined
   /** the open document has never been written to a file: its chats go when it does */
@@ -768,6 +778,11 @@ export function currentProvider(): AiProviderInfo | undefined {
 let askingTrust = false
 
 export async function send(raw: string): Promise<void> {
+  // a question is open: the text typed is the answer (with what is picked on the card)
+  if (get().asking && get().running) {
+    answerQuestion(raw)
+    return
+  }
   if (get().running || askingTrust) return
   // a turn starts where the chats are, not halfway through moving them
   if (moving) await moving
@@ -926,8 +941,13 @@ function onStoppedRunEvent(runId: string, ev: AiRunEvent): void {
 function finishTurn(ev: Extract<AiRunEvent, { type: 'done' }>, save: boolean): void {
   for (const [, res] of approvals) res(false)
   approvals.clear()
+  for (const [, res] of questions) res(null)
+  questions.clear()
   patchRunMsg((m) => {
-    for (const p of m.parts) if (p.type === 'tool' && (p.status === 'running' || p.status === 'pending')) p.status = ev.ok ? 'done' : 'error'
+    for (const p of m.parts) {
+      if (p.type === 'tool' && (p.status === 'running' || p.status === 'pending')) p.status = ev.ok ? 'done' : 'error'
+      if (p.type === 'question' && p.status === 'pending') p.status = 'cancelled'
+    }
     if (ev.stopped) pushPart(m, null, { type: 'notice', level: 'info', text: t('Остановлено') })
     else if (!ev.ok && ev.error) {
       m.error = ev.error
@@ -941,7 +961,7 @@ function finishTurn(ev: Extract<AiRunEvent, { type: 'done' }>, save: boolean): v
   patchChat((c) => {
     c.updatedAt = now()
   })
-  set({ running: null, status: '' })
+  set({ running: null, asking: null, status: '' })
   // a plan-mode turn that proposed nothing leaves no draft
   if (draft?.empty) draft = null
   if (ev.authRequired) void refreshProviders(false)
@@ -1004,6 +1024,7 @@ async function onToolCall(call: AiToolCall): Promise<void> {
     api.aiChat.toolResult(call.callId, { ok: false, text: 'Запуск не активен' })
     return
   }
+  if (call.tool === 'ask_user') return askUser(call)
   const { settings } = get()
   const mutating = isMutating(call.tool)
   const ask = mutating && settings.permission === 'ask' && !settings.planMode
@@ -1080,6 +1101,92 @@ async function onToolCall(call: AiToolCall): Promise<void> {
       p.image = t || undefined
     })
   }
+}
+
+/** ask_user: the card above the input box waits for the user; the answer goes back as the tool result */
+async function askUser(call: AiToolCall): Promise<void> {
+  const parsed = parseToolArgs('ask_user', call.args)
+  if (!parsed.ok) {
+    api.aiChat.toolResult(call.callId, { ok: false, text: parsed.error })
+    return
+  }
+  const qs: AiQuestion[] = parsed.args.questions
+  const setPart = (fn: (p: Extract<AiPart, { type: 'question' }>) => void) =>
+    patchRunMsg((m) => {
+      const i = partIndex.get(call.callId)
+      const p = i !== undefined ? m.parts[i] : undefined
+      if (p && p.type === 'question') fn(p)
+    })
+  patchRunMsg((m) => pushPart(m, call.callId, { type: 'question', id: call.callId, questions: qs, status: 'pending' }))
+  set({ asking: { callId: call.callId, runId: call.runId, questions: qs, draft: qs.map(() => ({ picked: [] })) }, status: '' })
+  void persist()
+  const res = await new Promise<{ answers: AiQuestionAnswer[]; note?: string } | null>((r) => questions.set(call.callId, r))
+  questions.delete(call.callId)
+  if (get().asking?.callId === call.callId) set({ asking: null })
+  // the turn ended meanwhile (Stop, another chat or project): the answer belongs to no turn now
+  if (get().running?.runId !== call.runId) {
+    api.aiChat.toolResult(call.callId, { ok: false, text: 'Запуск остановлен' })
+    return
+  }
+  if (!res) {
+    setPart((p) => {
+      p.status = 'cancelled'
+    })
+    api.aiChat.toolResult(call.callId, {
+      ok: false,
+      text: 'Пользователь не стал отвечать на вопросы. Не выдумывай ответы: сделай то, что можно без них, и перечисли, что осталось уточнить.',
+    })
+  } else {
+    setPart((p) => {
+      p.status = 'answered'
+      p.answers = res.answers
+      if (res.note) p.note = res.note
+    })
+    api.aiChat.toolResult(call.callId, { ok: true, text: formatAnswers(qs, res.answers, res.note) })
+  }
+  void persist()
+}
+
+/** a click on an option of the open question card (multi-select toggles; otherwise one choice, a second click clears it) */
+export function pickAnswer(qi: number, label: string): void {
+  const a = get().asking
+  if (!a?.questions[qi]) return
+  const multi = !!a.questions[qi].multiSelect
+  set({
+    asking: produce(a, (d) => {
+      const cur = d.draft[qi]
+      if (multi) cur.picked = cur.picked.includes(label) ? cur.picked.filter((x) => x !== label) : [...cur.picked, label]
+      else cur.picked = cur.picked[0] === label ? [] : [label]
+    }),
+  })
+}
+
+/** the «Другое» field of one question */
+export function setAnswerOther(qi: number, text: string): void {
+  const a = get().asking
+  if (!a?.draft[qi]) return
+  set({
+    asking: produce(a, (d) => {
+      d.draft[qi].other = text
+    }),
+  })
+}
+
+/** sends what the card holds; `note`: the text typed in the chat box; null = the user declined to answer */
+export function answerQuestion(note?: string | null): void {
+  const a = get().asking
+  const res = a && questions.get(a.callId)
+  if (!a || !res) return
+  if (note === null) return res(null)
+  res({
+    answers: a.draft.map((d) => ({ picked: d.picked, ...(d.other?.trim() ? { other: d.other.trim() } : {}) })),
+    ...(note?.trim() ? { note: note.trim() } : {}),
+  })
+}
+
+/** something to send: an option picked, a «Другое» text or a note */
+export function hasAnswer(a: AiState['asking'], note = ''): boolean {
+  return !!note.trim() || !!a?.draft.some((d) => d.picked.length || d.other?.trim())
 }
 
 export function answerApproval(callId: string, yes: boolean): void {

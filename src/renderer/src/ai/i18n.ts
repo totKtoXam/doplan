@@ -41,6 +41,20 @@ addTranslations('en', {
   'Думаю…': 'Thinking…',
   Остановлено: 'Stopped',
   'Пустой ответ': 'Empty answer',
+  // the agent's questions (ask_user)
+  'Агент спрашивает': 'The agent asks',
+  Пропустить: 'Skip',
+  'Не отвечать': 'Do not answer',
+  '(можно несколько)': '(you can pick several)',
+  'Другое — своими словами': 'Other — in your own words',
+  Ответить: 'Answer',
+  'Ответить (Enter)': 'Answer (Enter)',
+  'или ответьте в поле ниже': 'or answer in the box below',
+  'Вопросы агента': 'Agent questions',
+  'ждёт ответа': 'awaiting answer',
+  отвечено: 'answered',
+  'без ответа': 'not answered',
+  'Ответ своими словами…': 'Your answer in your own words…',
   'Запуск…': 'Starting…',
   'Провайдер недоступен': 'Provider unavailable',
   'Не удалось открыть чаты проекта: показан пустой чат': 'Could not open the project chats: an empty chat is shown',
@@ -185,6 +199,7 @@ addTranslations('en', {
   'Назначить материал': 'Assign material',
   'Построить план': 'Build plan',
   'Формат PlanSpec': 'PlanSpec format',
+  'Вопрос пользователю': 'Question to you',
 
   // from the main process (exact)
   'По умолчанию': 'Default',

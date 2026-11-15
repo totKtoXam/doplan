@@ -274,6 +274,7 @@ function createFallbackApi(): DoplanApi {
       async stop() {},
       onEvent: noopUnsub,
       onToolCall: noopUnsub,
+      onToolCancel: noopUnsub,
       toolResult() {},
       async listChats() {
         return []

@@ -169,6 +169,26 @@ export const AI_TOOL_SHAPES = {
     note: z.string().max(200).optional().describe('Комментарий к замеру (сохраняется в источнике размера)'),
     levelId,
   },
+  ask_user: {
+    questions: z
+      .array(
+        z
+          .object({
+            question: z.string().min(1).max(500).describe('Вопрос целиком, с вопросительным знаком'),
+            header: z.string().max(30).optional().describe('Короткая метка вопроса, 1–3 слова'),
+            options: z
+              .array(z.object({ label: z.string().min(1).max(80).describe('Вариант ответа, 1–5 слов'), description: z.string().max(300).optional().describe('Что значит этот вариант') }).strict())
+              .min(2)
+              .max(4)
+              .describe('2–4 варианта; пользователь всегда может ответить и своими словами'),
+            multiSelect: z.boolean().optional().describe('true — можно выбрать несколько вариантов'),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(4)
+      .describe('1–4 вопроса сразу: собери всё, что нужно узнать, в один вызов'),
+  },
   render_snapshot: {
     view: z.enum(['2d', '3d']).describe('2d — чертёж уровня, 3d — текущая камера 3D'),
     width: z.number().int().min(256).max(1600).optional(),
@@ -218,6 +238,8 @@ export const AI_TOOL_DESCRIPTIONS: Record<AiToolName, string> = {
     'Построить план из PlanSpec v1 (как импорт «План по фото»): replace — заменить план активного уровня, newLevel — добавить новым этажом.',
   get_planspec_schema: 'Описание формата PlanSpec v1 и правил распознавания планов (для apply_planspec).',
   render_snapshot: 'Снимок 2D-плана или 3D-вида в PNG, чтобы посмотреть результат.',
+  ask_user:
+    'Спросить пользователя о том, чего нет в плане и в запросе: названия комнат (на плане только номера), размеры, назначение, пожелания. Не выдумывай такие данные — спроси. Собери все вопросы в один вызов (до 4), у каждого 2–4 варианта; пользователь может ответить и своими словами. Ждёт ответа и возвращает его.',
   apply_measurement:
     'Внести замеры рулеткой: выставить чистую длину стороны стены (side = wallId:left|right, включая глубину и ширину ниши) или расстояние между узлами. Двигается конец moveEnd (по умолчанию b), соседние стены следуют за ним; размер помечается как «замерено». Все замеры вызова — один шаг отмены. Если неясно, к какой стороне или размеру относится число (чистый или по оси), сначала спроси пользователя.',
 }
@@ -240,6 +262,7 @@ export const AI_TOOL_TITLES: Record<AiToolName, string> = {
   apply_planspec: 'Построить план',
   get_planspec_schema: 'Формат PlanSpec',
   render_snapshot: 'Снимок',
+  ask_user: 'Вопрос пользователю',
   apply_measurement: 'Обмер',
 }
 
@@ -265,6 +288,18 @@ export function parseToolArgs<K extends AiToolName>(
     return `${path}: ${i.message}`
   })
   return { ok: false, error: `Неверные аргументы ${name}: ${lines.join('; ')}` }
+}
+
+/** The user's answers as the ask_user result the agent reads. */
+export function formatAnswers(questions: { question: string; header?: string }[], answers: { picked: string[]; other?: string }[], note?: string): string {
+  const lines = questions.map((q, i) => {
+    const a = answers[i]
+    const parts = [...(a?.picked ?? [])]
+    if (a?.other?.trim()) parts.push(`своими словами: ${a.other.trim()}`)
+    return `${i + 1}. ${q.question}\n   Ответ: ${parts.length ? parts.join('; ') : '(без ответа)'}`
+  })
+  if (note?.trim()) lines.push(`Пользователь ответил в чате своими словами: ${note.trim()}`)
+  return `Ответы пользователя:\n${lines.join('\n')}`
 }
 
 /** JSON Schema of a tool's input (for the Anthropic Messages API). */

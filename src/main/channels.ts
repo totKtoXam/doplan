@@ -66,6 +66,7 @@ export const CH = {
   evAiChatLogin: 'ev:aiChatLogin',
   evAiChatEvent: 'ev:aiChatEvent',
   evAiChatToolCall: 'ev:aiChatToolCall',
+  evAiChatToolCancel: 'ev:aiChatToolCancel',
   // ── end ai-chat block ──
 
   updatesGet: 'updates:get',

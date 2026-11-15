@@ -1,5 +1,5 @@
 import { Graphics } from 'pixi.js'
-import type { CurtainSpec, Opening, OpeningKind } from '@core/types'
+import type { CurtainSpec, DoorSlide, Opening, OpeningKind } from '@core/types'
 import { type EditorCtx, sameInputs } from '../context'
 import { frameOfOpening, framePoint } from '../shapes'
 
@@ -24,6 +24,7 @@ export interface SymbolSpec {
   swing: 'left' | 'right'
   sashes?: number
   curtain?: CurtainSpec
+  slide?: DoorSlide
 }
 
 type Tf = (s: number, k: number) => { x: number; y: number }
@@ -113,6 +114,56 @@ export function buildOpeningSymbol(spec: SymbolSpec, h: number, tf: Tf, out: Sym
       leaf(w2, -1, w2, false)
       break
     case 'slidingDoor': {
+      const slide = spec.slide ?? 'surface'
+      if (slide === 'pocket') {
+        // leaf in the wall axis, slid 30 % into the pocket (dashed cavity inside the wall)
+        const sh = hs * w * 0.3
+        const t = Math.min(20, h * 0.4)
+        const a = Math.max(-w2, -w2 + sh)
+        const b = Math.min(w2, w2 + sh)
+        seg(out.main, a, -t, b, -t)
+        seg(out.main, a, t, b, t)
+        seg(out.main, hs > 0 ? a : b, -t, hs > 0 ? a : b, t)
+        const p0 = hs * w2
+        const p1 = hs * (w2 + w)
+        dashed(out.thin, p0, -t - 6, p1, -t - 6, 60, 50)
+        dashed(out.thin, p0, t + 6, p1, t + 6, 60, 50)
+        seg(out.thin, p1, -t - 6, p1, t + 6)
+        break
+      }
+      if (slide === 'barn') {
+        // wide leaf on the wall face + the rail it hangs on
+        const sh = hs * w * 0.3
+        const k0 = sg * (h + 20)
+        const k1 = sg * (h + 55)
+        const a = -w2 - 50 + sh
+        const b = w2 + 50 + sh
+        seg(out.main, a, k0, b, k0)
+        seg(out.main, a, k1, b, k1)
+        seg(out.main, a, k0, a, k1)
+        seg(out.main, b, k0, b, k1)
+        const r0 = hs < 0 ? -w2 - w - 100 : -w2 - 100
+        const r1 = hs < 0 ? w2 + 100 : w2 + w + 100
+        dashed(out.thin, r0, sg * (h + 10), r1, sg * (h + 10), 80, 50)
+        break
+      }
+      if (slide === 'folding') {
+        // accordion panels, half folded towards the hinge side
+        const n = w <= 700 ? 4 : w <= 1000 ? 6 : 8
+        const pw = w / n
+        const ang = 0.5
+        let s = hs * w2
+        let k = -(pw * Math.sin(ang)) / 2
+        for (let i = 0; i < n; i++) {
+          const up = i % 2 === 0 ? 1 : -1
+          const s2 = s - hs * pw * Math.cos(ang)
+          const k2 = k + up * pw * Math.sin(ang)
+          seg(out.main, s, k, s2, k2)
+          s = s2
+          k = k2
+        }
+        break
+      }
       const k = h * 0.35
       seg(out.main, -w2, k, w2 * 0.12, k)
       seg(out.main, -w2 * 0.12, -k, w2, -k)
@@ -204,7 +255,7 @@ function strokeSegments(g: Graphics, segs: readonly number[], color: number, alp
 }
 
 export function symbolSpecOf(o: Opening): SymbolSpec {
-  return { kind: o.kind, width: o.width, hinge: o.hinge, swing: o.swing, sashes: o.sashes, curtain: o.curtain }
+  return { kind: o.kind, width: o.width, hinge: o.hinge, swing: o.swing, sashes: o.sashes, curtain: o.curtain, slide: o.slide }
 }
 
 /** Door / window symbols of the active level (world space, hairlines). */

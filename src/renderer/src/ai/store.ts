@@ -13,16 +13,18 @@ import { DEFAULT_AI_SETTINGS } from '@shared/aiChat'
 import { AI_TOOL_TITLES, isAiToolName } from '@shared/aiTools'
 import { api } from '@/store/api'
 import { docStore } from '@/store/document'
-import { getMark, marksStore } from '@/store/marks'
+import { getMark, marksStore, setMarkNumberFloor } from '@/store/marks'
 import { uiStore } from '@/store/ui'
 import { DraftHost, liveHost } from './hosts'
 import { markSnapshot } from './markSnapshot'
+import type { MarkupShape } from './markup'
 import { chipFor, entityLevel, lookupFor } from './summary'
 import { describeCall, executeTool, isMutating, previewCall } from './tools'
 
 export type DockTab = 'props' | 'ai'
 
-export type PendingImage = AiImage & { url: string }
+/** an image waiting to be sent; `markup` keeps the clean picture and the pencil marks drawn over it (re-editable) */
+export type PendingImage = AiImage & { url: string; markup?: { base: string; shapes: MarkupShape[] } }
 
 /** in-app CLI sign-in in progress (or just finished) */
 export interface LoginState {
@@ -52,6 +54,8 @@ export interface AiState {
   focusTick: number
   showHistory: boolean
   login: LoginState | null
+  /** text the composer should take in (a pencil-mark note); `send` = send right away */
+  composeInsert: { text: string; send: boolean; tick: number } | null
 }
 
 const TAB_KEY = 'doplan.ai.dockTab'
@@ -89,6 +93,7 @@ export const aiStore = createStore<AiState>()(() => ({
   focusTick: 0,
   showHistory: false,
   login: null,
+  composeInsert: null,
 }))
 
 export function useAi<T>(selector: (s: AiState) => T): T {
@@ -289,14 +294,15 @@ export function addSelectionToChat(): void {
 }
 
 /** «Пометка ①» chip: what the mark touches, plus a cropped snapshot of that area */
-export async function addMarkToChat(id: Id): Promise<void> {
+export async function addMarkToChat(id: Id, focus = true): Promise<void> {
   const { doc, derived } = docStore.getState()
   const m = doc.annotations?.[id]
   if (!m) return
   const plan = derived[m.levelId] ?? derivePlan(doc, m.levelId)
   const chip: AiChip = { kind: 'annotation', id: m.id, label: `Пометка ${markBadge(m.n)}`, summary: describeMark(doc, m, markTargets(doc, plan, m)) }
   set({ chips: [...get().chips.filter((c) => c.id !== id), chip] })
-  focusChat()
+  if (focus) focusChat()
+  else showChat()
   if (currentProvider()?.images === false) return
   try {
     const img = markSnapshot(doc, plan, m, uiStore.getState().catalog)
@@ -306,11 +312,44 @@ export async function addMarkToChat(id: Id): Promise<void> {
   }
 }
 
-export function focusChat(): void {
+/** opens the AI tab without taking the keyboard */
+export function showChat(): void {
   setDockTab('ai')
   if (!uiStore.getState().rightPanelOpen) uiStore.setState({ rightPanelOpen: true })
+}
+
+export function focusChat(): void {
+  showChat()
   set({ focusTick: get().focusTick + 1 })
 }
+
+/** puts a line into the chat input (and optionally sends it) — the mini field next to a pencil mark.
+ *  Adding without sending leaves the keyboard where it is, so the next mark can be drawn right away. */
+export function insertIntoComposer(text: string, send: boolean): void {
+  if (send) focusChat()
+  else showChat()
+  set({ composeInsert: { text, send, tick: (get().composeInsert?.tick ?? 0) + 1 } })
+}
+
+export function consumeInsert(): void {
+  if (get().composeInsert) set({ composeInsert: null })
+}
+
+/** highest badge number drawn on the pictures waiting to be sent */
+export function maxImageMarkNumber(extra: MarkupShape[] = []): number {
+  let max = 0
+  for (const im of get().images) for (const s of im.markup?.shapes ?? []) max = Math.max(max, s.n ?? 0)
+  for (const s of extra) max = Math.max(max, s.n ?? 0)
+  return max
+}
+
+/** next free number for a mark on a picture: after the plan marks and every other picture */
+export function nextImageMarkNumber(current: MarkupShape[]): number {
+  const plan = Object.values(docStore.getState().doc.annotations ?? {}).reduce((m, a) => Math.max(m, a.n), 0)
+  return Math.max(plan, maxImageMarkNumber(current)) + 1
+}
+
+setMarkNumberFloor(() => maxImageMarkNumber())
 
 export function removeChip(id: string): void {
   set({ chips: get().chips.filter((c) => c.id !== id) })
@@ -367,6 +406,13 @@ export async function addUnderlayImage(): Promise<boolean> {
   if (!u) return false
   set({ images: [...get().images, await toAttachment(u.src, 'подложка')].slice(0, 8) })
   return true
+}
+
+/** puts the image back after drawing pencil marks on it */
+export function replaceImage(i: number, img: PendingImage): void {
+  const images = get().images
+  if (!images[i]) return
+  set({ images: images.map((x, j) => (j === i ? img : x)) })
 }
 
 export function removeImage(i: number): void {

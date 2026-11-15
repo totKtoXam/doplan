@@ -4,6 +4,7 @@
  */
 import { addOpening, OPENING_DEFAULTS } from '@core'
 import type { OpeningKind } from '@core/types'
+import type { OpeningPreset } from '@/contracts'
 import { t } from '@/i18n'
 import { docStore } from '@/store/document'
 import { uiStore } from '@/store/ui'
@@ -28,6 +29,12 @@ interface Ghost {
 export function createOpeningTool(ctx: EditorCtx, mode: 'door' | 'window'): Tool {
   let ghost: Ghost | null = null
 
+  /** the Construction panel's door preset, when it is for this kind */
+  function presetFor(kind: OpeningKind): OpeningPreset['patch'] | undefined {
+    const p = uiStore.getState().openingPreset
+    return p && p.kind === kind ? p.patch : undefined
+  }
+
   function kindFor(): OpeningKind {
     const k = uiStore.getState().openingKind
     const isWin = isWindowKind(k)
@@ -43,7 +50,7 @@ export function createOpeningTool(ctx: EditorCtx, mode: 'door' | 'window'): Tool
     }
     const kind = kindFor()
     const def = OPENING_DEFAULTS[kind] ?? OPENING_DEFAULTS.door
-    const place = placeOpeningOnWall(ctx, hit, def.width, hit.t * hit.geom.length, { alt: e.alt })
+    const place = placeOpeningOnWall(ctx, hit, presetFor(kind)?.width ?? def.width, hit.t * hit.geom.length, { alt: e.alt })
     ghost = {
       hit,
       place,
@@ -84,13 +91,15 @@ export function createOpeningTool(ctx: EditorCtx, mode: 'door' | 'window'): Tool
       update(e)
       const g = ghost
       if (!g || !g.place.valid) return
-      const def = OPENING_DEFAULTS[g.kind] ?? OPENING_DEFAULTS.door
+      const preset = presetFor(g.kind)
+      const def = { ...(OPENING_DEFAULTS[g.kind] ?? OPENING_DEFAULTS.door), ...(preset?.width ? { width: preset.width } : {}) }
       let created: string | null = null
       docStore.getState().transact(mode === 'door' ? t('Дверь') : t('Окно'), (d) => {
         created = addOpening(d, g.place.wallId, g.kind, g.place.offset, {
           hinge: g.hinge,
           swing: g.swing,
-          ...(Math.abs(g.place.width - def.width) > 0.5 ? { width: g.place.width } : {}),
+          ...(preset ?? {}),
+          ...(Math.abs(g.place.width - def.width) > 0.5 || preset?.width ? { width: g.place.width } : {}),
         })
       })
       const id = created as string | null
@@ -114,7 +123,7 @@ export function createOpeningTool(ctx: EditorCtx, mode: 'door' | 'window'): Tool
       const f = openingFrame(g.hit.geom, wall.thickness, g.place.offset, g.place.width)
       p.polygon(openingRect(f), { fill: color, fillAlpha: 0.3, stroke: color, width: 1.5 })
       const out = emptySymbol()
-      buildOpeningSymbol({ kind: g.kind, width: g.place.width, hinge: g.hinge, swing: g.swing }, f.h, (s, k) => framePoint(f, s, k), out)
+      buildOpeningSymbol({ kind: g.kind, width: g.place.width, hinge: g.hinge, swing: g.swing, slide: presetFor(g.kind)?.slide }, f.h, (s, k) => framePoint(f, s, k), out)
       p.segments(out.thin, color, 1, 0.7)
       p.segments(out.glass, color, 1, 0.9)
       p.segments(out.main, color, 1.5, 1)

@@ -17,6 +17,7 @@ import {
   KeyRound,
   LoaderCircle,
   Paperclip,
+  Pencil,
   Plus,
   RefreshCw,
   Sparkles,
@@ -39,6 +40,7 @@ import {
   answerApproval,
   applyDraft,
   cancelLogin,
+  consumeInsert,
   discardDraft,
   dismissLogin,
   newChat,
@@ -48,6 +50,7 @@ import {
   removeChat,
   removeChip,
   removeImage,
+  replaceImage,
   send,
   sendLoginCode,
   startLogin,
@@ -55,6 +58,7 @@ import {
   updateSettings,
   useAi,
 } from './store'
+import { ImageMarkup } from './ImageMarkup'
 
 type ToolPart = Extract<AiPart, { type: 'tool' }>
 type Effort = AiChatSettings['effort']
@@ -885,11 +889,27 @@ function Composer() {
   const running = useAi((s) => !!s.running)
   const focusTick = useAi((s) => s.focusTick)
   const [text, setText] = useState('')
+  const [marking, setMarking] = useState<number | null>(null)
   const ta = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     if (focusTick) ta.current?.focus()
   }, [focusTick])
+
+  // a note from the mini field next to a pencil mark: append it (and send right away if asked)
+  const insert = useAi((s) => s.composeInsert)
+  const textRef = useRef(text)
+  textRef.current = text
+  useEffect(() => {
+    if (!insert) return
+    consumeInsert()
+    const cur = textRef.current.replace(/\s+$/, '')
+    const next = cur ? `${cur}\n${insert.text}` : insert.text
+    if (insert.send && !running) {
+      setText('')
+      void send(next)
+    } else setText(next)
+  }, [insert, running])
 
   // auto-grow up to ~10 lines
   useLayoutEffect(() => {
@@ -928,6 +948,16 @@ function Composer() {
 
   return (
     <div className="relative mx-2">
+      {marking !== null && images[marking] && (
+        <ImageMarkup
+          image={images[marking]}
+          onClose={() => {
+            setMarking(null)
+            ta.current?.focus()
+          }}
+          onChange={(img) => replaceImage(marking, img)}
+        />
+      )}
       {slash.length > 0 && (
         <div className="absolute inset-x-0 bottom-full mb-1 rounded-xl border border-border-strong bg-panel p-1 shadow-pop">
           {slash.map((q) => (
@@ -943,7 +973,17 @@ function Composer() {
           <div className="flex flex-wrap gap-1.5 px-2.5 pt-2.5">
             {images.map((im, i) => (
               <span key={i} className="group relative">
-                <img src={im.url} alt="" className="h-12 w-12 rounded-lg border border-border object-cover" />
+                <button type="button" title="Нарисовать пометки на картинке" className="block" onClick={() => setMarking(i)}>
+                  <img src={im.url} alt="" className="h-12 w-12 rounded-lg border border-border object-cover" />
+                  <span
+                    className={cn(
+                      'absolute right-0.5 bottom-0.5 rounded bg-panel/90 p-0.5',
+                      im.markup?.shapes.length ? 'text-danger' : 'hidden text-muted group-hover:block',
+                    )}
+                  >
+                    <Pencil size={10} />
+                  </span>
+                </button>
                 <button
                   type="button"
                   aria-label="Убрать"

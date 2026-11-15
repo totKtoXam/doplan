@@ -95,7 +95,7 @@ function createFallbackApi(): DoplanApi {
   const noopUnsub = () => () => {}
   return {
     platform: 'browser',
-    version: '0.5.0-web',
+    version: '0.6.0-web',
     project: {
       async open(path?: string) {
         let file: File | undefined = path ? pickedFiles.get(path) : undefined

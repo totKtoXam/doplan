@@ -5,10 +5,12 @@ import type { Asset, Id, Item, MountKind } from '@core/types'
 import { useDoc } from '@/store/document'
 import { resizePrefs, useResizePrefs } from '@/store/resizePrefs'
 import { useT } from '@/i18n'
+import '@/ui/catalogI18n'
 import { Button, ColorInput, IconButton, Input, NumberInput, Popover, Row, SearchInput, Section, Select, Thumb, Toggle, cn, fmtNum } from '@/ui/kit'
 import { assetIcon } from '../common/assetIcons'
 import { MaterialPicker } from '../common/MaterialPicker'
 import { ASSET_CATEGORY_RU, MOUNT_RU, optionsOf } from '../common/labels'
+import { paramChoices, paramValueLabel } from '../common/paramOptions'
 import { displayName, downloadEntry, tx, useAllAssets, useAssetMap, useLang } from '../common/catalog'
 import { useAssetThumb, useInView } from '../common/thumbs'
 import { Hint, InspectorHeader, Pair, Triple } from './shared'
@@ -113,6 +115,18 @@ const PARAM_RU: Record<string, string> = {
   sections_: 'Секции',
   radius: 'Радиус',
   gap: 'Зазор',
+  frontStyle: 'Стиль фасадов',
+  cornerType: 'Тип угла',
+  legDepth: 'Глубина крыла',
+  cornerDoorWidth: 'Ширина дверцы угла',
+  variant: 'Вариант',
+  standStyle: 'Подставка',
+  doorType: 'Двери',
+  hinge: 'Петли',
+  underLight: 'Подсветка снизу',
+  count: 'Количество',
+  frontThickness: 'Толщина фасада',
+  backOverhang: 'Свес со стороны сидений',
 }
 
 const LENGTH_PARAM = /(height|width|depth|thick|size|gap|offset|radius|length|overhang|elev|plinth)/i
@@ -335,6 +349,17 @@ export function ItemInspector({ id }: { id: Id }) {
                 </Row>
               )
             const s = String(value)
+            const choices = paramChoices(asset?.procedural, key)
+            if (choices)
+              return (
+                <Row key={key} label={label}>
+                  <Select
+                    value={choices.includes(s) ? s : choices[0]}
+                    options={choices.map((v) => ({ value: v, label: t(paramValueLabel(asset?.procedural, key, v)) }))}
+                    onChange={(v) => setParam(v)}
+                  />
+                </Row>
+              )
             if (s.startsWith('mat_') || /material/i.test(key))
               return (
                 <Row key={key} label={label}>

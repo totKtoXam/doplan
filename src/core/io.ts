@@ -8,6 +8,10 @@ import { newId, type IdPrefix } from './ids'
 import { normalize, syncRooms, type PinnedNode } from './ops'
 import {
   DOC_VERSION,
+  DOOR_LEAF_STYLES,
+  DOOR_SLIDES,
+  type DoorLeafStyle,
+  type DoorSlide,
   type Asset,
   type AssetCategory,
   type CameraBookmark,
@@ -642,6 +646,8 @@ export function parseDoc(json: unknown): Doc {
     if (sashes !== undefined) o.sashes = Math.round(sashes)
     const sillBoard = optNum(v.sillBoard, 0, 2000)
     if (sillBoard !== undefined) o.sillBoard = sillBoard
+    if (typeof v.style === 'string' && (DOOR_LEAF_STYLES as readonly string[]).includes(v.style)) o.style = v.style as DoorLeafStyle
+    if (typeof v.slide === 'string' && (DOOR_SLIDES as readonly string[]).includes(v.slide)) o.slide = v.slide as DoorSlide
     const curtain = readCurtain(v.curtain)
     if (curtain) o.curtain = curtain
     doc.openings[id] = o

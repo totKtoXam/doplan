@@ -1,19 +1,21 @@
 /**
- * «Карандаш» (P): freehand marks over the plan for the AI chat. A drag draws a line, a lasso or a
- * rectangle (the shape is chosen in the pencil panel); a click selects a mark, Delete removes it.
- * Marks are stored in doc.annotations (undoable) and drawn by drawMarks on every frame.
+ * «Пометить» (P, or the button in the chat input row): freehand marks over the plan for the AI chat.
+ * A drag draws a line, a lasso or a rectangle (the shape is picked in the chat button's popover); the
+ * mark goes into the message as a «Пометка ①» chip and the keyboard returns to the chat input.
+ * A click selects a mark, Delete removes it. Marks are stored in doc.annotations (undoable) and drawn
+ * by drawMarks on every frame.
  */
 import { markAt, markBadge } from '@core'
 import type { Annotation, Vec2 } from '@core/types'
 import { addMarkToChat } from '@/ai/store'
 import { t } from '@/i18n'
-import { addMark, clearMarks, deleteMark, marksStore } from '@/store/marks'
+import { addMark, clearMarks, deleteMark, MARK_HINT, marksStore } from '@/store/marks'
 import type { ContextMenuItem, EditorCtx } from '../context'
 import { dist } from '../geom'
 import type { Painter } from '../painter'
 import type { Tool } from './types'
 
-const rectPts = (a: Vec2, b: Vec2): Vec2[] => [a, { x: b.x, y: a.y }, b, { x: a.x, y: b.y }]
+const rectPts =(a: Vec2, b: Vec2): Vec2[] => [a, { x: b.x, y: a.y }, b, { x: a.x, y: b.y }]
 
 function extent(pts: readonly Vec2[]): number {
   let minX = Infinity
@@ -74,24 +76,21 @@ export function createPencilTool(ctx: EditorCtx): Tool {
   let start: Vec2 | null = null
 
   function idleHint(): void {
-    ctx.setHint(t('Карандаш: обведите место на плане · щелчок — выбрать пометку, Delete — удалить, Ctrl+L — в чат'))
+    ctx.setHint(t(MARK_HINT))
   }
 
   return {
     cursor: 'crosshair',
     activate() {
       pts = null
-      marksStore.getState().setPrompt(null)
       idleHint()
     },
     deactivate() {
       pts = null
-      marksStore.getState().setPrompt(null)
       ctx.setHint('')
     },
     pointerDown(e) {
       if (e.button !== 0) return
-      marksStore.getState().setPrompt(null)
       start = e.plan
       pts = [e.plan]
     },
@@ -124,8 +123,8 @@ export function createPencilTool(ctx: EditorCtx): Tool {
       const closed = shape !== 'free' || (drawn.length >= 8 && dist(drawn[0], drawn[drawn.length - 1]) <= ctx.mm(16))
       if (closed && drawn.length < 3) return
       const id = addMark(ctx.levelId(), closed ? 'zone' : 'stroke', drawn)
-      // like a text selection in Claude: a small field to say what to do with this place
-      marksStore.getState().setPrompt({ id, x: e.client.x, y: e.client.y })
+      // into the message as a chip; the keyboard goes back to the chat input to say what to do there
+      void addMarkToChat(id)
       idleHint()
     },
     keyDown(e) {

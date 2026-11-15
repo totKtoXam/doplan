@@ -33,7 +33,8 @@ import {
 import { type ClipboardEvent, type KeyboardEvent, type ReactNode, type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { AiChatMeta, AiChatSettings, AiMessage, AiPart, AiProviderInfo } from '@shared/aiChat'
 import { useDoc } from '@/store/document'
-import { useUi } from '@/store/ui'
+import { uiStore, useUi } from '@/store/ui'
+import { activateTool } from '@/ui/shell/ToolRail'
 import { cn, Popover } from '@/ui/kit'
 import {
   addImageFiles,
@@ -66,6 +67,8 @@ import {
 } from './store'
 import { pluralKey, tAi } from './i18n'
 import { ImageMarkup } from './ImageMarkup'
+import { MarkButton } from './MarkButton'
+import { parseMarkdown } from './markdown'
 import { t } from '@/i18n'
 
 type ToolPart = Extract<AiPart, { type: 'tool' }>
@@ -114,34 +117,91 @@ function useDigitKeys(open: boolean, count: number, pick: (i: number) => void): 
 
 // ───────────── message parts ─────────────
 
-/** minimal inline markdown: `code`, **bold**; blocks keep line breaks */
+/** inline markdown: `code`, **bold** */
+function inlineMd(text: string): ReactNode[] {
+  const out: ReactNode[] = []
+  const re = /(`[^`\n]+`|\*\*[^*\n]+\*\*)/g
+  let last = 0
+  let m: RegExpExecArray | null
+  let k = 0
+  while ((m = re.exec(text))) {
+    if (m.index > last) out.push(text.slice(last, m.index))
+    const s = m[0]
+    out.push(
+      s.startsWith('`') ? (
+        <code key={k++} className="rounded bg-[color-mix(in_srgb,var(--text)_10%,transparent)] px-1 font-mono text-[11px]">
+          {s.slice(1, -1)}
+        </code>
+      ) : (
+        <strong key={k++} className="font-semibold">
+          {s.slice(2, -2)}
+        </strong>
+      ),
+    )
+    last = m.index + s.length
+  }
+  if (last < text.length) out.push(text.slice(last))
+  return out
+}
+
+const ALIGN = { left: 'text-left', center: 'text-center', right: 'text-right' } as const
+/** the table is as wide as its content (w-max): short columns hug it, long text wraps at this width */
+const CELL = 'max-w-[15rem] [overflow-wrap:break-word]'
+
+/**
+ * Message markdown: text keeps its line breaks, GFM tables and fenced code get their own boxes. Wide
+ * tables and code scroll sideways inside the message; long words and links wrap — nothing runs past
+ * the panel edge.
+ */
 function RichText({ text, className }: { text: string; className?: string }) {
-  const nodes = useMemo(() => {
-    const out: ReactNode[] = []
-    const re = /(`[^`\n]+`|\*\*[^*\n]+\*\*)/g
-    let last = 0
-    let m: RegExpExecArray | null
-    let k = 0
-    while ((m = re.exec(text))) {
-      if (m.index > last) out.push(text.slice(last, m.index))
-      const s = m[0]
-      out.push(
-        s.startsWith('`') ? (
-          <code key={k++} className="rounded bg-[color-mix(in_srgb,var(--text)_10%,transparent)] px-1 font-mono text-[11px]">
-            {s.slice(1, -1)}
-          </code>
+  const blocks = useMemo(() => parseMarkdown(text), [text])
+  return (
+    <div data-ai-text className={cn('min-w-0 text-[12.5px] leading-relaxed [overflow-wrap:anywhere] select-text', className)}>
+      {blocks.map((b, i) =>
+        b.type === 'text' ? (
+          <div key={i} className="my-1 whitespace-pre-wrap first:mt-0 last:mb-0">
+            {inlineMd(b.text)}
+          </div>
+        ) : b.type === 'heading' ? (
+          <div key={i} className={cn('mt-2 mb-1 font-semibold first:mt-0', b.level <= 2 ? 'text-[13.5px]' : 'text-[12.5px]')}>
+            {inlineMd(b.text)}
+          </div>
+        ) : b.type === 'code' ? (
+          <pre
+            key={i}
+            className="my-1.5 max-w-full overflow-x-auto rounded-md border border-border bg-[color-mix(in_srgb,var(--text)_5%,transparent)] px-2 py-1.5 font-mono text-[11px] leading-snug [overflow-wrap:normal] whitespace-pre first:mt-0 last:mb-0"
+          >
+            {b.text}
+          </pre>
         ) : (
-          <strong key={k++} className="font-semibold">
-            {s.slice(2, -2)}
-          </strong>
+          <div key={i} data-md-table className="my-1.5 max-w-full overflow-x-auto rounded-md border border-border first:mt-0 last:mb-0">
+            <table className="w-max border-collapse text-[11.5px] leading-snug">
+              <thead>
+                <tr className="bg-panel-2">
+                  {b.head.map((c, k) => (
+                    <th key={k} className={cn('border-b border-border px-2 py-1 align-bottom font-semibold', ALIGN[b.align[k] ?? 'left'])}>
+                      <div className={CELL}>{inlineMd(c)}</div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {b.rows.map((r, ri) => (
+                  <tr key={ri} className="border-b border-border last:border-b-0">
+                    {r.map((c, k) => (
+                      <td key={k} className={cn('px-2 py-0.5 align-top', ALIGN[b.align[k] ?? 'left'])}>
+                        <div className={CELL}>{inlineMd(c)}</div>
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ),
-      )
-      last = m.index + s.length
-    }
-    if (last < text.length) out.push(text.slice(last))
-    return out
-  }, [text])
-  return <div className={cn('text-[12.5px] leading-relaxed break-words whitespace-pre-wrap select-text', className)}>{nodes}</div>
+      )}
+    </div>
+  )
 }
 
 function StatusIcon({ status }: { status: ToolPart['status'] }) {
@@ -1048,7 +1108,7 @@ function Composer() {
     if (focusTick) ta.current?.focus()
   }, [focusTick])
 
-  // a note from the mini field next to a pencil mark: append it (and send right away if asked)
+  // a note from the mini field next to a mark on a chat picture: append it (and send right away if asked)
   const insert = useAi((s) => s.composeInsert)
   const textRef = useRef(text)
   textRef.current = text
@@ -1089,6 +1149,8 @@ function Composer() {
       if (slash.length === 1 && text.trim() !== slash[0].cmd) setText(slash[0].cmd + ' ')
       else submit()
     }
+    // the keyboard comes back here after each plan mark: Esc still ends marking
+    if (e.key === 'Escape' && !slash.length && uiStore.getState().tool === 'pencil') activateTool('select', t)
     e.stopPropagation() // editor shortcuts must not fire while typing
   }
 
@@ -1171,6 +1233,7 @@ function Composer() {
         />
         <div className="flex items-center gap-1 px-1.5 pb-1.5">
           <PlusMenu onQuick={(cmd) => setText(cmd + ' ')} />
+          <MarkButton />
           <span className="min-w-0 flex-1 truncate px-1 text-[10px] text-faint">{t('«/» — команды, Ctrl+L — выделенное')}</span>
           {running && !(answering && canSend) ? (
             <button type="button" aria-label={t('Стоп')} title={t('Остановить')} className="flex h-7 w-7 items-center justify-center rounded-lg bg-text text-panel hover:opacity-85" onClick={() => stop()}>

@@ -169,8 +169,13 @@ addTranslations('en', {
   'место на плане': 'a spot on the plan',
   '«{room}», стена {len} мм': '“{room}”, wall {len} mm',
   ' и ещё {n}': ' and {n} more',
-  Карандаш: 'Pencil',
-  'Обведите место на плане и добавьте пометку в чат ИИ (Ctrl+L)': 'Circle a spot on the plan and add the mark to the AI chat (Ctrl+L)',
+  Пометить: 'Mark',
+  Пометки: 'Marks',
+  'Пометить место на плане (P)': 'Mark a spot on the plan (P)',
+  'Закончить пометки (Esc)': 'Stop marking (Esc)',
+  'Пометки рисуются на 2D-плане': 'Marks are drawn on the 2D plan',
+  'Форма пометки': 'Mark shape',
+  'Форма — у кнопки «Пометить» в чате': 'Pick the shape at the «Mark» button in the chat',
   'Обведите место на плане: пометка получит номер, его можно упомянуть в чате — «в ① ширина 180 см».':
     'Circle a spot on the plan: the mark gets a number you can mention in the chat, e.g. “in ① width 180 cm”.',
   зона: 'zone',
@@ -179,8 +184,8 @@ addTranslations('en', {
   'Удалить пометку': 'Delete mark',
   'Все в чат': 'All to chat',
   'Очистить пометки': 'Clear marks',
-  'Карандаш: обведите место на плане · щелчок — выбрать пометку, Delete — удалить, Ctrl+L — в чат':
-    'Pencil: circle a spot on the plan · click selects a mark, Delete removes it, Ctrl+L adds it to the chat',
+  'Пометить: обведите место на плане — пометка попадёт в сообщение · щелчок — выбрать, Delete — удалить, Ctrl+L — в чат':
+    'Mark: circle a spot on the plan and it goes into the message · click selects a mark, Delete removes it, Ctrl+L adds it to the chat',
   'Пометка {n}': 'Mark {n}',
   'Удалить пометку {n}': 'Delete mark {n}',
 

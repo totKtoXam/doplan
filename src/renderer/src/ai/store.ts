@@ -611,7 +611,7 @@ export function focusChat(): void {
   set({ focusTick: get().focusTick + 1 })
 }
 
-/** puts a line into the chat input (and optionally sends it) — the mini field next to a pencil mark.
+/** puts a line into the chat input (and optionally sends it) — the mini field next to a mark on a chat picture.
  *  Adding without sending leaves the keyboard where it is, so the next mark can be drawn right away. */
 export function insertIntoComposer(text: string, send: boolean): void {
   if (send) focusChat()

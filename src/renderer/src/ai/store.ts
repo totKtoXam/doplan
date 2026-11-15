@@ -201,8 +201,12 @@ export function initAi(): void {
     // changed it): the chat stays open. A plan-mode draft was made against the plan that is gone, so it
     // ends, and with it the turn that made it (it would go on proposing changes to proposals that are
     // gone); a turn would also go on editing an old version. A live turn goes on after a plain reload
-    if (!first && reload && docRef() === get().projectPath) {
+    if (!first && reload && (docRef() === get().projectPath || claimFailed)) {
       leaveChat(reload === 'version' || hasDraft())
+      // a copy read again keeps its own id (actions/project keepId), which its file still lacks
+      const c = copyClaim
+      const s = docStore.getState()
+      if (c && s.filePath === c.path && s.doc.meta.id === c.to && !s.dirty) s.setDirty(true)
       return
     }
     const gone = !first && unsavedDoc ? get().projectPath : null
@@ -213,7 +217,21 @@ export function initAi(): void {
   docStore.subscribe(sync)
   sync()
   addProjectHook({
+    // every save waits for the claim of the opened file, so it writes the copy's own id
+    beforeSave: claimSettled,
     saved: async (saveAs) => {
+      await claimSettled()
+      const c = copyClaim
+      const s = docStore.getState()
+      if (!saveAs && c && s.doc.meta.id === c.from) {
+        // a save that did not wait wrote the old id: the copy keeps its new one (changed until saved)
+        s.setDocId(c.to)
+        set({ projectPath: `id:${c.to}` })
+      } else copyClaim = null
+      // the claim failed: whether this file is a copy is unknown, so the save leaves the chats of its
+      // id alone (a Save As is a new project of its own and takes the chats made meanwhile)
+      if (claimFailed && !saveAs) return
+      claimFailed = false
       // the first save of a new document takes its chats along, even through Save As
       const wasUnsaved = unsavedDoc
       unsavedDoc = false
@@ -302,6 +320,23 @@ let settingsRev = 0
 
 /** a move of the chats in progress: a new turn waits for it (it would start in the wrong place) */
 let moving: Promise<void> | null = null
+/** the claim of the file just opened, until its answer is applied: the 'saved' hook waits for it */
+let claiming: Promise<void> | null = null
+/** the opened file at `path` turned out to be a copy: its id `from` became `to` (until it is saved with it) */
+let copyClaim: { path: string; from: string; to: string } | null = null
+/** the claim of the open file failed: its chats are a scratch bucket, the id's own chats are left alone */
+let claimFailed = false
+/** per chat reference: how many times its chats lost their agent sessions (a claim of a moved document).
+ * A stopped turn's session, written later, is dropped when this changed after the turn was stopped */
+const sessionDrops = new Map<string, number>()
+const dropsOf = (ref: string | null) => (ref ? (sessionDrops.get(ref) ?? 0) : 0)
+/** one per document opened: a chat loaded for the document before is not this one's, even with the same id */
+let projectGen = 0
+
+/** resolves once no claim of an opened file is pending (its answer applied) */
+async function claimSettled(): Promise<void> {
+  while (claiming) await claiming
+}
 
 /**
  * The open document was saved: its chats follow when its reference changed (moved; copied without
@@ -371,10 +406,13 @@ function dropCurrent(): void {
  * nothing can reach any more.
  */
 async function setProject(gone: string | null): Promise<void> {
+  projectGen++
   // a shared pre-0.6 chat is never dropped with a document: it is saved where it lives
   if (gone && !get().legacy) dropCurrent()
   else leaveChat()
   let ref = docRef()
+  copyClaim = null
+  claimFailed = false
   // switched at once: whatever is saved from now on lands in the new project
   set({ projectPath: ref, legacy: false, chats: [], chat: emptyChat(get().settings.provider), chips: [], images: [], status: '' })
   if (gone && gone !== ref) void queueWrite(() => api.aiChat.dropChats(gone)).catch(() => {})
@@ -382,16 +420,58 @@ async function setProject(gone: string | null): Promise<void> {
   if (filePath && ref.startsWith('id:')) {
     // a copy of another file (the same id inside) gets an id and chats of its own
     const opened = ref
-    const job = queueWrite(() => api.aiChat.claimDocument(opened, filePath)).catch(() => opened)
+    // the document this claim is for: another file opened meanwhile can carry the same id (the original
+    // of the copy being claimed), and must not get the copy's id
+    const job = queueWrite(async () => {
+      const c = await api.aiChat.claimDocument(opened, filePath)
+      // the chats it keeps lost their agent sessions (moved outside the app): a stopped turn of this id
+      // that reports its session late must not write it back. Done in the queue, before any later write
+      if (c.sessionsDropped) {
+        // also a turn whose 'done' already came: its session write may be queued behind this claim
+        sessionDrops.set(opened, dropsOf(opened) + 1)
+        for (const s of stoppedRuns.values()) if (s.ref === opened) s.noSession = true
+        if (chatRef() === opened) {
+          const r = get().running
+          if (r) voidSessions.add(r.runId)
+          // the open chat (loaded from disk before the drop) forgets them too
+          patchChat((ch) => {
+            delete ch.resume
+            delete ch.resumeCwd
+          })
+        }
+      }
+      return c.ref
+    }).catch((e) => {
+      console.error('[doplan] claiming the document failed', e)
+      return null
+    })
     const wait = job.then(() => {})
     moving = wait
-    const claimed = await job
-    if (moving === wait) moving = null
-    if (get().projectPath !== opened) return
-    if (claimed !== opened && claimed.startsWith('id:')) {
-      docStore.getState().setDocId(claimed.slice(3))
-      ref = claimed
-      set({ projectPath: ref })
+    let applied!: () => void
+    const claim = new Promise<void>((r) => (applied = r))
+    claiming = claim
+    try {
+      const claimed = await job
+      if (moving === wait) moving = null
+      const s = docStore.getState()
+      // still this file with this id: not after another file was opened (the original of a copy can
+      // carry the same id), nor after a Save As gave it an id of its own. A reload keeps the answer
+      if (get().projectPath !== opened || s.filePath !== filePath || `id:${s.doc.meta.id}` !== opened) return
+      if (claimed === null) {
+        // unknown whether this file is a copy: no chats of the id are shown or touched, the next open
+        // tries again
+        claimFailed = true
+        ref = `unsaved:${uid()}`
+        set({ projectPath: ref, status: t('Не удалось открыть чаты проекта: показан пустой чат') })
+      } else if (claimed !== opened && claimed.startsWith('id:')) {
+        copyClaim = { path: filePath, from: opened.slice(3), to: claimed.slice(3) }
+        s.setDocId(claimed.slice(3))
+        ref = claimed
+        set({ projectPath: ref })
+      }
+    } finally {
+      if (claiming === claim) claiming = null
+      applied()
     }
   }
   const rev = settingsRev
@@ -440,9 +520,12 @@ export async function openChat(id: string, legacy = false): Promise<void> {
   }
   leaveChat()
   const path = get().projectPath
+  const gen = projectGen
   // after the save of the chat just left
   const rec = await queueWrite(() => api.aiChat.loadChat(legacy ? null : path, id))
-  if (!rec || get().projectPath !== path || get().running) return
+  // another document opened meanwhile (also one with the same id: the record, and its agent sessions,
+  // may be of the document before)
+  if (!rec || get().projectPath !== path || projectGen !== gen || get().running) return
   set({ chat: rec, legacy, showHistory: false, status: '' })
 }
 
@@ -769,7 +852,8 @@ export async function send(raw: string): Promise<void> {
 export function stop(save = true): void {
   const r = get().running
   if (!r) return
-  stoppedRuns.set(r.runId, { chatId: get().chat.id, msgId: r.msgId, ref: chatRef(), noSession: voidSessions.has(r.runId) })
+  const ref = chatRef()
+  stoppedRuns.set(r.runId, { chatId: get().chat.id, msgId: r.msgId, ref, noSession: voidSessions.has(r.runId), stoppedIn: ref, drops: dropsOf(ref) })
   void api.aiChat.stop(r.runId)
   finishTurn({ type: 'done', ok: false, stopped: true }, save)
 }
@@ -778,7 +862,19 @@ export function stop(save = true): void {
  * Turns stopped here that main is still winding down: their last usage, API history (the request and
  * the edits the model already made) and agent session id still belong to the chat record.
  */
-const stoppedRuns = new Map<string, { chatId: string; msgId: string; ref: string | null; noSession?: boolean }>()
+const stoppedRuns = new Map<string, StoppedRun>()
+interface StoppedRun {
+  chatId: string
+  msgId: string
+  /** where the chat lives now (a Save As that moved the chats moves it too) */
+  ref: string | null
+  noSession?: boolean
+  /** the reference it was stopped in, and how many session drops that reference had then */
+  stoppedIn: string | null
+  drops: number
+}
+/** the turn's agent session no longer belongs to its chat */
+const sessionGone = (s: StoppedRun) => !!s.noSession || dropsOf(s.stoppedIn) !== s.drops
 /** turns whose agent session no longer belongs to the chat (it was copied / moved away from its folder) */
 const voidSessions = new Set<string>()
 
@@ -812,7 +908,7 @@ function onStoppedRunEvent(runId: string, ev: AiRunEvent): void {
     return
   }
   if (ev.type !== 'session' && ev.type !== 'apiHistory' && ev.type !== 'usage') return
-  if (ev.type === 'session' && s.noSession) return
+  if (ev.type === 'session' && sessionGone(s)) return
   if (get().chat.id === s.chatId && chatRef() === s.ref) {
     patchChat((c) => recordEvent(c, s.msgId, ev))
     void persist()
@@ -820,6 +916,8 @@ function onStoppedRunEvent(runId: string, ev: AiRunEvent): void {
   }
   // the user moved on to another chat: update the saved record, after the save that leaving it issued
   void queueWrite(async () => {
+    // a claim queued before this write may have ended the id's sessions meanwhile
+    if (ev.type === 'session' && sessionGone(s)) return
     const rec = await api.aiChat.loadChat(s.ref, s.chatId)
     if (rec) await api.aiChat.saveChat(s.ref, produce(rec, (c) => recordEvent(c, s.msgId, ev)))
   }).catch((e) => console.error('[doplan] saving a stopped turn failed', e))

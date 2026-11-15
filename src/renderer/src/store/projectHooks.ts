@@ -4,6 +4,8 @@
  * document that is closed. Kept apart from actions/project so modules that react need not import it.
  */
 export interface ProjectHook {
+  /** a save is about to read the document (the AI chat lets a pending claim of a copy's id finish) */
+  beforeSave?(): Promise<void> | void
   /** the document was written (`saveAs`: to a new file, as a new project) */
   saved?(saveAs: boolean): Promise<void> | void
   /** the window is about to close, unsaved changes already settled */

@@ -158,6 +158,7 @@ export async function createProjectFolder(mode: 'new' | 'saveAs', name: string, 
       loadDocument(doc, res.path, { kind: 'folder', git: res.git })
       void api.project.clearRecovery().catch(() => {})
     } else {
+      await runProjectHooks('beforeSave')
       const store = docStore.getState()
       if (store.doc.meta.name !== clean) store.transact(t('Название проекта'), (d) => void (d.meta.name = clean))
       const doc = docStore.getState().doc
@@ -181,7 +182,8 @@ export async function createProjectFolder(mode: 'new' | 'saveAs', name: string, 
   }
 }
 
-async function afterOpen(res: Awaited<ReturnType<typeof api.project.open>>, reload: DocReload = null): Promise<void> {
+/** `loadId`: of the document open when the reload began (another project loaded meanwhile: not a reload) */
+async function afterOpen(res: Awaited<ReturnType<typeof api.project.open>>, reload: DocReload = null, loadId?: number): Promise<void> {
   if (!res) return
   let doc: Doc
   try {
@@ -190,9 +192,6 @@ async function afterOpen(res: Awaited<ReturnType<typeof api.project.open>>, relo
     await alertDialog(t('Файл проекта повреждён или имеет неверный формат'), errorText(err))
     return
   }
-  // the same project read again keeps the id it has in memory, like viewVersion: an opened copy got its
-  // own id that plan.json does not hold until the next save
-  if (reload) doc = keepId(doc)
   // main switches the project root and assets only now, after the document was validated
   try {
     await api.project.attach(res.path)
@@ -200,6 +199,13 @@ async function afterOpen(res: Awaited<ReturnType<typeof api.project.open>>, relo
     await alertDialog(t('Не удалось открыть проект'), errorText(err))
     return
   }
+  // the same project read again keeps the id it has in memory, like viewVersion: an opened copy got its
+  // own id that plan.json does not hold until the next save. Taken now, after the waits: the claim of
+  // that copy may have answered meanwhile. Another project opened during the waits: this is an open of
+  // its own, the id in memory is that other project's (the same project loaded again meanwhile, by a
+  // reload or a version view, is still this one)
+  if (reload && otherProjectLoaded(loadId, res.path)) reload = null
+  if (reload) doc = keepId(doc)
   loadDocument(doc, res.path, { kind: res.kind ?? kindOfPath(res.path), git: res.git, untrustedGit: res.untrustedGit || res.untrustedFolder, gitFile: res.gitFile, unsafeGit: res.unsafeGit, reload })
   refreshRecent()
   toast(t('Проект открыт'), 'success')
@@ -350,7 +356,8 @@ export async function ensureAiFolderTrust(): Promise<boolean> {
 export async function openProject(path?: string, opts?: { skipConfirm?: boolean; reload?: DocReload }): Promise<void> {
   if (!opts?.skipConfirm && !(await confirmDiscard())) return
   try {
-    await afterOpen(await api.project.open(path), opts?.reload ?? null)
+    const loadId = docStore.getState().loadId
+    await afterOpen(await api.project.open(path), opts?.reload ?? null, loadId)
   } catch (err) {
     await alertDialog(t('Не удалось открыть проект'), errorText(err))
   }
@@ -383,6 +390,8 @@ export function pendingCommitMessage(): string {
 
 /** Resolves true when the document was written. */
 export async function saveProject(saveAs = false, opts?: { message?: string; overwrite?: boolean }): Promise<boolean> {
+  // an opened copy may be getting an id of its own: the save writes that one
+  await runProjectHooks('beforeSave')
   const { doc, filePath } = docStore.getState()
   const ps = projectStore.getState()
   const folder = ps.kind === 'folder' && !!filePath
@@ -441,6 +450,7 @@ export async function saveProject(saveAs = false, opts?: { message?: string; ove
 
 /** single-file save (.doplan opened earlier, or the browser fallback) */
 async function saveFileLegacy(target: string | null): Promise<boolean> {
+  await runProjectHooks('beforeSave')
   const { doc, filePath } = docStore.getState()
   const saveAs = target === null
   const id = saveId(doc, filePath, saveAs)
@@ -500,6 +510,7 @@ export async function viewVersion(v: ProjectVersion): Promise<boolean> {
   const root = projectStore.getState().root
   if (!root) return false
   if (!(await confirmDiscard())) return false
+  const loadId = docStore.getState().loadId
   let doc: Doc
   try {
     doc = parseDoc(await api.project.versionDoc(v.sha))
@@ -507,6 +518,8 @@ export async function viewVersion(v: ProjectVersion): Promise<boolean> {
     await alertDialog(t('Не удалось открыть версию'), errorText(err))
     return false
   }
+  // another project was opened while the version was read: it is not a version of that one
+  if (otherProjectLoaded(loadId, root) || projectStore.getState().root !== root) return false
   // an old version is the same project: it keeps the project's id (and so its AI chats), even one
   // written before documents had an id
   doc = keepId(doc)
@@ -533,6 +546,21 @@ export async function leaveVersion(): Promise<void> {
     if (!ok) return
   }
   await openProject(root, { skipConfirm: true, reload: 'version' })
+}
+
+/** since `loadId`, a document of another file than `path` was loaded */
+function otherProjectLoaded(loadId: number | undefined, path: string): boolean {
+  const s = docStore.getState()
+  return s.loadId !== loadId && !sameFile(s.filePath, path)
+}
+
+function sameFile(a: string | null, b: string): boolean {
+  if (!a) return false
+  const norm = (p: string) => {
+    const q = p.replace(/\\/g, '/').replace(/\/+$/, '')
+    return api.platform === 'linux' ? q : q.toLowerCase()
+  }
+  return norm(a) === norm(b)
 }
 
 /** the open project's id on a document read again from it */

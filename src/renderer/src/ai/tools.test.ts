@@ -3,7 +3,9 @@ import { builtinCatalog, createEmptyDoc, derivePlan, roomEdgeRuns } from '@core'
 import type { Catalog } from '@core/types'
 import { parseToolArgs, toolJsonSchema } from '@shared/aiTools'
 import { docStore } from '@/store/document'
-import { executeTool, type ToolHost } from './tools'
+import { uiStore } from '@/store/ui'
+import './i18n'
+import { describeCall, executeTool, type ToolHost } from './tools'
 
 const catalog: Catalog = builtinCatalog()
 const st = () => docStore.getState()
@@ -85,6 +87,31 @@ describe('executeTool', () => {
     expect(Object.keys(st().doc.items)).toHaveLength(0)
     st().undo()
     expect(Object.keys(st().doc.walls)).toHaveLength(4)
+  })
+
+  it('change lines the user reads follow the UI language', async () => {
+    uiStore.setState({ lang: 'en' })
+    try {
+      await executeTool(host, 'add_rect_room', { x: 0, y: 0, w: 4000, h: 3000, type: 'kitchen' })
+      const roomId = Object.keys(st().doc.rooms)[0]
+      // no name of its own: the room goes by its type
+      st().transact('t', (d) => {
+        d.rooms[roomId].name = ''
+      })
+      const found = await executeTool(host, 'list_catalog', { kind: 'asset', query: 'холодильник' })
+      const fridgeId = /- (\S+) —/.exec(found.result.text)?.[1]
+      const put = await executeTool(host, 'place_item', { assetId: fridgeId, roomId })
+      const itemId = Object.keys(st().doc.items)[0]
+      const moved = await executeTool(host, 'move_item', { itemId, rotation: 90, elevation: 100 })
+      const room = await executeTool(host, 'set_room', { roomId, ceilingHeight: 2700 })
+      const lines = [...(put.changes ?? []), ...(moved.changes ?? []), ...(room.changes ?? []), describeCall('move_node', { nodeId: 'n_1', x: 0, y: 0 })]
+      expect(lines.length).toBe(4)
+      for (const l of lines) expect(l, l).not.toMatch(/[А-Яа-яЁё]/)
+      expect(put.changes?.[0]).toContain('Kitchen')
+      expect(moved.changes?.[0]).toContain('rotation 0° → 90°')
+    } finally {
+      uiStore.setState({ lang: 'ru' })
+    }
   })
 
   it('reports missing entities instead of throwing', async () => {

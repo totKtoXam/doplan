@@ -313,7 +313,9 @@ export function registerAiChat(): void {
     typeof from === 'string' && typeof to === 'string' ? moveChats(from, to, copy === true, typeof path === 'string' ? path : null) : { sessionsKept: true },
   )
   handleIpc(CH.aiChatDrop, (p: unknown) => dropChats(typeof p === 'string' ? p : null))
-  handleIpc(CH.aiChatClaim, (ref: unknown, path: unknown) => (typeof ref === 'string' && typeof path === 'string' ? claimDocument(ref, path) : ref))
+  handleIpc(CH.aiChatClaim, (ref: unknown, path: unknown) =>
+    typeof ref === 'string' && typeof path === 'string' ? claimDocument(ref, path) : { ref: String(ref), sessionsDropped: false },
+  )
   handleIpc(CH.aiChatLogin, async (id: unknown) => {
     const prov = (await providers(false)).find((p) => p.info.id === id)
     if (!prov?.bin || !prov.info.canLogin) throw new Error('Вход для этого провайдера недоступен')

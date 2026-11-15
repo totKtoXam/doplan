@@ -270,6 +270,8 @@ export interface Room {
 export interface RoomDesign {
   /** id of the style preset last applied to the room (BUILTIN_STYLES or a project style) */
   styleId?: Id
+  /** the wall face (`wallId:side`) the style made the accent wall, so a later apply can move it */
+  accentFace?: string
 }
 
 // ───────────────────────────── Items (furniture etc.) ─────────────────────────────

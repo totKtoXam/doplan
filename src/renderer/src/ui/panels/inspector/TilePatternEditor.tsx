@@ -32,9 +32,11 @@ export interface TilePatternEditorProps {
   color: string
   /** `gesture` groups slider/scrub edits */
   onChange(next: TilePattern | undefined, gesture?: string): void
+  /** what «Начало раскладки» is measured from (default: the room corner, for floors) */
+  startHint?: string
 }
 
-export function TilePatternEditor({ pattern, color, onChange }: TilePatternEditorProps) {
+export function TilePatternEditor({ pattern, color, onChange, startHint = 'сдвиг первой целой плитки от угла, мм' }: TilePatternEditorProps) {
   const t = useT()
   const p = pattern ?? { ...DEFAULT_PATTERN, type: 'none' as TilePatternType }
   const set = (patch: Partial<TilePattern>, g?: string) => onChange({ ...p, ...patch }, g)
@@ -72,7 +74,7 @@ export function TilePatternEditor({ pattern, color, onChange }: TilePatternEdito
           <Row label={t('Вариативность')}>
             <Slider value={p.variation ?? 0} min={0} max={1} step={0.01} format={(v) => `${Math.round(v * 100)}%`} onChange={(v, g) => set({ variation: v }, g)} />
           </Row>
-          <Row label={t('Начало раскладки')} hint={t('сдвиг первой целой плитки от угла, мм')}>
+          <Row label={t('Начало раскладки')} hint={t(startHint)}>
             <NumberInput kind="length" label="X" value={p.offsetX ?? 0} min={-5000} max={5000} round={1} onChange={(v, g) => set({ offsetX: v }, g)} />
             <NumberInput kind="length" label="Y" value={p.offsetY ?? 0} min={-5000} max={5000} round={1} onChange={(v, g) => set({ offsetY: v }, g)} />
           </Row>

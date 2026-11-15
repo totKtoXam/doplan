@@ -13,6 +13,9 @@ import { tx, useAllMaterials } from '../common/catalog'
 import { roomWallSides } from '../common/edits'
 import { Hint, InspectorHeader, Pair } from './shared'
 
+/** a wall face is laid from its own end, which is a room corner or the node where another wall meets it */
+const WALL_START_HINT = 'сдвиг первой целой плитки от края стены (угла или места, где к ней примыкает другая стена), мм'
+
 type Side = 'left' | 'right'
 
 export function WallInspector({ id }: { id: Id }) {
@@ -142,6 +145,7 @@ function WallSideEditor({ wall, side, room }: { wall: Wall; side: Side; room: { 
         />
       </Row>
       <TilePatternEditor
+        startHint={WALL_START_HINT}
         pattern={ws.pattern}
         color={colorOf(ws.materialId)}
         onChange={(p, g) =>
@@ -213,6 +217,7 @@ function WallSideEditor({ wall, side, room }: { wall: Wall; side: Side; room: { 
             </summary>
             <div className="pt-1">
               <TilePatternEditor
+                startHint={WALL_START_HINT}
                 pattern={z.pattern}
                 color={colorOf(z.materialId)}
                 onChange={(p, g) =>

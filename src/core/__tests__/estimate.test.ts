@@ -375,6 +375,16 @@ describe('estimate: lots', () => {
     expect(new Set(priced.map((r) => r.priceUnit)).size).toBe(1)
   })
 
+  it('an erased card price stays erased through a price list export and import', () => {
+    const doc = two(mat('m_e', 'tile', { price: 1000, priceUnit: 'м²', vendor: 'Leroy', url: 'https://shop.kz/e' }), GRID)
+    doc.design = { priceList: { m_e: { noPrice: true } } }
+    const csv = priceListToCsv(computeBom(doc), doc)
+    const line = csv.split(/\n/).find((l) => l.startsWith('m_e;'))!
+    expect(line).not.toContain('Leroy')
+    // an unchanged file brings nothing for it back
+    expect(parsePriceListCsv(csv).entries.m_e).toBeUndefined()
+  })
+
   it('a card price erased in the project is not used; the card stays', () => {
     const doc = two(mat('m_c', 'tile', { price: 1000, priceUnit: 'м²', vendor: 'V' }), GRID)
     doc.design = { priceList: { m_c: { noPrice: true } } }

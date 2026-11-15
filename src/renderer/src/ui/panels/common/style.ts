@@ -9,6 +9,8 @@ import { tx } from './catalog'
 addTranslations('en', {
   'Начало раскладки': 'Layout start',
   'сдвиг первой целой плитки от угла, мм': 'offset of the first whole tile from the corner, mm',
+  'сдвиг первой целой плитки от края стены (угла или места, где к ней примыкает другая стена), мм':
+    'offset of the first whole tile from the end of the wall (a corner or where another wall meets it), mm',
   'Запас на подрезку': 'Cutting waste',
   'по умолч.': 'default',
   'Раскладка стены': 'Wall layout',

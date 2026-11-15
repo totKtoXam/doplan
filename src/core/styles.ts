@@ -630,15 +630,31 @@ export function applyStyle(doc: Doc, style: StylePreset, opts: ApplyStyleOptions
         }
       }
       const accentKey = accent ? faceKey(accent.wallId, accent.side) : undefined
+      const prevAccent = room.design?.accentFace
+      /** the finish the room's other walls have (most common), for the face that stops being the accent */
+      const roomFinish = (): Id => {
+        const n = new Map<Id, number>()
+        for (const f of faces) {
+          const k = faceKey(f.wallId, f.side)
+          if (k === accentKey || k === prevAccent) continue
+          const id = doc.walls[f.wallId][f.side].materialId
+          if (id) n.set(id, (n.get(id) ?? 0) + 1)
+        }
+        let best: Id = F.wallMain
+        let most = 0
+        for (const [id, c] of n) if (c > most) [best, most] = [id, c]
+        return best
+      }
       for (const f of faces) {
         const side = doc.walls[f.wallId][f.side]
         const k = faceKey(f.wallId, f.side)
         const isAccent = k === accentKey
-        // with finishes off only the accent face is dressed, and an old accent face of this style
-        // (the accent moved, e.g. a window was cut into it) goes back to the main finish
-        const oldAccent = parts.accent && !wet && !!F.wallAccent && side.materialId === F.wallAccent
+        // with finishes off only the accent face is dressed, and the face this style made the accent
+        // before (the accent moved, e.g. a window was cut into it) gets the room's wall finish back;
+        // accent walls the user placed are left alone
+        const oldAccent = !parts.finishes && parts.accent && !isAccent && k === prevAccent && side.materialId === F.wallAccent
         if (!parts.finishes && !isAccent && !oldAccent) continue
-        const materialId = wet ? F.wallWet : isAccent ? F.wallAccent! : F.wallMain
+        const materialId = wet ? F.wallWet : isAccent ? F.wallAccent! : oldAccent ? roomFinish() : F.wallMain
         if (side.materialId !== materialId) {
           side.materialId = materialId
           // an old layout must not be laid with the new material: the material's own pattern applies
@@ -654,6 +670,14 @@ export function applyStyle(doc: Doc, style: StylePreset, opts: ApplyStyleOptions
           }
         }
         report.faces++
+      }
+      // with finishes on and the accent off the old accent face was given the main finish above
+      const nextAccent = parts.accent ? accentKey : undefined
+      if (room.design?.accentFace !== nextAccent) {
+        const design = { ...room.design }
+        if (nextAccent) design.accentFace = nextAccent
+        else delete design.accentFace
+        room.design = design
       }
     }
 

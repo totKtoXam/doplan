@@ -360,15 +360,18 @@ async function setProject(gone: string | null): Promise<void> {
   if (filePath && ref.startsWith('id:')) {
     // a copy of another file (the same id inside) gets an id and chats of its own
     const opened = ref
-    const job = queueWrite(() => api.aiChat.claimDocument(opened, filePath)).catch(() => opened)
+    // the document this claim is for: another file opened meanwhile can carry the same id (the original
+    // of the copy being claimed), and must not get the copy's id
+    const loadId = docStore.getState().loadId
+    const job = queueWrite(() => api.aiChat.claimDocument(opened, filePath)).catch(() => ({ ref: opened, idPending: false }))
     const wait = job.then(() => {})
     moving = wait
     const claimed = await job
     if (moving === wait) moving = null
-    if (get().projectPath !== opened) return
-    if (claimed !== opened && claimed.startsWith('id:')) {
-      docStore.getState().setDocId(claimed.slice(3))
-      ref = claimed
+    if (get().projectPath !== opened || docStore.getState().loadId !== loadId) return
+    if (claimed.ref !== opened && claimed.ref.startsWith('id:')) {
+      docStore.getState().setDocId(claimed.ref.slice(3), claimed.idPending)
+      ref = claimed.ref
       set({ projectPath: ref })
     }
   }

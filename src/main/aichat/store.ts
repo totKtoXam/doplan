@@ -8,7 +8,7 @@
  * Also provides the agent working directory for projects without their own folder.
  */
 import { createHash, randomBytes } from 'node:crypto'
-import { readdir, rename, rm, stat } from 'node:fs/promises'
+import { readdir, realpath, rename, rm, stat } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import { app } from 'electron'
 import { type AiChatMeta, type AiChatRecord, type AiChatSettings, DEFAULT_AI_SETTINGS } from '../../shared/aiChat'
@@ -150,49 +150,78 @@ export async function moveChats(from: string, to: string, copy: boolean, path: s
   return { sessionsKept }
 }
 
-/** copies opened from another path than their original: `<id>|<lower-case path>` → their own id */
+/**
+ * copies whose own id could not be written into the file yet: `<id>|<lower-case path>` → that id
+ * (consulted only while the original is still there; dropped once the id is in the file)
+ */
 function copiesFile(): string {
   return join(app.getPath('userData'), 'ai-chats', 'copies.json')
 }
 
 const OWN_ID_RE = /^[A-Za-z0-9_-]{6,64}$/
 
+/** writes a new id into the saved file (`from` → `to`); false when it could not */
+export type WriteDocId = (path: string, from: string, to: string) => Promise<boolean>
+
+/** the path as the file system knows it: junctions, symlinks and mapped drives resolved */
+async function canonicalPath(p: string): Promise<string> {
+  const full = resolve(p)
+  try {
+    return await realpath(full)
+  } catch {
+    return full
+  }
+}
+
+/** two paths that reach one and the same file (a hard link, a share opened by two names) */
+async function sameFile(a: string, b: string): Promise<boolean> {
+  try {
+    const [x, y] = await Promise.all([stat(a, { bigint: true }), stat(b, { bigint: true })])
+    return x.ino !== 0n && x.ino === y.ino && x.dev === y.dev
+  } catch {
+    return false
+  }
+}
+
 /**
  * A saved document with an id was opened from `path`. The id travels with the file contents, so a copy
  * made outside the app (Explorer, a versioned flat-v2, a file sent back by a colleague) carries the same
- * one. The chat folder remembers the file it belongs to: the same path, or that file no longer exists
- * (renamed / moved) → the document is the file itself and keeps its chats. Another file still there →
- * this one is a copy: it gets an id of its own (the same one on every open, until it is saved with it),
- * and the chats are copied without agent sessions, as on Save As. A path once known as a copy stays a
- * copy. The renderer marks the copy as changed, so its new id reaches the file. Resolves the reference to use.
+ * one. The chat folder remembers the file it belongs to: the same file (by its real path or the file
+ * itself), or that file no longer exists (renamed / moved) → the document is the file itself and keeps
+ * its chats. Another file still there → this one is a copy: it gets an id of its own, the chats are
+ * copied without agent sessions (as on Save As), and the new id is written into the copy at once, so
+ * renaming or moving either file later changes nothing. `idPending`: the id could not be written (the
+ * renderer then marks the document changed); until it is, the copy finds the same id again at the same
+ * path while the original is still there.
  */
-export async function claimDocument(ref: string, path: string): Promise<string> {
+export async function claimDocument(ref: string, path: string, writeId?: WriteDocId): Promise<{ ref: string; idPending: boolean }> {
   const d = DOC_ID_RE.exec(ref)
-  if (!d || typeof path !== 'string' || !path) return ref
-  const full = resolve(path)
+  if (!d || typeof path !== 'string' || !path) return { ref, idPending: false }
+  const full = await canonicalPath(path)
   const dir = chatsDir(ref)
   const saved = await readJson<{ path?: unknown } | null>(join(dir, SAVED_FILE), null)
-  const owner = typeof saved?.path === 'string' ? resolve(saved.path) : null
-  if (owner && owner.toLowerCase() === full.toLowerCase()) return ref
-  const copies = await readJson<Record<string, unknown>>(copiesFile(), {})
-  const key = `${d[1]}|${full.toLowerCase()}`
-  const mapped = copies && typeof copies === 'object' ? copies[key] : undefined
-  const known = typeof mapped === 'string' && OWN_ID_RE.test(mapped) ? mapped : undefined
-  // a path that was once a copy stays one when the original is renamed or deleted later:
-  // it never takes over the original's id, chats and agent sessions
-  if (!known && (!owner || !(await exists(owner)))) {
+  const owner = typeof saved?.path === 'string' ? await canonicalPath(saved.path) : null
+  if (owner && owner.toLowerCase() === full.toLowerCase()) return { ref, idPending: false }
+  if (!owner || !(await exists(owner))) {
     await ensureDir(dir)
     await atomicWrite(join(dir, SAVED_FILE), JSON.stringify({ path: full }))
-    return ref
+    return { ref, idPending: false }
   }
+  if (await sameFile(owner, full)) return { ref, idPending: false }
+  const copies = await readJson<Record<string, unknown>>(copiesFile(), {})
+  const all = copies && typeof copies === 'object' ? { ...copies } : {}
+  const key = `${d[1]}|${full.toLowerCase()}`
+  const mapped = all[key]
+  const known = typeof mapped === 'string' && OWN_ID_RE.test(mapped) ? mapped : undefined
   const id = known ?? randomBytes(12).toString('base64url')
-  if (id !== known) {
-    await moveChats(ref, `id:${id}`, true, full)
-    await atomicWrite(copiesFile(), JSON.stringify({ ...(copies && typeof copies === 'object' ? copies : {}), [key]: id }))
-  } else if (!(await exists(join(chatsDir(`id:${id}`), SAVED_FILE)))) {
-    await moveChats(ref, `id:${id}`, true, full)
-  }
-  return `id:${id}`
+  if (!known || !(await exists(join(chatsDir(`id:${id}`), SAVED_FILE)))) await moveChats(ref, `id:${id}`, true, full)
+  const written = writeId ? await writeId(path, d[1], id).catch(() => false) : false
+  // the file carries its id now: nothing to remember by path (a stale entry could hand this id to
+  // another file moved here later)
+  if (written) delete all[key]
+  else all[key] = id
+  if (written ? mapped !== undefined : mapped !== id) await atomicWrite(copiesFile(), JSON.stringify(all))
+  return { ref: `id:${id}`, idPending: !written }
 }
 
 /**

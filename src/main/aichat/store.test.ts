@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync } from 'node:fs'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, link, mkdir, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
@@ -8,6 +8,7 @@ const root = mkdtempSync(join(tmpdir(), 'doplan-chats-'))
 vi.mock('electron', () => ({ app: { getPath: () => root } }))
 
 const { agentWorkDir, claimDocument, dropChats, getChatSettings, listChats, loadChat, moveChats, projectKey, saveChat, setChatSettings } = await import('./store')
+type WriteDocId = import('./store').WriteDocId
 
 afterAll(() => rmSync(root, { recursive: true, force: true }))
 
@@ -21,6 +22,21 @@ const chat = (id: string, title: string, resume?: Record<string, string>) => ({
   ...(resume ? { resume } : {}),
 })
 const ids = async (ref: string | null) => (await listChats(ref)).map((c) => c.id).sort()
+
+// a saved project as far as claiming goes: the id inside the file
+const docFile = (p: string, id: string) => writeFile(p, JSON.stringify({ meta: { id } }))
+const fileId = async (p: string): Promise<string> => JSON.parse(await readFile(p, 'utf8')).meta.id
+/** writes the id the way project.writeDocId does: only while the file still carries `from` */
+const writer: WriteDocId = async (p, from, to) => {
+  const d = JSON.parse(await readFile(p, 'utf8'))
+  if (d.meta.id !== from) return false
+  d.meta.id = to
+  await writeFile(p, JSON.stringify(d))
+  return true
+}
+const failing: WriteDocId = async () => false
+/** opening a file as the app does: the id inside it is claimed for its path */
+const open = async (p: string, w: WriteDocId = writer) => claimDocument(`id:${await fileId(p)}`, p, w)
 
 describe('chat storage follows the project', () => {
   it('a document id names the folder (renaming the file keeps it); settings carry over to new projects', async () => {
@@ -82,49 +98,101 @@ describe('chat storage follows the project', () => {
     expect((await getChatSettings('id:another-doc')).provider).toBe('gemini')
   })
 
-  it('a copy of a file (same id, other path, the original still there) gets chats of its own', async () => {
+  it('a copy of a file (same id, other path, the original still there) gets chats and an id of its own, written into it', async () => {
     const orig = join(root, 'flat-orig.doplan')
     const copy = join(root, 'flat-v2.doplan')
-    await writeFile(orig, '{}')
+    await docFile(orig, 'copied-id-1')
     await saveChat('id:copied-id-1', chat('chat-c', 'c', { codex: 'T-1' }))
-    expect(await claimDocument('id:copied-id-1', orig)).toBe('id:copied-id-1')
-    const mine = await claimDocument('id:copied-id-1', copy)
-    expect(mine).toMatch(/^id:[A-Za-z0-9_-]{16}$/)
-    expect(await ids(mine)).toEqual(['chat-c'])
-    expect((await loadChat(mine, 'chat-c'))?.resume).toBeUndefined()
+    expect(await open(orig)).toEqual({ ref: 'id:copied-id-1', idPending: false })
+    await cp(orig, copy)
+    const mine = await open(copy)
+    expect(mine.ref).toMatch(/^id:[A-Za-z0-9_-]{16}$/)
+    expect(mine.idPending).toBe(false)
+    expect(`id:${await fileId(copy)}`).toBe(mine.ref)
+    expect(await fileId(orig)).toBe('copied-id-1')
+    expect(await ids(mine.ref)).toEqual(['chat-c'])
+    expect((await loadChat(mine.ref, 'chat-c'))?.resume).toBeUndefined()
     expect((await loadChat('id:copied-id-1', 'chat-c'))?.resume).toEqual({ codex: 'T-1' })
-    // the same copy opened again (not yet saved with its id) finds the same chats
-    expect(await claimDocument('id:copied-id-1', copy)).toBe(mine)
-    expect(await claimDocument('id:copied-id-1', orig)).toBe('id:copied-id-1')
+    expect((await open(copy)).ref).toBe(mine.ref)
+    expect((await open(orig)).ref).toBe('id:copied-id-1')
   })
 
-  it('a known copy stays a copy after the original is renamed; the renamed original keeps its id and sessions', async () => {
+  it('renaming the copy, the original or both after the copy was opened changes nothing', async () => {
     const orig = join(root, 'home.doplan')
     const copy = join(root, 'home - Copy.doplan')
-    const moved = join(root, 'home-old.doplan')
-    await writeFile(orig, '{}')
+    await docFile(orig, 'home-id-1')
     await saveChat('id:home-id-1', chat('chat-h', 'h', { claude: 'H-1' }))
-    expect(await claimDocument('id:home-id-1', orig)).toBe('id:home-id-1')
-    const mine = await claimDocument('id:home-id-1', copy)
+    await open(orig)
+    await cp(orig, copy)
+    const mine = (await open(copy)).ref
     await saveChat(mine, chat('chat-mine', 'mine'))
-    // the original is renamed in Explorer before the copy was saved with its own id
-    await rm(orig)
-    await writeFile(moved, '{}')
-    expect(await claimDocument('id:home-id-1', copy)).toBe(mine)
+    // both renamed in Explorer; nothing was saved in the app
+    await rename(copy, join(root, 'home-v2.doplan'))
+    await rename(orig, join(root, 'home-old.doplan'))
+    expect((await open(join(root, 'home-v2.doplan'))).ref).toBe(mine)
     expect(await ids(mine)).toEqual(['chat-h', 'chat-mine'])
-    expect(await claimDocument('id:home-id-1', moved)).toBe('id:home-id-1')
-    expect((await loadChat('id:home-id-1', 'chat-h'))?.resume).toEqual({ claude: 'H-1' })
+    expect((await open(join(root, 'home-old.doplan'))).ref).toBe('id:home-id-1')
     expect(await ids('id:home-id-1')).toEqual(['chat-h'])
+    expect((await loadChat('id:home-id-1', 'chat-h'))?.resume).toEqual({ claude: 'H-1' })
+  })
+
+  it('a copy whose id could not be written keeps it by path while the original is there, and asks to be saved', async () => {
+    const orig = join(root, 'ro.doplan')
+    const copy = join(root, 'ro - Copy.doplan')
+    await docFile(orig, 'ro-id-1')
+    await saveChat('id:ro-id-1', chat('chat-ro', 'ro', { claude: 'R-1' }))
+    await open(orig)
+    await cp(orig, copy)
+    const mine = await open(copy, failing)
+    expect(mine.idPending).toBe(true)
+    expect(await fileId(copy)).toBe('ro-id-1')
+    expect(await open(copy, failing)).toEqual(mine)
+    // the copy is deleted and the original moved onto its path: it is the original, not that copy
+    await rm(copy)
+    await rename(orig, copy)
+    expect(await open(copy, failing)).toEqual({ ref: 'id:ro-id-1', idPending: false })
+    expect((await loadChat('id:ro-id-1', 'chat-ro'))?.resume).toEqual({ claude: 'R-1' })
+  })
+
+  it('the original moved onto the path of a deleted copy keeps its own id and sessions', async () => {
+    const orig = join(root, 'p1.doplan')
+    const copy = join(root, 'p2.doplan')
+    await docFile(orig, 'pp-id-1')
+    await saveChat('id:pp-id-1', chat('chat-p1', 'p', { claude: 'P1-1' }))
+    await open(orig)
+    await cp(orig, copy)
+    const theCopy = (await open(copy)).ref
+    await rm(copy)
+    await rename(orig, copy)
+    expect(await open(copy)).toEqual({ ref: 'id:pp-id-1', idPending: false })
+    expect(theCopy).not.toBe('id:pp-id-1')
+    expect(await fileId(copy)).toBe('pp-id-1')
+    expect((await loadChat('id:pp-id-1', 'chat-p1'))?.resume).toEqual({ claude: 'P1-1' })
+  })
+
+  it('one file reached by two paths (a junction, a hard link) is not a copy of itself', async () => {
+    const real = join(root, 'real-dir')
+    await mkdir(real, { recursive: true })
+    const file = join(real, 'same.doplan')
+    await docFile(file, 'same-id-1')
+    await open(file)
+    const viaJunction = join(root, 'junction-dir')
+    await symlink(real, viaJunction, 'junction')
+    expect(await open(join(viaJunction, 'same.doplan'))).toEqual({ ref: 'id:same-id-1', idPending: false })
+    const hard = join(root, 'same-hardlink.doplan')
+    await link(file, hard)
+    expect(await open(hard)).toEqual({ ref: 'id:same-id-1', idPending: false })
+    expect(await fileId(file)).toBe('same-id-1')
   })
 
   it('a renamed or moved file (the old path is gone) keeps its chats', async () => {
     const before = join(root, 'room-old.doplan')
     const after = join(root, 'room-new.doplan')
     await saveChat('id:renamed-id-1', chat('chat-r', 'r'))
-    expect(await claimDocument('id:renamed-id-1', before)).toBe('id:renamed-id-1')
-    expect(await claimDocument('id:renamed-id-1', after)).toBe('id:renamed-id-1')
+    expect((await claimDocument('id:renamed-id-1', before)).ref).toBe('id:renamed-id-1')
+    expect((await claimDocument('id:renamed-id-1', after)).ref).toBe('id:renamed-id-1')
     // now the new path is the file: opening it from the old one again (that file does not exist) also keeps them
-    expect(await claimDocument('id:renamed-id-1', after)).toBe('id:renamed-id-1')
+    expect((await claimDocument('id:renamed-id-1', after)).ref).toBe('id:renamed-id-1')
   })
 
   it('an abandoned unsaved document loses its chats, a saved project never does', async () => {

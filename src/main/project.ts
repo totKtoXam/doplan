@@ -194,6 +194,35 @@ export async function saveProject(doc: unknown, pathArg: unknown): Promise<{ pat
   return { path }
 }
 
+/**
+ * Writes a new document id into a saved .doplan file in place (an opened copy of another file gets an
+ * id of its own at once, so renaming or moving it later keeps its chats). Only `meta.id` of doc.json
+ * changes, and only while the file still carries `from`; the rest of the archive is written back as
+ * it was. Returns false when the file is not a doplan archive or could not be written.
+ */
+export async function writeDocId(pathArg: string, from: string, to: string): Promise<boolean> {
+  const path = await assertReadable(pathArg).catch(() => null)
+  if (!path || extname(path).toLowerCase() !== '.doplan') return false
+  const st = await fsp.stat(path)
+  if (st.size > MAX_PROJECT_BYTES) return false
+  const buf = new Uint8Array(await fsp.readFile(path))
+  if (!isZip(buf)) return false
+  const files = unzipSync(buf)
+  const name = files['doc.json'] ? 'doc.json' : files['scene.json'] ? 'scene.json' : null
+  if (!name) return false
+  const doc = parseJsonText(files[name]) as { meta?: { id?: unknown } } | null
+  if (!doc?.meta || doc.meta.id !== from) return false
+  doc.meta.id = to
+  const zip: Zippable = {}
+  for (const [file, data] of Object.entries(files)) {
+    if (file.endsWith('/')) continue
+    const ext = extname(file).slice(1).toLowerCase()
+    zip[file] = file === name ? [strToU8(JSON.stringify(doc)), { level: 6 }] : [data, { level: STORED_EXT.has(ext) ? 0 : 6 }]
+  }
+  await atomicWrite(path, zipSync(zip, { mtime: st.mtime }))
+  return true
+}
+
 export async function autosave(doc: unknown, path: unknown): Promise<void> {
   const rec: RecoveryFile = {
     path: typeof path === 'string' && path ? path : null,

@@ -203,6 +203,8 @@ async function afterOpen(res: Awaited<ReturnType<typeof api.project.open>>, relo
   loadDocument(doc, res.path, { kind: res.kind ?? kindOfPath(res.path), git: res.git, untrustedGit: res.untrustedGit || res.untrustedFolder, gitFile: res.gitFile, unsafeGit: res.unsafeGit, reload })
   refreshRecent()
   toast(t('Проект открыт'), 'success')
+  if (res.linkedAssets?.length)
+    toast(t('Не открыты файлы-ссылки (символические ссылки или точки соединения): {files}. doplan не читает файлы проекта по ссылкам: замените их обычными файлами.', { files: shortList(res.linkedAssets) }), 'warning', 9000)
   if (res.untrustedGit) await offerTrustFolder('git')
   // a trusted folder whose git config has unknown keys: reset it or work without versions (asked once per session)
   else if (res.unsafeGit && !reload) await offerResetGitConfig()

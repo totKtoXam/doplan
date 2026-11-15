@@ -990,3 +990,113 @@ describe('repository layout', { timeout: 60_000 }, async () => {
     )
   })
 })
+
+// A received folder may hold links (symlinks, junctions) where plan.json, manifest.json, AGENTS.md or
+// assets are: to files elsewhere, or to another machine (opening one there would reach out to it).
+// doplan reads project files with lstat first and never opens or stats anything through a link.
+describe('project files through links', { timeout: 60_000 }, async () => {
+  const { folderAssetLinks, loadFolderAssets, planChangedOnDisk, readFolderPlan, readInstructions, rememberPlanOnDisk, writeFolderProject } = await import('./projectFolder')
+  const { paths } = await import('./paths')
+  const canLink = (() => {
+    const probe = join(base, 'link-probe-2')
+    try {
+      symlinkSync(join(base, 'link-probe-target'), probe, 'file')
+      unlinkSync(probe)
+      return true
+    } catch {
+      return false
+    }
+  })()
+  const junction = (target: string, path: string) => symlinkSync(target, path, process.platform === 'win32' ? 'junction' : 'dir')
+  const HASHED = `${'a'.repeat(64)}.png`
+  const project = (name: string, files: Record<string, string> = {}) => folder(name, { 'plan.json': '{"version":1,"meta":{"name":"L"}}', 'manifest.json': MANIFEST, ...files })
+  const assetUrl = (n: string) => `doplan-asset://project/${n}`
+
+  it('plan.json or manifest.json as a link: the folder is no project, or opening it says what is wrong', async () => {
+    const elsewhere = folder('links-elsewhere', { 'plan.json': '{"stolen":true}' })
+    const dir = project('links-plan')
+    rmSync(join(dir, 'plan.json'))
+    junction(elsewhere, join(dir, 'plan.json'))
+    expect(await folderRootOf(dir)).toBe(dir)
+    await expect(readFolderPlan(dir)).rejects.toThrow(/plan\.json[^]*(ссылка|link)/)
+    expect(await folderRootOf(join(dir, 'plan.json'))).toBe(dir)
+    unlinkSync(join(dir, 'plan.json'))
+    writeFileSync(join(dir, 'plan.json'), '{"a":1}')
+    expect(await readFolderPlan(dir)).toEqual({ a: 1 })
+
+    rmSync(join(dir, 'manifest.json'))
+    junction(elsewhere, join(dir, 'manifest.json'))
+    expect(await isProjectFolder(dir)).toBe(false)
+    expect(await folderRootOf(dir)).toBeNull()
+    await expect(readFolderPlan(dir)).rejects.toThrow(/manifest\.json/)
+  })
+
+  it.skipIf(!canLink)('links to another machine are never opened: plan.json, manifest.json, AGENTS.md', async () => {
+    const dir = project('links-unc')
+    await rememberPlanOnDisk(dir)
+    for (const f of ['plan.json', 'AGENTS.md']) {
+      rmSync(join(dir, f), { force: true })
+      symlinkSync(`\\\\192.0.2.9\\share\\${f}`, join(dir, f), 'file')
+    }
+    const t0 = Date.now()
+    expect(await folderRootOf(dir)).toBe(dir)
+    expect(await folderRootOf(join(dir, 'plan.json'))).toBe(dir)
+    await expect(readFolderPlan(dir)).rejects.toThrow(/plan\.json/)
+    expect(await planChangedOnDisk(dir)).toBe(false)
+    expect(await readInstructions(dir)).toBe('')
+    rmSync(join(dir, 'manifest.json'))
+    symlinkSync('\\\\192.0.2.9\\share\\manifest.json', join(dir, 'manifest.json'), 'file')
+    expect(await isProjectFolder(dir)).toBe(false)
+    expect(Date.now() - t0).toBeLessThan(5000)
+  })
+
+  it('assets/ as a junction: nothing is opened through it, and saving never writes or deletes there', async () => {
+    const outside = folder('links-assets-outside', { [HASHED]: 'theirs', 'b.png': 'b' })
+    const dir = project('links-assets')
+    junction(outside, join(dir, 'assets'))
+    expect(await folderAssetLinks(dir)).toEqual(['assets'])
+    await loadFolderAssets(dir)
+    expect(readdirSync(paths.projectAssets)).toEqual([])
+    // a plain save would drop the unreferenced content-addressed file and write the new ones
+    writeFileSync(join(paths.projectAssets, 'c.png'), 'c')
+    await expect(writeFolderProject(dir, { version: 1, meta: { name: 'L' }, img: assetUrl('c.png') })).rejects.toThrow(/assets[^]*(ссылка|link)/)
+    expect(readdirSync(outside).sort()).toEqual([HASHED, 'b.png'].sort())
+    expect(readFileSync(join(outside, HASHED), 'utf8')).toBe('theirs')
+    expect(readFileSync(join(dir, 'plan.json'), 'utf8')).toBe('{"version":1,"meta":{"name":"L"}}')
+    unlinkSync(join(dir, 'assets'))
+    await writeFolderProject(dir, { version: 1, meta: { name: 'L' }, img: assetUrl('c.png') })
+    expect(readFileSync(join(dir, 'assets', 'c.png'), 'utf8')).toBe('c')
+  })
+
+  it('a link among the assets is skipped and replaced by the real file on save; plain assets open as before', async () => {
+    const outside = folder('links-asset-files', { 'secret.png': 'secret' })
+    const dir = project('links-asset-file', { 'assets/plain.png': 'plain' })
+    junction(outside, join(dir, 'assets', 'dir.png'))
+    if (canLink) symlinkSync(join(outside, 'secret.png'), join(dir, 'assets', 'link.png'), 'file')
+    expect(await folderAssetLinks(dir)).toEqual(canLink ? ['assets/dir.png', 'assets/link.png'] : ['assets/dir.png'])
+    await loadFolderAssets(dir)
+    expect(readdirSync(paths.projectAssets)).toEqual(['plain.png'])
+    expect(readFileSync(join(paths.projectAssets, 'plain.png'), 'utf8')).toBe('plain')
+    if (!canLink) return
+    // the document refers to link.png: its own copy (added in the editor) replaces the link, the target stays
+    writeFileSync(join(paths.projectAssets, 'link.png'), 'mine')
+    await writeFolderProject(dir, { version: 1, meta: { name: 'L' }, a: assetUrl('plain.png'), b: assetUrl('link.png') })
+    expect(lstatSync(join(dir, 'assets', 'link.png')).isFile()).toBe(true)
+    expect(readFileSync(join(dir, 'assets', 'link.png'), 'utf8')).toBe('mine')
+    expect(readFileSync(join(outside, 'secret.png'), 'utf8')).toBe('secret')
+    // without its own copy the link is not read for the manifest either
+    symlinkSync(join(outside, 'secret.png'), join(dir, 'assets', 'link2.png'), 'file')
+    await writeFolderProject(dir, { version: 1, meta: { name: 'L' }, b: assetUrl('link2.png') })
+    expect(readFileSync(join(dir, 'manifest.json'), 'utf8')).not.toContain('link2.png')
+  })
+
+  it('AGENTS.md as a junction is no instructions; a link where a scaffold file goes is left alone', async () => {
+    const outside = folder('links-agents', { 'AGENTS.md': 'not yours' })
+    const dir = project('links-agents-dir')
+    junction(outside, join(dir, 'AGENTS.md'))
+    expect(await readInstructions(dir)).toBe('')
+    await writeFolderProject(dir, { version: 1, meta: { name: 'L' } })
+    expect(lstatSync(join(dir, 'AGENTS.md')).isSymbolicLink()).toBe(true)
+    expect(readdirSync(outside)).toEqual(['AGENTS.md'])
+  })
+})

@@ -61,6 +61,11 @@ export interface ProjectOpenResult {
   gitFile?: boolean
   /** folders: the repository config has keys outside doplan's allowlist; no git command runs there (see UnsafeGitConfig) */
   unsafeGit?: UnsafeGitConfig
+  /**
+   * folders: assets/ entries that are links (symlinks, junctions) or no plain files, or assets/ itself:
+   * not opened (doplan reads project files only without following links); saving refuses an assets/ link
+   */
+  linkedAssets?: string[]
 }
 
 /**

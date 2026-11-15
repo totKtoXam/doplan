@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { existsSync, promises as fsp } from 'node:fs'
+import { lstatSync, promises as fsp } from 'node:fs'
 import { dirname, extname, join, resolve } from 'node:path'
 import { app, dialog } from 'electron'
 import { strToU8, unzipSync, zipSync, type Zippable } from 'fflate'
@@ -14,6 +14,7 @@ import {
   createFolderProject,
   defaultProjectsDir,
   docName,
+  folderAssetLinks,
   folderRootOf,
   folderTrust,
   getProjectRoot,
@@ -122,6 +123,8 @@ async function openFolderAt(root: string): Promise<ProjectOpenResult> {
   const res: ProjectOpenResult = { path: root, doc, kind: 'folder', git, untrustedGit: trust.git === 'untrusted', gitFile: trust.git === 'gitfile' }
   if (trust.git === 'unknown') res.untrustedFolder = true
   if (trust.unsafeGit) res.unsafeGit = trust.unsafeGit
+  const links = await folderAssetLinks(root)
+  if (links.length) res.linkedAssets = links
   return res
 }
 
@@ -493,7 +496,13 @@ export function projectFileFromArgv(argv: string[]): string | null {
     if (!a || a.startsWith('-')) continue
     const ext = extname(a).toLowerCase()
     if (ext === '.doplan' || ext === '.json') return a
-    if (existsSync(join(a, PLAN_FILE))) return a
+    // lstat: a plan.json that is a link is never followed here (opening refuses it with a message)
+    try {
+      lstatSync(join(a, PLAN_FILE))
+      return a
+    } catch {
+      /* not a project folder */
+    }
   }
   return null
 }

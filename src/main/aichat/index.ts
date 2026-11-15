@@ -18,7 +18,7 @@ import { binVersion, findOnPath, killTree, type ResolvedBin } from './detect'
 import { authStatus, cancelLogin, isAuthError, loginInput, startLogin } from './login'
 import { closeMcpServer, openEndpoint, revokeRun } from './mcpServer'
 import { AGENT_SYSTEM_PROMPT, PLAN_MODE_NOTE } from './prompt'
-import { agentWorkDir, deleteChat, dropChats, getChatSettings, listChats, loadChat, moveChats, sanitizeSettings, saveChat, setChatSettings } from './store'
+import { agentWorkDir, claimDocument, deleteChat, dropChats, getChatSettings, listChats, loadChat, moveChats, sanitizeSettings, saveChat, setChatSettings } from './store'
 
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 
@@ -248,9 +248,10 @@ export function registerAiChat(): void {
   handleIpc(CH.aiChatGetSettings, (p: unknown) => getChatSettings(typeof p === 'string' ? p : null))
   handleIpc(CH.aiChatSetSettings, (p: unknown, s: unknown) => setChatSettings(typeof p === 'string' ? p : null, s))
   handleIpc(CH.aiChatMove, (from: unknown, to: unknown, copy: unknown, path: unknown) =>
-    typeof to === 'string' ? moveChats(typeof from === 'string' ? from : null, to, copy === true, typeof path === 'string' ? path : null) : undefined,
+    typeof from === 'string' && typeof to === 'string' ? moveChats(from, to, copy === true, typeof path === 'string' ? path : null) : { sessionsKept: true },
   )
   handleIpc(CH.aiChatDrop, (p: unknown) => dropChats(typeof p === 'string' ? p : null))
+  handleIpc(CH.aiChatClaim, (ref: unknown, path: unknown) => (typeof ref === 'string' && typeof path === 'string' ? claimDocument(ref, path) : ref))
   handleIpc(CH.aiChatLogin, async (id: unknown) => {
     const prov = (await providers(false)).find((p) => p.info.id === id)
     if (!prov?.bin || !prov.info.canLogin) throw new Error('Вход для этого провайдера недоступен')

@@ -43,7 +43,11 @@ export interface AiState {
   settings: AiChatSettings
   projectPath: string | null
   chats: AiChatMeta[]
+  /** chats of unsaved projects from before 0.6: one bucket shared by all projects, never deleted silently */
+  legacyChats: AiChatMeta[]
   chat: AiChatRecord
+  /** the open chat is one of legacyChats (it is saved there and runs in their agent folder) */
+  legacy: boolean
   running: { runId: string; msgId: string } | null
   status: string
   chips: AiChip[]
@@ -84,7 +88,9 @@ export const aiStore = createStore<AiState>()(() => ({
   settings: { ...DEFAULT_AI_SETTINGS },
   projectPath: null,
   chats: [],
+  legacyChats: [],
   chat: emptyChat(DEFAULT_AI_SETTINGS.provider),
+  legacy: false,
   running: null,
   status: '',
   chips: [],
@@ -130,14 +136,41 @@ function pushPart(m: AiMessage, key: string | null, part: AiPart): void {
   if (key) partIndex.set(key, m.parts.length - 1)
 }
 
+/** where the open chat is stored: the project's chats, or the shared pre-0.6 bucket (null) */
+function chatRef(): string | null {
+  return get().legacy ? null : get().projectPath
+}
+
+/**
+ * Every access to the chat storage that can race a save (saves, the late events of a stopped turn,
+ * moves, loads), one after the other: a read-modify-write never reads a record from before a save
+ * that was issued earlier.
+ */
+let writeQueue: Promise<unknown> = Promise.resolve()
+function queueWrite<T>(job: () => Promise<T>): Promise<T> {
+  const p = writeQueue.then(job)
+  writeQueue = p.catch(() => {})
+  return p
+}
+
+/** both chat lists, as stored now */
+async function refreshLists(): Promise<void> {
+  const p = get().projectPath
+  const [chats, legacyChats] = await Promise.all([
+    p ? api.aiChat.listChats(p).catch(() => get().chats) : Promise.resolve([] as AiChatMeta[]),
+    api.aiChat.listChats(null).catch(() => get().legacyChats),
+  ])
+  if (get().projectPath === p) set({ chats, legacyChats })
+}
+
 /** saves the chat as it is now (taken synchronously: the caller may switch chats right after) */
 async function persist(): Promise<void> {
-  const { chat, projectPath } = get()
+  const { chat } = get()
+  const ref = chatRef()
   if (!chat.messages.length) return
   try {
-    await api.aiChat.saveChat(projectPath, chat)
-    const chats = await api.aiChat.listChats(projectPath)
-    if (get().projectPath === projectPath) set({ chats })
+    await queueWrite(() => api.aiChat.saveChat(ref, chat))
+    await refreshLists()
   } catch (e) {
     console.error('[doplan] chat save failed', e)
   }
@@ -166,26 +199,28 @@ export function initAi(): void {
     const gone = !first && unsavedDoc ? get().projectPath : null
     unsavedDoc = filePath === null
     looseRef = ''
-    void setProject(docRef(), gone)
+    void setProject(gone)
   }
   docStore.subscribe(sync)
   sync()
   addProjectHook({
     saved: async (saveAs) => {
+      // the first save of a new document takes its chats along, even through Save As
+      const wasUnsaved = unsavedDoc
       unsavedDoc = false
-      await moveProject(docRef(), saveAs, docStore.getState().filePath)
+      await moveProject(docRef(), saveAs && !wasUnsaved, docStore.getState().filePath)
     },
     closing: async () => {
-      if (unsavedDoc) {
-        // closed without saving: nothing can open these chats again
-        const ref = get().projectPath
-        dropCurrent()
-        if (ref) await api.aiChat.dropChats(ref).catch(() => {})
-      } else {
+      const ref = get().projectPath
+      if (unsavedDoc && !get().legacy) dropCurrent()
+      else {
         const wasRunning = !!get().running
         if (wasRunning) stop(false)
         if (discardDraft() || wasRunning) await persist()
       }
+      // closed without saving: nothing can open the document's chats again (the shared ones stay)
+      if (unsavedDoc && ref) await queueWrite(() => api.aiChat.dropChats(ref)).catch(() => {})
+      await writeQueue
     },
   })
 }
@@ -267,14 +302,31 @@ let moving: Promise<void> | null = null
 async function moveProject(to: string, copy: boolean, path: string | null): Promise<void> {
   const from = get().projectPath
   set({ projectPath: to })
-  const job = api.aiChat.moveChats(from, to, copy, path).catch((e) => console.error('[doplan] moving chats failed', e))
-  moving = job
-  await job
-  if (moving === job) moving = null
+  const job = queueWrite(() => (from ? api.aiChat.moveChats(from, to, copy, path) : Promise.resolve({ sessionsKept: true }))).catch((e) => {
+    console.error('[doplan] moving chats failed', e)
+    return { sessionsKept: false }
+  })
+  const wait = job.then(() => {})
+  moving = wait
+  const { sessionsKept } = await job
+  if (moving === wait) moving = null
+  // agent sessions resume only in the folder and project they were made in: the open chat drops them
+  // too (Save As: the copy starts its own; a target with a folder of its own), and so does a running turn
+  if (!sessionsKept) {
+    const r = get().running
+    if (!get().legacy) {
+      patchChat((c) => {
+        delete c.resume
+      })
+      if (r) voidSessions.add(r.runId)
+    }
+    for (const s of stoppedRuns.values()) if (s.ref === from) s.noSession = true
+  }
+  if (!copy) for (const s of stoppedRuns.values()) if (s.ref === from) s.ref = to
   if (get().projectPath !== to) return
   // the current chat (also when a save of it raced the move) and the list of the new place
-  if (get().chat.messages.length) await persist()
-  else set({ chats: await api.aiChat.listChats(to).catch(() => get().chats) })
+  if (get().chat.messages.length && !get().legacy) await persist()
+  else await refreshLists()
 }
 
 /** leaving the current chat: a running turn stops, and the conversation is saved as it stands */
@@ -296,23 +348,40 @@ function dropCurrent(): void {
  * Another document is open. `gone`: the reference of the unsaved document it replaced, whose chats
  * nothing can reach any more.
  */
-async function setProject(ref: string, gone: string | null): Promise<void> {
-  if (gone) dropCurrent()
+async function setProject(gone: string | null): Promise<void> {
+  // a shared pre-0.6 chat is never dropped with a document: it is saved where it lives
+  if (gone && !get().legacy) dropCurrent()
   else leaveChat()
+  let ref = docRef()
   // switched at once: whatever is saved from now on lands in the new project
-  set({ projectPath: ref, chats: [], chat: emptyChat(get().settings.provider), chips: [], images: [], status: '' })
-  if (gone && gone !== ref) void api.aiChat.dropChats(gone).catch(() => {})
-  // a new unsaved document takes over the chats unsaved projects shared before 0.6
-  if (docStore.getState().filePath === null) await api.aiChat.moveChats(null, ref, false, null).catch(() => {})
+  set({ projectPath: ref, legacy: false, chats: [], chat: emptyChat(get().settings.provider), chips: [], images: [], status: '' })
+  if (gone && gone !== ref) void queueWrite(() => api.aiChat.dropChats(gone)).catch(() => {})
+  const { filePath } = docStore.getState()
+  if (filePath && ref.startsWith('id:')) {
+    // a copy of another file (the same id inside) gets an id and chats of its own
+    const opened = ref
+    const job = queueWrite(() => api.aiChat.claimDocument(opened, filePath)).catch(() => opened)
+    const wait = job.then(() => {})
+    moving = wait
+    const claimed = await job
+    if (moving === wait) moving = null
+    if (get().projectPath !== opened) return
+    if (claimed !== opened && claimed.startsWith('id:')) {
+      docStore.getState().setDocId(claimed.slice(3))
+      ref = claimed
+      set({ projectPath: ref })
+    }
+  }
   const rev = settingsRev
-  const [loaded, chats] = await Promise.all([
+  const [loaded, chats, legacyChats] = await Promise.all([
     api.aiChat.getSettings(ref).catch(() => ({ ...DEFAULT_AI_SETTINGS })),
     api.aiChat.listChats(ref).catch(() => [] as AiChatMeta[]),
+    api.aiChat.listChats(null).catch(() => [] as AiChatMeta[]),
   ])
   if (get().projectPath !== ref) return
   const settings = rev === settingsRev ? loaded : get().settings
   const chat = get().chat.messages.length || get().running ? get().chat : emptyChat(settings.provider)
-  set({ settings, chats, chat })
+  set({ settings, chats, legacyChats, chat })
   if (settings !== loaded) void api.aiChat.setSettings(ref, settings).catch(() => {})
 }
 
@@ -339,23 +408,25 @@ export function updateSettings(patch: Partial<AiChatSettings>): void {
 
 export function newChat(): void {
   leaveChat()
-  set({ chat: emptyChat(get().settings.provider), status: '', showHistory: false })
+  set({ chat: emptyChat(get().settings.provider), legacy: false, status: '', showHistory: false })
 }
 
-export async function openChat(id: string): Promise<void> {
-  if (get().chat.id === id) {
+/** `legacy`: one of the shared chats from before 0.6 */
+export async function openChat(id: string, legacy = false): Promise<void> {
+  if (get().chat.id === id && get().legacy === legacy) {
     set({ showHistory: false })
     return
   }
   leaveChat()
   const path = get().projectPath
-  const rec = await api.aiChat.loadChat(path, id)
+  // after the save of the chat just left
+  const rec = await queueWrite(() => api.aiChat.loadChat(legacy ? null : path, id))
   if (!rec || get().projectPath !== path || get().running) return
-  set({ chat: rec, showHistory: false, status: '' })
+  set({ chat: rec, legacy, showHistory: false, status: '' })
 }
 
-export async function removeChat(id: string): Promise<void> {
-  if (get().chat.id === id) {
+export async function removeChat(id: string, legacy = false): Promise<void> {
+  if (get().chat.id === id && get().legacy === legacy) {
     // no save of the chat being deleted, nor of what its stopped turn still reports
     const r = get().running
     if (r) {
@@ -363,10 +434,11 @@ export async function removeChat(id: string): Promise<void> {
       stoppedRuns.delete(r.runId)
     }
     discardDraft()
-    set({ chat: emptyChat(get().settings.provider), status: '', showHistory: false })
+    set({ chat: emptyChat(get().settings.provider), legacy: false, status: '', showHistory: false })
   }
-  await api.aiChat.deleteChat(get().projectPath, id)
-  set({ chats: await api.aiChat.listChats(get().projectPath) })
+  const ref = legacy ? null : get().projectPath
+  await queueWrite(() => api.aiChat.deleteChat(ref, id))
+  await refreshLists()
 }
 
 // ───────────── context ─────────────
@@ -378,7 +450,7 @@ export function addRefsToChat(refs: EntityRef[]): void {
   for (const r of refs) {
     if (chips.some((c) => c.id === r.id)) continue
     const lv = entityLevel(doc, r)
-    chips.push(chipFor(doc, lv ? derived[lv] : undefined, r, lk))
+    chips.push(chipFor(doc, lv ? derived[lv] : undefined, r, lk, uiStore.getState().lang))
   }
   set({ chips })
   focusChat()
@@ -634,7 +706,8 @@ export async function send(raw: string): Promise<void> {
     await api.aiChat.run({
       runId,
       chatId: chat.id,
-      projectPath: st.projectPath,
+      // a shared pre-0.6 chat runs in its own agent folder, where its sessions are
+      projectPath: chatRef(),
       projectRoot: null,
       settings,
       text,
@@ -657,7 +730,7 @@ export async function send(raw: string): Promise<void> {
 export function stop(save = true): void {
   const r = get().running
   if (!r) return
-  stoppedRuns.set(r.runId, { chatId: get().chat.id, msgId: r.msgId, projectPath: get().projectPath })
+  stoppedRuns.set(r.runId, { chatId: get().chat.id, msgId: r.msgId, ref: chatRef(), noSession: voidSessions.has(r.runId) })
   void api.aiChat.stop(r.runId)
   finishTurn({ type: 'done', ok: false, stopped: true }, save)
 }
@@ -666,9 +739,9 @@ export function stop(save = true): void {
  * Turns stopped here that main is still winding down: their last usage, API history (the request and
  * the edits the model already made) and agent session id still belong to the chat record.
  */
-const stoppedRuns = new Map<string, { chatId: string; msgId: string; projectPath: string | null }>()
-/** writes to a chat that is no longer open, one after the other */
-let recordQueue: Promise<void> = Promise.resolve()
+const stoppedRuns = new Map<string, { chatId: string; msgId: string; ref: string | null; noSession?: boolean }>()
+/** turns whose agent session no longer belongs to the chat (it was copied / moved away from its folder) */
+const voidSessions = new Set<string>()
 
 /** the events of a turn that change the chat record itself (not what is shown while it runs) */
 function recordEvent(c: AiChatRecord, msgId: string, ev: AiRunEvent): void {
@@ -693,21 +766,21 @@ function onStoppedRunEvent(runId: string, ev: AiRunEvent): void {
   if (!s) return
   if (ev.type === 'done') {
     stoppedRuns.delete(runId)
+    voidSessions.delete(runId)
     return
   }
   if (ev.type !== 'session' && ev.type !== 'apiHistory' && ev.type !== 'usage') return
-  if (get().chat.id === s.chatId) {
+  if (ev.type === 'session' && s.noSession) return
+  if (get().chat.id === s.chatId && chatRef() === s.ref) {
     patchChat((c) => recordEvent(c, s.msgId, ev))
     void persist()
     return
   }
-  // the user moved on to another chat: update the saved record
-  recordQueue = recordQueue
-    .then(async () => {
-      const rec = await api.aiChat.loadChat(s.projectPath, s.chatId)
-      if (rec) await api.aiChat.saveChat(s.projectPath, produce(rec, (c) => recordEvent(c, s.msgId, ev)))
-    })
-    .catch((e) => console.error('[doplan] saving a stopped turn failed', e))
+  // the user moved on to another chat: update the saved record, after the save that leaving it issued
+  void queueWrite(async () => {
+    const rec = await api.aiChat.loadChat(s.ref, s.chatId)
+    if (rec) await api.aiChat.saveChat(s.ref, produce(rec, (c) => recordEvent(c, s.msgId, ev)))
+  }).catch((e) => console.error('[doplan] saving a stopped turn failed', e))
 }
 
 function finishTurn(ev: Extract<AiRunEvent, { type: 'done' }>, save: boolean): void {
@@ -744,6 +817,9 @@ function onRunEvent(runId: string, ev: AiRunEvent): void {
       set({ status: ev.text })
       return
     case 'session':
+      if (voidSessions.has(runId)) return
+      patchChat((c) => recordEvent(c, r.msgId, ev))
+      return
     case 'apiHistory':
     case 'usage':
       patchChat((c) => recordEvent(c, r.msgId, ev))
@@ -774,6 +850,7 @@ function onRunEvent(runId: string, ev: AiRunEvent): void {
       patchRunMsg((m) => pushPart(m, null, { type: 'notice', level: ev.level, text: ev.text }))
       return
     case 'done':
+      voidSessions.delete(runId)
       finishTurn(ev, true)
       return
   }

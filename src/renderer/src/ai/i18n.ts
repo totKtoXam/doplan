@@ -17,6 +17,9 @@ addTranslations('en', {
   'Чаты этого проекта': 'Chats of this project',
   Чаты: 'Chats',
   'Пока нет сохранённых чатов': 'No saved chats yet',
+  'Ранние чаты (общие)': 'Earlier chats (shared)',
+  'Чаты несохранённых проектов из версий до 0.6. Они общие для всех проектов и удаляются только вручную.':
+    'Chats of unsaved projects from versions before 0.6. They are shared by all projects and are deleted only by hand.',
   'Без названия': 'Untitled',
   'Удалить чат': 'Delete chat',
 

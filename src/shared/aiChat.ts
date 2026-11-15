@@ -191,11 +191,16 @@ export interface AiChatApi {
   /**
    * The open document got a new reference (project refs: `id:<Doc.meta.id>`, or a file path / `unsaved:<id>`
    * for documents without an id): its chats follow it; `copy` (Save As) copies them without agent sessions.
-   * `from` = null adopts the chats unsaved projects shared before 0.6. `path`: the file it was saved to.
+   * `path`: the file it was saved to. Resolves whether agent sessions still resume at the new place.
    */
-  moveChats(from: string | null, to: string, copy: boolean, path: string | null): Promise<void>
+  moveChats(from: string, to: string, copy: boolean, path: string | null): Promise<{ sessionsKept: boolean }>
   /** removes the chats of an unsaved document that is gone (never those of a project that was saved) */
   dropChats(projectRef: string): Promise<void>
+  /**
+   * A saved document (`id:<id>`) was opened from `path`: the reference its chats live under. A copy of
+   * another file that is still there gets one of its own (its chats copied without agent sessions).
+   */
+  claimDocument(ref: string, path: string): Promise<string>
   /** start signing the CLI in; progress arrives through onLogin */
   login(provider: AiProviderId): Promise<void>
   /** paste the code shown by the sign-in page (when the CLI asks for one) */

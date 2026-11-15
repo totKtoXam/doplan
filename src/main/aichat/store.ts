@@ -2,10 +2,12 @@
  * Chat storage per project: <userData>/ai-chats/<projectKey>/{settings.json, <chatId>.json}.
  * The renderer names a project by a reference: `id:<id>` for a document that carries its own id
  * (Doc.meta.id: renames and crash recovery keep it), a file path for older files without one, and
- * `unsaved:<id>` for an older unsaved document. moveChats carries the chats along when that changes.
+ * `unsaved:<id>` for an older unsaved document. moveChats carries the chats along when that changes;
+ * claimDocument tells a copy of a file (same id, other path) from the file itself.
+ * Chats of unsaved documents from before 0.6 stay in the shared bucket (reference null) for good.
  * Also provides the agent working directory for projects without their own folder.
  */
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { readdir, rename, rm, stat } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import { app } from 'electron'
@@ -92,25 +94,27 @@ function withoutResume(rec: AiChatRecord): AiChatRecord {
 }
 
 /**
- * The open document got a new reference. `copy` (Save As): the chats are copied without their agent
- * sessions, so the two files do not continue one Claude Code / Codex conversation. Otherwise they move
- * and the agent keeps its old working folder, so a stored session still resumes; where that cannot
- * be (the target has a folder of its own) the moved chats start fresh sessions. `from` = null adopts
- * the chats unsaved documents shared before 0.6. Chats already at the target win. `path`: the file
- * the document is saved to now (its chats are never dropped as those of an abandoned document).
+ * The open document got a new reference. `copy` (Save As, a copied file): the chats are copied without
+ * their agent sessions, so the two files do not continue one Claude Code / Codex conversation. Otherwise
+ * they move and the agent keeps its old working folder, so a stored session still resumes; where that
+ * cannot be (the target has a folder of its own) the moved chats start fresh sessions. Chats already at
+ * the target win. `path`: the file the document is saved to now (its chats are never dropped as those
+ * of an abandoned document). Resolves whether agent sessions still resume at the target: when not, the
+ * renderer drops them from the chat it holds open too.
  */
-export async function moveChats(from: string | null, to: string, copy: boolean, path: string | null): Promise<void> {
-  if (!to) return
+export async function moveChats(from: string, to: string, copy: boolean, path: string | null): Promise<{ sessionsKept: boolean }> {
+  if (!from || !to || projectKey(from) === SHARED || projectKey(to) === SHARED) throw new Error('Неверная ссылка на проект')
   const dst = chatsDir(to)
+  let sessionsKept = true
   if (projectKey(from) !== projectKey(to)) {
     const src = chatsDir(from)
+    const srcWork = (await existingWorkDir(from)) ?? ownWorkDir(from)
+    const moved: string[] = []
     if (await exists(src)) {
-      const srcWork = await existingWorkDir(from)
       await ensureDir(dst)
-      if (from && !(await exists(join(dst, 'settings.json'))) && (await exists(join(src, 'settings.json')))) {
+      if (!(await exists(join(dst, 'settings.json'))) && (await exists(join(src, 'settings.json')))) {
         await atomicWrite(join(dst, 'settings.json'), JSON.stringify(await getChatSettings(from), null, 2))
       }
-      const moved: string[] = []
       for (const f of await readdir(src)) {
         if (!f.endsWith('.json') || META_FILES.has(f)) continue
         const target = join(dst, f)
@@ -123,26 +127,68 @@ export async function moveChats(from: string | null, to: string, copy: boolean, 
           moved.push(target)
         }
       }
-      if (!copy && srcWork && moved.length) {
-        if (!(await isDir(ownWorkDir(to))) && !(await exists(join(dst, WORKDIR_FILE)))) {
-          await atomicWrite(join(dst, WORKDIR_FILE), JSON.stringify({ dir: srcWork }))
-        }
-        // sessions resume only in the folder they were made in
-        if ((await existingWorkDir(to)) !== srcWork) {
-          for (const f of moved) {
-            const rec = await readJson<AiChatRecord | null>(f, null)
-            if (rec?.resume) await atomicWrite(f, JSON.stringify(withoutResume(rec)))
-          }
-        }
+      if (!copy) await rm(src, { recursive: true, force: true })
+    }
+    // the agent folder goes with the chats (also before the first chat is stored: a running turn has one)
+    if (!copy && (await isDir(srcWork)) && !(await isDir(ownWorkDir(to))) && !(await exists(join(dst, WORKDIR_FILE)))) {
+      await ensureDir(dst)
+      await atomicWrite(join(dst, WORKDIR_FILE), JSON.stringify({ dir: srcWork }))
+    }
+    // sessions resume only in the folder they were made in
+    sessionsKept = !copy && ((await existingWorkDir(to)) ?? ownWorkDir(to)) === srcWork
+    if (!sessionsKept && !copy) {
+      for (const f of moved) {
+        const rec = await readJson<AiChatRecord | null>(f, null)
+        if (rec?.resume) await atomicWrite(f, JSON.stringify(withoutResume(rec)))
       }
-      // the shared bucket keeps the default settings
-      if (!copy && from) await rm(src, { recursive: true, force: true })
     }
   }
   if (path) {
     await ensureDir(dst)
-    await atomicWrite(join(dst, SAVED_FILE), JSON.stringify({ path }))
+    await atomicWrite(join(dst, SAVED_FILE), JSON.stringify({ path: resolve(path) }))
   }
+  return { sessionsKept }
+}
+
+/** copies opened from another path than their original: `<id>|<lower-case path>` → their own id */
+function copiesFile(): string {
+  return join(app.getPath('userData'), 'ai-chats', 'copies.json')
+}
+
+const OWN_ID_RE = /^[A-Za-z0-9_-]{6,64}$/
+
+/**
+ * A saved document with an id was opened from `path`. The id travels with the file contents, so a copy
+ * made outside the app (Explorer, a versioned flat-v2, a file sent back by a colleague) carries the same
+ * one. The chat folder remembers the file it belongs to: the same path, or that file no longer exists
+ * (renamed / moved) → the document is the file itself and keeps its chats. Another file still there →
+ * this one is a copy: it gets an id of its own (the same one on every open, until it is saved with it),
+ * and the chats are copied without agent sessions, as on Save As. Resolves the reference to use.
+ */
+export async function claimDocument(ref: string, path: string): Promise<string> {
+  const d = DOC_ID_RE.exec(ref)
+  if (!d || typeof path !== 'string' || !path) return ref
+  const full = resolve(path)
+  const dir = chatsDir(ref)
+  const saved = await readJson<{ path?: unknown } | null>(join(dir, SAVED_FILE), null)
+  const owner = typeof saved?.path === 'string' ? resolve(saved.path) : null
+  if (owner && owner.toLowerCase() === full.toLowerCase()) return ref
+  if (!owner || !(await exists(owner))) {
+    await ensureDir(dir)
+    await atomicWrite(join(dir, SAVED_FILE), JSON.stringify({ path: full }))
+    return ref
+  }
+  const copies = await readJson<Record<string, unknown>>(copiesFile(), {})
+  const key = `${d[1]}|${full.toLowerCase()}`
+  const known = copies && typeof copies === 'object' ? copies[key] : undefined
+  const id = typeof known === 'string' && OWN_ID_RE.test(known) ? known : randomBytes(12).toString('base64url')
+  if (id !== known) {
+    await moveChats(ref, `id:${id}`, true, full)
+    await atomicWrite(copiesFile(), JSON.stringify({ ...(copies && typeof copies === 'object' ? copies : {}), [key]: id }))
+  } else if (!(await exists(join(chatsDir(`id:${id}`), SAVED_FILE)))) {
+    await moveChats(ref, `id:${id}`, true, full)
+  }
+  return `id:${id}`
 }
 
 /**

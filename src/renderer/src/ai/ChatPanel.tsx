@@ -30,7 +30,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { type ClipboardEvent, type KeyboardEvent, type ReactNode, type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { AiChatSettings, AiMessage, AiPart, AiProviderInfo } from '@shared/aiChat'
+import type { AiChatMeta, AiChatSettings, AiMessage, AiPart, AiProviderInfo } from '@shared/aiChat'
 import { useDoc } from '@/store/document'
 import { useUi } from '@/store/ui'
 import { cn, Popover } from '@/ui/kit'
@@ -350,10 +350,34 @@ function Message({ m, live }: { m: AiMessage; live: boolean }) {
 
 // ───────────── header: chat title + history ─────────────
 
+function ChatRow({ c, active, legacy, onPick }: { c: AiChatMeta; active: boolean; legacy: boolean; onPick(): void }) {
+  return (
+    <div className={cn('group flex items-center gap-1 rounded-md hover:bg-hover', active && 'bg-active')}>
+      <button
+        type="button"
+        className="min-w-0 flex-1 px-2 py-1.5 text-left"
+        title={c.title}
+        onClick={() => {
+          onPick()
+          void openChat(c.id, legacy)
+        }}
+      >
+        <div className="truncate">{c.title || t('Без названия')}</div>
+        <div className="text-[10px] text-faint">{new Date(c.updatedAt).toLocaleString()}</div>
+      </button>
+      <button type="button" title={t('Удалить чат')} aria-label={t('Удалить чат')} className="mr-1 hidden rounded p-1 text-muted group-hover:block hover:text-danger" onClick={() => void removeChat(c.id, legacy)}>
+        <Trash2 size={12} />
+      </button>
+    </div>
+  )
+}
+
 function ChatHeader() {
   const title = useAi((s) => s.chat.title)
   const chats = useAi((s) => s.chats)
+  const legacyChats = useAi((s) => s.legacyChats)
   const cur = useAi((s) => s.chat.id)
+  const curLegacy = useAi((s) => s.legacy)
   const [open, setOpen] = useState(false)
   const anchor = useRef<HTMLButtonElement>(null)
   return (
@@ -376,24 +400,18 @@ function ChatHeader() {
           <div className="px-2 pt-1 pb-1.5 text-[11px] text-muted">{t('Чаты этого проекта')}</div>
           {!chats.length && <div className="px-2 pb-2 text-faint">{t('Пока нет сохранённых чатов')}</div>}
           {chats.map((c) => (
-            <div key={c.id} className={cn('group flex items-center gap-1 rounded-md hover:bg-hover', c.id === cur && 'bg-active')}>
-              <button
-                type="button"
-                className="min-w-0 flex-1 px-2 py-1.5 text-left"
-                title={c.title}
-                onClick={() => {
-                  setOpen(false)
-                  void openChat(c.id)
-                }}
-              >
-                <div className="truncate">{c.title || t('Без названия')}</div>
-                <div className="text-[10px] text-faint">{new Date(c.updatedAt).toLocaleString()}</div>
-              </button>
-              <button type="button" title={t('Удалить чат')} aria-label={t('Удалить чат')} className="mr-1 hidden rounded p-1 text-muted group-hover:block hover:text-danger" onClick={() => void removeChat(c.id)}>
-                <Trash2 size={12} />
-              </button>
-            </div>
+            <ChatRow key={c.id} c={c} active={!curLegacy && c.id === cur} legacy={false} onPick={() => setOpen(false)} />
           ))}
+          {legacyChats.length > 0 && (
+            <>
+              <div className="mt-1 border-t border-border px-2 pt-2 pb-1.5 text-[11px] text-muted" title={t('Чаты несохранённых проектов из версий до 0.6. Они общие для всех проектов и удаляются только вручную.')}>
+                {t('Ранние чаты (общие)')}
+              </div>
+              {legacyChats.map((c) => (
+                <ChatRow key={c.id} c={c} active={curLegacy && c.id === cur} legacy onPick={() => setOpen(false)} />
+              ))}
+            </>
+          )}
         </div>
       </Popover>
     </div>

@@ -85,8 +85,9 @@ export async function openProject(path?: string): Promise<void> {
 export async function saveProject(saveAs = false): Promise<boolean> {
   const { doc, filePath } = docStore.getState()
   const target = saveAs ? null : filePath
-  // Save As makes a new project (its own chats); an older file without an id gets one now
-  const id = saveAs || !doc.meta.id ? newProjectId() : doc.meta.id
+  // Save As of a saved file makes a new project (its own chats); the first save of a new document keeps
+  // its id whichever command does it; an older file without an id gets one now
+  const id = (saveAs && filePath) || !doc.meta.id ? newProjectId() : doc.meta.id
   try {
     const res = await api.project.save(id === doc.meta.id ? doc : { ...doc, meta: { ...doc.meta, id } }, target)
     if (!res) return false
@@ -164,6 +165,8 @@ export async function offerRecovery(): Promise<boolean> {
   )
   if (choice !== 'restore') {
     await api.project.clearRecovery().catch(() => {})
+    // the copy of a never-saved document was its only way back to its chats (a saved one keeps them)
+    if (!snap.path && doc.meta.id) await api.aiChat.dropChats(`id:${doc.meta.id}`).catch(() => {})
     return false
   }
   loadDocument(doc, snap.path)

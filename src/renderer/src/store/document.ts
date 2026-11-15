@@ -409,6 +409,11 @@ export const docStore = createStore<DocStoreState>()((set, get) => {
       set({ doc, filePath, dirty: computeDirty() })
     },
 
+    setDocId(id) {
+      const doc = get().doc
+      if (doc.meta.id !== id) set({ doc: { ...doc, meta: { ...doc.meta, id } } })
+    },
+
     setDirty(dirty) {
       // dirty=true (e.g. a restored recovery snapshot): no history position matches the file on disk
       savedId = dirty ? -1 : currentId()

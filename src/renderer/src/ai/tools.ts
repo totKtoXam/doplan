@@ -24,6 +24,7 @@ import {
   syncRooms,
   validatePlanSpec,
   newId,
+  remapAccentFace,
 } from '@core'
 import type { Catalog, DerivedPlan, Doc, EntityRef, Id, Vec2 } from '@core/types'
 import type { AiToolResult } from '@shared/aiChat'
@@ -127,6 +128,7 @@ function copyLevel(src: Doc, srcLevel: Id, d: Doc, dst: Id): void {
     if (r.levelId !== srcLevel) continue
     const id = newId('r')
     d.rooms[id] = structuredClone({ ...r, id, levelId: dst })
+    remapAccentFace(d.rooms[id], wallMap)
   }
   for (const it of Object.values(src.items)) {
     if (it.levelId !== srcLevel) continue

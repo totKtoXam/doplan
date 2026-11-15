@@ -1,4 +1,4 @@
-import { duplicateEntities, newId, removeEntities } from '@core'
+import { duplicateEntities, newId, remapAccentFace, removeEntities } from '@core'
 import type { Doc, EntityRef, Id, Vec2 } from '@core/types'
 import { t } from '@/i18n'
 import { docStore } from '@/store/document'
@@ -218,10 +218,12 @@ function pasteInto(src: Doc, refs: EntityRef[], srcLevel: Id, d: Doc, level: Id,
     d.nodes[nid] = { id: nid, levelId: level, x: n.x + dx, y: n.y + dy }
     return nid
   }
+  const wallMap = new Map<Id, Id>()
   for (const wid of wallIds) {
     const w = src.walls[wid]
     if (!w || !src.nodes[w.a] || !src.nodes[w.b]) continue
     const id = newId('w')
+    wallMap.set(wid, id)
     d.walls[id] = structuredClone({ ...w, id, levelId: level, a: mapNode(w.a), b: mapNode(w.b) })
     out.push({ kind: 'wall', id })
     for (const o of Object.values(src.openings)) {
@@ -234,6 +236,7 @@ function pasteInto(src: Doc, refs: EntityRef[], srcLevel: Id, d: Doc, level: Id,
     const r = src.rooms[rid]
     const id = newId('r')
     d.rooms[id] = structuredClone({ ...r, id, levelId: level, anchor: { x: r.anchor.x + dx, y: r.anchor.y + dy } })
+    remapAccentFace(d.rooms[id], wallMap)
   }
   for (const r of refs) {
     switch (r.kind) {

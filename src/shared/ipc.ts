@@ -13,6 +13,7 @@ import type { Asset, Catalog, Hdri, Material } from '../core/types'
 import type { AiChatApi } from './aiChat'
 // ── end ai-chat block ──
 import type { UpdatesApi } from './updater'
+import type { AssetFeed } from './feeds'
 
 export interface FileFilter {
   name: string
@@ -35,6 +36,8 @@ export interface AppSettings {
   recent: RecentProject[]
   /** default parent folder for new projects chosen in Settings; null → Documents/doplan */
   projectsDir: string | null
+  /** where on-demand catalog entries are downloaded from, in priority order (see shared/feeds.ts) */
+  assetFeeds: AssetFeed[]
 }
 
 // ── project folders + git versions ──

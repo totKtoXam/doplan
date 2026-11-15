@@ -1,12 +1,15 @@
 /**
  * doplan asset fetcher.
  *
- *   pnpm exec tsx tools/assets/fetch.ts [--all] [--only=models|materials|hdris] [--limit=N]
+ *   pnpm exec tsx tools/assets/fetch.ts [--all] [--only=models|materials|hdris] [--limit=N] [--no-optimize]
  *
  * Reads tools/assets/manifest.json, downloads the BUNDLED core pack (or everything with --all)
  * into resources/assets and (re)writes resources/assets/catalog.json + LICENSES.md.
  * Every manifest entry that is not downloaded locally becomes a `remote: true` catalog entry with a
  * `download` field ({ files } or { zip }) so the app can fetch it on demand into the user library.
+ *
+ * Bundled JPEG textures are then re-encoded in place for a smaller installer (tools/assets/optimize.ts,
+ * idempotent; --no-optimize keeps the source files as downloaded).
  *
  * Resumable (existing non-empty files are skipped), never aborts on a single failure.
  * Downloads are untrusted: only whitelisted extensions are written, paths are sanitised, nothing is executed.
@@ -22,6 +25,7 @@ import { NodeIO } from '@gltf-transform/core'
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions'
 import { getBounds, metalRough, prune, textureCompress } from '@gltf-transform/functions'
 import { gltfExtents, implausibleSize, sizeFromGltf, type GltfJson } from './sizes'
+import { optimizeTextures } from './optimize'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..', '..')
@@ -35,6 +39,7 @@ const ALLOWED_EXT = new Set(['.gltf', '.glb', '.bin', '.jpg', '.jpeg', '.png', '
 const argv = process.argv.slice(2)
 const FLAG_ALL = argv.includes('--all')
 const ONLY = argv.find((a) => a.startsWith('--only='))?.slice(7) as 'models' | 'materials' | 'hdris' | undefined
+const NO_OPTIMIZE = argv.includes('--no-optimize')
 const LIMIT = Number(argv.find((a) => a.startsWith('--limit='))?.slice(8) ?? '0') || 0
 const want = (k: 'models' | 'materials' | 'hdris') => !ONLY || ONLY === k
 
@@ -711,6 +716,11 @@ async function main(): Promise<void> {
     catalog.materials = merge(prev.materials, materials)
     catalog.assets = merge(prev.assets, assets)
     catalog.hdris = merge(prev.hdris, hdris)
+  }
+  // smaller bundled textures (same names and format, so the catalog does not change); idempotent
+  if (!NO_OPTIMIZE) {
+    const o = await optimizeTextures(OUT, { log: (s) => fail('optimize', s.trim()) })
+    log(`textures: ${o.files} jpeg, ${o.encoded} re-encoded, ${(o.before / 1048576).toFixed(1)} MB -> ${(o.after / 1048576).toFixed(1)} MB`)
   }
   await writeFile(catalogPath, JSON.stringify(catalog, null, 1))
   await writeFile(path.join(OUT, 'LICENSES.md'), licensesMd(catalog.assets, mf))

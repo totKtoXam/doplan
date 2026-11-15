@@ -1,6 +1,6 @@
 {
   "name": "doplan",
-  "version": "0.11.3",
+  "version": "0.11.4",
   "description": "doplan — 2D floor plans, photorealistic 3D and interior design",
   "main": "./out/main/index.js",
   "type": "module",

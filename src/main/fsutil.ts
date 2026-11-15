@@ -123,3 +123,25 @@ export async function rmrf(p: string): Promise<void> {
   await fsp.rm(p, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
 }
 
+
+export type EntryKind = 'file' | 'dir' | 'link' | 'other'
+
+/**
+ * What a directory entry is, never following it, or null when it is gone. A Dirent that is plainly a
+ * file or folder is taken as it is; anything else is asked of lstat: on Windows readdir reports every
+ * reparse point as a link, cloud placeholders (OneDrive, Dropbox Files On-Demand) too, while lstat
+ * reports only symlinks and junctions as links (and a placeholder as the file or folder it is).
+ */
+export async function entryKind(path: string, e: { isFile(): boolean; isDirectory(): boolean }): Promise<EntryKind | null> {
+  if (e.isFile()) return 'file'
+  if (e.isDirectory()) return 'dir'
+  let st
+  try {
+    st = await fsp.lstat(path)
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === 'ENOENT' || code === 'ENOTDIR') return null
+    throw err
+  }
+  return st.isSymbolicLink() ? 'link' : st.isFile() ? 'file' : st.isDirectory() ? 'dir' : 'other'
+}

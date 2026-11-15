@@ -8,12 +8,13 @@
  * history is unavailable (the UI says how to install git).
  */
 import { execFile } from 'node:child_process'
-import { constants as fsConstants, type Dirent, lstatSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { constants as fsConstants, lstatSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import fsp from 'node:fs/promises'
 import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path'
 import { app } from 'electron'
 import type { UnsafeGitConfig } from '../shared/ipc'
 import { msg } from './settings'
+import { entryKind, type EntryKind } from './fsutil'
 
 export interface GitVersion {
   sha: string
@@ -407,27 +408,44 @@ interface WalkEnd {
   unreadable: string | null
 }
 
+const gone = (err: unknown) => {
+  const code = (err as NodeJS.ErrnoException).code
+  return code === 'ENOENT' || code === 'ENOTDIR'
+}
+
 /**
- * Walks a tree without following links (a junction or symlink is an entry, never a folder to enter;
- * Node reports both as links). `visit` gets each entry: 'skip' does not enter a folder, 'stop' ends the walk.
+ * Walks a tree without following links (a junction or symlink is an entry, never a folder to enter).
+ * `visit` gets each entry with its kind as lstat sees it (see entryKind: a cloud placeholder is the
+ * file or folder it stands for): 'skip' does not enter a folder, 'stop' ends the walk. A folder or entry
+ * that vanished while walking (git gc, a deleted branch) is gone, not unreadable; one that cannot be
+ * listed or examined ends the walk as unreadable (fail closed).
  */
-async function walkTree(base: string, visit: (rel: string, e: Dirent) => 'skip' | 'stop' | void, limit = scanLimit.entries): Promise<WalkEnd> {
+async function walkTree(base: string, visit: (rel: string, name: string, kind: EntryKind) => 'skip' | 'stop' | void, limit = scanLimit.entries): Promise<WalkEnd> {
   const stack = ['']
   let seen = 0
   while (stack.length) {
     const rel = stack.pop()!
-    let entries: Dirent[]
+    const dir = rel ? join(base, rel) : base
+    let entries
     try {
-      entries = await fsp.readdir(rel ? join(base, rel) : base, { withFileTypes: true })
-    } catch {
+      entries = await fsp.readdir(dir, { withFileTypes: true })
+    } catch (err) {
+      if (rel && gone(err)) continue
       return { limit: false, unreadable: rel || '.' }
     }
     for (const e of entries) {
       if (++seen > limit) return { limit: true, unreadable: null }
       const path = rel ? `${rel}/${e.name}` : e.name
-      const r = visit(path, e)
+      let kind: EntryKind | null
+      try {
+        kind = await entryKind(join(dir, e.name), e)
+      } catch {
+        return { limit: false, unreadable: path }
+      }
+      if (!kind) continue
+      const r = visit(path, e.name, kind)
       if (r === 'stop') return { limit: false, unreadable: null }
-      if (r !== 'skip' && e.isDirectory()) stack.push(path)
+      if (r !== 'skip' && kind === 'dir') stack.push(path)
     }
   }
   return { limit: false, unreadable: null }
@@ -466,11 +484,13 @@ export async function gitDirProblems(root: string): Promise<string[]> {
   const add = (p: string) => {
     if (out.length < 50 && !out.includes(p)) out.push(p)
   }
-  const end = await walkTree(dir, (rel, e) => {
-    if (e.isSymbolicLink() || (!e.isDirectory() && !e.isFile())) add(`.git/${rel}`)
+  const end = await walkTree(dir, (rel, _name, kind) => {
+    if (kind === 'link' || kind === 'other') add(`.git/${rel}`)
   })
   if (end.limit) add(msg(`.git (больше ${scanLimit.entries} файлов)`, `.git (over ${scanLimit.entries} entries)`))
   if (end.unreadable) add(end.unreadable === '.' ? '.git' : `.git/${end.unreadable}`)
+  // stop here: the checks below lstat nested paths, and Windows follows a link anywhere above the last part (to a share too)
+  if (out.length) return out
   if (!lstatOrNull(join(dir, 'HEAD'))?.isFile()) add('.git/HEAD')
   if (!lstatOrNull(join(dir, 'objects'))?.isDirectory()) add('.git/objects')
   if (!lstatOrNull(join(dir, 'refs'))?.isDirectory()) add('.git/refs')
@@ -506,23 +526,23 @@ const isDotGit = (name: string) => (process.platform === 'linux' ? name === '.gi
  */
 async function workTreeProblem(root: string): Promise<string | null> {
   let found: string | null = null
-  const end = await walkTree(root, (rel, e) => {
-    if (!rel.includes('/') && isDotGit(e.name) && e.isDirectory()) return 'skip' // the repository itself, checked by gitDirProblems
-    if (isDotGit(e.name)) {
+  const end = await walkTree(root, (rel, name, kind) => {
+    if (!rel.includes('/') && isDotGit(name) && kind === 'dir') return 'skip' // the repository itself, checked by gitDirProblems
+    if (isDotGit(name)) {
       found = msg(
         `В папке проекта есть вложенный репозиторий git (${rel}). doplan не сохраняет версии, пока он там: удалите или перенесите его.`,
         `The project folder has a nested git repository (${rel}). doplan saves no versions while it is there: delete or move it.`,
       )
       return 'stop'
     }
-    if (e.isSymbolicLink()) {
+    if (kind === 'link') {
       found = msg(
         `В папке проекта есть ссылка (символическая ссылка или точка соединения): ${rel}. git может пройти по ней за пределы папки, поэтому doplan не сохраняет версии, пока она там: замените её обычной папкой или файлом.`,
         `The project folder has a link (a symbolic link or junction): ${rel}. git could follow it out of the folder, so doplan saves no versions while it is there: replace it with a plain folder or file.`,
       )
       return 'stop'
     }
-    if (!e.isDirectory() && !e.isFile()) {
+    if (kind === 'other') {
       found = msg(`В папке проекта есть файл особого типа (${rel}). doplan не сохраняет версии, пока он там.`, `The project folder has a special file (${rel}). doplan saves no versions while it is there.`)
       return 'stop'
     }

@@ -19,10 +19,13 @@ import {
   folderTrust,
   getProjectRoot,
   isDirectory,
+  isLinkAt,
+  linkedFileError,
   loadFolderAssets,
   parseJsonText,
   planChangedOnDisk,
   readFolderPlan,
+  readPickedFile,
   readInstructions,
   readVersion,
   referencedAssets,
@@ -145,13 +148,14 @@ export async function openProject(pathArg?: unknown): Promise<ProjectOpenResult 
     path = chosen
   }
 
+  // a project file (.doplan, .json, plan.json) that is a link is refused before anything stats or reads through it
+  if (/\.(json|doplan)$/i.test(path) && (await isLinkAt(path))) throw linkedFileError(path)
   const root = await folderRootOf(path)
   if (root) return openFolderAt(root)
   if (await isDirectory(path)) throw new Error(notProjectFolder())
 
-  const st = await fsp.stat(path)
-  if (st.size > MAX_PROJECT_BYTES) throw new Error(msg('Файл проекта слишком большой', 'The project file is too large'))
-  const buf = new Uint8Array(await fsp.readFile(path))
+  const tooLarge = () => new Error(msg('Файл проекта слишком большой', 'The project file is too large'))
+  const buf = new Uint8Array(await readPickedFile(path, MAX_PROJECT_BYTES, tooLarge))
   let doc: unknown
   const zip = isZip(buf)
   let staged: string | null = null

@@ -1,4 +1,5 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import fsp from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
@@ -11,7 +12,7 @@ vi.mock('electron', () => ({
   safeStorage: { isEncryptionAvailable: () => false },
 }))
 
-const { gitCandidates, findGit, filterOffArgs, gitLog, gitShowFile, UnsafeGitConfigError, scanLimit } = await import('./git')
+const { gitCandidates, findGit, filterOffArgs, gitLog, gitShowFile, UnsafeGitConfigError, scanLimit, gitDirProblems } = await import('./git')
 const { commitFolder, createFolderProject, folderRootOf, folderTrust, isProjectFolder, readVersion, resetFolderGitConfig, trustFolder } = await import('./projectFolder')
 const { findOnPath } = await import('./aichat/detect')
 const { execFileSync } = await import('node:child_process')
@@ -24,6 +25,38 @@ function folder(name: string, files: Record<string, string>): string {
     writeFileSync(join(dir, f), text)
   }
   return dir
+}
+
+/**
+ * readdir as Windows lists a synced folder (OneDrive, Dropbox Files On-Demand): libuv reports every
+ * reparse point, cloud placeholders too, as a link, while lstat still says file or folder.
+ */
+function asPlaceholders() {
+  const real = fsp.readdir.bind(fsp) as (p: unknown, o: unknown) => Promise<unknown[]>
+  return vi.spyOn(fsp, 'readdir').mockImplementation((async (p: unknown, o?: { withFileTypes?: boolean }) => {
+    const list = await real(p, o)
+    if (!o?.withFileTypes) return list
+    return (list as { name: string; parentPath: string }[]).map((e) => ({
+      name: e.name,
+      parentPath: e.parentPath,
+      isFile: () => false,
+      isDirectory: () => false,
+      isSymbolicLink: () => true,
+      isBlockDevice: () => false,
+      isCharacterDevice: () => false,
+      isFIFO: () => false,
+      isSocket: () => false,
+    }))
+  }) as never)
+}
+
+/** readdir failing with `code` for the folders whose path matches `which` */
+function failingReaddir(which: RegExp, code: () => string) {
+  const real = fsp.readdir.bind(fsp) as (p: unknown, o: unknown) => Promise<unknown[]>
+  return vi.spyOn(fsp, 'readdir').mockImplementation((async (p: unknown, o?: unknown) => {
+    if (which.test(String(p))) throw Object.assign(new Error(code()), { code: code() })
+    return real(p, o)
+  }) as never)
 }
 
 const MANIFEST = JSON.stringify({ format: 'doplan-folder', version: 1, app: 'doplan', assets: [] })
@@ -882,6 +915,80 @@ describe('repository layout', { timeout: 60_000 }, async () => {
     expect(await commitFolder(root, 'x')).toBeTruthy()
   })
 
+  it.skipIf(!git)('a cloud placeholder (OneDrive, Dropbox) is the file or folder it stands for, not a link', async () => {
+    const root = await created('Placeholders')
+    const outside = folder('placeholders-outside', { 'secret.txt': 'secret' })
+    writeFileSync(join(root, 'plan.json'), '{"p":1}')
+    const spy = asPlaceholders()
+    try {
+      expect(await gitDirProblems(root)).toEqual([])
+      expect(await layoutOf(root)).toBeUndefined()
+      expect(await commitFolder(root, 'синхронизировано')).toBeTruthy()
+      expect(spy).toHaveBeenCalled()
+      // real links still are links
+      junction(outside, join(root, 'extra'))
+      writeFileSync(join(root, 'plan.json'), '{"p":2}')
+      await expect(commitFolder(root, 'x')).rejects.toThrow(/ссылка[^]*extra|link[^]*extra/)
+      unlinkSync(join(root, 'extra'))
+      junction(outside, join(root, '.git', 'objects', 'ab'))
+      expect(await gitDirProblems(root)).toEqual(['.git/objects/ab'])
+      unlinkSync(join(root, '.git', 'objects', 'ab'))
+      expect(await commitFolder(root, 'без ссылок')).toBeTruthy()
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it.skipIf(!git)('the .git check stops at the first link: no path below it is looked at, so a link to a share is never followed', async () => {
+    const root = await created('EarlyStop')
+    const objects = join(root, '.git', 'objects')
+    const store = join(base, 'early-stop-objects')
+    renameSync(objects, store)
+    mkdirSync(join(store, 'info'), { recursive: true })
+    writeFileSync(join(store, 'info', 'alternates'), 'C:/elsewhere/objects\n')
+    junction(store, objects)
+    // the alternates check would lstat .git/objects/info/alternates through the junction
+    expect(await gitDirProblems(root)).toEqual(['.git/objects'])
+    unlinkSync(objects)
+    if (canLink && process.platform === 'win32') {
+      // a directory symlink to a machine that never answers: the check returns at once, connecting nowhere
+      symlinkSync('\\\\192.0.2.86\\s\\objects', objects, 'dir')
+      const t0 = Date.now()
+      expect(await gitDirProblems(root)).toEqual(['.git/objects'])
+      expect(Date.now() - t0).toBeLessThan(5000)
+      unlinkSync(objects)
+    }
+    renameSync(store, objects)
+    rmSync(join(objects, 'info', 'alternates'))
+    expect(await gitDirProblems(root)).toEqual([])
+  })
+
+  it.skipIf(!git)('a folder that vanishes during the scan (git gc, a deleted branch) is gone; one that cannot be listed still refuses', async () => {
+    const root = await created('Vanish')
+    mkdirSync(join(root, '.git', 'objects', 'zz'))
+    mkdirSync(join(root, 'sub'))
+    writeFileSync(join(root, 'sub', 'a.txt'), 'a')
+    writeFileSync(join(root, 'plan.json'), '{"v":1}')
+    let code = 'ENOENT'
+    const spy = failingReaddir(/[\\/](zz|sub)$/, () => code)
+    try {
+      expect(await gitDirProblems(root)).toEqual([])
+      expect(await commitFolder(root, 'исчезла')).toBeTruthy()
+      code = 'ENOTDIR'
+      expect(await gitDirProblems(root)).toEqual([])
+      // anything else fails closed
+      code = 'EACCES'
+      expect(await gitDirProblems(root)).toEqual(['.git/objects/zz'])
+      writeFileSync(join(root, 'plan.json'), '{"v":2}')
+      expect(await commitFolder(root, 'x')).toBeNull()
+      rmSync(join(root, '.git', 'objects', 'zz'), { recursive: true })
+      await expect(commitFolder(root, 'x')).rejects.toThrow(/«sub»|“sub”/)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(await commitFolder(root, 'x')).toBeTruthy()
+  })
+
   it.skipIf(!git)('a repository only doplan writes still gets packed: doplan runs git gc --auto itself', async () => {
     const root = await created('Gc')
     const { createHash } = await import('node:crypto')
@@ -1088,6 +1195,49 @@ describe('project files through links', { timeout: 60_000 }, async () => {
     symlinkSync(join(outside, 'secret.png'), join(dir, 'assets', 'link2.png'), 'file')
     await writeFolderProject(dir, { version: 1, meta: { name: 'L' }, b: assetUrl('link2.png') })
     expect(readFileSync(join(dir, 'manifest.json'), 'utf8')).not.toContain('link2.png')
+  })
+
+  it('synced assets (cloud placeholders) open and are no links; real links still are', async () => {
+    const outside = folder('placeholder-assets-outside', { 'x.png': 'x' })
+    const dir = project('placeholder-assets', { [`assets/${HASHED}`]: 'img', 'assets/b.png': 'b' })
+    junction(outside, join(dir, 'assets', 'dir.png'))
+    const spy = asPlaceholders()
+    try {
+      expect(await folderAssetLinks(dir)).toEqual(['assets/dir.png'])
+      await loadFolderAssets(dir)
+      expect(spy).toHaveBeenCalled()
+    } finally {
+      spy.mockRestore()
+    }
+    expect(readdirSync(paths.projectAssets).sort()).toEqual([HASHED, 'b.png'].sort())
+    expect(readFileSync(join(paths.projectAssets, HASHED), 'utf8')).toBe('img')
+  })
+
+  it.skipIf(!canLink)('a plan.json, .json or .doplan the user picks that is a link is refused before anything reads through it', async () => {
+    const { openProject } = await import('./project')
+    const { grantPath } = await import('./access')
+    const outside = folder('picked-outside', { 'x.json': '{"version":1,"meta":{"name":"stolen"}}' })
+    // no doplan manifest: opening plan.json takes the path of any .json file
+    const dir = folder('picked', { 'manifest.json': '{"name":"pwa"}' })
+    const open = (p: string) => {
+      grantPath(p)
+      return openProject(p)
+    }
+    const t0 = Date.now()
+    for (const [name, target] of [
+      ['plan.json', join(outside, 'x.json')],
+      ['x.json', join(outside, 'x.json')],
+      ['x.doplan', join(outside, 'x.json')],
+      ['unc.json', '\\\\192.0.2.9\\share\\x.json'],
+      ['other', join(outside, 'x.json')],
+    ]) {
+      symlinkSync(target, join(dir, name), 'file')
+      await expect(open(join(dir, name))).rejects.toThrow(/ссылка|link/)
+    }
+    expect(Date.now() - t0).toBeLessThan(5000)
+    // a plain file opens as before
+    writeFileSync(join(dir, 'plain.json'), '{"version":1,"meta":{"name":"ok"}}')
+    expect((await open(join(dir, 'plain.json')))?.doc).toMatchObject({ meta: { name: 'ok' } })
   })
 
   it('AGENTS.md as a junction is no instructions; a link where a scaffold file goes is left alone', async () => {

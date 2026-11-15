@@ -177,6 +177,15 @@ function samePath(a: string, b: string): boolean {
   return process.platform === 'linux' ? a === b : a.toLowerCase() === b.toLowerCase()
 }
 
+/** the chats in `dir` lose their agent sessions (the history stays) */
+async function dropSessions(dir: string): Promise<void> {
+  for (const f of await readdir(dir)) {
+    if (!f.endsWith('.json') || META_FILES.has(f)) continue
+    const rec = await readJson<AiChatRecord | null>(join(dir, f), null)
+    if (rec && typeof rec === 'object' && (rec.resume || rec.resumeCwd)) await atomicWrite(join(dir, f), JSON.stringify(withoutResume(rec)))
+  }
+}
+
 /** the project at `path` is there and still carries `id`; one that cannot be read counts as carrying it */
 async function carries(path: string, id: string): Promise<boolean> {
   if (!(await exists(path))) return false
@@ -193,16 +202,20 @@ async function carries(path: string, id: string): Promise<boolean> {
  * flat-v2, a file sent back by a colleague) carries the same one. One rule, on the path the id's chat
  * folder belongs to (saved.json):
  * 1. That path → the document itself.
- * 2. Nothing is there, or the project there no longer carries the id → the document was moved or
- *    renamed: it takes the id, and the folder now belongs to `path`.
+ * 2. Nothing is there (or nothing was ever recorded), or the project there no longer carries the id →
+ *    the document was moved or renamed: it takes the id and the folder now belongs to `path`, but the
+ *    chats lose their agent sessions. A rename cannot be told from a copy opened before the renamed
+ *    original, and an agent must never continue another document's session: after a rename outside
+ *    the app the agent starts a fresh session, the chat history stays.
  * 3. The project there still carries the id → this is a copy: an id of its own, the chats copied
  *    without agent sessions (as on Save As). Nothing is written into the file here: the renderer marks
  *    the document changed, and the id reaches the file with the user's next save.
  * Accepted cost: a copy that is never saved with its id (not saved, a .json export, a read-only or
  * locked file, one file reached by two spellings of its path such as a mapped drive and a UNC path)
  * gets a new id and a fresh copy of the chats on every open; the earlier copies stay on disk. And
- * whichever of two files with one id is opened first after the other's path changed takes the id.
- * Chats are never lost and never shown with a document that does not carry their id.
+ * whichever of two files with one id is opened first after the other's path changed takes the id (and
+ * the chats, without sessions). Chats are never lost and never shown with a document that does not
+ * carry their id, and no agent session resumes in another document.
  */
 export async function claimDocument(ref: string, path: string): Promise<string> {
   const d = DOC_ID_RE.exec(ref)
@@ -214,6 +227,7 @@ export async function claimDocument(ref: string, path: string): Promise<string> 
   if (owner && samePath(owner, here)) return ref
   if (!owner || !(await carries(owner, d[1]))) {
     await ensureDir(dir)
+    await dropSessions(dir)
     await atomicWrite(join(dir, SAVED_FILE), JSON.stringify({ path: here }))
     return ref
   }

@@ -200,8 +200,12 @@ export function initAi(): void {
     // the same project loaded again (an old version viewed or left, plan.json reloaded after the agent
     // changed it): the chat stays open. A plan-mode draft was made against the plan that is gone, and a
     // turn would go on editing an old version, so those end (the turn goes on after a plain reload)
-    if (!first && reload && docRef() === get().projectPath) {
+    if (!first && reload && (docRef() === get().projectPath || claimFailed)) {
       leaveChat(reload === 'version')
+      // a copy read again keeps its own id (actions/project keepId), which its file still lacks
+      const c = copyClaim
+      const s = docStore.getState()
+      if (c && s.filePath === c.path && s.doc.meta.id === c.to && !s.dirty) s.setDirty(true)
       return
     }
     const gone = !first && unsavedDoc ? get().projectPath : null
@@ -212,18 +216,21 @@ export function initAi(): void {
   docStore.subscribe(sync)
   sync()
   addProjectHook({
+    // every save waits for the claim of the opened file, so it writes the copy's own id
+    beforeSave: claimSettled,
     saved: async (saveAs) => {
-      // a claim of the opened file answers first: a save made before it (Ctrl+S right after opening a
-      // copy) must not hand the original's chat folder to the copy
-      while (claiming) await claiming
+      await claimSettled()
       const c = copyClaim
       const s = docStore.getState()
-      // the save started before the claim answered and wrote the old id: the copy keeps its new one
-      // (and stays changed until it is saved with it)
-      if (!saveAs && c && s.loadId === c.loadId && s.filePath === c.path && s.doc.meta.id === c.from) {
+      if (!saveAs && c && s.doc.meta.id === c.from) {
+        // a save that did not wait wrote the old id: the copy keeps its new one (changed until saved)
         s.setDocId(c.to)
         set({ projectPath: `id:${c.to}` })
-      }
+      } else copyClaim = null
+      // the claim failed: whether this file is a copy is unknown, so the save leaves the chats of its
+      // id alone (a Save As is a new project of its own and takes the chats made meanwhile)
+      if (claimFailed && !saveAs) return
+      claimFailed = false
       // the first save of a new document takes its chats along, even through Save As
       const wasUnsaved = unsavedDoc
       unsavedDoc = false
@@ -314,8 +321,15 @@ let settingsRev = 0
 let moving: Promise<void> | null = null
 /** the claim of the file just opened, until its answer is applied: the 'saved' hook waits for it */
 let claiming: Promise<void> | null = null
-/** the opened file turned out to be a copy: its id `from` became `to` (for the load `loadId` of `path`) */
-let copyClaim: { loadId: number; path: string; from: string; to: string } | null = null
+/** the opened file at `path` turned out to be a copy: its id `from` became `to` (until it is saved with it) */
+let copyClaim: { path: string; from: string; to: string } | null = null
+/** the claim of the open file failed: its chats are a scratch bucket, the id's own chats are left alone */
+let claimFailed = false
+
+/** resolves once no claim of an opened file is pending (its answer applied) */
+async function claimSettled(): Promise<void> {
+  while (claiming) await claiming
+}
 
 /**
  * The open document was saved: its chats follow when its reference changed (moved; copied without
@@ -385,6 +399,7 @@ async function setProject(gone: string | null): Promise<void> {
   else leaveChat()
   let ref = docRef()
   copyClaim = null
+  claimFailed = false
   // switched at once: whatever is saved from now on lands in the new project
   set({ projectPath: ref, legacy: false, chats: [], chat: emptyChat(get().settings.provider), chips: [], images: [], status: '' })
   if (gone && gone !== ref) void queueWrite(() => api.aiChat.dropChats(gone)).catch(() => {})
@@ -394,8 +409,10 @@ async function setProject(gone: string | null): Promise<void> {
     const opened = ref
     // the document this claim is for: another file opened meanwhile can carry the same id (the original
     // of the copy being claimed), and must not get the copy's id
-    const loadId = docStore.getState().loadId
-    const job = queueWrite(() => api.aiChat.claimDocument(opened, filePath)).catch(() => opened)
+    const job = queueWrite(() => api.aiChat.claimDocument(opened, filePath)).catch((e) => {
+      console.error('[doplan] claiming the document failed', e)
+      return null
+    })
     const wait = job.then(() => {})
     moving = wait
     let applied!: () => void
@@ -405,10 +422,17 @@ async function setProject(gone: string | null): Promise<void> {
       const claimed = await job
       if (moving === wait) moving = null
       const s = docStore.getState()
-      // not after another file was opened, nor after a Save As gave the document an id of its own
-      if (get().projectPath !== opened || s.loadId !== loadId || s.filePath !== filePath || `id:${s.doc.meta.id}` !== opened) return
-      if (claimed !== opened && claimed.startsWith('id:')) {
-        copyClaim = { loadId, path: filePath, from: opened.slice(3), to: claimed.slice(3) }
+      // still this file with this id: not after another file was opened (the original of a copy can
+      // carry the same id), nor after a Save As gave it an id of its own. A reload keeps the answer
+      if (get().projectPath !== opened || s.filePath !== filePath || `id:${s.doc.meta.id}` !== opened) return
+      if (claimed === null) {
+        // unknown whether this file is a copy: no chats of the id are shown or touched, the next open
+        // tries again
+        claimFailed = true
+        ref = `unsaved:${uid()}`
+        set({ projectPath: ref, status: t('Не удалось открыть чаты проекта: показан пустой чат') })
+      } else if (claimed !== opened && claimed.startsWith('id:')) {
+        copyClaim = { path: filePath, from: opened.slice(3), to: claimed.slice(3) }
         s.setDocId(claimed.slice(3))
         ref = claimed
         set({ projectPath: ref })

@@ -157,6 +157,7 @@ export async function createProjectFolder(mode: 'new' | 'saveAs', name: string, 
       loadDocument(doc, res.path, { kind: 'folder', git: res.git })
       void api.project.clearRecovery().catch(() => {})
     } else {
+      await runProjectHooks('beforeSave')
       const store = docStore.getState()
       if (store.doc.meta.name !== clean) store.transact(t('Название проекта'), (d) => void (d.meta.name = clean))
       const doc = docStore.getState().doc
@@ -318,6 +319,8 @@ export function pendingCommitMessage(): string {
 
 /** Resolves true when the document was written. */
 export async function saveProject(saveAs = false, opts?: { message?: string; overwrite?: boolean }): Promise<boolean> {
+  // an opened copy may be getting an id of its own: the save writes that one
+  await runProjectHooks('beforeSave')
   const { doc, filePath } = docStore.getState()
   const ps = projectStore.getState()
   const folder = ps.kind === 'folder' && !!filePath
@@ -376,6 +379,7 @@ export async function saveProject(saveAs = false, opts?: { message?: string; ove
 
 /** single-file save (.doplan opened earlier, or the browser fallback) */
 async function saveFileLegacy(target: string | null): Promise<boolean> {
+  await runProjectHooks('beforeSave')
   const { doc, filePath } = docStore.getState()
   const saveAs = target === null
   const id = saveId(doc, filePath, saveAs)

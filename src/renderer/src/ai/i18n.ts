@@ -43,6 +43,7 @@ addTranslations('en', {
   'Пустой ответ': 'Empty answer',
   'Запуск…': 'Starting…',
   'Провайдер недоступен': 'Provider unavailable',
+  'Не удалось открыть чаты проекта: показан пустой чат': 'Could not open the project chats: an empty chat is shown',
   'Приложите фото плана (скрепка или Ctrl+V) или добавьте подложку': 'Attach a plan photo (paper clip or Ctrl+V) or add an underlay',
   '(изображение)': '(image)',
   // context chip kinds

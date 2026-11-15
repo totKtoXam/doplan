@@ -115,8 +115,8 @@ describe('chat storage follows the project', () => {
     const orig = join(root, 'flat-orig.doplan')
     const copy = join(root, 'flat-v2.doplan')
     await docFile(orig, 'copied-id-1')
-    await saveChat('id:copied-id-1', chat('chat-c', 'c', { codex: 'T-1' }))
     expect(await open(orig)).toBe('id:copied-id-1')
+    await saveChat('id:copied-id-1', chat('chat-c', 'c', { codex: 'T-1' }))
     await cp(orig, copy)
     const before = await stat(copy)
     const mine = await open(copy)
@@ -134,8 +134,8 @@ describe('chat storage follows the project', () => {
     const orig = join(root, 'ro.doplan')
     const copy = join(root, 'ro-export.json')
     await docFile(orig, 'ro-id-1')
-    await saveChat('id:ro-id-1', chat('chat-ro', 'ro', { claude: 'R-1' }))
     await open(orig)
+    await saveChat('id:ro-id-1', chat('chat-ro', 'ro', { claude: 'R-1' }))
     await cp(orig, copy)
     const first = await open(copy)
     await saveChat(first, chat('chat-first', 'first'))
@@ -147,7 +147,7 @@ describe('chat storage follows the project', () => {
     expect((await loadChat('id:ro-id-1', 'chat-ro'))?.resume).toEqual({ claude: 'R-1' })
   })
 
-  it('a copy saved with its id is a document of its own: renaming it keeps its chats', async () => {
+  it('a copy saved with its id is a document of its own: renaming it keeps its chats (without agent sessions)', async () => {
     const orig = join(root, 'quick.doplan')
     const copy = join(root, 'quick - Copy.doplan')
     await docFile(orig, 'quick-id-1')
@@ -159,7 +159,8 @@ describe('chat storage follows the project', () => {
     expect(await open(copy)).toBe(mine)
     await rename(copy, join(root, 'quick-v2.doplan'))
     expect(await open(join(root, 'quick-v2.doplan'))).toBe(mine)
-    expect((await loadChat(mine, 'chat-mine'))?.resume).toEqual({ claude: 'M-1' })
+    expect(await ids(mine)).toEqual(['chat-mine'])
+    expect((await loadChat(mine, 'chat-mine'))?.resume).toBeUndefined()
     expect(await open(orig)).toBe('id:quick-id-1')
   })
 
@@ -182,36 +183,68 @@ describe('chat storage follows the project', () => {
     expect(z).not.toBe('id:den-id-1')
     expect(await ids(z)).toEqual(['chat-orig'])
     expect(await open(join(root, 'den v2.doplan'))).toBe(y)
-    expect((await loadChat(y, 'chat-v2'))?.resume).toEqual({ claude: 'V2-1' })
+    expect(await ids(y)).toEqual(['chat-orig', 'chat-v2'])
   })
 
-  it('a renamed or moved original keeps its id and sessions, also when another project took its old path', async () => {
+  it('a renamed or moved original keeps its id and chats, also when another project took its old path; its agent sessions end', async () => {
     const orig = join(root, 'home.doplan')
     await docFile(orig, 'home-id-1')
-    await saveChat('id:home-id-1', chat('chat-h', 'h', { claude: 'H-1' }))
     await open(orig)
+    await saveChat('id:home-id-1', chat('chat-h', 'h', { claude: 'H-1' }))
+    expect(await open(orig)).toBe('id:home-id-1')
+    expect((await loadChat('id:home-id-1', 'chat-h'))?.resume).toEqual({ claude: 'H-1' })
     await rename(orig, join(root, 'home-moved.doplan'))
     // a different project now lives at the old path
     await docFile(orig, 'other-id-1')
     expect(await open(join(root, 'home-moved.doplan'))).toBe('id:home-id-1')
-    expect((await loadChat('id:home-id-1', 'chat-h'))?.resume).toEqual({ claude: 'H-1' })
+    expect(await ids('id:home-id-1')).toEqual(['chat-h'])
+    expect((await loadChat('id:home-id-1', 'chat-h'))?.resume).toBeUndefined()
     expect(await open(orig)).toBe('id:other-id-1')
     expect(await open(join(root, 'home-moved.doplan'))).toBe('id:home-id-1')
   })
 
-  it('the original moved onto the path of a deleted copy keeps its own id and sessions', async () => {
+  it('the original moved onto the path of a deleted copy keeps its own id and chats', async () => {
     const orig = join(root, 'p1.doplan')
     const copy = join(root, 'p2.doplan')
     await docFile(orig, 'pp-id-1')
-    await saveChat('id:pp-id-1', chat('chat-p1', 'p', { claude: 'P1-1' }))
     await open(orig)
+    await saveChat('id:pp-id-1', chat('chat-p1', 'p', { claude: 'P1-1' }))
     await cp(orig, copy)
     const theCopy = await open(copy)
     await rm(copy)
     await rename(orig, copy)
     expect(await open(copy)).toBe('id:pp-id-1')
     expect(theCopy).not.toBe('id:pp-id-1')
-    expect((await loadChat('id:pp-id-1', 'chat-p1'))?.resume).toEqual({ claude: 'P1-1' })
+    expect(await ids('id:pp-id-1')).toEqual(['chat-p1'])
+    expect((await loadChat('id:pp-id-1', 'chat-p1'))?.resume).toBeUndefined()
+  })
+
+  it("a copy opened before the renamed original takes the id, but never the original's agent sessions", async () => {
+    const orig = join(root, 'race.doplan')
+    const copy = join(root, 'race - Copy.doplan')
+    await docFile(orig, 'race-id-1')
+    await open(orig)
+    await saveChat('id:race-id-1', chat('chat-race', 'r', { claude: 'RACE-1', codex: 'RACE-2' }))
+    await cp(orig, copy)
+    await rename(orig, join(root, 'race-renamed.doplan'))
+    expect(await open(copy)).toBe('id:race-id-1')
+    expect(await ids('id:race-id-1')).toEqual(['chat-race'])
+    const rec = await loadChat('id:race-id-1', 'chat-race')
+    expect(rec?.resume).toBeUndefined()
+    expect(rec?.resumeCwd).toBeUndefined()
+    // the renamed original is now the copy: chats copied, no sessions either
+    const other = await open(join(root, 'race-renamed.doplan'))
+    expect(other).not.toBe('id:race-id-1')
+    expect((await loadChat(other, 'chat-race'))?.resume).toBeUndefined()
+  })
+
+  it('a project opened from its own path keeps its agent sessions', async () => {
+    const orig = join(root, 'stay.doplan')
+    await docFile(orig, 'stay-id-1')
+    await open(orig)
+    await saveChat('id:stay-id-1', chat('chat-stay', 's', { claude: 'S-1' }))
+    expect(await open(orig)).toBe('id:stay-id-1')
+    expect((await loadChat('id:stay-id-1', 'chat-stay'))?.resume).toEqual({ claude: 'S-1' })
   })
 
   it('reads the id of a .doplan archive and of a project folder; a project it cannot read counts as still there', async () => {

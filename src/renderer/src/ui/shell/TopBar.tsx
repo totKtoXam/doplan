@@ -17,6 +17,7 @@ import {
   Package,
   Paintbrush,
   Redo2,
+  RefreshCw,
   Save,
   ScanLine,
   Settings,
@@ -30,6 +31,7 @@ import { useT } from '@/i18n'
 import { dialogStore } from '@/store/dialogs'
 import { useDoc } from '@/store/document'
 import { uiStore, useUi } from '@/store/ui'
+import { checkForUpdatesManually } from '@/store/updates'
 import type { ViewMode } from '@/contracts'
 import { DropdownMenu, IconBtn, type MenuEntry, Segmented, Sep, TextBtn, Tip } from './primitives'
 
@@ -98,6 +100,7 @@ export function TopBar() {
     { type: 'separator' },
     { label: t('Материалы…'), icon: Paintbrush, onSelect: () => dialogStore.getState().open('materialEditor') },
     { label: t('Настройки…'), icon: Settings, onSelect: () => dialogStore.getState().open('settings') },
+    { label: t('Проверить обновления…'), icon: RefreshCw, onSelect: () => void checkForUpdatesManually() },
   ]
 
   const exportMenu = (): MenuEntry[] => [

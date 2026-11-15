@@ -19,3 +19,4 @@ inbox/
 /*.doplan
 .claude/settings.local.json
 .claude/worktrees/
+tools/assets/.cache/

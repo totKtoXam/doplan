@@ -145,6 +145,8 @@ function keepFirstVariant(scene: THREE.Object3D): void {
 export class ItemsLayer {
   private records = new Map<Id, ItemRec>()
   private templates = new Map<string, Promise<ModelTemplate>>()
+  /** templates whose download finished, for synchronous re-instantiation */
+  private ready = new Map<string, ModelTemplate>()
   private gltf: { loader: GLTFLoader; dispose(): void } | null = null
   private tokens = 0
   private disposed = false
@@ -167,12 +169,15 @@ export class ItemsLayer {
 
   /** `variants`: trim variant collections to their first variant (catalog models only, see fit.ts) */
   loadTemplate(src: string, variants = false): Promise<ModelTemplate> {
-    const url = resolveAssetUrl(src)
-    const key = variants ? `variant:${url}` : url
+    const key = this.templateKey(src, variants)
     let p = this.templates.get(key)
     if (!p) {
       if (!this.gltf) this.gltf = createGltfLoader(this.ctx.renderer)
-      p = this.gltf.loader.loadAsync(url).then((g) => prepareTemplate(g.scene, variants))
+      p = this.gltf.loader.loadAsync(resolveAssetUrl(src)).then((g) => {
+        const tpl = prepareTemplate(g.scene, variants)
+        this.ready.set(key, tpl)
+        return tpl
+      })
       this.templates.set(key, p)
       p.catch(() => {
         // allow a retry after a failed download
@@ -180,6 +185,11 @@ export class ItemsLayer {
       })
     }
     return p
+  }
+
+  private templateKey(src: string, variants: boolean): string {
+    const url = resolveAssetUrl(src)
+    return variants ? `variant:${url}` : url
   }
 
   /** clone of a template fitted into `size` (mm), origin at the footprint centre on the floor */
@@ -267,8 +277,18 @@ export class ItemsLayer {
       }
       return
     }
+    if (!asset.src || asset.remote) {
+      setContent(this.placeholder(item))
+      return
+    }
+    // an already loaded model is swapped in at once: going through the promise would show the
+    // placeholder box for a frame on every resize / parameter step of a drag (flicker)
+    const loaded = this.ready.get(this.templateKey(asset.src, trimsVariants(asset)))
+    if (loaded) {
+      setContent(this.instantiate(loaded, item, asset))
+      return
+    }
     setContent(this.placeholder(item))
-    if (!asset.src || asset.remote) return
     modelLoadStarted()
     this.loadTemplate(asset.src, trimsVariants(asset))
       .then(
@@ -389,6 +409,7 @@ export class ItemsLayer {
       }).catch(() => undefined)
     }
     this.templates.clear()
+    this.ready.clear()
     this.gltf?.dispose()
     this.gltf = null
   }

@@ -50,6 +50,12 @@ export const CH = {
   evAiChatToolCall: 'ev:aiChatToolCall',
   // ── end ai-chat block ──
 
+  updatesGet: 'updates:get',
+  updatesCheck: 'updates:check',
+  updatesInstall: 'updates:install',
+  updatesOpenRelease: 'updates:openRelease',
+  evUpdateState: 'ev:updateState',
+
   // renderer → main (fire and forget)
   windowSetTitle: 'window:setTitle',
   windowConfirmClose: 'window:confirmClose',

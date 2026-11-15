@@ -1,5 +1,6 @@
 import { useMemo, type ReactNode } from 'react'
 import type { TilePattern, TilePatternType } from '@core/types'
+import { wasteFor } from '@core'
 import { useT } from '@/i18n'
 import { ColorInput, NumberInput, Row, Select, Slider } from '@/ui/kit'
 import { optionsOf, PATTERN_RU } from '../common/labels'
@@ -70,6 +71,20 @@ export function TilePatternEditor({ pattern, color, onChange }: TilePatternEdito
           </Row>
           <Row label={t('Вариативность')}>
             <Slider value={p.variation ?? 0} min={0} max={1} step={0.01} format={(v) => `${Math.round(v * 100)}%`} onChange={(v, g) => set({ variation: v }, g)} />
+          </Row>
+          <Row label={t('Начало раскладки')} hint={t('сдвиг первой целой плитки от угла, мм')}>
+            <NumberInput kind="length" label="X" value={p.offsetX ?? 0} min={-5000} max={5000} round={1} onChange={(v, g) => set({ offsetX: v }, g)} />
+            <NumberInput kind="length" label="Y" value={p.offsetY ?? 0} min={-5000} max={5000} round={1} onChange={(v, g) => set({ offsetY: v }, g)} />
+          </Row>
+          <Row label={t('Запас на подрезку')}>
+            <Slider
+              value={p.waste ?? wasteFor(p.type)}
+              min={0}
+              max={0.4}
+              step={0.01}
+              format={(v) => `${Math.round(v * 100)}%${p.waste === undefined ? ` (${t('по умолч.')})` : ''}`}
+              onChange={(v, g) => set({ waste: v }, g)}
+            />
           </Row>
           <Row label={t('Второй цвет')}>
             <ColorInput

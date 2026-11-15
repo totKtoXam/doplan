@@ -40,6 +40,8 @@ export interface NumberInputProps {
   placeholder?: string
   'aria-label'?: string
   title?: string
+  /** an optional value: erasing the text and committing calls this (without it, empty text is ignored) */
+  onClear?(): void
 }
 
 function defaultStep(kind: NumberKind): number {
@@ -67,6 +69,7 @@ export function NumberInput({
   className,
   placeholder,
   title,
+  onClear,
   ...aria
 }: NumberInputProps) {
   const docUnit = useDoc((s) => s.doc.settings.units)
@@ -103,6 +106,11 @@ export function NumberInput({
   }
 
   const commitText = (): boolean => {
+    if (text.trim() === '' && shown !== '' && onClear) {
+      setInvalid(false)
+      onClear()
+      return true
+    }
     if (text.trim() === '' || text === shown) {
       setInvalid(false)
       return true

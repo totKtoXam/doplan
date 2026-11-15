@@ -3,12 +3,15 @@ import { Clock, Download, Star, Trash, Upload } from 'lucide-react'
 import type { Asset, AssetCategory } from '@core/types'
 import { uiStore, useUi } from '@/store/ui'
 import { useT } from '@/i18n'
+import '@/ui/catalogI18n'
 import { Button, cn, focusRing, SearchInput, Spinner, Thumb, fmtNum } from '@/ui/kit'
 import { assetIcon } from '../common/assetIcons'
 import { ASSET_CATEGORIES, ASSET_CATEGORY_RU } from '../common/labels'
 import { displayName, downloadEntry, errorText, progressFraction, refreshCatalog, useAllAssets, useDownloads, useLang, usePrefs } from '../common/catalog'
 import { useAssetThumb, useInView } from '../common/thumbs'
 import { ImportModelDialog } from '../ImportModelDialog'
+import { KITCHEN_PRESETS } from '@core'
+import { placeKitchenPreset } from '../common/kitchenPresets'
 
 export { ASSET_ICONS } from '../common/assetIcons'
 
@@ -99,6 +102,7 @@ export function FurnitureTab() {
         {chip('recent', t('Недавние'), <Clock />)}
         {ASSET_CATEGORIES.filter((c) => present.has(c)).map((c) => chip(c, t(ASSET_CATEGORY_RU[c]), undefined, present.get(c)))}
       </div>
+      {!q && (filter === 'all' || filter === 'kitchen') && <KitchenPresets />}
       {groups.map((g, gi) =>
         g.items.length === 0 ? null : (
           <div key={g.title ?? gi} className="flex flex-col gap-1.5">
@@ -124,6 +128,25 @@ export function FurnitureTab() {
         {t('Щёлкните предмет и укажите место на плане. Модели из открытых библиотек (CC0 / CC-BY) — лицензия видна во всплывающей подсказке.')}
       </p>
       <ImportModelDialog open={importOpen} onClose={() => setImportOpen(false)} />
+    </div>
+  )
+}
+
+/** one-click kitchen sets: along the selected wall, or next to the plan */
+function KitchenPresets() {
+  const t = useT()
+  const lang = useLang()
+  return (
+    <div className="flex flex-col gap-1.5" data-testid="kitchen-presets">
+      <div className="pt-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">{t('Готовые кухни')}</div>
+      <div className="grid grid-cols-2 gap-1.5">
+        {KITCHEN_PRESETS.map((p) => (
+          <Button key={p.id} onClick={() => void placeKitchenPreset(p)} title={t('Выделите стену или комнату — гарнитур встанет вдоль стены')}>
+            {lang === 'en' ? p.name : p.nameRu}
+          </Button>
+        ))}
+      </div>
+      <p className="text-[10px] leading-snug text-[var(--muted)]">{t('Выделите стену или комнату — гарнитур встанет вдоль стены, если помещается; без выделения — рядом с планом. Модули можно менять по одному.')}</p>
     </div>
   )
 }

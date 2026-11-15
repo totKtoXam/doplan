@@ -8,6 +8,10 @@ import { newId, PROJECT_ID_RE, type IdPrefix } from './ids'
 import { normalize, syncRooms, type PinnedNode } from './ops'
 import {
   DOC_VERSION,
+  DOOR_LEAF_STYLES,
+  DOOR_SLIDES,
+  type DoorLeafStyle,
+  type DoorSlide,
   type Asset,
   type AssetCategory,
   type CameraBookmark,
@@ -19,6 +23,11 @@ import {
   type DimSource,
   type Dimension,
   type Doc,
+  type DocDesign,
+  type PaintSpec,
+  type PriceUnit,
+  type ProductRef,
+  type WallpaperSpec,
   type FinishZone,
   type Id,
   type Item,
@@ -300,6 +309,12 @@ function readPattern(v: unknown): TilePattern | undefined {
   if (variation !== undefined) p.variation = variation
   const alt = optColor(v.altColor)
   if (alt) p.altColor = alt
+  const offsetX = optNum(v.offsetX, -100000, 100000)
+  if (offsetX) p.offsetX = offsetX
+  const offsetY = optNum(v.offsetY, -100000, 100000)
+  if (offsetY) p.offsetY = offsetY
+  const waste = optNum(v.waste, 0, 1)
+  if (waste !== undefined) p.waste = waste
   return p
 }
 
@@ -333,6 +348,8 @@ function readSide(v: unknown): WallSide {
   if (typeof v === 'string' && v !== '') return { materialId: v }
   const o = isObj(v) ? v : {}
   const side: WallSide = { materialId: str(o.materialId, DEFAULT_MATERIALS.wall) || DEFAULT_MATERIALS.wall }
+  const sidePattern = readPattern(o.pattern)
+  if (sidePattern) side.pattern = sidePattern
   if (Array.isArray(o.zones)) {
     const zones: FinishZone[] = []
     for (const z of o.zones) {
@@ -341,7 +358,12 @@ function readSide(v: unknown): WallSide {
       const to = optNum(z.to, 0)
       const materialId = optStr(z.materialId)
       if (from === undefined || to === undefined || !materialId || to - from < 1) continue
-      zones.push({ from, to, materialId })
+      const zone: FinishZone = { from, to, materialId }
+      const zp = readPattern(z.pattern)
+      if (zp) zone.pattern = zp
+      const label = optStr(z.label)
+      if (label) zone.label = label
+      zones.push(zone)
     }
     zones.sort((p, q) => p.from - q.from)
     if (zones.length) side.zones = zones
@@ -405,6 +427,29 @@ function readMaterial(id: Id, v: Obj): Material {
   }
   const nameRu = optStr(v.nameRu)
   if (nameRu) m.nameRu = nameRu
+  if (isObj(v.colorCode)) {
+    const system = optStr(v.colorCode.system)
+    const code = optStr(v.colorCode.code)
+    if (system && code) m.colorCode = { system, code }
+  }
+  if (isObj(v.wallpaper)) {
+    const wp: WallpaperSpec = { rollW: num(v.wallpaper.rollW, 530, 100, 5000), rollL: num(v.wallpaper.rollL, 10050, 500, 100000) }
+    const repeat = optNum(v.wallpaper.repeat, 0, 5000)
+    if (repeat) wp.repeat = repeat
+    const match = v.wallpaper.match
+    if (match === 'straight' || match === 'offset' || match === 'free') wp.match = match
+    m.wallpaper = wp
+  }
+  if (isObj(v.paint)) {
+    const ps: PaintSpec = {}
+    const coverage = optNum(v.paint.coverage, 0.5, 100)
+    if (coverage !== undefined) ps.coverage = coverage
+    const coats = optNum(v.paint.coats, 1, 10)
+    if (coats !== undefined) ps.coats = Math.round(coats)
+    if (Object.keys(ps).length) m.paint = ps
+  }
+  const product = readProduct(v.product)
+  if (product) m.product = product
   const maps = stringRecord(v.maps) as MaterialMaps | undefined
   if (maps) m.maps = maps
   if (Array.isArray(v.sizeMm) && v.sizeMm.length >= 2) m.sizeMm = [num(v.sizeMm[0], 1000, 1), num(v.sizeMm[1], 1000, 1)]
@@ -469,6 +514,45 @@ function readAsset(id: Id, v: Obj): Asset {
   if (typeof v.remote === 'boolean') a.remote = v.remote
   if (typeof v.custom === 'boolean') a.custom = v.custom
   return a
+}
+
+function readDesign(v: unknown): DocDesign | undefined {
+  if (!isObj(v)) return undefined
+  const d: DocDesign = {}
+  const styleId = optStr(v.styleId)
+  if (styleId) d.styleId = styleId
+  const currency = optStr(v.currency)
+  if (currency && /^[A-Za-z]{3}$/.test(currency)) d.currency = currency.toUpperCase()
+  if (isObj(v.priceList)) {
+    const list: Record<Id, ProductRef> = {}
+    for (const k of Object.keys(v.priceList)) {
+      const p = readProduct(v.priceList[k])
+      if (p && k) list[k] = p
+    }
+    if (Object.keys(list).length) d.priceList = list
+  }
+  return Object.keys(d).length > 0 ? d : undefined
+}
+
+const PRICE_UNITS: readonly PriceUnit[] = ['м²', 'м', 'шт', 'л', 'рул.', 'уп.']
+const PRODUCT_SOURCES = ['manual', 'csv', 'link', 'feed'] as const
+
+/** a product reference (vendor / article / link / price); undefined when it carries nothing */
+export function readProduct(v: unknown): ProductRef | undefined {
+  if (!isObj(v)) return undefined
+  const p: ProductRef = {}
+  for (const key of ['vendor', 'sku', 'url', 'updatedAt', 'note'] as const) {
+    const s = optStr(v[key])
+    if (s) p[key] = s
+  }
+  const price = optNum(v.price, 0, 1e12)
+  if (price !== undefined) p.price = price
+  if (typeof v.priceUnit === 'string' && (PRICE_UNITS as readonly string[]).includes(v.priceUnit)) p.priceUnit = v.priceUnit as PriceUnit
+  const pack = optNum(v.pack, 0.001, 1e6)
+  if (pack !== undefined) p.pack = pack
+  if (typeof v.source === 'string' && (PRODUCT_SOURCES as readonly string[]).includes(v.source)) p.source = v.source as ProductRef['source']
+  if (v.noPrice === true && p.price === undefined) p.noPrice = true
+  return Object.keys(p).length ? p : undefined
 }
 
 // ───────────────────────────── public API ─────────────────────────────
@@ -645,6 +729,8 @@ export function parseDoc(json: unknown): Doc {
     if (sashes !== undefined) o.sashes = Math.round(sashes)
     const sillBoard = optNum(v.sillBoard, 0, 2000)
     if (sillBoard !== undefined) o.sillBoard = sillBoard
+    if (typeof v.style === 'string' && (DOOR_LEAF_STYLES as readonly string[]).includes(v.style)) o.style = v.style as DoorLeafStyle
+    if (typeof v.slide === 'string' && (DOOR_SLIDES as readonly string[]).includes(v.slide)) o.slide = v.slide as DoorSlide
     const curtain = readCurtain(v.curtain)
     if (curtain) o.curtain = curtain
     doc.openings[id] = o
@@ -669,6 +755,10 @@ export function parseDoc(json: unknown): Doc {
     room.skirtingMaterialId = sk ?? DEFAULT_MATERIALS.skirting
     const labelledArea = optNum(v.labelledArea, 0, 1e6)
     if (labelledArea !== undefined && labelledArea > 0) room.labelledArea = labelledArea
+    if (isObj(v.design)) {
+      const styleId = optStr(v.design.styleId)
+      if (styleId) room.design = { styleId }
+    }
     doc.rooms[id] = room
   }
 
@@ -785,6 +875,10 @@ export function parseDoc(json: unknown): Doc {
   // ── project-local catalogue ──
   for (const [id, v] of entries(raw.materials, 'm')) doc.materials[id] = readMaterial(id, v)
   for (const [id, v] of entries(raw.assets, 'a')) doc.assets[id] = readAsset(id, v)
+
+  // ── design layer ──
+  const design = readDesign(raw.design)
+  if (design) doc.design = design
 
   // openings without an offset go to the middle of their wall (clamping happens in normalize)
   for (const id in doc.openings) {

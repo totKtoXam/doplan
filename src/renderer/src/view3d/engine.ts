@@ -25,6 +25,7 @@ import type {
 import { docStore } from '@/store/document'
 import { uiStore } from '@/store/ui'
 import { Architecture } from './build/architecture'
+import { ElectricalBuilder } from './build/electrical'
 import { createControls } from './controls'
 import { ThumbRenderer, convertModel, exportSceneGlb, imageToBlob, readTarget } from './export'
 import { createInteraction } from './interaction'
@@ -137,6 +138,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     architecture: group('architecture'),
     items: group('items'),
     lights: group('lights'),
+    electrical: group('electrical'),
     helpers: group('helpers'),
   }
   roots.helpers.userData.helper = true
@@ -218,6 +220,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     invalidate()
   }
   const items = new ItemsLayer(ctx, lib, factory, afterSceneChange)
+  const electrical = new ElectricalBuilder(roots.electrical)
   const thumbs = new ThumbRenderer(ctx, lib, items)
 
   // ── document → scene ──
@@ -272,6 +275,10 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
         if (r && r.kind === 'light' && r.id === ref.id) found.push(child)
       }
       return found
+    }
+    if (ref.kind === 'electric') {
+      const o = electrical.objectFor(ref.id)
+      return o ? [o] : []
     }
     return []
   }
@@ -365,6 +372,13 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
         moved = r.moved
       } catch (err) {
         console.error('[doplan] items build failed', err)
+      }
+    }
+    if (!lastDoc || levelChanged || doc.electrical !== lastDoc.electrical) {
+      try {
+        if (electrical.sync(doc, levelId)) sceneChanged = true
+      } catch (err) {
+        console.error('[doplan] electrical build failed', err)
       }
     }
     if (archDirty || sceneChanged || moved) updateBounds(plan, doc, levelId)
@@ -905,7 +919,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
         }
       })
       try {
-        return await exportSceneGlb([roots.architecture, roots.items])
+        return await exportSceneGlb([roots.architecture, roots.items, roots.electrical])
       } finally {
         for (const o of shown) o.visible = false
         arch.setExportMode(false)

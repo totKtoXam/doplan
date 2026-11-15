@@ -25,12 +25,27 @@ import {
   validatePlanSpec,
   newId,
   remapAccentFace,
+  ELECTRIC_TYPES,
+  addElectric,
+  alongWall,
+  detachElectric,
+  electricBinding,
+  electricFrame,
+  electricGangs,
+  electricName,
+  electricPointsOf,
+  electricSides,
+  electricType,
+  nearestWallFace,
+  placeElectricOnWall,
+  wallFacePoint,
 } from '@core'
-import type { Catalog, DerivedPlan, Doc, EntityRef, Id, Vec2 } from '@core/types'
+import type { Catalog, DerivedPlan, Doc, ElectricKind, ElectricPoint, EntityRef, Id, Vec2 } from '@core/types'
 import type { AiToolResult } from '@shared/aiChat'
 import { AI_TOOL_TITLES, type AiToolArgs, type AiToolName, isAiToolName, MUTATING_TOOLS, parseToolArgs } from '@shared/aiTools'
 import { t } from '@/i18n'
 import { uiStore } from '@/store/ui'
+import '@/ui/electricI18n'
 import { chipFor, collectionOf, describePlan, entityLevel, entitySummary, findEntity, lookupFor, type Lookup, r0, r1, roomAt, roomName } from './summary'
 
 export interface Snapshot {
@@ -103,6 +118,10 @@ function clearLevel(d: Doc, levelId: Id): void {
   for (const coll of ['nodes', 'walls', 'rooms', 'items', 'lights', 'dimensions', 'labels'] as const) {
     const rec = d[coll] as Record<Id, { levelId: Id }>
     for (const id of Object.keys(rec)) if (rec[id].levelId === levelId) delete rec[id]
+  }
+  if (d.electrical) {
+    for (const id of Object.keys(d.electrical)) if (d.electrical[id].levelId === levelId) delete d.electrical[id]
+    if (Object.keys(d.electrical).length === 0) delete d.electrical
   }
 }
 
@@ -215,6 +234,84 @@ export function previewCall(host: ToolHost, tool: string, args: unknown): { ok: 
   const lv = parsed.args.levelId && copy.levels[parsed.args.levelId] ? parsed.args.levelId : host.activeLevelId()
   const res = applyMeasurements(copy, lv, parsed.args)
   return res.ok ? { ok: true, changes: res.lines } : res
+}
+
+// ───────────────────────────── electrical points ─────────────────────────────
+
+interface WallSpot {
+  wallId: Id
+  side: 'left' | 'right'
+  t: number
+  point: Vec2
+}
+
+/**
+ * Where on a wall a point goes: `offset` from node a, or the projection of `at` (else of `from`,
+ * else the middle); the side is the given one, the one `at` lies on, or the face looking into a room.
+ */
+function wallSpot(doc: Doc, plan: DerivedPlan, wallId: Id, o: { side?: 'left' | 'right'; offset?: number; at?: Vec2; from?: Vec2 }): WallSpot {
+  const w = doc.walls[wallId]
+  if (!w) throw new ToolError(`Стена ${wallId} не найдена`)
+  const probe = wallFacePoint(doc, wallId, 'left', 0)
+  if (!probe) throw new ToolError(`На стену ${wallId} нельзя поставить точку (нулевая длина или виртуальная стена)`)
+  const len = probe.len
+  if (o.offset !== undefined && o.offset > len + 0.5) throw new ToolError(`offset ${r0(o.offset)} больше длины стены ${wallId} (${r0(len)} мм)`)
+  const proj = o.at ? alongWall(doc, wallId, o.at) : o.from ? alongWall(doc, wallId, o.from) : null
+  const t = Math.min(len, Math.max(0, o.offset ?? proj ?? len / 2))
+  let side = o.side
+  if (!side && o.at) {
+    const hit = nearestWallFace(doc, w.levelId, o.at, Infinity, { prefer: wallId })
+    if (hit && hit.wallId === wallId) side = hit.side
+  }
+  if (!side) {
+    // the face that looks into a room
+    for (const s of ['left', 'right'] as const) {
+      const f = wallFacePoint(doc, wallId, s, t)
+      if (!f) continue
+      const { uy } = electricFrame(f.rotation)
+      if (roomAt(plan, { x: f.point.x + uy.x * 50, y: f.point.y + uy.y * 50 }, inside)) {
+        side = s
+        break
+      }
+    }
+  }
+  side ??= 'left'
+  const f = wallFacePoint(doc, wallId, side, t)
+  if (!f) throw new ToolError(`На стену ${wallId} нельзя поставить точку`)
+  return { wallId, side, t, point: f.point }
+}
+
+/** one point for the agent: kind, height, wall, distances to the corners */
+function electricInfo(doc: Doc, plan: DerivedPlan | undefined, p: ElectricPoint): string {
+  const ty = electricType(p.kind)
+  const n = electricGangs(p)
+  const parts = [`${p.id} ${p.kind} «${electricName(p)}»${ty.code ? ` [${ty.code}]` : ''}`]
+  if (p.mount === 'wall') {
+    parts.push(`h ${r0(p.elevation)} мм`)
+    if (p.wallId) {
+      parts.push(`стена ${p.wallId}:${p.side ?? 'left'}`)
+      const along = alongWall(doc, p.wallId, p)
+      if (along !== null) parts.push(`offset ${r0(along)}`)
+      const b = electricBinding(doc, plan, p)
+      if (b) {
+        const s = electricSides(b)
+        parts.push(`${b.room ? 'до углов комнаты' : 'до концов стены'}: слева ${r0(s.left)}, справа ${r0(s.right)} (лицом к стене)`)
+      }
+    } else parts.push('на стене, не привязана')
+  } else parts.push(p.mount === 'floor' ? 'в полу' : `на потолке, h ${r0(p.elevation)}`)
+  if (n > 1) parts.push(`${n} постов${p.vertical ? ', вертикально' : ''}`)
+  parts.push(`в ${pt(p)}`)
+  const room = plan ? roomAt(plan, p, inside) : null
+  if (room) parts.push(`комната ${room} «${roomName(doc, room)}»`)
+  if (p.comment) parts.push(`«${p.comment}»`)
+  return parts.join(', ')
+}
+
+/** the height of a wall point of a kind that normally sits on the floor / ceiling (undefined: the catalog height) */
+function wallElevation(doc: Doc, lv: Id, kind: ElectricKind): number | undefined {
+  const ty = electricType(kind)
+  if (ty.mount === 'wall') return undefined
+  return ty.mount === 'floor' ? 100 : Math.max(300, (doc.levels[lv]?.height || doc.settings.wallHeight || 2700) - 200)
 }
 
 function catalogSearch(host: ToolHost, args: AiToolArgs<'list_catalog'>): string {
@@ -492,6 +589,143 @@ async function run(host: ToolHost, name: AiToolName, a: Record<string, unknown>)
       })
       return ok(`Предмет ${args.itemId}: ${ch.join(', ')}.`, [`${t(chipFor(doc, undefined, { kind: 'item', id: args.itemId }, lk, uiStore.getState().lang).label)}: ${ch.join(', ')}`])
     }
+    case 'list_electric': {
+      const args = a as AiToolArgs<'list_electric'>
+      const lv = levelOf(host, args.levelId)
+      const plan = host.derived(lv)
+      const pts = electricPointsOf(doc, lv).filter((p) => !args.wallId || p.wallId === args.wallId)
+      const where = `${lv}${args.wallId ? ` на стене ${args.wallId}` : ''}`
+      const lines = [pts.length ? `Электроточки уровня ${where} (${pts.length}):` : `Электроточек на уровне ${where} нет.`]
+      for (const p of pts) lines.push(`- ${electricInfo(doc, plan, p)}`)
+      if (args.catalog) {
+        lines.push('', 'Типы (kind — название [код], монтаж, высота по умолчанию):')
+        for (const ty of ELECTRIC_TYPES) {
+          const m = ty.mount === 'wall' ? `стена, h ${ty.elevation}` : ty.mount === 'floor' ? 'пол' : 'потолок'
+          lines.push(`- ${ty.kind} — ${ty.ru}${ty.code ? ` [${ty.code}]` : ''}, ${m}${ty.framed ? ', в рамке (gangs 1–5)' : ''}${ty.note ? `; ${ty.note}` : ''}`)
+        }
+      }
+      return ok(lines.join('\n'))
+    }
+    case 'place_electric': {
+      const args = a as AiToolArgs<'place_electric'>
+      let lv = levelOf(host, args.levelId)
+      const kind = args.kind as ElectricKind
+      const ty = electricType(kind)
+      let spot: WallSpot | null = null
+      if (args.wallId) {
+        const w = doc.walls[args.wallId]
+        if (!w) throw new ToolError(`Стена ${args.wallId} не найдена`)
+        lv = w.levelId
+        spot = wallSpot(doc, host.derived(lv), args.wallId, { side: args.side, offset: args.offset, at: args.at })
+      } else if (args.offset !== undefined || args.side) throw new ToolError('offset и side задаются вместе с wallId')
+      if (!spot && !args.at) throw new ToolError('Укажи wallId (с offset или at) или точку at')
+      if (args.gangs !== undefined && args.gangs > 1 && !ty.framed) throw new ToolError(`У «${ty.ru}» нет рамки: gangs не задаётся`)
+      let id = ''
+      host.mutate(label, (d) => {
+        const common = {
+          ...(args.gangs !== undefined ? { gangs: args.gangs } : {}),
+          ...(args.vertical ? { vertical: true } : {}),
+          ...(args.comment?.trim() ? { comment: args.comment.trim() } : {}),
+        }
+        if (spot) {
+          const elevation = args.elevation ?? wallElevation(d, lv, kind)
+          id = addElectric(d, lv, kind, spot.point.x, spot.point.y, {
+            ...common,
+            mount: 'wall',
+            wallId: spot.wallId,
+            side: spot.side,
+            ...(elevation !== undefined ? { elevation } : {}),
+          })
+          placeElectricOnWall(d, id, spot.wallId, spot.side, spot.t)
+        } else {
+          id = addElectric(d, lv, kind, args.at!.x, args.at!.y, {
+            ...common,
+            ...(args.elevation !== undefined ? { elevation: args.elevation } : {}),
+            ...(args.rotation !== undefined ? { rotation: args.rotation } : {}),
+          })
+        }
+      })
+      const p = host.doc().electrical?.[id]
+      if (!p) throw new ToolError('Точка не создана')
+      const where = p.wallId ? ` — ${p.wallId}, h ${r0(p.elevation)}` : ` — ${pt(p)}`
+      return ok(`Поставлена ${electricInfo(host.doc(), host.derived(lv), p)}.`, [t('Электроточка «{name}»{where}', { name: electricName(p, en() ? 'en' : 'ru'), where })])
+    }
+    case 'set_electric': {
+      const args = a as AiToolArgs<'set_electric'>
+      const p = doc.electrical?.[args.electricId]
+      if (!p) throw new ToolError(`Электроточка ${args.electricId} не найдена (list_electric)`)
+      const nextKind = (args.kind as ElectricKind | undefined) ?? p.kind
+      const nextTy = electricType(nextKind)
+      if (args.gangs !== undefined && args.gangs > 1 && !nextTy.framed) throw new ToolError(`У «${nextTy.ru}» нет рамки: gangs не задаётся`)
+      const wid = args.wallId ?? p.wallId
+      if ((args.offset !== undefined || args.side !== undefined) && !wid) throw new ToolError('Точка не на стене: укажи wallId')
+      const onWall = args.wallId !== undefined || args.offset !== undefined || args.side !== undefined || (args.at !== undefined && !!wid)
+      let spot: WallSpot | null = null
+      if (onWall && wid) {
+        const w = doc.walls[wid]
+        if (!w) throw new ToolError(`Стена ${wid} не найдена`)
+        if (w.levelId !== p.levelId) throw new ToolError(`Стена ${wid} на другом уровне`)
+        spot = wallSpot(doc, host.derived(p.levelId), wid, { side: args.side ?? (wid === p.wallId ? p.side : undefined), offset: args.offset, at: args.at, from: p })
+      }
+      const ch: string[] = []
+      if (args.kind && args.kind !== p.kind) ch.push(t('тип {kind}', { kind: en() ? nextTy.en : nextTy.ru }))
+      if (args.elevation !== undefined) ch.push(t('высота {h}', { h: r0(args.elevation) }))
+      if (args.gangs !== undefined) ch.push(t('постов {n}', { n: args.gangs }))
+      if (args.vertical !== undefined) ch.push(args.vertical ? t('вертикально') : t('горизонтально'))
+      if (args.comment !== undefined) ch.push(t('комментарий'))
+      if (spot) ch.push(t('на {wall}, offset {t}', { wall: `${spot.wallId}:${spot.side}`, t: r0(spot.t) }))
+      else if (args.at) ch.push(`→ ${pt(args.at)}`)
+      if (args.rotation !== undefined && !spot && !p.wallId) ch.push(t('поворот {from}° → {to}°', { from: r0(p.rotation), to: normDeg(args.rotation) }))
+      if (!ch.length) throw new ToolError('Нечего менять')
+      host.mutate(label, (d) => {
+        const x = d.electrical![args.electricId]
+        if (args.kind && args.kind !== x.kind) {
+          const prev = electricType(x.kind)
+          x.kind = nextKind
+          // the height follows the type while it is still the standard height of the old type
+          if (x.mount === 'wall' && nextTy.mount === 'wall' && Math.abs(x.elevation - prev.elevation) < 0.5) x.elevation = nextTy.elevation
+          if (!nextTy.framed) {
+            delete x.gangs
+            delete x.vertical
+          }
+        }
+        if (args.elevation !== undefined) x.elevation = args.elevation
+        if (args.gangs !== undefined) {
+          if (args.gangs > 1) x.gangs = args.gangs
+          else {
+            delete x.gangs
+            delete x.vertical
+          }
+        }
+        if (args.vertical !== undefined) {
+          if (args.vertical && electricGangs(x) > 1) x.vertical = true
+          else delete x.vertical
+        }
+        if (args.comment !== undefined) {
+          const c = args.comment.trim()
+          if (c) x.comment = c
+          else delete x.comment
+        }
+        if (spot) {
+          if (x.mount !== 'wall') {
+            x.mount = 'wall'
+            if (args.elevation === undefined) x.elevation = wallElevation(d, x.levelId, x.kind) ?? (electricType(x.kind).elevation || 300)
+          }
+          placeElectricOnWall(d, x.id, spot.wallId, spot.side, spot.t)
+        } else if (args.at) {
+          detachElectric(x)
+          x.x = args.at.x
+          x.y = args.at.y
+          if (x.mount === 'wall') {
+            const hit = nearestWallFace(d, x.levelId, x, 400)
+            if (hit) placeElectricOnWall(d, x.id, hit.wallId, hit.side, hit.t)
+          }
+        }
+        if (args.rotation !== undefined && !x.wallId) x.rotation = normDeg(args.rotation)
+      })
+      const np = host.doc().electrical?.[args.electricId] ?? p
+      return ok(`${electricInfo(host.doc(), host.derived(p.levelId), np)}.`, [`${electricName(np, en() ? 'en' : 'ru')}: ${ch.join(', ')}`])
+    }
     case 'set_material': {
       const args = a as AiToolArgs<'set_material'>
       requireMaterial(lk, args.materialId)
@@ -630,6 +864,12 @@ export function describeCall(tool: string, args: unknown): string {
       return `${s(a.targetId)}${a.surface ? ` (${surfaceName(s(a.surface))})` : ''} → ${s(a.materialId)}`
     case 'apply_planspec':
       return t('Построить план ({mode})', { mode: s(a.mode ?? 'replace') })
+    case 'place_electric':
+      return a.wallId
+        ? t('Электроточка {kind} на {wall}', { kind: s(a.kind), wall: s(a.wallId) })
+        : t('Электроточка {kind} в {at}', { kind: s(a.kind), at: p(a.at) })
+    case 'set_electric':
+      return t('Электроточка {id}: {fields}', { id: s(a.electricId), fields: keys('electricId') })
     case 'apply_measurement':
       return t('Обмер: {n}', { n: Array.isArray(a.measurements) ? a.measurements.length : 0 })
     default:

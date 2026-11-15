@@ -50,6 +50,17 @@ export function copyLevelInto(src: Doc, srcLevel: Id, draft: Doc, dstLevel: Id, 
     const id = newId('l')
     draft.lights[id] = structuredClone({ ...l, id, levelId: dstLevel, x: l.x + dx, y: l.y + dy })
   }
+  for (const e of Object.values(src.electrical ?? {})) {
+    if (e.levelId !== srcLevel) continue
+    const id = newId('e')
+    const wallId = e.wallId ? wallMap.get(e.wallId) : undefined
+    const copy = { ...e, id, levelId: dstLevel, x: e.x + dx, y: e.y + dy, wallId }
+    if (!wallId) {
+      delete copy.wallId
+      delete copy.side
+    }
+    ;(draft.electrical ??= {})[id] = copy
+  }
   for (const dm of Object.values(src.dimensions)) {
     if (dm.levelId !== srcLevel) continue
     const id = newId('d')
@@ -85,6 +96,10 @@ export function removeLevelFromDraft(d: Doc, levelId: Id): void {
   for (const c of colls) {
     const rec = d[c] as Record<Id, { levelId: Id }>
     for (const [id, e] of Object.entries(rec)) if (e.levelId === levelId) delete rec[id]
+  }
+  if (d.electrical) {
+    for (const [id, e] of Object.entries(d.electrical)) if (e.levelId === levelId) delete d.electrical[id]
+    if (!Object.keys(d.electrical).length) delete d.electrical
   }
   removeLevelMarks(d, levelId)
   delete d.levels[levelId]

@@ -10,13 +10,16 @@ import {
   minItemSize,
   moveNode,
   moveOpening,
+  nearestWallFace,
+  placeElectricOnWall,
+  detachElectric,
   planResizeTargets,
   resizedParams,
   resizeFromFace,
   snapValue,
   wallFaceSegments,
 } from '@core'
-import type { Dimension, EntityRef, Id, Item, Opening, Vec2 } from '@core/types'
+import type { Dimension, ElectricPoint, EntityRef, Id, Item, Opening, Vec2 } from '@core/types'
 import { t } from '@/i18n'
 import { docStore } from '@/store/document'
 import { handles as appHandles } from '@/store/handles'
@@ -64,13 +67,15 @@ type Drag =
       excludeWalls: Set<Id>
     }
   | { type: 'opening'; id: Id; base: Opening; startWall: Id; grab: number }
+  /** an electrical point: slides along wall faces (Alt: free) */
+  | { type: 'electric'; id: Id; base: ElectricPoint; grab: Vec2 }
   | { type: 'openingEnd'; id: Id; base: Opening; end: 'a' | 'b' }
   | { type: 'itemResize'; id: Id; base: Item; sx: number; sy: number }
   | { type: 'itemRotate'; id: Id; base: Item }
   | { type: 'dimOffset'; id: Id; base: Dimension }
   | { type: 'camera'; start: Vec2; cam: Cam; targetOnly: boolean }
 
-const MOVABLE = new Set(['wall', 'node', 'item', 'light', 'label', 'dimension', 'underlay'])
+const MOVABLE = new Set(['wall', 'node', 'item', 'light', 'electric', 'label', 'dimension', 'underlay'])
 
 export function createSelectTool(ctx: EditorCtx): Tool {
   let drag: Drag = { type: 'none' }
@@ -272,6 +277,15 @@ export function createSelectTool(ctx: EditorCtx): Tool {
         return
       }
     }
+    if (hit.kind === 'electric') {
+      // alone (not part of a group selection) the point slides along the walls
+      const q = d.electrical?.[hit.id]
+      const all = ui().selection
+      if (q && all.length <= 1) {
+        drag = { type: 'electric', id: hit.id, base: { ...q }, grab: sub(q, start) }
+        return
+      }
+    }
 
     if (hit.kind === 'wall' && !pend.start.ctrl) {
       // dragging the body of the only selected wall moves it sideways (Ctrl = free translate)
@@ -336,6 +350,16 @@ export function createSelectTool(ctx: EditorCtx): Tool {
           if (isHit) {
             hitMovable = true
             primary = { x: l.x, y: l.y }
+          }
+          break
+        }
+        case 'electric': {
+          const q = d.electrical?.[r.id]
+          if (!q) break
+          points.push({ ref: r, x: q.x, y: q.y })
+          if (isHit) {
+            hitMovable = true
+            primary = { x: q.x, y: q.y }
           }
           break
         }
@@ -476,6 +500,15 @@ export function createSelectTool(ctx: EditorCtx): Tool {
         transient(t('Перемещение'), (dr) => {
           for (const [id, p] of m.nodes) moveNode(dr, id, p.x + dd.x, p.y + dd.y)
           for (const pt of m.points) {
+            if (pt.ref.kind === 'electric') {
+              // wall points are put back on their faces by normalize
+              const q = dr.electrical?.[pt.ref.id]
+              if (q) {
+                q.x = pt.x + dd.x
+                q.y = pt.y + dd.y
+              }
+              continue
+            }
             const coll =
               pt.ref.kind === 'item'
                 ? dr.items
@@ -529,6 +562,29 @@ export function createSelectTool(ctx: EditorCtx): Tool {
           moveNode(dr, m.b.id, pb.x, pb.y)
         })
         badge = { at: add(baseMid, off), text: formatLenUnit(Math.abs(dn), st.units) }
+        break
+      }
+      case 'electric': {
+        const m = drag
+        if (!d.electrical?.[m.id]) break
+        const target = add(e.plan, m.grab)
+        const levelId = m.base.levelId
+        if (m.base.mount === 'wall' && !e.alt) {
+          const hit = nearestWallFace(d, levelId, target, Math.max(ctx.mm(40), 300), { prefer: m.base.wallId })
+          if (hit) {
+            const tt = Math.round(hit.t / 10) * 10
+            transient(t('Перемещение'), (dr) => placeElectricOnWall(dr, m.id, hit.wallId, hit.side, tt))
+            break
+          }
+        }
+        const g = snapToGrid(ctx, target, e.alt)
+        transient(t('Перемещение'), (dr) => {
+          const q = dr.electrical?.[m.id]
+          if (!q) return
+          detachElectric(q)
+          q.x = g.x
+          q.y = g.y
+        })
         break
       }
       case 'opening': {
@@ -758,6 +814,15 @@ export function createSelectTool(ctx: EditorCtx): Tool {
               if (l) {
                 l.x += dx
                 l.y += dy
+              }
+              break
+            }
+            case 'electric': {
+              // a wall point moves along its wall: the shift across it is undone by normalize
+              const q = dr.electrical?.[r.id]
+              if (q) {
+                q.x += dx
+                q.y += dy
               }
               break
             }

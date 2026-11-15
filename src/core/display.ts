@@ -10,9 +10,10 @@
  *
  * Pure TS: no DOM / Node imports.
  */
-import type { Asset, Catalog, DerivedPlan, Doc, EntityRef, Id, Item, Light, Opening, Vec2, Wall, WallGeom } from './types'
+import type { Asset, Catalog, DerivedPlan, Doc, ElectricPoint, EntityRef, Id, Item, Light, Opening, Vec2, Wall, WallGeom } from './types'
 import { BUILTIN_ASSETS, ROOM_TYPE_NAMES } from './defaults'
 import { derivePlan } from './derive'
+import { electricBinding, electricLabelLines, electricPointSymbol, electricToPlan } from './electrical'
 
 // ───────────────────────────── types ─────────────────────────────
 
@@ -23,6 +24,8 @@ export type DisplayLayer =
   | 'walls'
   | 'openings'
   | 'lights'
+  /** sockets, switches, low-voltage and cable outlets (layer «Электрика») */
+  | 'electrical'
   | 'text'
   | 'dimensions'
   | 'annotations'
@@ -124,6 +127,12 @@ export interface DisplayOptions {
   lang?: 'ru' | 'en'
   /** light fixtures; default true */
   lights?: boolean
+  /** electrical points (layer «Электрика»); default true */
+  electrical?: boolean
+  /** mounting heights next to the electrical symbols; default true */
+  electricalHeights?: boolean
+  /** dimensions tying wall electrical points to the room corners; default false */
+  electricalDims?: boolean
   /** default true */
   northArrow?: boolean
   /** default true */
@@ -154,6 +163,8 @@ interface DisplayTheme {
   furniture: string
   furnitureFill: string | null
   light: string
+  /** electrical points (layer «Электрика») */
+  electric: string
   dim: string
   text: string
   muted: string
@@ -175,6 +186,7 @@ export const DISPLAY_THEMES: Record<DisplayThemeName, DisplayTheme> = {
     furniture: '#6a6a6a',
     furnitureFill: '#ffffff',
     light: '#b7791f',
+    electric: '#b3261e',
     dim: '#333333',
     text: '#111111',
     muted: '#555555',
@@ -194,6 +206,7 @@ export const DISPLAY_THEMES: Record<DisplayThemeName, DisplayTheme> = {
     furniture: '#a8c5ee',
     furnitureFill: null,
     light: '#ffd166',
+    electric: '#ffb4a8',
     dim: '#cfe2ff',
     text: '#ffffff',
     muted: '#cfe2ff',
@@ -1268,6 +1281,60 @@ function drawLight(ctx: Ctx, l: Light): void {
   }
 }
 
+/** symbol radius and text size on paper, mm: ГОСТ symbols keep their paper size at any scale */
+const ELECTRIC_R = 1.5
+const ELECTRIC_TEXT = 1.6
+
+function drawElectric(ctx: Ctx, p: ElectricPoint, opts: DisplayOptions): void {
+  const { th, items, S } = ctx
+  const ref: EntityRef = { kind: 'electric', id: p.id }
+  const R = ELECTRIC_R * S
+  const pen: DlPen = { color: th.electric, width: 0.2 }
+  const fill: DlFill = { color: th.electric }
+  const shape = electricPointSymbol(p)
+  const T = electricToPlan(p, R)
+  const layer = 'electrical' as const
+  const role = 'electric'
+  const turn = p.rotation - 90
+  for (const q of shape.prims) {
+    if (q.t === 'line') items.push({ t: 'line', layer, role, a: T(q.a), b: T(q.b), stroke: pen, ref })
+    else if (q.t === 'circle') items.push({ t: 'circle', layer, role, c: T(q.c), r: q.r * R, stroke: pen, fill: q.fill ? fill : undefined, ref })
+    else if (q.t === 'poly') items.push({ t: 'poly', layer, role, pts: q.pts.map(T), closed: q.closed, stroke: pen, fill: q.fill ? fill : undefined, ref })
+    else items.push({ t: 'arc', layer, role, c: T(q.c), r: q.r * R, a0: q.a0 + turn, a1: q.a1 + turn, stroke: pen, ref })
+  }
+  // letter code and mounting height, upright, beyond the symbol in the facing direction
+  const lines = electricLabelLines(p, { heights: opts.electricalHeights !== false })
+  if (lines.length) {
+    const size = ELECTRIC_TEXT * S
+    const step = size * 1.2
+    const wall = p.mount === 'wall'
+    const r = (p.rotation * Math.PI) / 180
+    const dir = wall ? V(Math.cos(r), Math.sin(r)) : V(0, -1)
+    const reach = (wall ? shape.box.maxY : Math.max(shape.box.maxX, shape.box.maxY)) * R + size * 0.7
+    const base = vAdd(V(p.x, p.y), vMul(dir, reach))
+    const side = Math.abs(dir.x) >= 0.5
+    const anchor: 'start' | 'middle' | 'end' = !side ? 'middle' : dir.x > 0 ? 'start' : 'end'
+    const block = (lines.length - 1) * step
+    // a vertical stack grows away from the symbol; a side stack is centred on it
+    const y0 = side ? base.y - block / 2 : dir.y > 0 ? base.y + size * 0.3 : base.y - block - size * 0.3
+    lines.forEach((text, i) =>
+      items.push({ t: 'text', layer, role: 'electric-text', p: V(base.x, y0 + i * step), text, size: i === 0 ? size : size * 0.85, rot: 0, anchor, baseline: 'middle', color: th.electric, ref }),
+    )
+  }
+  if (opts.electricalDims) {
+    const b = electricBinding(ctx.doc, ctx.plan, p)
+    if (b) {
+      const from = items.length
+      const d = vNorm(vSub(b.b, b.a))
+      const into = vDot(V(d.y, -d.x), b.n) >= 0 ? 1 : -1
+      const off = 6 * S * into
+      if (b.fromA >= 1) pushDim(ctx, b.a, b.foot, off, 'electric-dim', { ref })
+      if (b.fromB >= 1) pushDim(ctx, b.foot, b.b, off, 'electric-dim', { ref })
+      for (let i = from; i < items.length; i++) items[i].layer = 'electrical'
+    }
+  }
+}
+
 function boundsOf(items: DisplayItem[]): DisplayBounds {
   let minX = Infinity
   let minY = Infinity
@@ -1495,6 +1562,9 @@ export function buildDisplayList(doc: Doc, levelId: Id, opts: DisplayOptions = {
   drawWalls(ctx, levelWalls, openingsByWall)
   drawOpenings(ctx, levelWalls, openingsByWall)
   if (opts.lights !== false) for (const l of Object.values(doc.lights)) if (l.levelId === levelId) drawLight(ctx, l)
+  if (opts.electrical !== false && doc.electrical) {
+    for (const p of Object.values(doc.electrical)) if (p.levelId === levelId) drawElectric(ctx, p, opts)
+  }
   drawRoomLabels(ctx, showLabels, showAreas)
   if (showLabels) {
     for (const lb of Object.values(doc.labels)) {

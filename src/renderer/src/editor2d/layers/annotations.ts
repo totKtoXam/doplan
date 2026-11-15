@@ -3,8 +3,8 @@
  * automatic inner dimensions, manual dimensions and text labels. Text never scales with the
  * wall geometry and is always upright.
  */
-import { sizedCatalogName, dimLabel, type EffectiveProvenance, itemClearances, itemGaps, type ItemGap, type Clearance, ROOM_TYPE_NAMES, roomEdgeRuns, roomMeasureStatus, runProvenance } from '@core'
-import type { DerivedPlan, DerivedRoom, Doc, Item, Light, Vec2 } from '@core/types'
+import { electricBinding, electricLabelLines, electricPointSymbol, sizedCatalogName, dimLabel, type EffectiveProvenance, itemClearances, itemGaps, type ItemGap, type Clearance, ROOM_TYPE_NAMES, roomEdgeRuns, roomMeasureStatus, runProvenance } from '@core'
+import type { DerivedPlan, DerivedRoom, Doc, ElectricPoint, Item, Light, Vec2 } from '@core/types'
 import { t } from '@/i18n'
 import '@/ui/accuracyI18n'
 import { accuracyStore } from '@/store/accuracy'
@@ -14,6 +14,8 @@ import { formatArea, formatLen } from '../format'
 import type { Painter } from '../painter'
 import type { Palette } from '../theme'
 import { dimensionNormal, itemCorners } from '../shapes'
+import { drawElectricGlyph, electricRingPx, electricUnitPx } from '../electricGlyph'
+import '@/ui/electricI18n'
 
 interface AutoDim {
   /** run key (core/provenance) */
@@ -211,6 +213,18 @@ export class AnnotationsLayer {
       this.drawLight(p, l)
     }
 
+    // ── electrical points (layer «Электрика») ──
+    if (doc.electrical) {
+      for (const id in doc.electrical) {
+        const e = doc.electrical[id]
+        if (e.levelId !== levelId) continue
+        if (e.x < view.minX || e.x > view.maxX || e.y < view.minY || e.y > view.maxY) continue
+        this.drawElectric(p, e, scale >= 0.06)
+      }
+      const one = ui.selection.length === 1 && ui.selection[0].kind === 'electric' ? doc.electrical[ui.selection[0].id] : undefined
+      if (one && one.levelId === levelId) this.drawElectricDims(p, doc, derived, one, st.units)
+    }
+
     // ── manual dimensions ──
     for (const id in doc.dimensions) {
       const d = doc.dimensions[id]
@@ -312,6 +326,49 @@ export class AnnotationsLayer {
       p.stext(`lg:s${i}`, r.sample, x0 + 34, y, { size: 10, color: r.color, italic: r.italic, anchorY: 1 })
       p.stext(`lg:l${i}`, r.label, x0 + 68, y - 3, { size: 10.5, color: 0xd8dde6, anchorX: 0, anchorY: 0.5 })
     })
+  }
+
+  private drawElectric(p: Painter, e: ElectricPoint, labels: boolean): void {
+    const pal = p.pal
+    drawElectricGlyph(p, e, { color: pal.electric })
+    if (!labels) return
+    const lines = electricLabelLines(e)
+    if (!lines.length) return
+    // the code and the height beyond the symbol, in the facing direction
+    const u = electricUnitPx(p.cam)
+    const box = electricPointSymbol(e).box
+    const s = p.cam.toScreen(e)
+    const wall = e.mount === 'wall'
+    const r = (e.rotation * Math.PI) / 180
+    const dir = wall ? { x: Math.cos(r), y: Math.sin(r) } : { x: 0, y: -1 }
+    const reach = (wall ? box.maxY : Math.max(box.maxX, box.maxY)) * u + 8
+    const bx = s.x + dir.x * reach
+    const by = s.y + dir.y * reach
+    const side = Math.abs(dir.x) >= 0.5
+    const anchorX = !side ? 0.5 : dir.x > 0 ? 0 : 1
+    const step = 11
+    const block = (lines.length - 1) * step
+    const y0 = side ? by - block / 2 : dir.y > 0 ? by : by - block
+    lines.forEach((text, i) =>
+      p.stext(`el:${e.id}:${i}`, text, bx, y0 + i * step, { size: i === 0 ? 10 : 9, color: pal.electric, anchorX, bold: i === 0 }),
+    )
+  }
+
+  /** the selected wall point: distances to the room corners along the face and the height from the floor */
+  private drawElectricDims(p: Painter, doc: Doc, derived: DerivedPlan, e: ElectricPoint, units: Doc['settings']['units']): void {
+    const pal = p.pal
+    const b = electricBinding(doc, derived, e)
+    if (b) {
+      const o = { color: pal.electric, size: 11, bold: true }
+      if (b.fromA >= 1) p.dimension(`ed:a:${e.id}`, b.a, b.foot, b.n, 0, 22, formatLen(b.fromA, units), o)
+      if (b.fromB >= 1) p.dimension(`ed:b:${e.id}`, b.foot, b.b, b.n, 0, 22, formatLen(b.fromB, units), o)
+    }
+    if (e.mount === 'wall') {
+      const s = p.cam.toScreen(e)
+      const r = (e.rotation * Math.PI) / 180
+      const reach = electricRingPx(p.cam, e) + 26
+      p.sbadge(`eh:${e.id}`, `↑ ${formatLen(e.elevation, units)} ${t('от пола')}`, s.x + Math.cos(r) * reach, s.y + Math.sin(r) * reach + 18, { size: 11, bg: pal.electric })
+    }
   }
 
   private drawLight(p: Painter, l: Light): void {

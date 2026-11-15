@@ -3,6 +3,7 @@
  * draft inside `docStore.transact`) and returns the ids it created. Writes are skipped when a value
  * does not change, so the resulting patch sets stay minimal.
  */
+import { captureElectricAnchors, duplicateElectric, reattachElectrical, restoreElectricAnchors } from './electrical'
 import { DEFAULT_MATERIALS, OPENING_DEFAULTS, ROOM_TYPE_NAMES, defaultRoom, defaultWallSide } from './defaults'
 import { EPS, dist, projectOnSegment, segIntersect } from './geom'
 import { newId } from './ids'
@@ -371,6 +372,7 @@ export function moveNodes(doc: Doc, moves: Map<Id, Vec2>): void {
     const w = doc.walls[id]
     if (moves.has(w.a) || moves.has(w.b)) affected.push({ wall: w, oldLen: wallLength(doc, w) })
   }
+  const elecAnchors = captureElectricAnchors(doc, affected.map((x) => x.wall.id))
   for (const [id, p] of moves) {
     const n = doc.nodes[id]
     if (!n || !Number.isFinite(p.x) || !Number.isFinite(p.y)) continue
@@ -388,6 +390,7 @@ export function moveNodes(doc: Doc, moves: Map<Id, Vec2>): void {
       clampOpening(doc, o)
     }
   }
+  if (elecAnchors.length) restoreElectricAnchors(doc, elecAnchors, moves)
 }
 
 export function moveNode(doc: Doc, nodeId: Id, x: number, y: number): void {
@@ -598,6 +601,9 @@ export function removeEntities(doc: Doc, refs: EntityRef[]): void {
       case 'light':
         delete doc.lights[ref.id]
         break
+      case 'electric':
+        if (doc.electrical?.[ref.id]) delete doc.electrical[ref.id]
+        break
       case 'dimension':
         delete doc.dimensions[ref.id]
         break
@@ -712,6 +718,10 @@ export function duplicateEntities(doc: Doc, refs: EntityRef[], dx: number, dy: n
         out.push({ kind: 'light', id: c.id })
         break
       }
+      case 'electric': {
+        for (const id of duplicateElectric(doc, [r.id], dx, dy)) out.push({ kind: 'electric', id })
+        break
+      }
       case 'dimension': {
         const d = doc.dimensions[r.id]
         if (!d) break
@@ -797,7 +807,8 @@ export function applyFinishToWallSide(
  *     openings of a dropped duplicate move to the surviving wall;
  *  3. two collinear walls meeting at an unpinned degree-2 node are merged when their kind, thickness,
  *     height and finishes are identical (openings are re-offset);
- *  4. orphan nodes and openings without a wall are removed, openings are clamped to their wall.
+ *  4. orphan nodes and openings without a wall are removed, openings are clamped to their wall;
+ *  5. wall-mounted electrical points are put back on their faces (core/electrical).
  */
 export function normalize(doc: Doc): void {
   // ── 1. merge coincident nodes ──
@@ -982,6 +993,9 @@ export function normalize(doc: Doc): void {
     }
     clampOpening(doc, o)
   }
+
+  // ── 5. electrical points stay on their wall faces ──
+  reattachElectrical(doc)
 }
 
 // ───────────────────────────── rooms ─────────────────────────────

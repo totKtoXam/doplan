@@ -51,7 +51,7 @@ const CLICK_SLOP = 4 // px
 const WALL_SNAP = 180 // mm
 const ITEM_SNAP = 60 // mm
 const ROTATE_STEP = 15 // degrees while dragging the ring
-const ENTITY_KINDS: ReadonlySet<string> = new Set<EntityKind>(['node', 'wall', 'opening', 'room', 'item', 'light', 'dimension', 'label', 'underlay'])
+const ENTITY_KINDS: ReadonlySet<string> = new Set<EntityKind>(['node', 'wall', 'opening', 'room', 'item', 'light', 'electric', 'dimension', 'label', 'underlay'])
 
 interface Hit {
   ref: EntityRef | null
@@ -64,7 +64,7 @@ interface Hit {
   side?: 'left' | 'right'
   slot?: string
   zone?: { from: number; to: number }
-  root: 'items' | 'lights' | 'architecture'
+  root: 'items' | 'lights' | 'electrical' | 'architecture'
 }
 
 interface WallFaceHit {
@@ -243,6 +243,7 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
     visit(ctx.roots.architecture)
     visit(ctx.roots.items)
     visit(ctx.roots.lights)
+    visit(ctx.roots.electrical)
     return map
   }
 
@@ -346,7 +347,7 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
   }
 
   /** Nearest visible hit over the given roots (the ray must be set). */
-  function pick(roots: Array<Hit['root']> = ['items', 'lights', 'architecture']): Hit | null {
+  function pick(roots: Array<Hit['root']> = ['items', 'lights', 'electrical', 'architecture']): Hit | null {
     let best: THREE.Intersection | null = null
     let bestRoot: Hit['root'] = 'architecture'
     const list: THREE.Intersection[] = []
@@ -1528,7 +1529,7 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
     }
     // select (and every 2D-only tool) — objects by single click, walls / rooms by double click
     const ref = hit?.ref
-    if (ref && (ref.kind === 'item' || ref.kind === 'light' || ref.kind === 'opening')) {
+    if (ref && (ref.kind === 'item' || ref.kind === 'light' || ref.kind === 'electric' || ref.kind === 'opening')) {
       toggleSelect(ref, additive)
     } else if (!additive && ui.selection.length > 0) {
       ui.clearSelection()
@@ -1674,7 +1675,7 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
     }
     const ref = hit?.ref
     const doc = docStore.getState().doc
-    if (ref && (ref.kind === 'item' || ref.kind === 'light' || ref.kind === 'opening')) {
+    if (ref && (ref.kind === 'item' || ref.kind === 'light' || ref.kind === 'electric' || ref.kind === 'opening')) {
       const movable = (ref.kind === 'item' && !doc.items[ref.id]?.locked) || ref.kind === 'light'
       setCursor(ui.tool === 'erase' ? 'pointer' : movable ? 'grab' : 'pointer')
       setHover(hit)

@@ -6,6 +6,7 @@
 import { DEFAULT_MATERIALS, OPENING_DEFAULTS, ROOM_TYPE_NAMES, createEmptyDoc, defaultRenderSettings, defaultSettings } from './defaults'
 import { newId, PROJECT_ID_RE, type IdPrefix } from './ids'
 import { normalize, syncRooms, type PinnedNode } from './ops'
+import { parseElectricPoint } from './electrical'
 import {
   DOC_VERSION,
   DOOR_LEAF_STYLES,
@@ -817,6 +818,13 @@ export function parseDoc(json: unknown): Doc {
     if (rotation !== undefined) light.rotation = rotation
     if (isObj(v.size)) light.size = { w: num(v.size.w, 600, 1, 100000), d: num(v.size.d, 600, 1, 100000) }
     doc.lights[id] = light
+  }
+
+  // ── electrical points (0.12+; absent in older files) ──
+  for (const [id, v] of entries(raw.electrical, 'e')) {
+    const levelId = levelOf(v.levelId)
+    const p = parseElectricPoint(id, v, levelId, levels[levelId].height)
+    if (p) (doc.electrical ??= {})[id] = p
   }
 
   // ── annotations ──

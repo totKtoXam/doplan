@@ -9,6 +9,7 @@ import { OpeningInspector } from './inspector/OpeningInspector'
 import { RoomInspector } from './inspector/RoomInspector'
 import { ItemInspector } from './inspector/ItemInspector'
 import { LightInspector } from './inspector/LightInspector'
+import { ElectricInspector } from './inspector/ElectricInspector'
 import { MultiInspector } from './inspector/MultiInspector'
 import { ProjectInspector } from './inspector/ProjectInspector'
 import { DimensionInspector, LabelInspector, NodeInspector, UnderlayInspector } from './inspector/MiscInspectors'
@@ -27,6 +28,8 @@ function exists(doc: Doc, r: EntityRef): boolean {
       return !!doc.items[r.id]
     case 'light':
       return !!doc.lights[r.id]
+    case 'electric':
+      return !!doc.electrical?.[r.id]
     case 'dimension':
       return !!doc.dimensions[r.id]
     case 'label':
@@ -64,6 +67,9 @@ export function RightPanel({ className }: { className?: string }) {
         break
       case 'light':
         body = <LightInspector id={r.id} />
+        break
+      case 'electric':
+        body = <ElectricInspector id={r.id} />
         break
       case 'node':
         body = <NodeInspector id={r.id} />

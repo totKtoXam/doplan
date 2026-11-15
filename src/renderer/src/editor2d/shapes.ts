@@ -136,6 +136,10 @@ export function entityShape(doc: Doc, derived: DerivedPlan, ref: EntityRef): Sha
       const l = doc.lights[ref.id]
       return l ? { type: 'point', p: { x: l.x, y: l.y } } : null
     }
+    case 'electric': {
+      const e = doc.electrical?.[ref.id]
+      return e ? { type: 'point', p: { x: e.x, y: e.y } } : null
+    }
     case 'dimension': {
       const d = doc.dimensions[ref.id]
       if (!d) return null

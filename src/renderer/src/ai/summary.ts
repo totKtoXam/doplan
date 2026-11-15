@@ -2,8 +2,8 @@
  * Compact text views of the document for agents (get_plan / get_entity / selection chips).
  * Pure: works on any Doc + DerivedPlan (the real document or a plan-mode draft).
  */
-import { ROOM_TYPE_NAMES } from '@core'
-import type { Asset, Catalog, DerivedPlan, Doc, EntityKind, EntityRef, Id, Material } from '@core/types'
+import { ROOM_TYPE_NAMES, electricName, electricPointsOf } from '@core'
+import type { Asset, Catalog, DerivedPlan, Doc, ElectricPoint, EntityKind, EntityRef, Id, Material } from '@core/types'
 import type { AiChip } from '@shared/aiChat'
 
 export const r0 = (n: number) => Math.round(n)
@@ -17,6 +17,7 @@ const COLLECTIONS: [keyof Doc, EntityKind][] = [
   ['rooms', 'room'],
   ['items', 'item'],
   ['lights', 'light'],
+  ['electrical', 'electric'],
   ['dimensions', 'dimension'],
   ['labels', 'label'],
   ['underlays', 'underlay'],
@@ -140,7 +141,17 @@ export function describePlan(doc: Doc, plan: DerivedPlan, levelId: Id, lk: Looku
   if (lights.length) {
     lines.push('', `Свет (${lights.length}): ${lights.map((l) => `${l.id} ${l.kind}${pt(l)}`).join(' ')}`)
   }
+  const points = electricPointsOf(doc, levelId)
+  if (points.length) {
+    lines.push('', `Электрика (${points.length}):`)
+    for (const p of points) lines.push(`- ${electricLine(p)}`)
+  }
   return lines.join('\n')
+}
+
+function electricLine(p: ElectricPoint): string {
+  const wall = p.mount === 'wall' ? (p.wallId ? ` на ${p.wallId} (${p.side})` : ' на стене (не привязана)') : p.mount === 'floor' ? ' в полу' : ' на потолке'
+  return `${p.id} ${p.kind}${p.gangs && p.gangs > 1 ? ` ×${p.gangs}${p.vertical ? ' вертикально' : ''}` : ''} ${pt(p)}${wall}, высота ${r0(p.elevation)}, поворот ${r0(p.rotation)}°${p.comment ? ` — «${p.comment}»` : ''}`
 }
 
 /** One-line summary of an entity (chips, approval cards). */
@@ -177,6 +188,10 @@ export function entitySummary(doc: Doc, plan: DerivedPlan | undefined, ref: Enti
       const l = doc.lights[ref.id]
       return l ? `свет ${l.kind} ${pt(l)}` : 'свет'
     }
+    case 'electric': {
+      const p = doc.electrical?.[ref.id]
+      return p ? electricLine(p) : 'электроточка'
+    }
     case 'dimension':
       return 'размерная линия'
     case 'label': {
@@ -195,6 +210,7 @@ const KIND_LABEL: Record<EntityKind, string> = {
   room: 'Комната',
   item: 'Предмет',
   light: 'Свет',
+  electric: 'Электроточка',
   dimension: 'Размер',
   label: 'Подпись',
   underlay: 'Подложка',
@@ -204,6 +220,10 @@ const KIND_LABEL: Record<EntityKind, string> = {
 export function chipFor(doc: Doc, plan: DerivedPlan | undefined, ref: EntityRef, lk: Lookup, lang: 'ru' | 'en' = 'ru'): AiChip {
   let label = KIND_LABEL[ref.kind]
   if (ref.kind === 'room' && doc.rooms[ref.id]) label = roomName(doc, ref.id)
+  if (ref.kind === 'electric') {
+    const p = doc.electrical?.[ref.id]
+    if (p) label = electricName(p, lang)
+  }
   if (ref.kind === 'item') {
     const it = doc.items[ref.id]
     const a = it ? lk.asset(it.assetId) : undefined

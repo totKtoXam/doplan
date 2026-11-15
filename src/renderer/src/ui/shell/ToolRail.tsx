@@ -11,6 +11,7 @@ import {
   Paintbrush,
   Pencil,
   Pipette,
+  Plug,
   RotateCw,
   Ruler,
   RulerDimensionLine,
@@ -24,6 +25,7 @@ import { useT } from '@/i18n'
 import { uiStore, useUi } from '@/store/ui'
 import type { ToolId } from '@/contracts'
 import { IconBtn } from './primitives'
+import '@/ui/electricI18n'
 
 export interface ToolDef {
   id: ToolId
@@ -45,6 +47,7 @@ export const TOOLS: (ToolDef | 'sep')[] = [
   { id: 'door', icon: DoorOpen, label: 'Дверь', key: 'D', hint: 'Кликните по стене, чтобы поставить дверь' },
   { id: 'window', icon: AppWindow, label: 'Окно', key: 'N', hint: 'Кликните по стене, чтобы поставить окно' },
   { id: 'light', icon: LampCeiling, label: 'Светильник', key: 'L', hint: 'Кликните, чтобы поставить светильник' },
+  { id: 'electric', icon: Plug, label: 'Электроточка', key: 'E', hint: 'Кликните у стены, чтобы поставить розетку или выключатель (тип — во вкладке «Электрика»)' },
   'sep',
   { id: 'dimension', icon: RulerDimensionLine, label: 'Размер', hint: 'Укажите две точки размерной линии, затем её отступ' },
   { id: 'measure', icon: Ruler, label: 'Рулетка', key: 'M', hint: 'Укажите две точки, чтобы измерить расстояние' },

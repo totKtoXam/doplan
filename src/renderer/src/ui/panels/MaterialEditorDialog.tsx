@@ -302,10 +302,12 @@ export function MaterialEditorDialog({ open, onClose, materialId, onSaved }: Mat
         if (!extra.product) delete next.product
         if (!extra.wallpaper) delete next.wallpaper
         if (!extra.paint) delete next.paint
+        const before = prev?.product?.price
         d.materials[id] = next
-        // a price typed on the card is used again even if it was erased in the estimate before
+        // a new price typed on the card is used again even if the price was erased in the estimate;
+        // the card's old price, pre-filled in the draft, is not
         const own = d.design?.priceList?.[id]
-        if (own?.noPrice && extra.product?.price !== undefined) delete own.noPrice
+        if (own?.noPrice && extra.product?.price !== undefined && extra.product.price !== before) delete own.noPrice
       })
 
       if (toLibrary) {

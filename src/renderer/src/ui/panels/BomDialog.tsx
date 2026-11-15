@@ -210,7 +210,8 @@ export function BomDialog({ open, onClose }: DialogPropsBase) {
           const list = (design.priceList ??= {})
           for (const [id, p] of Object.entries(res.entries)) {
             const next: ProductRef = { ...(list[id] ?? {}), ...p }
-            delete next.noPrice
+            // an erased price stays erased unless the file brings a price for it
+            if (p.price !== undefined) delete next.noPrice
             list[id] = next
           }
         })

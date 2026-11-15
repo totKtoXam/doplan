@@ -152,7 +152,8 @@ describe('applyStyle', () => {
     doc.materials.mat_custom = { id: 'mat_custom', name: 'My paint', category: 'paint', color: '#abcdef', roughness: 0.9, metalness: 0, colorCode: { system: 'NCS', code: 'S 1020-Y' }, custom: true }
     const back = parseDoc(serializeDoc(doc))
     expect(back.design).toEqual({ styleId: style.id })
-    expect(back.rooms[roomIds.living].design).toEqual({ styleId: style.id })
+    expect(back.rooms[roomIds.living].design).toEqual({ styleId: style.id, accentFace: doc.rooms[roomIds.living].design!.accentFace })
+    expect(back.rooms[roomIds.living].design?.accentFace).toMatch(/:(left|right)$/)
     expect(back.materials.mat_custom.colorCode).toEqual({ system: 'NCS', code: 'S 1020-Y' })
   })
 
@@ -202,5 +203,19 @@ describe('applyStyle', () => {
     expect(now).toHaveLength(1)
     expect(now[0].w.id).not.toBe(first.w.id)
     expect(first.w[first.k].materialId).toBe(style.finishes.wallMain)
+  })
+
+  it('accent-only apply leaves accent walls the user placed alone', () => {
+    const { doc, roomIds } = build()
+    applyStyle(doc, style, { rooms: 'all' })
+    const accentId = style.finishes.wallAccent!
+    // the user paints a hall wall and a second living-room wall in the accent colour by hand
+    const hallWall = Object.values(doc.walls).find((w) => w.left.materialId === style.finishes.wallMain || w.right.materialId === style.finishes.wallMain)!
+    const side = hallWall.left.materialId === style.finishes.wallMain ? 'left' : 'right'
+    hallWall[side].materialId = accentId
+    const before = JSON.stringify(doc.walls)
+    applyStyle(doc, style, { rooms: 'all', parts: { finishes: false, accent: true, openings: false, furniture: false, lights: false } })
+    expect(JSON.stringify(doc.walls)).toBe(before)
+    void roomIds
   })
 })

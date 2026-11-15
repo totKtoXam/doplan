@@ -773,7 +773,11 @@ export function priceListToCsv(rows: BomRow[], doc: Doc, catalog?: Catalog): str
     if (!r.refId || seen.has(r.refId)) continue
     seen.add(r.refId)
     const purchase = rows.find((x) => x.refId === r.refId && x.purchase)
-    line(r.refId, r.name.replace(/ — (упаковки|плитка .*|краска|обои|с запасом)$/, ''), (purchase ?? r).unit, productFor(doc, catalog, r.refId))
+    const p = productFor(doc, catalog, r.refId)
+    // a price erased in the estimate goes out as an empty line (the card's vendor and link stay on
+    // the card), so importing the file back unchanged leaves it erased
+    const erased = doc.design?.priceList?.[r.refId]?.noPrice
+    line(r.refId, r.name.replace(/ — (упаковки|плитка .*|краска|обои|с запасом)$/, ''), (purchase ?? r).unit, erased ? { priceUnit: p?.priceUnit } : p)
   }
   for (const [id, p] of Object.entries(doc.design?.priceList ?? {})) if (!seen.has(id)) line(id, '', p.priceUnit ?? '', p)
   return lines.join('\n')

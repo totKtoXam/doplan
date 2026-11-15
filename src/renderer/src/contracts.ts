@@ -43,6 +43,12 @@ export interface DocState {
   revision: number
   /** bumped only by load/newDoc: another document is open (a save keeps it, even when filePath changes) */
   loadId: number
+  /**
+   * Set by load: the same project loaded again, so the AI chat stays open. 'version': an old version
+   * viewed, or left for the current one (a running turn stops, its edits would land in the other version);
+   * 'disk': plan.json reloaded after an outside change. null: another document.
+   */
+  reload: DocReload
   filePath: string | null
   dirty: boolean
   canUndo: boolean
@@ -59,13 +65,16 @@ export interface DocState {
   cancelTransient(): void
   undo(): void
   redo(): void
-  load(doc: Doc, filePath: string | null): void
+  load(doc: Doc, filePath: string | null, reload?: DocReload): void
   newDoc(name?: string): void
   /** `id`: the Doc.meta.id the file was written with */
   markSaved(filePath: string, id?: string): void
   /** a copy of another file was opened: it gets an id of its own (written with its next save; not an edit) */
   setDocId(id: string): void
 }
+
+/** see DocState.reload */
+export type DocReload = 'version' | 'disk' | null
 
 export type ToolId =
   | 'select'

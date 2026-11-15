@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import tailwindcss from '@tailwindcss/vite'
@@ -6,6 +7,15 @@ import { defineConfig } from 'electron-vite'
 import type { Plugin } from 'vite'
 
 const root = fileURLToPath(new URL('.', import.meta.url))
+
+/** `git describe` of the source tree, shown as the app version tooltip ('' outside a git checkout) */
+function gitDescribe(): string {
+  try {
+    return execFileSync('git', ['describe', '--tags', '--always', '--dirty'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).trim()
+  } catch {
+    return ''
+  }
+}
 
 const sharedAlias = [
   { find: /^@core$/, replacement: resolve(root, 'src/core/index.ts') },
@@ -85,6 +95,7 @@ export default defineConfig({
       ],
       dedupe: ['three', 'react', 'react-dom'],
     },
+    define: { __APP_GIT__: JSON.stringify(gitDescribe()) },
     plugins: [react(), tailwindcss(), devCsp()],
     worker: {
       format: 'es',

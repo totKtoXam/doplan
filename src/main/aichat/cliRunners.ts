@@ -105,6 +105,9 @@ export async function runClaude(ctx: RunCtx, bin: ResolvedBin): Promise<void> {
     JSON.stringify({ mcpServers: { doplan: { type: 'http', url: endpoint.url, headers: { Authorization: `Bearer ${endpoint.token}` } } } }),
     { mode: 0o600 },
   )
+  // through a file: with AGENTS.md inlined the prompt can exceed the Windows command-line limit (32767)
+  const promptPath = join(dir, `prompt-${req.runId.replace(/[^A-Za-z0-9_-]/g, '')}.md`)
+  await writeFile(promptPath, ctx.systemPrompt, { mode: 0o600 })
   const s = req.settings
   const args = [
     '-p',
@@ -117,8 +120,8 @@ export async function runClaude(ctx: RunCtx, bin: ResolvedBin): Promise<void> {
     '--mcp-config',
     cfgPath,
     '--strict-mcp-config',
-    '--append-system-prompt',
-    ctx.systemPrompt,
+    '--append-system-prompt-file',
+    promptPath,
     '--permission-mode',
     'dontAsk',
     '--allowedTools',
@@ -143,6 +146,7 @@ export async function runClaude(ctx: RunCtx, bin: ResolvedBin): Promise<void> {
   })
   for (const ev of parser.end()) emit(ev)
   await rm(cfgPath, { force: true }).catch(() => {})
+  await rm(promptPath, { force: true }).catch(() => {})
 
   if (ctx.signal.aborted) return emit({ type: 'done', ok: false, stopped: true })
   const r = parser.result

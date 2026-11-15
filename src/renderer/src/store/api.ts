@@ -19,6 +19,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   autosaveSec: 30,
   anthropicApiKeySet: false,
   recent: [],
+  projectsDir: null,
 }
 
 function readLocalSettings(): AppSettings {
@@ -148,6 +149,53 @@ function createFallbackApi(): DoplanApi {
         let bin = ''
         for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
         return `data:${mime};base64,${btoa(bin)}`
+      },
+      // project folders + git versions: desktop only
+      async root() {
+        return null
+      },
+      async instructions() {
+        return null
+      },
+      async setInstructions() {
+        throw new Error('Папки проектов доступны только в настольном приложении')
+      },
+      async info() {
+        return { root: null, gitAvailable: false, repo: false, trusted: true, gitFile: false, folderTrusted: false, gitVersion: '' }
+      },
+      async defaultLocation() {
+        return ''
+      },
+      async pickLocation() {
+        return null
+      },
+      async pickProjectsDir() {
+        return null
+      },
+      async create() {
+        throw new Error('Папки проектов доступны только в настольном приложении')
+      },
+      async openFolder() {
+        return null
+      },
+      async exportZip(doc: unknown) {
+        download('project.doplan.json', JSON.stringify(doc), 'application/json')
+        return 'project.doplan.json'
+      },
+      async attach() {
+        return false
+      },
+      async trustFolder() {
+        return false
+      },
+      async history() {
+        return []
+      },
+      async versionDoc() {
+        throw new Error('История версий доступна только в настольном приложении')
+      },
+      async tagVersion() {
+        throw new Error('История версий доступна только в настольном приложении')
       },
     },
     files: {

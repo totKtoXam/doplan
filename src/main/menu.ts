@@ -50,6 +50,10 @@ const L = {
     downloadPage: 'Страница загрузки новой версии…',
     downloadPageV: 'Скачать версию {v}…',
     about: 'О программе doplan',
+    openFolder: 'Открыть папку проекта…',
+    exportDoplan: 'Файл .doplan (один файл)…',
+    history: 'История версий…',
+    instructions: 'Инструкции для ИИ…',
   },
   en: {
     file: 'File',
@@ -94,6 +98,10 @@ const L = {
     downloadPage: 'New version download page…',
     downloadPageV: 'Download version {v}…',
     about: 'About doplan',
+    openFolder: 'Open project folder…',
+    exportDoplan: '.doplan file (single file)…',
+    history: 'Version history…',
+    instructions: 'AI instructions…',
   },
 } as const
 
@@ -145,10 +153,13 @@ export function buildMenu(
       submenu: [
         { label: t.new, accelerator: 'CmdOrCtrl+N', click: cmd('new') },
         { label: t.open, accelerator: 'CmdOrCtrl+O', click: cmd('open') },
+        { label: t.openFolder, click: cmd('openFolder') },
         { label: t.recent, submenu: recentItems },
         { type: 'separator' },
         { label: t.save, accelerator: 'CmdOrCtrl+S', click: cmd('save') },
         { label: t.saveAs, accelerator: 'CmdOrCtrl+Shift+S', click: cmd('saveAs') },
+        { label: t.history, accelerator: 'CmdOrCtrl+Shift+H', click: cmd('history') },
+        { label: t.instructions, click: cmd('instructions') },
         { type: 'separator' },
         {
           label: t.import,
@@ -168,6 +179,8 @@ export function buildMenu(
             { type: 'separator' },
             { label: t.exportGlb, click: cmd('exportGlb') },
             { label: t.exportRender, accelerator: 'F12', click: cmd('exportRender') },
+            { type: 'separator' },
+            { label: t.exportDoplan, click: cmd('exportDoplan') },
           ],
         },
         { type: 'separator' },

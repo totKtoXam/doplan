@@ -9,6 +9,7 @@ import { useT } from '@/i18n'
 import { api } from '@/store/api'
 import { checkForUpdatesManually, installUpdate, openReleasePage, useUpdates } from '@/store/updates'
 import { Button, Dialog, Spinner } from '@/ui/kit'
+import { APP_GIT } from '@/ui/shell/appVersion'
 import type { DialogPropsBase } from './BomDialog'
 
 function Bar({ percent }: { percent: number | null }) {
@@ -111,7 +112,8 @@ export function AboutDialog({ open, onClose }: DialogPropsBase) {
             <div className="text-sm font-semibold">doplan</div>
             <div className="text-[var(--muted)]">{t('Планировки, фотореалистичное 3D и дизайн интерьера')}</div>
             <div className="font-mono text-[11px] text-[var(--muted)] select-text">
-              {t('Версия')} {api.version} · {api.platform}
+              {t('Версия')} {api.version}
+              {APP_GIT ? ` (${APP_GIT})` : ''} · {api.platform}
             </div>
           </div>
         </div>

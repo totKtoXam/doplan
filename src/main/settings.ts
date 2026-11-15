@@ -1,8 +1,18 @@
-import { basename } from 'node:path'
+import { basename, isAbsolute, resolve } from 'node:path'
 import { safeStorage } from 'electron'
 import type { AppSettings, RecentProject } from '../shared/ipc'
 import { atomicWrite, readJson } from './fsutil'
 import { paths } from './paths'
+
+interface TrustedFolder {
+  /** resolved, lower-cased path */
+  path: string
+  /** identity of the folder (and its .git) on disk when it was recorded: a folder replaced at the same path differs */
+  id: string
+  /** the user trusts the folder itself (doplan created it or the user confirmed it): the AI agent may run in it.
+   *  false: only the git repository is doplan's own (doplan ran git init in a folder that had none). */
+  folder: boolean
+}
 
 interface StoredSettings {
   lang: AppSettings['lang']
@@ -10,6 +20,10 @@ interface StoredSettings {
   backend: AppSettings['backend']
   autosaveSec: number
   recent: RecentProject[]
+  /** default parent folder for new projects; absent → Documents/doplan */
+  projectsDir?: string
+  /** project folders whose git repository doplan created or the user trusted, with the identity they had then */
+  trustedFolders?: TrustedFolder[]
   /** base64 of safeStorage-encrypted API key */
   apiKeyEnc?: string
 }
@@ -51,6 +65,13 @@ function sanitize(raw: Partial<StoredSettings> | null | undefined): StoredSettin
         ? Math.max(0, Math.min(3600, Math.round(r.autosaveSec)))
         : DEFAULTS.autosaveSec,
     recent,
+    projectsDir: typeof r.projectsDir === 'string' && isAbsolute(r.projectsDir) ? r.projectsDir : undefined,
+    trustedFolders: Array.isArray(r.trustedFolders)
+      ? r.trustedFolders
+          .filter((x): x is TrustedFolder => !!x && typeof x.path === 'string' && isAbsolute(x.path) && typeof x.id === 'string' && !!x.id)
+          .map((x) => ({ path: x.path, id: x.id, folder: x.folder === true }))
+          .slice(-500)
+      : undefined,
     apiKeyEnc: typeof r.apiKeyEnc === 'string' && r.apiKeyEnc ? r.apiKeyEnc : undefined,
   }
 }
@@ -76,6 +97,7 @@ function toPublic(s: StoredSettings): AppSettings {
     autosaveSec: s.autosaveSec,
     anthropicApiKeySet: !!s.apiKeyEnc || !!sessionKey,
     recent: s.recent.map((r) => ({ ...r })),
+    projectsDir: s.projectsDir ?? null,
   }
 }
 
@@ -105,6 +127,50 @@ export async function setSettings(patch: unknown): Promise<AppSettings> {
   })
   next.apiKeyEnc = cur.apiKeyEnc
   next.recent = cur.recent
+  // a custom projects folder is chosen only through the main-process folder picker (setProjectsDir);
+  // the renderer may only reset it to the default
+  next.trustedFolders = cur.trustedFolders
+  next.projectsDir = 'projectsDir' in p && p.projectsDir == null ? undefined : cur.projectsDir
+  await persist(next)
+  emit(next)
+  return toPublic(next)
+}
+
+/** UI language as last stored (main-process messages follow it); 'ru' before the settings are loaded */
+export function uiLang(): 'ru' | 'en' {
+  return cache?.lang ?? 'ru'
+}
+
+/** picks the Russian or English text of a main-process message by the UI language */
+export function msg(ru: string, en: string): string {
+  return uiLang() === 'en' ? en : ru
+}
+
+const folderKey = (root: string) => resolve(root).toLowerCase()
+
+/** what is recorded about a project folder (see projectFolder.folderTrust), or null */
+export async function trustRecord(root: string): Promise<{ id: string; folder: boolean } | null> {
+  const k = folderKey(root)
+  const r = (await load()).trustedFolders?.find((f) => f.path === k)
+  return r ? { id: r.id, folder: r.folder } : null
+}
+
+export async function setTrustRecord(root: string, id: string, folder: boolean): Promise<void> {
+  const cur = await load()
+  const k = folderKey(root)
+  const list = (cur.trustedFolders ?? []).filter((f) => f.path !== k)
+  list.push({ path: k, id, folder })
+  await persist({ ...cur, trustedFolders: list.slice(-500) })
+}
+
+/** custom default parent folder for new projects, or null (→ Documents/doplan) */
+export async function getProjectsDir(): Promise<string | null> {
+  return (await load()).projectsDir ?? null
+}
+
+export async function setProjectsDir(dir: string | null): Promise<AppSettings> {
+  const cur = await load()
+  const next = { ...cur, projectsDir: dir && isAbsolute(dir) ? dir : undefined }
   await persist(next)
   emit(next)
   return toPublic(next)

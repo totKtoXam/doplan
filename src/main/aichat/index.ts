@@ -5,7 +5,7 @@
 import type { ChildProcess } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { getProjectRoot, isDirectory, isFolderTrusted, readInstructions } from '../projectFolder'
 import { getApiKey } from '../settings'
 import type { AiChip, AiProviderId, AiProviderInfo, AiRunEvent, AiRunRequest } from '../../shared/aiChat'
@@ -137,6 +137,7 @@ function validRequest(raw: unknown): AiRunRequest {
     images,
     chips,
     resumeId: typeof r.resumeId === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(r.resumeId) ? r.resumeId : undefined,
+    resumeCwd: typeof r.resumeCwd === 'string' && r.resumeCwd.length < 4096 ? r.resumeCwd : undefined,
     apiHistory: Array.isArray(r.apiHistory) ? r.apiHistory : undefined,
   }
 }
@@ -193,6 +194,19 @@ function systemPrompt(req: AiRunRequest, place: AgentPlace | null): string {
   return parts.join('\n\n')
 }
 
+/**
+ * Claude Code keeps its sessions per working folder: a session made in ai-work is not found from the
+ * project folder (the folder was trusted since, or saved as a project folder) and the other way round,
+ * and every turn would fail. A Claude session then starts anew. Records from before the folder was
+ * stored ran in the project's ai-work folder. Codex threads are global and always resume.
+ */
+async function resumesHere(req: AiRunRequest, cwd: string): Promise<boolean> {
+  if (!req.resumeId || req.settings.provider !== 'claude') return true
+  const madeIn = req.resumeCwd ?? (await agentWorkDir(req.projectPath))
+  const norm = (p: string) => (process.platform === 'win32' ? resolve(p).toLowerCase() : resolve(p))
+  return norm(madeIn) === norm(cwd)
+}
+
 async function startRun(raw: unknown): Promise<void> {
   const req = validRequest(raw)
   if (runs.has(req.runId)) throw new Error('Запуск уже идёт')
@@ -243,8 +257,9 @@ async function startRun(raw: unknown): Promise<void> {
           return
         }
         const ctx: RunCtx = {
-          req,
-          emit,
+          req: (await resumesHere(req, place.cwd)) ? req : { ...req, resumeId: undefined },
+          // the renderer keeps the folder with the session id: a session resumes only where it was made
+          emit: (ev) => emit(ev.type === 'session' ? { ...ev, cwd: place.cwd } : ev),
           signal: run.abort.signal,
           endpoint,
           cwd: place.cwd,

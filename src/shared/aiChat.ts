@@ -83,6 +83,8 @@ export interface AiRunRequest {
   chips: AiChip[]
   /** provider session id to resume (Claude / Codex) */
   resumeId?: string
+  /** the agent folder that session was made in (AiRunEvent 'session'); main starts a new Claude session when the agent works elsewhere now */
+  resumeCwd?: string
   /** Anthropic API provider: prior conversation (opaque JSON kept by the chat) */
   apiHistory?: unknown[]
 }
@@ -90,7 +92,8 @@ export interface AiRunRequest {
 /** Normalised stream of a running turn (main → renderer). */
 export type AiRunEvent =
   | { type: 'status'; text: string }
-  | { type: 'session'; id: string }
+  /** `cwd`: the agent folder the session belongs to (added by main) */
+  | { type: 'session'; id: string; cwd?: string }
   | { type: 'text'; partId: string; delta: string }
   | { type: 'thinking'; partId: string; delta: string }
   /** provider-side tool (not a doplan doc tool), e.g. Read / Agent / web search */
@@ -163,6 +166,8 @@ export interface AiChatMeta {
 export interface AiChatRecord extends AiChatMeta {
   /** provider resume id (Claude session id / Codex thread id), per provider */
   resume?: Partial<Record<AiProviderId, string>>
+  /** the agent folder each resume id was made in (Claude Code keeps its sessions per folder) */
+  resumeCwd?: Partial<Record<AiProviderId, string>>
   apiHistory?: unknown[]
   messages: AiMessage[]
   totals?: { inputTokens: number; outputTokens: number; costUsd: number }

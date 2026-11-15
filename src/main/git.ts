@@ -182,19 +182,47 @@ async function run(root: string, args: string[], opts: RunOpts = {}): Promise<{ 
 const text = async (root: string, args: string[], opts?: RunOpts) => (await run(root, args, opts)).out.toString('utf8')
 
 /**
- * `-c` flags that switch off the clean/smudge filter drivers a repository defines in its own config
- * (.git/config and the files it includes): `git add` would otherwise run those programs. Drivers from
- * the user's global or system config (git-lfs…) are the user's own and stay.
+ * `filter.*` keys of one config view (`-z`: records "key\nvalue\0"), last value wins as in git.
+ * `scope` null reads the effective config of the repository (all files, includes followed).
+ * Resolves null when git could not read it (exit 1 only means "no such keys").
  */
-async function filterOffArgs(root: string): Promise<string[]> {
-  const r = await run(root, ['config', '--show-scope', '--get-regexp', '^filter\\.'], { allowFail: true })
+async function filterKeys(root: string, scope: '--global' | '--system' | null): Promise<Map<string, string> | null> {
+  const r = await run(root, ['config', ...(scope ? [scope] : []), '-z', '--get-regexp', '^filter\\.'], { allowFail: true })
+  if (r.code !== 0 && r.code !== 1) return null
+  const keys = new Map<string, string>()
+  for (const rec of r.out.toString('utf8').split('\0')) {
+    if (!rec) continue
+    const nl = rec.indexOf('\n')
+    keys.set(nl < 0 ? rec : rec.slice(0, nl), nl < 0 ? '' : rec.slice(nl + 1))
+  }
+  return keys
+}
+
+/**
+ * `-c` flags that switch off every clean/smudge/process filter driver the repository has a say in:
+ * `git add` would otherwise run those programs. A driver whose keys all come from the user's global
+ * or system config unchanged (git-lfs…) is the user's own and stays; one the repository defines or
+ * overrides (.git/config, the files it includes) is switched off. Works the same on any git version.
+ * Throws when the drivers cannot be told apart: doplan then does not commit at all.
+ */
+export async function filterOffArgs(root: string): Promise<string[]> {
+  const all = await filterKeys(root, null)
+  if (!all) throw new GitError(msg('Не удалось прочитать настройки git репозитория', 'Could not read the repository git config'), -1, '')
+  if (!all.size) return []
+  // the user's own view: system, then global over it (unreadable counts as none: more gets switched off)
+  const own = new Map([...((await filterKeys(root, '--system')) ?? []), ...((await filterKeys(root, '--global')) ?? [])])
   const names = new Set<string>()
-  for (const line of r.out.toString('utf8').split('\n')) {
-    const m = /^(\S+)\s+filter\.(.+)\.[^.\s]+(?:\s|$)/.exec(line)
-    if (m && m[1] !== 'system' && m[1] !== 'global') names.add(m[2])
+  for (const [key, value] of all) {
+    if (own.get(key) === value) continue
+    // filter.<subsection>.<variable>: the subsection is everything between the first and the last dot
+    const last = key.lastIndexOf('.')
+    if (!key.toLowerCase().startsWith('filter.') || last <= 'filter.'.length) continue
+    names.add(key.slice('filter.'.length, last))
   }
   const out: string[] = []
   for (const n of names) {
+    // `-c name=value` splits at the first '=': such a name could not be switched off reliably
+    if (/[=\n\r\0]/.test(n)) throw new GitError(msg('В настройках git репозитория есть фильтр, который doplan не может отключить', 'The repository git config has a filter doplan cannot switch off'), -1, '')
     out.push('-c', `filter.${n}.clean=`, '-c', `filter.${n}.smudge=`, '-c', `filter.${n}.process=`, '-c', `filter.${n}.required=false`)
   }
   return out

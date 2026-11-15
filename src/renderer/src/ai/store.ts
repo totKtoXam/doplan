@@ -318,6 +318,7 @@ async function moveProject(to: string, copy: boolean, path: string | null): Prom
     if (!get().legacy) {
       patchChat((c) => {
         delete c.resume
+        delete c.resumeCwd
       })
       if (r) voidSessions.add(r.runId)
     }
@@ -731,6 +732,7 @@ export async function send(raw: string): Promise<void> {
       images: images.map(({ mime, data, name }) => ({ mime, data, name })),
       chips,
       resumeId: chat.resume?.[settings.provider],
+      resumeCwd: chat.resumeCwd?.[settings.provider],
       apiHistory: settings.provider === 'api' ? chat.apiHistory : undefined,
     })
   } catch (e) {
@@ -762,7 +764,10 @@ const voidSessions = new Set<string>()
 
 /** the events of a turn that change the chat record itself (not what is shown while it runs) */
 function recordEvent(c: AiChatRecord, msgId: string, ev: AiRunEvent): void {
-  if (ev.type === 'session') c.resume = { ...(c.resume ?? {}), [c.provider]: ev.id }
+  if (ev.type === 'session') {
+    c.resume = { ...(c.resume ?? {}), [c.provider]: ev.id }
+    if (ev.cwd) c.resumeCwd = { ...(c.resumeCwd ?? {}), [c.provider]: ev.cwd }
+  }
   else if (ev.type === 'apiHistory') c.apiHistory = ev.messages
   else if (ev.type === 'usage') {
     const m = c.messages.find((x) => x.id === msgId)

@@ -89,7 +89,7 @@ export async function setChatSettings(ref: string | null, s: unknown): Promise<v
 
 /** a chat record without its agent sessions: they belong to the folder and project they were made in */
 function withoutResume(rec: AiChatRecord): AiChatRecord {
-  const { resume: _drop, ...rest } = rec
+  const { resume: _drop, resumeCwd: _dropCwd, ...rest } = rec
   return rest
 }
 

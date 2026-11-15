@@ -11,7 +11,7 @@ vi.mock('electron', () => ({
   safeStorage: { isEncryptionAvailable: () => false },
 }))
 
-const { gitCandidates, findGit } = await import('./git')
+const { gitCandidates, findGit, filterOffArgs } = await import('./git')
 const { commitFolder, createFolderProject, folderRootOf, folderTrust, isProjectFolder, trustFolder } = await import('./projectFolder')
 const { findOnPath } = await import('./aichat/detect')
 const { execFileSync } = await import('node:child_process')
@@ -142,6 +142,35 @@ describe('folder trust', { timeout: 30_000 }, async () => {
     expect((await folderTrust(foreign)).git).toBe('trusted')
     expect(await commitFolder(foreign, 'x')).toBeTruthy()
     expect(existsSync(marker)).toBe(false)
+  })
+
+  it.skipIf(!git)('filter drivers whose command or name has dots are switched off too', async () => {
+    const marker = join(base, 'dotted-ran').replace(/\\/g, '/')
+    const script = `echo ran >> '${marker}'\ncat\n`
+    const foreign = folder('filters-dotted', {
+      'plan.json': '{}',
+      'manifest.json': MANIFEST,
+      'note.txt': 'x',
+      '.gitattributes': '*.json filter=evil\n*.txt filter=a.b\n',
+      'evil.sh': script,
+      'proc.sh': script,
+    })
+    gitIn(foreign, 'init', '-q')
+    // only a clean command with a dot in it: no other key names the driver
+    gitIn(foreign, 'config', 'filter.evil.clean', 'sh ./evil.sh')
+    gitIn(foreign, 'config', 'filter.a.b.process', 'sh ./proc.sh')
+    expect(await filterOffArgs(foreign)).toEqual(expect.arrayContaining(['filter.evil.clean=', 'filter.a.b.process=']))
+    await trustFolder(foreign)
+    expect(await commitFolder(foreign, 'x')).toBeTruthy()
+    expect(existsSync(marker)).toBe(false)
+  })
+
+  it.skipIf(!git)('a filter driver that cannot be switched off stops the commit', async () => {
+    const foreign = folder('filters-eq', { 'plan.json': '{}', 'manifest.json': MANIFEST })
+    gitIn(foreign, 'init', '-q')
+    gitIn(foreign, 'config', 'filter.x=y.clean', 'cat')
+    await trustFolder(foreign)
+    await expect(commitFolder(foreign, 'x')).rejects.toThrow()
   })
 
   it.skipIf(!git)('the user can trust a foreign repository', async () => {

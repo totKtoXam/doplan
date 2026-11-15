@@ -402,9 +402,11 @@ export const docStore = createStore<DocStoreState>()((set, get) => {
       get().load(createEmptyDoc(name), null)
     },
 
-    markSaved(filePath) {
+    markSaved(filePath, id) {
       savedId = currentId()
-      set({ filePath, dirty: computeDirty() })
+      // the id the file was written with (Save As / the first save of an older file give a new one); not an edit
+      const doc = id && id !== get().doc.meta.id ? { ...get().doc, meta: { ...get().doc.meta, id } } : get().doc
+      set({ doc, filePath, dirty: computeDirty() })
     },
 
     setDirty(dirty) {

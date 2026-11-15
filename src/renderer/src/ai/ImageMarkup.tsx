@@ -259,7 +259,7 @@ export function ImageMarkup({ image, onChange, onClose }: { image: PendingImage;
           <RotateCcw size={12} /> {tr('Отменить правки')}
         </button>
         <button type="button" className="rounded-md bg-accent px-3 py-1 text-accent-fg hover:bg-accent-hover" onClick={onClose}>
-          Готово
+          {tr('Готово')}
         </button>
         <button type="button" aria-label={tr('Закрыть')} className="rounded-md p-1 text-muted hover:text-text" onClick={onClose}>
           <X size={14} />

@@ -42,6 +42,11 @@ addTranslations('en', {
   'Провайдер недоступен': 'Provider unavailable',
   'Приложите фото плана (скрепка или Ctrl+V) или добавьте подложку': 'Attach a plan photo (paper clip or Ctrl+V) or add an underlay',
   '(изображение)': '(image)',
+  // context chip kinds
+  Узел: 'Node',
+  Предмет: 'Item',
+  Свет: 'Light',
+  Подпись: 'Label',
   'Не удалось открыть изображение': 'Could not open the image',
 
   // sign-in
@@ -109,6 +114,10 @@ addTranslations('en', {
   'План по фото': 'Plan from photo',
   'Расставь мебель': 'Arrange furniture',
   'Проверь площади': 'Check areas',
+  // slash commands (the Russian ones keep working in English too)
+  '/план по фото': '/plan from photo',
+  '/расставь мебель': '/arrange furniture',
+  '/проверь площади': '/check areas',
   'Нарисовать пометки на картинке': 'Draw marks on the image',
   Убрать: 'Remove',
   'Что изменить в плане?': 'What should change in the plan?',

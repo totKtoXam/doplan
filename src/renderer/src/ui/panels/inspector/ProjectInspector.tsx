@@ -1,6 +1,7 @@
 import { ArrowDown, ArrowUp, Copy, Eye, EyeOff, FolderCog, Plus, Trash } from 'lucide-react'
 import type { Doc, DocSettings, Id, Level } from '@core/types'
 import { newId, removeEntities } from '@core'
+import { removeLevelMarks } from '@/actions/levels'
 import { useDoc } from '@/store/document'
 import { uiStore, useUi } from '@/store/ui'
 import { useT } from '@/i18n'
@@ -77,6 +78,7 @@ export function ProjectInspector() {
     if (!window.confirm(`${t('Удалить этаж')} «${lv?.name ?? ''}» ${t('со всем содержимым?')}`)) return
     tx('Удалить этаж', (d) => {
       removeEntities(d, refsOnLevel(d, id))
+      removeLevelMarks(d, id)
       delete d.levels[id]
       d.levelOrder = d.levelOrder.filter((x) => x !== id)
     })

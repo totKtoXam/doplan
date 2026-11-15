@@ -7,46 +7,91 @@ import { afterAll, describe, expect, it, vi } from 'vitest'
 const root = mkdtempSync(join(tmpdir(), 'doplan-chats-'))
 vi.mock('electron', () => ({ app: { getPath: () => root } }))
 
-const { agentWorkDir, getChatSettings, listChats, moveChats, projectKey, saveChat, setChatSettings } = await import('./store')
+const { agentWorkDir, dropChats, getChatSettings, listChats, loadChat, moveChats, projectKey, saveChat, setChatSettings } = await import('./store')
 
 afterAll(() => rmSync(root, { recursive: true, force: true }))
 
-const chat = (id: string, title: string) => ({ id, title, provider: 'claude', createdAt: '', updatedAt: title, messages: [{ id: 'm', role: 'user', createdAt: '', parts: [] }] })
+const chat = (id: string, title: string, resume?: Record<string, string>) => ({
+  id,
+  title,
+  provider: 'claude',
+  createdAt: '',
+  updatedAt: title,
+  messages: [{ id: 'm', role: 'user', createdAt: '', parts: [] }],
+  ...(resume ? { resume } : {}),
+})
+const ids = async (ref: string | null) => (await listChats(ref)).map((c) => c.id).sort()
 
 describe('chat storage follows the project', () => {
-  it('every unsaved document has its own chats, settings are shared between them', async () => {
+  it('a document id names the folder (renaming the file keeps it); settings carry over to new projects', async () => {
+    expect(projectKey('id:abcd1234')).toBe('p-abcd1234')
+    expect(projectKey('id:../xyzzz')).not.toContain('..')
     expect(projectKey('unsaved:abcd1234')).toBe('unsaved-abcd1234')
-    expect(projectKey('unsaved:../x')).not.toContain('..')
-    await saveChat('unsaved:doc-one-1', chat('chat-a1', 'a'))
-    expect((await listChats('unsaved:doc-one-1')).map((c) => c.id)).toEqual(['chat-a1'])
-    expect(await listChats('unsaved:doc-two-2')).toEqual([])
-    await setChatSettings('unsaved:doc-one-1', { provider: 'codex' })
-    expect((await getChatSettings('unsaved:doc-two-2')).provider).toBe('codex')
+    await saveChat('id:doc-one-1', chat('chat-a1', 'a'))
+    expect(await ids('id:doc-one-1')).toEqual(['chat-a1'])
+    expect(await ids('id:doc-two-2')).toEqual([])
+    await setChatSettings('id:doc-one-1', { provider: 'codex' })
+    expect((await getChatSettings('id:doc-two-2')).provider).toBe('codex')
+    await setChatSettings('id:doc-two-2', { provider: 'gemini' })
+    expect((await getChatSettings('id:doc-one-1')).provider).toBe('codex')
   })
 
-  it('first save moves the chats and keeps the agent folder; Save As copies', async () => {
-    const work = await agentWorkDir('unsaved:doc-one-1')
-    const a = join(root, 'flat.doplan')
-    await moveChats('unsaved:doc-one-1', a)
-    expect((await listChats(a)).map((c) => c.id)).toEqual(['chat-a1'])
-    expect(await listChats('unsaved:doc-one-1')).toEqual([])
-    expect((await getChatSettings(a)).provider).toBe('codex')
-    // the stored Claude Code session lives in the old folder: the saved project keeps using it
-    expect(await agentWorkDir(a)).toBe(work)
+  it('Save As copies the chats without agent sessions: the two files do not share one', async () => {
+    await saveChat('id:proj-aaaa', chat('chat-s', 's', { claude: 'S-1' }))
+    await moveChats('id:proj-aaaa', 'id:proj-bbbb', true, join(root, 'b.doplan'))
+    expect(await ids('id:proj-aaaa')).toEqual(['chat-s'])
+    expect(await ids('id:proj-bbbb')).toEqual(['chat-s'])
+    expect((await loadChat('id:proj-aaaa', 'chat-s'))?.resume).toEqual({ claude: 'S-1' })
+    expect((await loadChat('id:proj-bbbb', 'chat-s'))?.resume).toBeUndefined()
+  })
 
-    const b = join(root, 'flat copy.doplan')
-    await saveChat(b, chat('chat-b1', 'old b'))
-    await moveChats(a, b)
-    expect((await listChats(a)).map((c) => c.id)).toEqual(['chat-a1'])
-    expect((await listChats(b)).map((c) => c.id).sort()).toEqual(['chat-a1', 'chat-b1'])
+  it('an older file moves to its id on save and keeps resuming in its agent folder', async () => {
+    const a = join(root, 'flat.doplan')
+    await saveChat(a, chat('chat-p', 'p', { claude: 'P-1' }))
+    const work = await agentWorkDir(a)
+    await moveChats(a, 'id:flat-id-1', false, a)
+    expect(await ids(a)).toEqual([])
+    expect(await ids('id:flat-id-1')).toEqual(['chat-p'])
+    expect(await agentWorkDir('id:flat-id-1')).toBe(work)
+    expect((await loadChat('id:flat-id-1', 'chat-p'))?.resume).toEqual({ claude: 'P-1' })
+  })
+
+  it('moved chats drop their sessions when the target has an agent folder of its own', async () => {
+    await saveChat('id:own-src-1', chat('chat-o', 'o', { claude: 'O-1' }))
+    await agentWorkDir('id:own-src-1')
+    await agentWorkDir('id:own-dst-1')
+    await moveChats('id:own-src-1', 'id:own-dst-1', false, null)
+    expect((await loadChat('id:own-dst-1', 'chat-o'))?.resume).toBeUndefined()
   })
 
   it('a chat already at the target is not overwritten', async () => {
-    const c = join(root, 'c.doplan')
-    await saveChat('unsaved:doc-three-3', chat('chat-same', 'older'))
-    await saveChat(c, chat('chat-same', 'newer'))
-    await moveChats('unsaved:doc-three-3', c)
-    expect(JSON.parse(await readFile(join(root, 'ai-chats', projectKey(c), 'chat-same.json'), 'utf8')).title).toBe('newer')
+    await saveChat('id:same-src', chat('chat-same', 'older'))
+    await saveChat('id:same-dst', chat('chat-same', 'newer'))
+    await moveChats('id:same-src', 'id:same-dst', false, null)
+    expect(JSON.parse(await readFile(join(root, 'ai-chats', projectKey('id:same-dst'), 'chat-same.json'), 'utf8')).title).toBe('newer')
+  })
+
+  it('chats of 0.5 unsaved projects go to the next unsaved document; the shared settings stay', async () => {
+    await saveChat(null, chat('chat-old', 'old'))
+    await moveChats(null, 'id:new-doc-1', false, null)
+    expect(await ids('id:new-doc-1')).toEqual(['chat-old'])
+    expect(await ids(null)).toEqual([])
+    expect((await getChatSettings('id:another-doc')).provider).toBe('gemini')
+  })
+
+  it('an abandoned unsaved document loses its chats, a saved project never does', async () => {
+    await saveChat('id:gone-doc-1', chat('chat-g', 'g'))
+    await agentWorkDir('id:gone-doc-1')
+    await dropChats('id:gone-doc-1')
+    expect(await ids('id:gone-doc-1')).toEqual([])
+    await saveChat('id:kept-doc-1', chat('chat-k', 'k'))
+    await moveChats('id:kept-doc-1', 'id:kept-doc-1', false, join(root, 'k.doplan'))
+    await dropChats('id:kept-doc-1')
+    expect(await ids('id:kept-doc-1')).toEqual(['chat-k'])
+    // file-path projects and the shared bucket are never dropped
+    await dropChats(join(root, 'flat.doplan'))
+    await dropChats('unsaved')
+    expect((await getChatSettings(null)).provider).toBe('gemini')
   })
 
   it('a forged agent folder pointer outside the app folder is ignored', async () => {

@@ -53,7 +53,8 @@ export interface DocState {
   redo(): void
   load(doc: Doc, filePath: string | null): void
   newDoc(name?: string): void
-  markSaved(filePath: string): void
+  /** `id`: the Doc.meta.id the file was written with */
+  markSaved(filePath: string, id?: string): void
 }
 
 export type ToolId =

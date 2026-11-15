@@ -41,6 +41,7 @@ export const CH = {
   aiChatGetSettings: 'aiChat:getSettings',
   aiChatSetSettings: 'aiChat:setSettings',
   aiChatMove: 'aiChat:move',
+  aiChatDrop: 'aiChat:drop',
   aiChatLogin: 'aiChat:login',
   aiChatLoginInput: 'aiChat:loginInput',
   aiChatLoginCancel: 'aiChat:loginCancel',

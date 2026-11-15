@@ -233,6 +233,7 @@ function createFallbackApi(): DoplanApi {
       },
       async setSettings() {},
       async moveChats() {},
+      async dropChats() {},
       async login() {},
       async loginInput() {},
       async loginCancel() {},

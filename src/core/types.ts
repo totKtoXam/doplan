@@ -589,6 +589,11 @@ export interface DocSource {
 
 export interface DocMeta {
   name: string
+  /**
+   * Stable project identity (keys its AI chats): survives renaming or moving the file and crash
+   * recovery; Save As and imports give a new one. Missing in files from before 0.6.
+   */
+  id?: string
   createdAt: string
   modifiedAt: string
   app: 'doplan'

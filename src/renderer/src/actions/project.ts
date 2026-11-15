@@ -1,10 +1,11 @@
-import { parseDoc } from '@core'
+import { newProjectId, parseDoc } from '@core'
 import type { Doc } from '@core/types'
 import { t } from '@/i18n'
 import { api } from '@/store/api'
 import { docStore } from '@/store/document'
 import { handles } from '@/store/handles'
 import { alertDialog, choiceDialog, toast } from '@/store/notify'
+import { runProjectHooks } from '@/store/projectHooks'
 import { buildSampleApartment } from '@/store/sample'
 import { uiStore } from '@/store/ui'
 import { currentDoc, errorText } from './util'
@@ -84,10 +85,14 @@ export async function openProject(path?: string): Promise<void> {
 export async function saveProject(saveAs = false): Promise<boolean> {
   const { doc, filePath } = docStore.getState()
   const target = saveAs ? null : filePath
+  // Save As makes a new project (its own chats); an older file without an id gets one now
+  const id = saveAs || !doc.meta.id ? newProjectId() : doc.meta.id
   try {
-    const res = await api.project.save(doc, target)
+    const res = await api.project.save(id === doc.meta.id ? doc : { ...doc, meta: { ...doc.meta, id } }, target)
     if (!res) return false
-    docStore.getState().markSaved(res.path)
+    docStore.getState().markSaved(res.path, id)
+    // awaited: a save from the close dialog is followed by the window closing
+    await runProjectHooks('saved', saveAs)
     void api.project.clearRecovery().catch(() => {})
     void api.settings
       .get()
@@ -121,6 +126,7 @@ export async function handleCloseRequest(): Promise<void> {
     const ok = await confirmDiscard()
     if (!ok) return
   }
+  await runProjectHooks('closing')
   try {
     await api.project.clearRecovery()
   } catch {

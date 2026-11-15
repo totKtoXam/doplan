@@ -2,7 +2,7 @@
  * Defaults and the built-in (colour-only, zero-download) catalogue.
  * Everything here is plain data; ids are stable (`mat_*`, `asset_*`) because documents reference them.
  */
-import { newId } from './ids'
+import { newId, newProjectId } from './ids'
 import {
   DOC_VERSION,
   type Asset,
@@ -1014,7 +1014,7 @@ export function createEmptyDoc(name = 'Новый проект'): Doc {
   const now = new Date().toISOString()
   return {
     version: DOC_VERSION,
-    meta: { name, createdAt: now, modifiedAt: now, app: 'doplan' },
+    meta: { name, id: newProjectId(), createdAt: now, modifiedAt: now, app: 'doplan' },
     settings: defaultSettings(),
     render: defaultRenderSettings(),
     levelOrder: [level.id],

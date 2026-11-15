@@ -188,8 +188,14 @@ export interface AiChatApi {
   deleteChat(projectPath: string | null, chatId: string): Promise<void>
   getSettings(projectPath: string | null): Promise<AiChatSettings>
   setSettings(projectPath: string | null, s: AiChatSettings): Promise<void>
-  /** the document got a file (Save / Save As): its chats follow it. Project refs are a file path or `unsaved:<id>` */
-  moveChats(from: string | null, to: string): Promise<void>
+  /**
+   * The open document got a new reference (project refs: `id:<Doc.meta.id>`, or a file path / `unsaved:<id>`
+   * for documents without an id): its chats follow it; `copy` (Save As) copies them without agent sessions.
+   * `from` = null adopts the chats unsaved projects shared before 0.6. `path`: the file it was saved to.
+   */
+  moveChats(from: string | null, to: string, copy: boolean, path: string | null): Promise<void>
+  /** removes the chats of an unsaved document that is gone (never those of a project that was saved) */
+  dropChats(projectRef: string): Promise<void>
   /** start signing the CLI in; progress arrives through onLogin */
   login(provider: AiProviderId): Promise<void>
   /** paste the code shown by the sign-in page (when the CLI asks for one) */

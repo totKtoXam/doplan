@@ -46,6 +46,7 @@ import {
   newChat,
   openChat,
   QUICK_ACTIONS,
+  quickCmd,
   refreshProviders,
   removeChat,
   removeChip,
@@ -182,7 +183,7 @@ function ApprovalCard({ part }: { part: ToolPart }) {
   return (
     <div className="my-1.5 rounded-lg border border-warning/50 bg-warning/5 px-2.5 py-2 text-[11px]">
       <div className="mb-1 flex items-center gap-1.5 font-medium">
-        <CircleAlert size={12} className="text-warning" /> {part.title}
+        <CircleAlert size={12} className="text-warning" /> {t(part.title)}
       </div>
       {part.changes?.length ? (
         <ul className="mb-1.5 text-text">
@@ -305,7 +306,7 @@ function Message({ m, live }: { m: AiMessage; live: boolean }) {
             <div className="mb-1 flex flex-wrap gap-1">
               {m.chips.map((c) => (
                 <span key={c.id} className="rounded bg-[color-mix(in_srgb,var(--accent)_18%,transparent)] px-1.5 text-[10px]" title={c.summary}>
-                  {c.label}
+                  {t(c.label)}
                 </span>
               ))}
             </div>
@@ -438,6 +439,8 @@ function LoginCard({ prov }: { prov: AiProviderInfo | undefined }) {
     .split(/\r?\n/)
     .filter((l) => l.trim() && !/https?:\/\//.test(l))
     .slice(-2)
+    // the app's own lines (terminal fallback) in the UI language; the CLI's stay as printed
+    .map((l) => tAi(l.trim()))
     .join('\n')
   return (
     <div className="mx-2 mb-1.5 rounded-xl border border-border bg-panel-2 px-3 py-2 text-[11.5px]">
@@ -870,11 +873,11 @@ function PlusMenu({ onQuick }: { onQuick(cmd: string): void }) {
               className={rowBtn}
               onClick={() => {
                 setOpen(false)
-                onQuick(q.cmd)
+                onQuick(quickCmd(q))
               }}
             >
               <span className="flex-1">{t(q.label)}</span>
-              <span className="font-mono text-[10px] text-faint">{q.cmd}</span>
+              <span className="font-mono text-[10px] text-faint">{quickCmd(q)}</span>
             </button>
           ))}
         </div>
@@ -919,7 +922,7 @@ function Composer() {
     el.style.height = `${Math.min(200, el.scrollHeight)}px`
   }, [text])
 
-  const slash = text.startsWith('/') && !text.includes('\n') ? QUICK_ACTIONS.filter((q) => q.cmd.startsWith(text.trim().toLowerCase()) || text.trim() === '/') : []
+  const slash = text.startsWith('/') && !text.includes('\n') ? QUICK_ACTIONS.filter((q) => text.trim() === '/' || [quickCmd(q), q.cmd].some((c) => c.toLowerCase().startsWith(text.trim().toLowerCase()))) : []
   const canSend = !running && (!!text.trim() || images.length > 0)
 
   const submit = () => {
@@ -961,9 +964,9 @@ function Composer() {
       {slash.length > 0 && (
         <div className="absolute inset-x-0 bottom-full mb-1 rounded-xl border border-border-strong bg-panel p-1 shadow-pop">
           {slash.map((q) => (
-            <button key={q.cmd} type="button" className={rowBtn} onClick={() => setText(q.cmd + ' ')}>
-              <span className="font-mono text-accent">{q.cmd}</span>
-              <span className="text-muted">{q.label}</span>
+            <button key={q.cmd} type="button" className={rowBtn} onClick={() => setText(quickCmd(q) + ' ')}>
+              <span className="font-mono text-accent">{quickCmd(q)}</span>
+              <span className="text-muted">{t(q.label)}</span>
             </button>
           ))}
         </div>
@@ -996,7 +999,7 @@ function Composer() {
             ))}
             {chips.map((c) => (
               <span key={c.id} className="flex h-6 max-w-full items-center gap-1 self-end rounded-md border border-border bg-panel-2 pr-1 pl-1.5 text-[11px]" title={c.summary}>
-                <span className="truncate">{c.label}</span>
+                <span className="truncate">{t(c.label)}</span>
                 <button type="button" aria-label={t('Убрать')} className="text-muted hover:text-text" onClick={() => removeChip(c.id)}>
                   <X size={11} />
                 </button>
@@ -1050,7 +1053,7 @@ function EmptyState() {
       <div className="text-[11.5px] text-muted">{t('«добавь стену от n_… до n_…», «поставь холодильник на кухне». Правки видны сразу и отменяются Ctrl+Z.')}</div>
       <div className="mt-4 flex flex-wrap justify-center gap-1.5">
         {QUICK_ACTIONS.map((q) => (
-          <button key={q.cmd} type="button" className="rounded-full border border-border px-2.5 py-1 text-[11px] hover:bg-hover" onClick={() => void send(q.cmd)}>
+          <button key={q.cmd} type="button" className="rounded-full border border-border px-2.5 py-1 text-[11px] hover:bg-hover" onClick={() => void send(quickCmd(q))}>
             {t(q.label)}
           </button>
         ))}

@@ -140,23 +140,31 @@ const LOGIN_TEXT = {
 
 /**
  * The console command line for a sign-in window: `/s /c "start "title" cmd /k ""bin" "arg" sub""`.
- * Passed verbatim (Node would re-quote it with backslashes, which cmd.exe does not understand):
- * the outer cmd strips the first and last quote, the inner `cmd /k` strips the pair around the command.
+ * Passed verbatim (Node would re-quote it with backslashes, which cmd.exe does not understand).
+ * The outer cmd strips the first and last quote; in what is left the `""` before each path opens and
+ * closes a quote, so the outer cmd sees the paths unquoted and their metacharacters (`R&D`) get a `^`.
+ * The inner `cmd /k` strips the pair around the command and sees the paths quoted.
+ * null when a part cannot be passed safely (`"`, `%`, `!`, line breaks): the user runs it by hand.
  */
-export function terminalCommandLine(command: string, prefix: string[], args: string[]): string {
-  const q = (s: string) => `"${s.replace(/"/g, '')}"`
-  const cmd = [q(command), ...prefix.map(q), ...args].join(' ')
+export function terminalCommandLine(command: string, prefix: string[], args: string[]): string | null {
+  const paths = [command, ...prefix]
+  if (paths.some((s) => !s || /["%!\r\n]/.test(s))) return null
+  if (args.some((a) => !/^[\w.:=/-]+$/.test(a))) return null
+  const q = (s: string) => `"${s.replace(/[&|<>^()]/g, '^$&')}"`
+  const cmd = [...paths.map(q), ...args].join(' ')
   return `/d /s /c "start "doplan" cmd /k "${cmd}""`
 }
 
 /** Opens a console window running the CLI sign-in; false where the app cannot open one. */
 function openInTerminal(bin: ResolvedBin, args: string[]): boolean {
   if (process.platform !== 'win32') return false
+  const line = terminalCommandLine(bin.command, bin.prefix, args)
+  if (!line) return false
   const env = { ...process.env }
   if (bin.asNode) env['ELECTRON_RUN_AS_NODE'] = '1'
   try {
     // arguments are app-controlled (binary path + fixed subcommands)
-    spawn('cmd.exe', [terminalCommandLine(bin.command, bin.prefix, args)], {
+    spawn('cmd.exe', [line], {
       env,
       windowsHide: false,
       windowsVerbatimArguments: true,

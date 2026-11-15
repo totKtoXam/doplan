@@ -15,6 +15,7 @@ import { t } from '@/i18n'
 import { api } from '@/store/api'
 import { docStore } from '@/store/document'
 import { getMark, marksStore, setMarkNumberFloor } from '@/store/marks'
+import { addProjectHook } from '@/store/projectHooks'
 import { uiStore } from '@/store/ui'
 import { DraftHost, liveHost } from './hosts'
 import { markSnapshot } from './markSnapshot'
@@ -153,21 +154,55 @@ export function initAi(): void {
   api.aiChat.onEvent(onRunEvent)
   api.aiChat.onToolCall((call) => void onToolCall(call))
   api.aiChat.onLogin(onLoginEvent)
-  let lastPath: string | null | undefined
   let lastLoad: number | undefined
+  /** the open document has never been written to a file: its chats go when it does */
+  let unsavedDoc = false
   const sync = () => {
-    const { filePath: p, loadId } = docStore.getState()
-    if (p === lastPath && loadId === lastLoad) return
-    const sameDoc = loadId === lastLoad
-    lastPath = p
+    const { filePath, loadId } = docStore.getState()
+    // a save keeps the document (the 'saved' hook moves its chats when its reference changes)
+    if (loadId === lastLoad) return
+    const first = lastLoad === undefined
     lastLoad = loadId
-    // Save / Save As of the open document: the chat, a running turn and the draft go on
-    if (sameDoc && p) void moveProject(p)
-    // another document: its own chats (an unsaved one gets a fresh bucket of its own)
-    else void setProject(p ?? `unsaved:${uid()}`)
+    const gone = !first && unsavedDoc ? get().projectPath : null
+    unsavedDoc = filePath === null
+    looseRef = ''
+    void setProject(docRef(), gone)
   }
   docStore.subscribe(sync)
   sync()
+  addProjectHook({
+    saved: async (saveAs) => {
+      unsavedDoc = false
+      await moveProject(docRef(), saveAs, docStore.getState().filePath)
+    },
+    closing: async () => {
+      if (unsavedDoc) {
+        // closed without saving: nothing can open these chats again
+        const ref = get().projectPath
+        dropCurrent()
+        if (ref) await api.aiChat.dropChats(ref).catch(() => {})
+      } else {
+        const wasRunning = !!get().running
+        if (wasRunning) stop(false)
+        if (discardDraft() || wasRunning) await persist()
+      }
+    },
+  })
+}
+
+/** an older document without an id of its own and without a file: one bucket per load */
+let looseRef = ''
+
+/**
+ * The open document's chat reference: its id (renames and crash recovery keep it), or, for files from
+ * before 0.6 without one, the file path (until the next save gives it an id).
+ */
+function docRef(): string {
+  const { doc, filePath } = docStore.getState()
+  if (doc.meta.id) return `id:${doc.meta.id}`
+  if (filePath) return filePath
+  if (!looseRef) looseRef = `unsaved:${uid()}`
+  return looseRef
 }
 
 // ───────────── CLI sign-in ─────────────
@@ -221,20 +256,25 @@ export async function refreshProviders(refresh: boolean): Promise<void> {
 /** bumped by updateSettings: a project load that finishes later must not undo the user's choice */
 let settingsRev = 0
 
-/** the open document got a file: its chats move there (copied on Save As), nothing is interrupted */
-async function moveProject(path: string): Promise<void> {
+/** a move of the chats in progress: a new turn waits for it (it would start in the wrong place) */
+let moving: Promise<void> | null = null
+
+/**
+ * The open document was saved: its chats follow when its reference changed (moved; copied without
+ * agent sessions on Save As), and the folder learns it belongs to a saved project. Nothing is
+ * interrupted: the chat, a running turn and the draft go on.
+ */
+async function moveProject(to: string, copy: boolean, path: string | null): Promise<void> {
   const from = get().projectPath
-  if (from === path) return
-  set({ projectPath: path })
-  try {
-    await api.aiChat.moveChats(from, path)
-  } catch (e) {
-    console.error('[doplan] moving chats failed', e)
-  }
-  if (get().projectPath !== path) return
+  set({ projectPath: to })
+  const job = api.aiChat.moveChats(from, to, copy, path).catch((e) => console.error('[doplan] moving chats failed', e))
+  moving = job
+  await job
+  if (moving === job) moving = null
+  if (get().projectPath !== to) return
   // the current chat (also when a save of it raced the move) and the list of the new place
   if (get().chat.messages.length) await persist()
-  else set({ chats: await api.aiChat.listChats(path).catch(() => get().chats) })
+  else set({ chats: await api.aiChat.listChats(to).catch(() => get().chats) })
 }
 
 /** leaving the current chat: a running turn stops, and the conversation is saved as it stands */
@@ -245,16 +285,35 @@ function leaveChat(): void {
   if (wasRunning || dropped) void persist()
 }
 
-async function setProject(path: string): Promise<void> {
-  leaveChat()
+/** the current chat goes with its (unsaved, abandoned) document: nothing is saved */
+function dropCurrent(): void {
+  if (get().running) stop(false)
+  discardDraft()
+  stoppedRuns.clear()
+}
+
+/**
+ * Another document is open. `gone`: the reference of the unsaved document it replaced, whose chats
+ * nothing can reach any more.
+ */
+async function setProject(ref: string, gone: string | null): Promise<void> {
+  if (gone) dropCurrent()
+  else leaveChat()
+  // switched at once: whatever is saved from now on lands in the new project
+  set({ projectPath: ref, chats: [], chat: emptyChat(get().settings.provider), chips: [], images: [], status: '' })
+  if (gone && gone !== ref) void api.aiChat.dropChats(gone).catch(() => {})
+  // a new unsaved document takes over the chats unsaved projects shared before 0.6
+  if (docStore.getState().filePath === null) await api.aiChat.moveChats(null, ref, false, null).catch(() => {})
   const rev = settingsRev
   const [loaded, chats] = await Promise.all([
-    api.aiChat.getSettings(path).catch(() => ({ ...DEFAULT_AI_SETTINGS })),
-    api.aiChat.listChats(path).catch(() => [] as AiChatMeta[]),
+    api.aiChat.getSettings(ref).catch(() => ({ ...DEFAULT_AI_SETTINGS })),
+    api.aiChat.listChats(ref).catch(() => [] as AiChatMeta[]),
   ])
+  if (get().projectPath !== ref) return
   const settings = rev === settingsRev ? loaded : get().settings
-  set({ projectPath: path, settings, chats, chat: emptyChat(settings.provider), chips: [], images: [], status: '' })
-  if (settings !== loaded) void api.aiChat.setSettings(path, settings).catch(() => {})
+  const chat = get().chat.messages.length || get().running ? get().chat : emptyChat(settings.provider)
+  set({ settings, chats, chat })
+  if (settings !== loaded) void api.aiChat.setSettings(ref, settings).catch(() => {})
 }
 
 export function setDockTab(tab: DockTab): void {
@@ -297,8 +356,12 @@ export async function openChat(id: string): Promise<void> {
 
 export async function removeChat(id: string): Promise<void> {
   if (get().chat.id === id) {
-    // no save of the chat being deleted
-    if (get().running) stop(false)
+    // no save of the chat being deleted, nor of what its stopped turn still reports
+    const r = get().running
+    if (r) {
+      stop(false)
+      stoppedRuns.delete(r.runId)
+    }
     discardDraft()
     set({ chat: emptyChat(get().settings.provider), status: '', showHistory: false })
   }
@@ -496,11 +559,22 @@ export const QUICK_ACTIONS: { cmd: string; label: string; prompt: string; needsI
   },
 ]
 
+/** the command as the user sees it in the current language */
+export const quickCmd = (q: { cmd: string }): string => t(q.cmd)
+
+/** true when `text` starts with the command (in Russian or in the UI language) */
+export function quickMatch(q: { cmd: string }, text: string): string | null {
+  const s = text.trim().toLowerCase()
+  for (const c of [quickCmd(q), q.cmd]) if (s.startsWith(c.toLowerCase())) return c
+  return null
+}
+
 function expandQuick(text: string): { text: string; needsImage: boolean } {
-  const t = text.trim()
+  const s = text.trim()
   for (const q of QUICK_ACTIONS) {
-    if (t.toLowerCase().startsWith(q.cmd)) {
-      const extra = t.slice(q.cmd.length).trim()
+    const c = quickMatch(q, s)
+    if (c) {
+      const extra = s.slice(c.length).trim()
       return { text: extra ? `${q.prompt}\n\nДополнительно: ${extra}` : q.prompt, needsImage: !!q.needsImage }
     }
   }
@@ -515,6 +589,9 @@ export function currentProvider(): AiProviderInfo | undefined {
 }
 
 export async function send(raw: string): Promise<void> {
+  if (get().running) return
+  // a turn starts where the chats are, not halfway through moving them
+  if (moving) await moving
   const st = get()
   if (st.running) return
   const { text, needsImage } = expandQuick(raw)
@@ -537,7 +614,7 @@ export async function send(raw: string): Promise<void> {
     id: uid(),
     role: 'user',
     createdAt: now(),
-    parts: [{ type: 'text', text: raw.trim() || '(изображение)' }],
+    parts: [{ type: 'text', text: raw.trim() || t('(изображение)') }],
     chips: chips.length ? chips : undefined,
     images: images.length ? await Promise.all(images.map((im) => thumb(im.url))) : undefined,
   }
@@ -547,7 +624,7 @@ export async function send(raw: string): Promise<void> {
   partIndex = new Map()
   patchChat((c) => {
     c.messages.push(userMsg, asst)
-    if (!c.title) c.title = (raw.trim() || 'Изображение').slice(0, 60)
+    if (!c.title) c.title = (raw.trim() || t('Изображение')).slice(0, 60)
     c.provider = settings.provider
     c.updatedAt = now()
   })
@@ -574,13 +651,63 @@ export async function send(raw: string): Promise<void> {
 /**
  * Stops the turn at once: main kills the agent and revokes its access, and here the run is closed
  * right away, so a tool call already on its way is refused instead of landing in whatever document
- * is open by then. `save` = store the chat now (the late 'done' from main is ignored).
+ * is open by then. `save` = store the chat now. What main still reports for the stopped turn (its
+ * usage, the API history, the agent session) is kept: see stoppedRuns.
  */
 export function stop(save = true): void {
   const r = get().running
   if (!r) return
+  stoppedRuns.set(r.runId, { chatId: get().chat.id, msgId: r.msgId, projectPath: get().projectPath })
   void api.aiChat.stop(r.runId)
   finishTurn({ type: 'done', ok: false, stopped: true }, save)
+}
+
+/**
+ * Turns stopped here that main is still winding down: their last usage, API history (the request and
+ * the edits the model already made) and agent session id still belong to the chat record.
+ */
+const stoppedRuns = new Map<string, { chatId: string; msgId: string; projectPath: string | null }>()
+/** writes to a chat that is no longer open, one after the other */
+let recordQueue: Promise<void> = Promise.resolve()
+
+/** the events of a turn that change the chat record itself (not what is shown while it runs) */
+function recordEvent(c: AiChatRecord, msgId: string, ev: AiRunEvent): void {
+  if (ev.type === 'session') c.resume = { ...(c.resume ?? {}), [c.provider]: ev.id }
+  else if (ev.type === 'apiHistory') c.apiHistory = ev.messages
+  else if (ev.type === 'usage') {
+    const m = c.messages.find((x) => x.id === msgId)
+    if (m) {
+      m.usage = {
+        inputTokens: (m.usage?.inputTokens ?? 0) + (ev.inputTokens ?? 0),
+        outputTokens: (m.usage?.outputTokens ?? 0) + (ev.outputTokens ?? 0),
+        costUsd: ev.costUsd !== undefined ? (m.usage?.costUsd ?? 0) + ev.costUsd : m.usage?.costUsd,
+      }
+    }
+    const tt = c.totals ?? { inputTokens: 0, outputTokens: 0, costUsd: 0 }
+    c.totals = { inputTokens: tt.inputTokens + (ev.inputTokens ?? 0), outputTokens: tt.outputTokens + (ev.outputTokens ?? 0), costUsd: tt.costUsd + (ev.costUsd ?? 0) }
+  }
+}
+
+function onStoppedRunEvent(runId: string, ev: AiRunEvent): void {
+  const s = stoppedRuns.get(runId)
+  if (!s) return
+  if (ev.type === 'done') {
+    stoppedRuns.delete(runId)
+    return
+  }
+  if (ev.type !== 'session' && ev.type !== 'apiHistory' && ev.type !== 'usage') return
+  if (get().chat.id === s.chatId) {
+    patchChat((c) => recordEvent(c, s.msgId, ev))
+    void persist()
+    return
+  }
+  // the user moved on to another chat: update the saved record
+  recordQueue = recordQueue
+    .then(async () => {
+      const rec = await api.aiChat.loadChat(s.projectPath, s.chatId)
+      if (rec) await api.aiChat.saveChat(s.projectPath, produce(rec, (c) => recordEvent(c, s.msgId, ev)))
+    })
+    .catch((e) => console.error('[doplan] saving a stopped turn failed', e))
 }
 
 function finishTurn(ev: Extract<AiRunEvent, { type: 'done' }>, save: boolean): void {
@@ -608,18 +735,19 @@ function finishTurn(ev: Extract<AiRunEvent, { type: 'done' }>, save: boolean): v
 
 function onRunEvent(runId: string, ev: AiRunEvent): void {
   const r = get().running
-  if (!r || r.runId !== runId) return
+  if (!r || r.runId !== runId) {
+    onStoppedRunEvent(runId, ev)
+    return
+  }
   switch (ev.type) {
     case 'status':
       set({ status: ev.text })
       return
-    case 'session': {
-      const prov = get().settings.provider
-      patchChat((c) => {
-        c.resume = { ...(c.resume ?? {}), [prov]: ev.id }
-      })
+    case 'session':
+    case 'apiHistory':
+    case 'usage':
+      patchChat((c) => recordEvent(c, r.msgId, ev))
       return
-    }
     case 'text':
     case 'thinking':
       if (get().status) set({ status: '' })
@@ -642,26 +770,8 @@ function onRunEvent(runId: string, ev: AiRunEvent): void {
         }
       })
       return
-    case 'usage':
-      patchRunMsg((m) => {
-        m.usage = {
-          inputTokens: (m.usage?.inputTokens ?? 0) + (ev.inputTokens ?? 0),
-          outputTokens: (m.usage?.outputTokens ?? 0) + (ev.outputTokens ?? 0),
-          costUsd: ev.costUsd !== undefined ? (m.usage?.costUsd ?? 0) + ev.costUsd : m.usage?.costUsd,
-        }
-      })
-      patchChat((c) => {
-        const t = c.totals ?? { inputTokens: 0, outputTokens: 0, costUsd: 0 }
-        c.totals = { inputTokens: t.inputTokens + (ev.inputTokens ?? 0), outputTokens: t.outputTokens + (ev.outputTokens ?? 0), costUsd: t.costUsd + (ev.costUsd ?? 0) }
-      })
-      return
     case 'notice':
       patchRunMsg((m) => pushPart(m, null, { type: 'notice', level: ev.level, text: ev.text }))
-      return
-    case 'apiHistory':
-      patchChat((c) => {
-        c.apiHistory = ev.messages
-      })
       return
     case 'done':
       finishTurn(ev, true)

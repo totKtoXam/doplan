@@ -642,6 +642,55 @@ function drawOpenings(ctx: Ctx, levelWalls: Wall[], openingsByWall: Map<Id, Open
           break
         }
         case 'slidingDoor': {
+          const slide = o.slide ?? 'surface'
+          const dirA = hingeA ? -1 : 1
+          if (slide === 'pocket') {
+            const sh = dirA * o.width * 0.3
+            const t = Math.min(20, h * 0.4)
+            const a = Math.max(u0, u0 + sh)
+            const b = Math.min(u1, u1 + sh)
+            line(a, -t, b, -t, pen)
+            line(a, t, b, t, pen)
+            const p0 = hingeA ? u0 : u1
+            const p1 = p0 + dirA * o.width
+            line(p0, -t - 6, p1, -t - 6, { ...thin, dash: [2, 1] })
+            line(p0, t + 6, p1, t + 6, { ...thin, dash: [2, 1] })
+            line(u0, -h, u0, h, thin)
+            line(u1, -h, u1, h, thin)
+            break
+          }
+          if (slide === 'barn') {
+            const sh = dirA * o.width * 0.3
+            const k0 = s * (h + 20)
+            const k1 = s * (h + 55)
+            const a = u0 - 50 + sh
+            const b = u1 + 50 + sh
+            items.push({ t: 'poly', layer: 'openings', role: 'door-leaf', pts: [F.at(a, k0), F.at(b, k0), F.at(b, k1), F.at(a, k1)], closed: true, stroke: pen, fill: { color: th.bg }, ref })
+            const r0 = hingeA ? u0 - o.width - 100 : u0 - 100
+            const r1 = hingeA ? u1 + 100 : u1 + o.width + 100
+            line(r0, s * (h + 10), r1, s * (h + 10), { ...thin, dash: [2, 1] })
+            line(u0, -h, u0, h, thin)
+            line(u1, -h, u1, h, thin)
+            break
+          }
+          if (slide === 'folding') {
+            const n = o.width <= 700 ? 4 : o.width <= 1000 ? 6 : 8
+            const pw = o.width / n
+            const ang = 0.5
+            let su = hingeA ? u0 : u1
+            let k = -(pw * Math.sin(ang)) / 2
+            for (let i = 0; i < n; i++) {
+              const up = i % 2 === 0 ? 1 : -1
+              const s2 = su - dirA * pw * Math.cos(ang)
+              const k2 = k + up * pw * Math.sin(ang)
+              line(su, k, s2, k2, pen)
+              su = s2
+              k = k2
+            }
+            line(u0, -h, u0, h, thin)
+            line(u1, -h, u1, h, thin)
+            break
+          }
           const lw = o.width * 0.55
           const lt = Math.max(25, Math.min(h * 0.5, 0.35 * S))
           const v1 = h * 0.35

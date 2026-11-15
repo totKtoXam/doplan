@@ -27,13 +27,16 @@ All commands: `pnpm -s dp <group> <cmd> … [--json]`. Exit code 0 = ok, 1 = pro
 
 ## Procedure
 
-Work dir: `.doplan-work/<slug>/` (slug = short latin name, e.g. `kv-lenina-12`). Keep every
-intermediate file there; numbered iterations make it easy to go back.
+Projects never go into the source repo. Everything lives in the projects folder `../dopan.projects/`
+(a sibling of the repo; the paths below are relative to the repo root, so from a worktree use that
+folder's absolute path): `.doplan` files in its root, incoming images in `inbox/`, work files in
+`.work/<slug>/` (slug = short latin name, e.g. `kv-lenina-12`). Keep every intermediate file there;
+numbered iterations make it easy to go back.
 
 ### 1. Get the file
-- A path was given → use it. A file in `inbox/` → use it.
-- The image was pasted into the chat (no path) → `pnpm -s dp img paste --out inbox/` (Windows/macOS/Linux
-  clipboard). If that fails, ask the user to save the image into `inbox/` and tell you the name.
+- A path was given → use it. A file in `../dopan.projects/inbox/` → use it.
+- The image was pasted into the chat (no path) → `pnpm -s dp img paste --out ../dopan.projects/inbox/` (Windows/macOS/Linux
+  clipboard). If that fails, ask the user to save the image into `../dopan.projects/inbox/` and tell you the name.
 - PDF / HEIC are not decoded: ask for a PNG/JPG export or a screenshot of the page.
 - Several pages/images (plan + экспликация on another sheet) → process the plan image, read the
   table from the other image(s).
@@ -41,7 +44,7 @@ intermediate file there; numbered iterations make it easy to go back.
 
 ### 2. Prepare
 ```
-pnpm -s dp img prep <file> --out .doplan-work/<slug>/ [--perspective x1,y1,…,x4,y4 [--rect-mm W,H]] [--crop x,y,w,h] [--deskew] [--contrast]
+pnpm -s dp img prep <file> --out ../dopan.projects/.work/<slug>/ [--perspective x1,y1,…,x4,y4 [--rect-mm W,H]] [--crop x,y,w,h] [--deskew] [--contrast]
 ```
 - Always produces `work.png` (oriented, ≤ 2000 px long side, upscaled to ≥ 1000) + `prep.json`.
 - `--deskew` for phone photos/scans that look tilted (auto-detects ±5°; or `--deskew 1.5`).
@@ -63,8 +66,8 @@ pnpm -s dp img prep <file> --out .doplan-work/<slug>/ [--perspective x1,y1,…,x
 
 ### 3. Look: grid and tiles
 ```
-pnpm -s dp img grid  .doplan-work/<slug>/work.png --out .doplan-work/<slug>/grid.png
-pnpm -s dp img tiles .doplan-work/<slug>/work.png --out .doplan-work/<slug>/tiles/ --n 2x2
+pnpm -s dp img grid  ../dopan.projects/.work/<slug>/work.png --out ../dopan.projects/.work/<slug>/grid.png
+pnpm -s dp img tiles ../dopan.projects/.work/<slug>/work.png --out ../dopan.projects/.work/<slug>/tiles/ --n 2x2
 ```
 - Read `grid.png` for the overall layout (labels on all four edges = px of work.png).
 - Read every tile: they are zoomed but **labelled in work.png px**, so coordinates are directly usable.
@@ -76,7 +79,7 @@ pnpm -s dp img tiles .doplan-work/<slug>/work.png --out .doplan-work/<slug>/tile
   measure thicknesses and to snap your coordinates; ignore candidates that are furniture or text.
 
 ### 4. Read ALL text first (before any geometry)
-Write a list in your notes (`.doplan-work/<slug>/reading.md`, short):
+Write a list in your notes (`../dopan.projects/.work/<slug>/reading.md`, short):
 - every **dimension** with what it spans (`5 700: левая наружная грань → правая`, `3 200: ось A–Б`).
   Note whether a chain is outer faces, clear interior or axes;
 - every **room**: number, name, area m² (from the plan or the экспликация table), Ж/П columns;
@@ -96,7 +99,7 @@ pnpm -s dp spec scale --ref x1,y1,x2,y2 --mm 5700 --spec draft.json --label "о�
 - Neither → ask for one known length (e.g. door = 800 mm is a last resort; write it into `notes`).
 
 ### 6. Draft the PlanSpec
-Write `.doplan-work/<slug>/draft-01.json`. **Prefer rooms-mode, units `mm`, orthogonal**:
+Write `../dopan.projects/.work/<slug>/draft-01.json`. **Prefer rooms-mode, units `mm`, orthogonal**:
 - Each room = clear interior `rect` `[x, y, w, h]` (or `polygon` for L-shapes), `labelledArea` from the
   plan, `number`, `name` as printed, `type`.
 - **Walls are not written**; the compiler builds them from the gaps between rooms: gap
@@ -121,7 +124,7 @@ Write `.doplan-work/<slug>/draft-01.json`. **Prefer rooms-mode, units `mm`, orth
 
 ### 7. Validate
 ```
-pnpm -s dp spec validate .doplan-work/<slug>/draft-01.json
+pnpm -s dp spec validate ../dopan.projects/.work/<slug>/draft-01.json
 ```
 Fix every **error** (exit 1). Warnings to take seriously: `AREA_MISMATCH` (room off by > 2–5 %),
 `TOTAL_AREA_MISMATCH`, `ROOM_MERGED` (two rooms not separated: a wall gap is missing),
@@ -130,7 +133,7 @@ Codes are explained in `planspec-reference.md`.
 
 ### 8. Render + overlay, compare, fix (max 4 rounds)
 ```
-pnpm -s dp spec check .doplan-work/<slug>/draft-01.json --out-dir .doplan-work/<slug>/ --image .doplan-work/<slug>/work.png --iter 1
+pnpm -s dp spec check ../dopan.projects/.work/<slug>/draft-01.json --out-dir ../dopan.projects/.work/<slug>/ --image ../dopan.projects/.work/<slug>/work.png --iter 1
 ```
 (= validate + `spec render` + `spec overlay`; files `render-01.png`, `overlay-01.png`, `check-01.json`.)
 - **Look at `overlay-01.png`**: magenta = your walls, blue = doors/labels, green = windows over the
@@ -145,12 +148,12 @@ pnpm -s dp spec check .doplan-work/<slug>/draft-01.json --out-dir .doplan-work/<
 
 ### 9. Build the project
 ```
-pnpm -s dp spec build .doplan-work/<slug>/draft-0N.json --out <Name>.doplan --name "<Name>" [--open]
+pnpm -s dp spec build ../dopan.projects/.work/<slug>/draft-0N.json --out ../dopan.projects/<Name>.doplan --name "<Name>" [--open]
 ```
 Packs `manifest.json + doc.json + assets/` and embeds the source image as a locked underlay (unless
 `--no-underlay`). `--open` launches the installed app (or the dev build). `doc info <file>` prints
-rooms/areas from the built project; `doc render` re-renders it. Save the `.doplan` next to the source
-image or where the user asked (default: the repo root is fine for a quick test; ask if unsure).
+rooms/areas from the built project; `doc render` re-renders it. Save the `.doplan` in `../dopan.projects/`
+unless the user named another place; never in the repo.
 
 ### 10. Report to the user (Russian if they wrote Russian)
 Short: where the file is; rooms with computed vs labelled area; total; **what was assumed**

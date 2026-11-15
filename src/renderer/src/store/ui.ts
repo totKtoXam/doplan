@@ -81,6 +81,7 @@ export const uiStore = createStore<UiStoreState>()((set, get) => ({
   wallThickness: firstDoc.settings.wallThickness,
   wallHeight: firstDoc.settings.wallHeight,
   openingKind: 'door',
+  openingPreset: null,
   placingAssetId: null,
   paintFinish: null,
   catalog: safeBuiltinCatalog(),
@@ -241,6 +242,13 @@ function applyLang(lang: 'ru' | 'en'): void {
 
 applyTheme(uiStore.getState().theme)
 applyLang(uiStore.getState().lang)
+
+// a door preset from the Construction panel applies only while the door tool draws its kind:
+// leaving the tool or switching the opening kind drops it
+uiStore.subscribe((s) => {
+  const p = s.openingPreset
+  if (p && (s.tool !== 'door' || s.openingKind !== p.kind)) uiStore.setState({ openingPreset: null })
+})
 
 uiStore.subscribe((s, prev) => {
   if (s.theme !== prev.theme) applyTheme(s.theme)

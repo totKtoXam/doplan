@@ -17,12 +17,20 @@ import type {
   Id,
   Item,
   Material,
+  Opening,
   OpeningKind,
   QualityPreset,
   SurfaceFinish,
   Vec2,
   WallKind,
 } from '@core/types'
+
+/** a door look picked from the Construction panel (kind + fields copied onto the new opening) */
+export interface OpeningPreset {
+  id: string
+  kind: OpeningKind
+  patch: Partial<Pick<Opening, 'width' | 'height' | 'style' | 'slide' | 'leafMaterialId' | 'frameMaterialId'>>
+}
 
 // ───────────────────────────── stores ─────────────────────────────
 
@@ -67,6 +75,7 @@ export type ToolId =
   | 'label'
   | 'measure'
   | 'survey' // «Обмер»: replace a dimension with a tape measurement
+  | 'pencil' // «Карандаш»: freehand marks for the AI chat
   | 'paint' // apply `paintMaterialId` to clicked surface
   | 'eyedropper'
   | 'calibrate' // underlay scale calibration: two clicks + typed length
@@ -87,6 +96,8 @@ export interface UiState {
   wallThickness: number
   wallHeight: number
   openingKind: OpeningKind
+  /** door preset picked in the Construction panel: applied by the opening tool to new openings of its kind */
+  openingPreset: OpeningPreset | null
   /** asset being placed by the `item` tool */
   placingAssetId: Id | null
   /** finish applied by the `paint` tool */

@@ -1,12 +1,14 @@
 import { useState } from 'react'
+import type { OpeningPreset } from '@/contracts'
 import { FileUp, ImageUp, ScanText } from 'lucide-react'
 import type { DocSettings, OpeningKind, RoomType, Vec2, WallKind } from '@core/types'
-import { addWall, defaultRoom, OPENING_DEFAULTS, polylabel } from '@core'
+import { addWall, defaultRoom, OPENING_DEFAULTS, openingForLeaf, polylabel } from '@core'
 import { uiStore, useUi } from '@/store/ui'
 import { docStore, useDoc } from '@/store/document'
 import { handles } from '@/store/handles'
 import { actions } from '@/actions'
 import { useT } from '@/i18n'
+import '@/ui/catalogI18n'
 import { Button, Dialog, Input, NumberInput, Row, Section, Segmented, Select, Toggle, fmtNum } from '@/ui/kit'
 import { DOOR_KINDS, OPENING_KIND_RU, ROOM_TYPES, roomTypeName, WALL_KIND_RU, WINDOW_KINDS, isWindowKind } from '../common/labels'
 import { freeOrigin, offsetPolygon } from '../common/edits'
@@ -47,7 +49,11 @@ export function ConstructionTab() {
     uiStore.getState().set({ tool: 'wall', wallKind: k, ...(d.thickness ? { wallThickness: d.thickness } : {}), ...(d.height ? { wallHeight: d.height } : {}) })
   }
   const pickOpening = (k: OpeningKind) => {
-    uiStore.getState().set({ tool: isWindowKind(k) ? 'window' : 'door', openingKind: k })
+    uiStore.getState().set({ tool: isWindowKind(k) ? 'window' : 'door', openingKind: k, openingPreset: null })
+  }
+  const openingPreset = useUi((s) => s.openingPreset)
+  const pickPreset = (p: OpeningPreset) => {
+    uiStore.getState().set({ tool: 'door', openingKind: p.kind, openingPreset: p })
   }
 
   return (
@@ -97,8 +103,23 @@ export function ConstructionTab() {
               icon={<OpeningKindIcon kind={k} />}
               label={t(OPENING_KIND_RU[k])}
               sub={sizeLabel(k)}
-              active={(tool === 'door' || tool === 'window') && openingKind === k}
+              active={(tool === 'door' || tool === 'window') && openingKind === k && !openingPreset}
               onClick={() => pickOpening(k)}
+            />
+          ))}
+        </CardGrid>
+      </Section>
+
+      <Section title={t('Варианты дверей')} id="left.doorPresets">
+        <CardGrid>
+          {DOOR_PRESETS.map((p) => (
+            <ToolCard
+              key={p.id}
+              icon={<OpeningKindIcon kind={p.kind} />}
+              label={t(p.label)}
+              sub={`${fmtNum(p.leaf[0] / 10, 0)}×${fmtNum(p.leaf[1] / 10, 0)}`}
+              active={tool === 'door' && openingPreset?.id === p.id && openingKind === p.kind}
+              onClick={() => pickPreset(p)}
             />
           ))}
         </CardGrid>
@@ -136,6 +157,31 @@ export function ConstructionTab() {
     </div>
   )
 }
+
+type DoorPreset = OpeningPreset & { label: string; leaf: [number, number] }
+
+/** a door preset given by its leaf size (1:1, as sold); the opening is the leaf plus the frame */
+function doorPreset(id: string, label: string, kind: OpeningKind, leaf: [number, number], patch: OpeningPreset['patch'] = {}): DoorPreset {
+  return { id, label, leaf, kind, patch: { ...patch, ...openingForLeaf(kind, patch.slide, leaf[0], leaf[1]) } }
+}
+
+/** ready door looks; the leaf size / style can be changed in the inspector afterwards */
+const DOOR_PRESETS: DoorPreset[] = [
+  doorPreset('flush', 'Гладкая', 'door', [800, 2000], { style: 'flush', leafMaterialId: 'mat_wood_white' }),
+  doorPreset('panel', 'Филёнчатая', 'door', [800, 2000], { style: 'panel', leafMaterialId: 'mat_wood_oak_bleached' }),
+  doorPreset('glazed', 'Остеклённая', 'door', [800, 2000], { style: 'glazed', leafMaterialId: 'mat_wood_white' }),
+  doorPreset('insert', 'Царговая', 'door', [800, 2000], { style: 'insert', leafMaterialId: 'mat_wood_ash_grey' }),
+  doorPreset('glass', 'Стеклянная', 'door', [800, 2000], { style: 'glass', leafMaterialId: 'mat_glass_frosted', frameMaterialId: 'mat_metal_aluminium' }),
+  doorPreset('narrow', 'В санузел 600', 'door', [600, 2000], { style: 'flush' }),
+  doorPreset('tall', 'Высокая 2300', 'door', [900, 2300], { style: 'flush', leafMaterialId: 'mat_wood_walnut' }),
+  doorPreset('double-glazed', 'Двустворчатая остеклённая', 'doubleDoor', [1200, 2000], { style: 'glazed' }),
+  doorPreset('pocket', 'Пенал в стену', 'slidingDoor', [800, 2000], { slide: 'pocket', style: 'flush' }),
+  doorPreset('barn', 'Амбарная', 'slidingDoor', [900, 2000], { slide: 'barn', style: 'flush', leafMaterialId: 'mat_wood_oak_natural' }),
+  doorPreset('glass-slide', 'Стеклянное купе', 'slidingDoor', [900, 2000], { slide: 'surface', style: 'glass', leafMaterialId: 'mat_glass_frosted' }),
+  doorPreset('folding', 'Гармошка', 'slidingDoor', [800, 2000], { slide: 'folding', leafMaterialId: 'mat_plastic_white' }),
+  doorPreset('steel', 'Входная стальная', 'entranceDoor', [860, 2000], { style: 'flush', leafMaterialId: 'mat_metal_black', frameMaterialId: 'mat_metal_black' }),
+  doorPreset('steel-glazed', 'Входная со стеклом', 'entranceDoor', [860, 2000], { style: 'glazed', leafMaterialId: 'mat_paint_anthracite', frameMaterialId: 'mat_metal_black' }),
+]
 
 function sizeLabel(k: OpeningKind): string {
   const d = OPENING_DEFAULTS[k]

@@ -14,9 +14,9 @@ import {
   MaterialEditorDialog,
   PhotoPlanDialog,
   RenderPanel,
-  RightPanel,
   SettingsDialog,
 } from '@/ui/panels'
+import { RightDock } from '@/ai' // ai-chat: «Свойства | ИИ» tabs
 import { LevelTabs } from '@/ui/shell/LevelTabs'
 import { Overlays } from '@/ui/shell/Overlays'
 import { IconBtn } from '@/ui/shell/primitives'
@@ -186,7 +186,7 @@ export function App() {
         {rightOpen && (
           <aside className="flex w-[320px] shrink-0 flex-col overflow-hidden border-l border-border bg-panel">
             <Boundary name={tr('Свойства')}>
-              <RightPanel />
+              <RightDock />
             </Boundary>
           </aside>
         )}

@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import {
   type Ctx,
   F,
+  HANDLE_STYLES,
   addHandle,
   box,
   cached,
@@ -334,7 +335,7 @@ export function dishwasher(c: Ctx): void {
     const plinth = Math.min(0.1, H * 0.12)
     c.add(box(W - 0.004, plinth - 0.004, 0.016), 'plinth', F.white, [0, plinth / 2, zf - 0.04])
     c.add(rbox(W - 0.006, H - plinth - 0.006, 0.018, 0.0015), 'front', F.white, [0, plinth + (H - plinth) / 2, zf + 0.009])
-    addHandle(c, c.str('handle', 'bar', ['bar', 'knob', 'none', 'edge'] as const), 0, H - 0.06, zf + 0.018, Math.min(0.32, W * 0.5), false)
+    addHandle(c, c.str('handle', 'bar', HANDLE_STYLES), 0, H - 0.06, zf + 0.018, Math.min(0.32, W * 0.5), false)
     return
   }
   const panelH = Math.min(0.1, H * 0.12)
@@ -389,7 +390,46 @@ export function washingMachine(c: Ctx): void {
   c.add(rbox(0.14, 0.1, 0.002, 0.004), 'panel', F.whiteGloss, [W / 2 - 0.12, 0.08, zf + 0.001])
 }
 
+/** soundbar: a long rounded body with a wrapped fabric grille and a small status display */
+function soundbar(c: Ctx): void {
+  const { W, H, D } = c
+  const wall = c.item.mount === 'wall'
+  const r = Math.min(H, D) * 0.35
+  c.add(rbox(W, H, D, r), 'body', F.blackMatte, [0, H / 2, 0])
+  // fabric grille over the front and top, slightly proud of the body
+  c.add(rbox(W - 0.03, H * 0.82, 0.004, Math.min(0.002, H * 0.1)), 'fabric', F.anthracite, [0, H * 0.48, D / 2 + 0.0005])
+  c.add(rbox(0.05, 0.008, 0.002, 0.001), 'screen', F.screen, [W * 0.35, H * 0.85, D / 2 + 0.003])
+  if (!wall) for (const sx of [-1, 1]) c.add(rbox(0.06, 0.006, D * 0.6, 0.002), 'rubber', F.rubber, [sx * W * 0.38, 0.003, 0])
+}
+
+/** TV wall bracket: wall plate, (articulating) arm and a VESA plate at the front */
+function tvBracket(c: Ctx): void {
+  const { W, H, D } = c
+  const plateD = 0.012
+  const zb = -D / 2
+  // wall plate: two horizontal rails joined by uprights
+  for (const sy of [0.15, 0.85]) c.add(rbox(W, 0.04, plateD, 0.003), 'metal', F.blackMetal, [0, H * sy, zb + plateD / 2])
+  for (const sx of [-1, 1]) c.add(rbox(0.03, H * 0.75, plateD, 0.003), 'metal', F.blackMetal, [sx * W * 0.25, H / 2, zb + plateD / 2])
+  const reach = D - 2 * plateD
+  if (reach > 0.06) {
+    // two-link arm
+    const L = reach
+    c.add(rbox(0.05, 0.03, L * 0.55, 0.006), 'metal', F.blackMetal, [-W * 0.08, H / 2, zb + plateD + L * 0.28])
+    c.add(rbox(0.05, 0.03, L * 0.55, 0.006), 'metal', F.blackMetal, [W * 0.06, H / 2 + 0.02, zb + plateD + L * 0.7])
+    c.add(cyl(0.02, 0.02, 0.08, 20), 'metal', F.steel, [-W * 0.01, H / 2 + 0.01, zb + plateD + L * 0.5])
+  } else {
+    c.add(rbox(0.06, H * 0.5, Math.max(0.01, reach), 0.004), 'metal', F.blackMetal, [0, H / 2, zb + plateD + Math.max(0.01, reach) / 2])
+  }
+  // VESA plate with four bolts
+  const v = Math.min(W, H) * 0.7
+  c.add(rbox(v, v, plateD, 0.004), 'metal', F.blackMetal, [0, H / 2, D / 2 - plateD / 2])
+  for (const sx of [-1, 1]) for (const sy of [-1, 1]) c.add(cylZ(0.006, 0.01, 12), 'metal', F.steel, [sx * v * 0.38, H / 2 + sy * v * 0.38, D / 2])
+}
+
 export function tv(c: Ctx): void {
+  const variant = c.str('variant', 'tv', ['tv', 'soundbar', 'bracket'] as const)
+  if (variant === 'soundbar') return soundbar(c)
+  if (variant === 'bracket') return tvBracket(c)
   const { W, H, D } = c
   const wall = c.has('stand') ? !c.bool('stand', true) : c.item.mount === 'wall'
   const standH = wall ? 0 : Math.min(0.09, H * 0.12)

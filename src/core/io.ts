@@ -8,6 +8,10 @@ import { newId, type IdPrefix } from './ids'
 import { normalize, syncRooms, type PinnedNode } from './ops'
 import {
   DOC_VERSION,
+  DOOR_LEAF_STYLES,
+  DOOR_SLIDES,
+  type DoorLeafStyle,
+  type DoorSlide,
   type Asset,
   type AssetCategory,
   type CameraBookmark,
@@ -27,6 +31,7 @@ import {
   type FinishZone,
   type Id,
   type Item,
+  type Annotation,
   type Label,
   type Level,
   type Light,
@@ -720,6 +725,8 @@ export function parseDoc(json: unknown): Doc {
     if (sashes !== undefined) o.sashes = Math.round(sashes)
     const sillBoard = optNum(v.sillBoard, 0, 2000)
     if (sillBoard !== undefined) o.sillBoard = sillBoard
+    if (typeof v.style === 'string' && (DOOR_LEAF_STYLES as readonly string[]).includes(v.style)) o.style = v.style as DoorLeafStyle
+    if (typeof v.slide === 'string' && (DOOR_SLIDES as readonly string[]).includes(v.slide)) o.slide = v.slide as DoorSlide
     const curtain = readCurtain(v.curtain)
     if (curtain) o.curtain = curtain
     doc.openings[id] = o
@@ -820,6 +827,15 @@ export function parseDoc(json: unknown): Doc {
     if (!p) continue
     const l: Label = { id, levelId: levelOf(v.levelId), x: p.x, y: p.y, text: str(v.text, ''), size: num(v.size, 200, 1, 100000) }
     doc.labels[id] = l
+  }
+  // pencil marks: kept only while their level exists
+  for (const [id, v] of entries(raw.annotations, 'pm')) {
+    if (typeof v.levelId !== 'string' || !levels[v.levelId] || !Array.isArray(v.points)) continue
+    const points = v.points.map((q: unknown) => vec2(q)).filter((q: Vec2 | null): q is Vec2 => !!q).slice(0, 2000)
+    if (points.length < 2) continue
+    const a: Annotation = { id, levelId: v.levelId, n: Math.round(num(v.n, 1, 1, 9999)), shape: v.shape === 'zone' ? 'zone' : 'stroke', points }
+    if (v.done === true) a.done = true
+    ;(doc.annotations ??= {})[id] = a
   }
   for (const [id, v] of entries(raw.underlays, 'u')) {
     const src = optStr(v.src)

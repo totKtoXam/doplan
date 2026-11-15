@@ -1,6 +1,6 @@
 {
   "name": "doplan",
-  "version": "0.4.0",
+  "version": "0.6.0",
   "description": "doplan — 2D floor plans, photorealistic 3D and interior design",
   "main": "./out/main/index.js",
   "type": "module",
@@ -27,10 +27,12 @@
     ]
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
     "@biomejs/biome": "^2.6.7",
     "@gltf-transform/core": "^4.5.1",
     "@gltf-transform/extensions": "^4.5.1",
     "@gltf-transform/functions": "^4.5.1",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@napi-rs/canvas": "^1.1.1",
     "@swc/core": "^1.16.22",
     "@tailwindcss/vite": "^4.3.5",
@@ -67,6 +69,7 @@
     "vite": "8.3.8",
     "vitest": "^5.1.0",
     "xatlas-web": "^0.1.0",
+    "zod": "^4.6.7",
     "zustand": "^5.1.0"
   }
 }

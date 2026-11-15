@@ -27,6 +27,7 @@ import type { Engine3DHandle } from '@/contracts'
 import { prefs3dStore, usePrefs3d, type DenoiseMode, type TraceMode } from '@/view3d/prefs'
 import { useStatus3d } from '@/view3d/status'
 import { IconBtn, MiniSelect, Segmented, TextBtn } from './primitives'
+import { Ai3DMenu } from '@/ai' // ai-chat
 
 const QUALITY: QualityPreset[] = ['low', 'medium', 'high', 'ultra']
 const QUALITY_NAMES: Record<QualityPreset, string> = { low: 'Низкое', medium: 'Среднее', high: 'Высокое', ultra: 'Ультра' }
@@ -335,6 +336,7 @@ export function Viewport3D({ hidden }: { hidden?: boolean }) {
       )}
       {engine && <Overlay engine={engine} hidden={hidden} />}
       {engine && !hidden && <BusyStatus />}
+      {!hidden && <Ai3DMenu host={host} />}
     </div>
   )
 }

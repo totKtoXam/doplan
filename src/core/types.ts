@@ -137,6 +137,13 @@ export interface CurtainSpec {
   fullHeight: boolean
 }
 
+/** flush slab, raised panels, wood leaf with glass lites, rail-and-stile (царговая) with inserts, all-glass */
+export type DoorLeafStyle = 'flush' | 'panel' | 'glazed' | 'insert' | 'glass'
+export const DOOR_LEAF_STYLES: readonly DoorLeafStyle[] = ['flush', 'panel', 'glazed', 'insert', 'glass']
+/** surface track, pocket (leaf hides inside the wall), barn (exposed rail with rollers), folding (accordion) */
+export type DoorSlide = 'surface' | 'pocket' | 'barn' | 'folding'
+export const DOOR_SLIDES: readonly DoorSlide[] = ['surface', 'pocket', 'barn', 'folding']
+
 export interface Opening {
   id: Id
   wallId: Id
@@ -153,6 +160,10 @@ export interface Opening {
   swing: 'left' | 'right'
   frameMaterialId?: Id
   leafMaterialId?: Id
+  /** doors: look of the leaf; default panel (glass when the leaf material is transparent) */
+  style?: DoorLeafStyle
+  /** sliding doors: how the leaf moves; default surface (track on the wall face) */
+  slide?: DoorSlide
   /** window: number of sashes; door: ignored */
   sashes?: number
   /** window sill board depth mm (0 = none) */
@@ -336,6 +347,23 @@ export interface Label {
   y: number
   text: string
   size: number
+}
+
+/**
+ * «Карандаш»: a freehand mark drawn over the plan to point at a zone in the AI chat
+ * («в ① ширина 180 см»). Editor-only: not exported, not shown in 3D.
+ */
+export interface Annotation {
+  id: Id
+  levelId: Id
+  /** badge number shown as ①, ② … */
+  n: number
+  /** stroke = open freehand line; zone = closed lasso / rectangle */
+  shape: 'stroke' | 'zone'
+  /** plan points, mm */
+  points: Vec2[]
+  /** the measurements given for this mark were applied */
+  done?: boolean
 }
 
 /** Background image for tracing. */
@@ -669,6 +697,8 @@ export interface Doc {
   lights: Record<Id, Light>
   dimensions: Record<Id, Dimension>
   labels: Record<Id, Label>
+  /** pencil marks (editor-only, see Annotation) */
+  annotations?: Record<Id, Annotation>
   underlays: Record<Id, Underlay>
   cameras: Record<Id, CameraBookmark>
   /** project-local (custom / embedded) materials and assets; builtin ones live in the Catalog */

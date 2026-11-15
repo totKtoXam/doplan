@@ -7,11 +7,16 @@ import { uiStore } from '@/store/ui'
 import type { ContextMenuItem, EditorCtx } from './context'
 import { dist, normDeg } from './geom'
 import { requestWallFrom } from './tools/wallStart'
+import { addSelectionToChat } from '@/ai/store' // ai-chat
+import { markMenuItems } from './tools/pencil' // ai-chat
 
 const DUPLICABLE = new Set(['wall', 'opening', 'item', 'light', 'label', 'dimension'])
 
 export function buildContextMenu(ctx: EditorCtx, plan: Vec2, zoomToFit: () => void): ContextMenuItem[] {
   const ui = uiStore.getState()
+  // ai-chat: a pencil mark under the pointer has its own menu
+  const markItems = ui.tool === 'pencil' || !ctx.hit.hit(plan, ctx.mm(8)) ? markMenuItems(ctx, plan) : null
+  if (markItems) return markItems
   const transact = docStore.getState().transact
   const hit = ctx.hit.hit(plan, ctx.mm(8))
   if (hit && !ctx.isSelected(hit)) ui.select([hit])
@@ -285,5 +290,7 @@ export function buildContextMenu(ctx: EditorCtx, plan: Vec2, zoomToFit: () => vo
       },
     })
   }
+  // ai-chat
+  if (uiStore.getState().selection.length) items.push({ label: t('Добавить в чат'), run: () => addSelectionToChat() })
   return items
 }

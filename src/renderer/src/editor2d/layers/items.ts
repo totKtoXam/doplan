@@ -3,7 +3,7 @@ import type { Item } from '@core/types'
 import { type EditorCtx, sameInputs } from '../context'
 import { DEG } from '../geom'
 import { itemCorners } from '../shapes'
-import { drawItemSketch, SegmentSketch, sketchKind } from '../symbols'
+import { drawItemSketch, footprintPolygon, SegmentSketch, sketchKind } from '../symbols'
 import { mixColor, parseHex } from '../theme'
 
 function strokeSegments(g: Graphics, segs: readonly number[], color: number, alpha = 1): void {
@@ -60,12 +60,16 @@ export class ItemsLayer {
     const sk = new SegmentSketch(sketch)
 
     for (const it of items) {
-      const c = itemCorners(it)
-      const flat = [c[0].x, c[0].y, c[1].x, c[1].y, c[2].x, c[2].y, c[3].x, c[3].y]
+      const asset = ui.getAsset(it.assetId)
+      sk.setTransform(it.x, it.y, it.rotation * DEG, !!it.mirrored)
+      const poly = footprintPolygon(asset, it.params, it.size.w, it.size.d)
+      const c = poly ? poly.map(([x, y]) => sk.point(x, y)) : itemCorners(it)
+      const flat = c.flatMap((p) => [p.x, p.y])
+      const nc = c.length
       const overhead = it.mount === 'ceiling' || (it.mount === 'wall' && it.elevation > 1400)
       if (it.hidden) {
-        for (let i = 0; i < 4; i++) {
-          const j = (i + 1) % 4
+        for (let i = 0; i < nc; i++) {
+          const j = (i + 1) % nc
           dashedEdge(hidden, c[i].x, c[i].y, c[j].x, c[j].y)
         }
         continue
@@ -75,14 +79,12 @@ export class ItemsLayer {
         g.poly(flat, true).fill({ color: fill, alpha: pal.itemFillAlpha })
       }
       const target = overhead ? dashed : outline
-      for (let i = 0; i < 4; i++) {
-        const j = (i + 1) % 4
+      for (let i = 0; i < nc; i++) {
+        const j = (i + 1) % nc
         if (overhead) dashedEdge(target, c[i].x, c[i].y, c[j].x, c[j].y)
         else target.push(c[i].x, c[i].y, c[j].x, c[j].y)
       }
-      const asset = ui.getAsset(it.assetId)
-      sk.setTransform(it.x, it.y, it.rotation * DEG, !!it.mirrored)
-      drawItemSketch(sketchKind(asset), it.size.w, it.size.d, sk)
+      if (!poly) drawItemSketch(sketchKind(asset, it.params), it.size.w, it.size.d, sk)
     }
 
     strokeSegments(g, sketch, pal.itemSketch, 0.9)

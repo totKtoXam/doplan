@@ -497,3 +497,72 @@ describe('a reload that finishes after another project was opened', () => {
     }
   })
 })
+
+describe('reloads of the same project that overlap', () => {
+  const openChatWith = (id: string) => {
+    const chat = { ...aiStore.getState().chat, id, messages: [{ id: 'm1', role: 'user', parts: [{ type: 'text', text: 'привет' }], at: 0 }] }
+    aiStore.setState({ chat: chat as never })
+  }
+
+  it('"back to current" clicked twice: the second is a reload too (the chat stays, no new claim)', async () => {
+    fake.files.set('C:/p/DV', planWithId('dvdvdvdv'))
+    fake.files.set('version:abc', planWithId('dvdvdvdv'))
+    await openProject('C:/p/DV', { skipConfirm: true })
+    await settle()
+    expect(await viewVersion(version)).toBe(true)
+    await settle()
+    openChatWith('chat-dv')
+    fake.calls.claim.length = 0
+    const release = holdFor(fake.gate.attachFor, 'C:/p/DV')
+    const a = leaveVersion()
+    const b = leaveVersion()
+    await settle()
+    await release()
+    await Promise.all([a, b])
+    await settle()
+    expect(aiStore.getState().chat.id).toBe('chat-dv')
+    expect(fake.calls.claim).toEqual([])
+    expect(projectStore.getState().viewing).toBeNull()
+  })
+
+  it("two disk reloads of a copy that overlap keep the copy's id and the open chat", async () => {
+    fake.files.set('C:/p/DC', planWithId('origDCDC'))
+    fake.claims.set('id:origDCDC|C:/p/DC', 'id:copyDCDC')
+    await openProject('C:/p/DC', { skipConfirm: true })
+    await settle()
+    expect(aiStore.getState().projectPath).toBe('id:copyDCDC')
+    openChatWith('chat-dc')
+    // a second claim of the file would give yet another id
+    fake.claims.set('id:origDCDC|C:/p/DC', 'id:copy2DC2')
+    const release = holdFor(fake.gate.openFor, 'C:/p/DC')
+    const a = openProject('C:/p/DC', { skipConfirm: true, reload: 'disk' })
+    const b = openProject('C:/p/DC', { skipConfirm: true, reload: 'disk' })
+    await settle()
+    await release()
+    await Promise.all([a, b])
+    await settle()
+    expect(docStore.getState().doc.meta.id).toBe('copyDCDC')
+    expect(aiStore.getState().projectPath).toBe('id:copyDCDC')
+    expect(aiStore.getState().chat.id).toBe('chat-dc')
+  })
+
+  it('a version view that lands while the project is reloaded leaves the reload a reload', async () => {
+    fake.files.set('C:/p/DW', planWithId('dwdwdwdw'))
+    fake.files.set('version:abc', planWithId('dwdwdwdw'))
+    await openProject('C:/p/DW', { skipConfirm: true })
+    await settle()
+    openChatWith('chat-dw')
+    fake.calls.claim.length = 0
+    const release = holdFor(fake.gate.attachFor, 'C:/p/DW')
+    const reloading = openProject('C:/p/DW', { skipConfirm: true, reload: 'disk' })
+    await settle()
+    expect(await viewVersion(version)).toBe(true)
+    await settle()
+    await release()
+    await reloading
+    await settle()
+    expect(aiStore.getState().chat.id).toBe('chat-dw')
+    expect(fake.calls.claim).toEqual([])
+    expect(docStore.getState().doc.meta.id).toBe('dwdwdwdw')
+  })
+})

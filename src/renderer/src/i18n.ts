@@ -515,12 +515,21 @@ const en: Record<string, string> = {
     'Save it as a project folder? A folder keeps a version history (git) and instructions for AI (AGENTS.md). The .doplan file stays unchanged.',
   'Не сейчас': 'Not now',
   'В папке уже есть репозиторий git': 'The folder already has a git repository',
-  'Эту папку создал не doplan, и в её настройках git могут быть чужие команды. Пока вы не доверяете папке, doplan не запускает в ней git: история версий выключена, сохранение пишет только файлы. Доверяйте, только если папка ваша или получена из надёжного источника.':
-    'This folder was not created by doplan, and its git settings may run someone else’s commands. Until you trust the folder, doplan runs no git in it: version history is off and saving writes files only. Trust it only if the folder is yours or comes from a reliable source.',
+  'Эту папку создал не doplan, и в её настройках git могут быть чужие команды. Пока вы не доверяете папке, doplan не запускает в ней git: история версий выключена, сохранение пишет только файлы, а ИИ-агент работает в отдельной папке. Доверяйте, только если папка ваша или получена из надёжного источника.':
+    'This folder was not created by doplan, and its git settings may run someone else’s commands. Until you trust the folder, doplan runs no git in it: version history is off, saving writes files only, and the AI agent works in a separate folder. Trust it only if the folder is yours or comes from a reliable source.',
+  'Доверять папке проекта?': 'Trust the project folder?',
+  'Папку «{name}» doplan не создавал на этом компьютере (или её заменили либо переместили). В доверенной папке ИИ-агент работает прямо в ней: следует её AGENTS.md как вашим инструкциям, читает её настройки агента (.claude, .codex, .gemini) и запускает в ней git. Иначе агент работает в отдельной папке и видит AGENTS.md только как заметки автора. Доверяйте, только если папка ваша или получена из надёжного источника.':
+    'doplan did not create the folder “{name}” on this computer (or it was replaced or moved). In a trusted folder the AI agent works right inside it: it follows its AGENTS.md as your instructions, reads its agent settings (.claude, .codex, .gemini) and runs git in it. Otherwise the agent works in a separate folder and sees AGENTS.md only as the author’s notes. Trust it only if the folder is yours or comes from a reliable source.',
+  'Работать вне папки': 'Work outside the folder',
+  'Не удалось доверить папку': 'Could not trust the folder',
+  'В папке .git — это файл: папка входит в другой репозиторий (подмодуль или git worktree). doplan не ведёт историю версий в такой папке; сохранение пишет только файлы. Историей управляйте в своём git-клиенте.':
+    'The folder’s .git is a file: the folder belongs to another repository (a submodule or a git worktree). doplan keeps no version history in such a folder; saving writes files only. Manage its history in your git client.',
+  'Папка входит в другой репозиторий git — история версий doplan выключена': 'The folder belongs to another git repository — doplan’s version history is off',
+  'Несохранённые инструкции': 'Unsaved instructions',
+  'Не удалось сохранить инструкции': 'Could not save the instructions',
   'Не доверять': 'Don’t trust',
   'Доверять этой папке': 'Trust this folder',
   'Доверять этой папке…': 'Trust this folder…',
-  'Не удалось включить историю версий': 'Could not turn on version history',
   Сохранение: 'Save',
   'Восстановить эту версию?': 'Restore this version?',
   'Версия от {date} («{msg}») станет текущей. Будет создана новая версия, история не изменится.':

@@ -11,6 +11,7 @@ import type { EntityRef, Id } from '@core/types'
 import type { AiChatMeta, AiChatRecord, AiChatSettings, AiChip, AiImage, AiLoginEvent, AiMessage, AiPart, AiProviderId, AiProviderInfo, AiRunEvent, AiToolCall } from '@shared/aiChat'
 import { DEFAULT_AI_SETTINGS } from '@shared/aiChat'
 import { AI_TOOL_TITLES, isAiToolName } from '@shared/aiTools'
+import { ensureAiFolderTrust } from '@/actions/project'
 import { api } from '@/store/api'
 import { docStore } from '@/store/document'
 import { getMark, marksStore } from '@/store/marks'
@@ -438,7 +439,20 @@ export function currentProvider(): AiProviderInfo | undefined {
   return s.providers.find((p) => p.id === s.settings.provider)
 }
 
+/** a trust question is open (send() awaits it): a second send waits for nothing */
+let askingTrust = false
+
 export async function send(raw: string): Promise<void> {
+  if (get().running || askingTrust) return
+  if (currentProvider()?.id !== 'api' && currentProvider()?.available) {
+    // an agent CLI in a project folder the user has not trusted yet: ask once (see actions/project.ts)
+    askingTrust = true
+    try {
+      if (!(await ensureAiFolderTrust())) return
+    } finally {
+      askingTrust = false
+    }
+  }
   const st = get()
   if (st.running) return
   const { text, needsImage } = expandQuick(raw)

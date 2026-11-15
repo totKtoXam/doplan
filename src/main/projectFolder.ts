@@ -24,9 +24,9 @@ import {
   stableStringify,
 } from '../shared/projectFormat'
 import { atomicWrite, cleanFileName, ensureDir, exists, rmrf } from './fsutil'
-import { findGit, gitCommit, gitInit, gitListDir, gitShowFile, hasGitEntry, isRepo } from './git'
+import { findGit, gitCommit, gitInit, gitListDir, gitShowFile } from './git'
 import { paths } from './paths'
-import { isTrustedRepo, msg, trustRepo } from './settings'
+import { msg, setTrustRecord, trustRecord } from './settings'
 
 export const ASSET_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
 /** names produced by addProjectAsset: sha256.ext — only these are ever deleted from assets/ */
@@ -124,16 +124,76 @@ export async function folderRootOf(p: string): Promise<string | null> {
   return (await isProjectFolder(dir)) ? resolve(dir) : null
 }
 
-// ───────────── git trust ─────────────
+// ───────────── trust ─────────────
+
+/** what `.git` in a folder is: nothing, a repository directory, or a gitdir file (submodule, worktree) */
+export async function gitState(root: string): Promise<'none' | 'repo' | 'gitfile'> {
+  try {
+    return (await fsp.lstat(join(root, '.git'))).isDirectory() ? 'repo' : 'gitfile'
+  } catch {
+    return 'none'
+  }
+}
+
+async function entryId(p: string, link: boolean): Promise<string> {
+  const st = link ? await fsp.lstat(p, { bigint: true }) : await fsp.stat(p, { bigint: true })
+  return `${st.dev}:${st.ino}:${st.birthtimeNs}`
+}
 
 /**
- * 'none': no repository yet (doplan creates one on save); 'trusted': created by doplan or confirmed by
- * the user; 'untrusted': a repository that came with the folder. Git may run programs named in a
- * repository's own config (filters, textconv…), so doplan runs no git command in an untrusted one.
+ * Identity of a project folder on disk: the folder and its `.git` (device, file id, creation time).
+ * A folder deleted and replaced by another one at the same path (a received copy unpacked over a
+ * trusted project) gets a different identity, and so loses the trust recorded for the old one.
  */
-export async function gitTrust(root: string): Promise<'none' | 'trusted' | 'untrusted'> {
-  if (!hasGitEntry(root)) return 'none'
-  return isRepo(root) && (await isTrustedRepo(root)) ? 'trusted' : 'untrusted'
+export async function folderIdentity(root: string): Promise<string> {
+  const dir = await entryId(root, false)
+  let git = '-'
+  try {
+    git = await entryId(join(root, '.git'), true)
+  } catch {
+    /* no .git */
+  }
+  return `${dir}|${git}`
+}
+
+export interface FolderTrust {
+  /**
+   * 'none': no repository yet (doplan creates one on save); 'trusted': created by doplan or confirmed by
+   * the user; 'untrusted': a repository that came with the folder; 'gitfile': .git is a file (submodule,
+   * worktree) — doplan keeps no history there. Git may run programs named in a repository's own config
+   * (filters, fsmonitor…), so doplan runs no git command in a repository it does not trust.
+   */
+  git: 'none' | 'trusted' | 'untrusted' | 'gitfile'
+  /**
+   * the folder itself is trusted (doplan created it or the user confirmed it): the AI agent may run
+   * inside it, where it reads the folder's own settings (.claude/, .codex/, .gemini/) and runs git.
+   */
+  folder: boolean
+}
+
+export async function folderTrust(root: string): Promise<FolderTrust> {
+  const state = await gitState(root)
+  const rec = await trustRecord(root)
+  let same = false
+  if (rec) {
+    try {
+      same = rec.id === (await folderIdentity(root))
+    } catch {
+      same = false
+    }
+  }
+  const git = state === 'none' ? 'none' : state === 'gitfile' ? 'gitfile' : same ? 'trusted' : 'untrusted'
+  return { git, folder: same && rec!.folder }
+}
+
+/** true when the AI agent may run inside this folder (see FolderTrust.folder) */
+export async function isFolderTrusted(root: string): Promise<boolean> {
+  return (await folderTrust(root)).folder
+}
+
+/** records the folder as it is on disk now; `folder`: the user (or doplan, having created it) trusts the folder itself */
+export async function trustFolder(root: string, folder = true): Promise<void> {
+  await setTrustRecord(root, await folderIdentity(root), folder)
 }
 
 export function untrustedError(): Error {
@@ -281,14 +341,19 @@ export async function writeFolderProject(root: string, doc: unknown): Promise<vo
   knownPlanHash.set(key(root), sha256(plan))
 }
 
-/** git commit of the whole folder; null when git is missing or nothing changed. Throws for an untrusted repository. */
+/**
+ * git commit of the whole folder; null when git is missing, nothing changed or .git is a file (no
+ * history there). Throws for an untrusted repository. A folder without a repository gets one: git init
+ * creates a fresh config, so nothing from the folder runs.
+ */
 export async function commitFolder(root: string, message: string, onlyPaths?: string[]): Promise<string | null> {
   if (!(await findGit())) return null
-  const trust = await gitTrust(root)
-  if (trust === 'untrusted') throw untrustedError()
-  if (trust === 'none') {
+  const trust = await folderTrust(root)
+  if (trust.git === 'untrusted') throw untrustedError()
+  if (trust.git === 'gitfile') return null
+  if (trust.git === 'none') {
     await gitInit(root)
-    await trustRepo(root)
+    await trustFolder(root, trust.folder)
   }
   return gitCommit(root, message, onlyPaths)
 }
@@ -326,12 +391,13 @@ async function createFolderProjectAt(root: string, name: string, doc: unknown, n
   }
   await ensureDir(root)
   await writeFolderProject(root, doc)
+  await trustFolder(root)
   let commit: string | null = null
   let git = false
   try {
     if (await findGit()) {
       await gitInit(root)
-      await trustRepo(root)
+      await trustFolder(root)
       git = true
       commit = await gitCommit(root, msg(`Создан проект «${docName(doc) ?? name}»`, `Created project “${docName(doc) ?? name}”`))
     }
@@ -369,7 +435,7 @@ export async function writeInstructions(root: string, text: string): Promise<str
 
 /** plan.json of a commit; its assets are copied into the open-project asset directory */
 export async function readVersion(root: string, sha: string): Promise<unknown> {
-  if ((await gitTrust(root)) !== 'trusted') throw untrustedError()
+  if ((await folderTrust(root)).git !== 'trusted') throw untrustedError()
   const plan = await gitShowFile(root, sha, PLAN_FILE)
   if (!plan) throw new Error(msg('В этой версии нет plan.json', 'This version has no plan.json'))
   const doc = parseJsonText(new Uint8Array(plan))

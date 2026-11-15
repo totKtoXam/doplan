@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
@@ -12,8 +12,9 @@ vi.mock('electron', () => ({
 }))
 
 const { gitCandidates, findGit } = await import('./git')
-const { commitFolder, createFolderProject, folderRootOf, gitTrust, isProjectFolder } = await import('./projectFolder')
-const { trustRepo } = await import('./settings')
+const { commitFolder, createFolderProject, folderRootOf, folderTrust, isProjectFolder, trustFolder } = await import('./projectFolder')
+const { findOnPath } = await import('./aichat/detect')
+const { execFileSync } = await import('node:child_process')
 
 function folder(name: string, files: Record<string, string>): string {
   const dir = join(base, name)
@@ -46,6 +47,21 @@ describe('project folder detection', () => {
 })
 
 describe('git executable', () => {
+  it('agent CLIs are looked up in absolute PATH entries only', () => {
+    const name = 'doplan-fake-cli'
+    const rel = join(base, 'cwd-bin')
+    mkdirSync(rel, { recursive: true })
+    writeFileSync(join(rel, process.platform === 'win32' ? `${name}.exe` : name), '')
+    const cwd = process.cwd()
+    process.chdir(rel)
+    try {
+      expect(findOnPath(name, { PATH: '.', Path: '.' })).toBeNull()
+      expect(findOnPath(name, { PATH: rel, Path: rel })?.path).toBe(join(rel, process.platform === 'win32' ? `${name}.exe` : name))
+    } finally {
+      process.chdir(cwd)
+    }
+  })
+
   it('is only ever an absolute path, even with relative PATH entries', () => {
     const key = process.platform === 'win32' ? 'Path' : 'PATH'
     const saved = process.env[key]
@@ -60,15 +76,24 @@ describe('git executable', () => {
   })
 })
 
-describe('git trust', { timeout: 30_000 }, async () => {
+describe('folder trust', { timeout: 30_000 }, async () => {
   const git = await findGit()
+  const gitIn = (dir: string, ...args: string[]) => execFileSync(git!, args, { cwd: dir, encoding: 'utf8' })
 
-  it('a folder without .git needs no trust; a .git that came with the folder is untrusted', async () => {
+  it('a folder without .git has no repository yet; a .git that came with the folder is untrusted', async () => {
     const plain = folder('plain', { 'plan.json': '{}', 'manifest.json': MANIFEST })
-    expect(await gitTrust(plain)).toBe('none')
+    expect(await folderTrust(plain)).toEqual({ git: 'none', folder: false })
     const foreign = folder('foreign', { 'plan.json': '{}', 'manifest.json': MANIFEST, '.git/HEAD': 'ref: refs/heads/main\n' })
-    expect(await gitTrust(foreign)).toBe('untrusted')
+    expect(await folderTrust(foreign)).toEqual({ git: 'untrusted', folder: false })
     await expect(commitFolder(foreign, 'x')).rejects.toThrow()
+  })
+
+  it('a .git file (submodule, worktree) gets no history and no error', async () => {
+    const sub = folder('submodule', { 'plan.json': '{}', 'manifest.json': MANIFEST, '.git': 'gitdir: ../elsewhere/.git\n' })
+    expect((await folderTrust(sub)).git).toBe('gitfile')
+    expect(await commitFolder(sub, 'x')).toBeNull()
+    await trustFolder(sub)
+    expect(await folderTrust(sub)).toEqual({ git: 'gitfile', folder: true })
   })
 
   it.skipIf(!git)('doplan repositories are trusted and repository hooks never run', async () => {
@@ -76,7 +101,7 @@ describe('git trust', { timeout: 30_000 }, async () => {
     mkdirSync(parent, { recursive: true })
     const res = await createFolderProject(parent, 'Дом', { version: 1, meta: { name: 'Дом' } })
     expect(res.git).toBe(true)
-    expect(await gitTrust(res.root)).toBe('trusted')
+    expect(await folderTrust(res.root)).toEqual({ git: 'trusted', folder: true })
     // a hook planted later (e.g. by a copied folder or a tool) must not run on save
     const marker = join(base, 'hook-ran')
     const hook = join(res.root, '.git', 'hooks', 'post-commit')
@@ -86,10 +111,43 @@ describe('git trust', { timeout: 30_000 }, async () => {
     expect(existsSync(marker)).toBe(false)
   })
 
+  it.skipIf(!git)('trust is bound to the folder on disk: a folder replaced at the same path is untrusted again', async () => {
+    const parent = join(base, 'projects2')
+    mkdirSync(parent, { recursive: true })
+    const res = await createFolderProject(parent, 'Проект', { version: 1, meta: { name: 'Проект' } })
+    expect(await folderTrust(res.root)).toEqual({ git: 'trusted', folder: true })
+    // the trusted folder is moved away and a received copy is unpacked at the same path
+    renameSync(res.root, join(parent, 'old'))
+    folder(join('projects2', 'Проект'), { 'plan.json': '{}', 'manifest.json': MANIFEST })
+    gitIn(res.root, 'init', '-q')
+    expect(await folderTrust(res.root)).toEqual({ git: 'untrusted', folder: false })
+    await expect(commitFolder(res.root, 'x')).rejects.toThrow()
+  })
+
+  it.skipIf(!git)('saving a folder without .git creates a repository but does not trust the folder for the AI', async () => {
+    const plain = folder('plain2', { 'plan.json': '{}', 'manifest.json': MANIFEST })
+    expect(await commitFolder(plain, 'Первая')).toBeTruthy()
+    expect(await folderTrust(plain)).toEqual({ git: 'trusted', folder: false })
+    await trustFolder(plain)
+    expect(await folderTrust(plain)).toEqual({ git: 'trusted', folder: true })
+  })
+
+  it.skipIf(!git)('filter drivers from the repository config never run on save', async () => {
+    const foreign = folder('filters', { 'plan.json': '{}', 'manifest.json': MANIFEST, '.gitattributes': '*.json filter=evil\n' })
+    gitIn(foreign, 'init', '-q')
+    const marker = join(base, 'filter-ran').replace(/\\/g, '/')
+    gitIn(foreign, 'config', 'filter.evil.clean', `sh -c "echo ran > '${marker}'; cat"`)
+    gitIn(foreign, 'config', 'filter.evil.required', 'true')
+    await trustFolder(foreign)
+    expect((await folderTrust(foreign)).git).toBe('trusted')
+    expect(await commitFolder(foreign, 'x')).toBeTruthy()
+    expect(existsSync(marker)).toBe(false)
+  })
+
   it.skipIf(!git)('the user can trust a foreign repository', async () => {
     const foreign = folder('foreign2', { 'plan.json': '{}', 'manifest.json': MANIFEST, '.git/HEAD': 'ref: refs/heads/main\n' })
-    expect(await gitTrust(foreign)).toBe('untrusted')
-    await trustRepo(foreign)
-    expect(await gitTrust(foreign)).toBe('trusted')
+    expect((await folderTrust(foreign)).git).toBe('untrusted')
+    await trustFolder(foreign)
+    expect(await folderTrust(foreign)).toEqual({ git: 'trusted', folder: true })
   })
 })

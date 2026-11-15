@@ -7,7 +7,7 @@ import { docStore } from '@/store/document'
 import { alertDialog, choiceDialog, confirmDialog, setProgress, toast } from '@/store/notify'
 import { uiStore } from '@/store/ui'
 import { copyLevelInto } from './levels'
-import { confirmDiscard, loadDocument, openProject } from './project'
+import { confirmDiscard, confirmInstructionsDiscard, loadDocument, openProject } from './project'
 import { activeLevel, currentDoc, errorText, extOf, IMAGE_EXTS, imageSize, MODEL_AUX_EXTS, MODEL_EXTS, mimeOf } from './util'
 
 // ───────────── PlanSpec ─────────────
@@ -126,7 +126,7 @@ async function placeImportedDoc(compiled: Doc): Promise<boolean> {
   }
   if (mode === 'cancel') return false
   if (mode === 'replace') {
-    if (!empty && !(await confirmDiscard())) return false
+    if (!(await confirmInstructionsDiscard()) || (!empty && !(await confirmDiscard()))) return false
     loadDocument(compiled, null)
     toast(t('План импортирован'), 'success')
     return true

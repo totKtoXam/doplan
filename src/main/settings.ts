@@ -4,6 +4,16 @@ import type { AppSettings, RecentProject } from '../shared/ipc'
 import { atomicWrite, readJson } from './fsutil'
 import { paths } from './paths'
 
+interface TrustedFolder {
+  /** resolved, lower-cased path */
+  path: string
+  /** identity of the folder (and its .git) on disk when it was recorded: a folder replaced at the same path differs */
+  id: string
+  /** the user trusts the folder itself (doplan created it or the user confirmed it): the AI agent may run in it.
+   *  false: only the git repository is doplan's own (doplan ran git init in a folder that had none). */
+  folder: boolean
+}
+
 interface StoredSettings {
   lang: AppSettings['lang']
   theme: AppSettings['theme']
@@ -12,8 +22,8 @@ interface StoredSettings {
   recent: RecentProject[]
   /** default parent folder for new projects; absent → Documents/doplan */
   projectsDir?: string
-  /** project folders whose existing git repository the user trusts (or that doplan created), lower-cased */
-  trustedRepos?: string[]
+  /** project folders whose git repository doplan created or the user trusted, with the identity they had then */
+  trustedFolders?: TrustedFolder[]
   /** base64 of safeStorage-encrypted API key */
   apiKeyEnc?: string
 }
@@ -56,7 +66,12 @@ function sanitize(raw: Partial<StoredSettings> | null | undefined): StoredSettin
         : DEFAULTS.autosaveSec,
     recent,
     projectsDir: typeof r.projectsDir === 'string' && isAbsolute(r.projectsDir) ? r.projectsDir : undefined,
-    trustedRepos: Array.isArray(r.trustedRepos) ? r.trustedRepos.filter((x): x is string => typeof x === 'string' && isAbsolute(x)).slice(-500) : undefined,
+    trustedFolders: Array.isArray(r.trustedFolders)
+      ? r.trustedFolders
+          .filter((x): x is TrustedFolder => !!x && typeof x.path === 'string' && isAbsolute(x.path) && typeof x.id === 'string' && !!x.id)
+          .map((x) => ({ path: x.path, id: x.id, folder: x.folder === true }))
+          .slice(-500)
+      : undefined,
     apiKeyEnc: typeof r.apiKeyEnc === 'string' && r.apiKeyEnc ? r.apiKeyEnc : undefined,
   }
 }
@@ -114,7 +129,7 @@ export async function setSettings(patch: unknown): Promise<AppSettings> {
   next.recent = cur.recent
   // a custom projects folder is chosen only through the main-process folder picker (setProjectsDir);
   // the renderer may only reset it to the default
-  next.trustedRepos = cur.trustedRepos
+  next.trustedFolders = cur.trustedFolders
   next.projectsDir = 'projectsDir' in p && p.projectsDir == null ? undefined : cur.projectsDir
   await persist(next)
   emit(next)
@@ -131,20 +146,21 @@ export function msg(ru: string, en: string): string {
   return uiLang() === 'en' ? en : ru
 }
 
-const repoKey = (root: string) => resolve(root).toLowerCase()
+const folderKey = (root: string) => resolve(root).toLowerCase()
 
-/** true when the git repository in this project folder is trusted (created by doplan or confirmed by the user) */
-export async function isTrustedRepo(root: string): Promise<boolean> {
-  const k = repoKey(root)
-  return ((await load()).trustedRepos ?? []).includes(k)
+/** what is recorded about a project folder (see projectFolder.folderTrust), or null */
+export async function trustRecord(root: string): Promise<{ id: string; folder: boolean } | null> {
+  const k = folderKey(root)
+  const r = (await load()).trustedFolders?.find((f) => f.path === k)
+  return r ? { id: r.id, folder: r.folder } : null
 }
 
-export async function trustRepo(root: string): Promise<void> {
+export async function setTrustRecord(root: string, id: string, folder: boolean): Promise<void> {
   const cur = await load()
-  const k = repoKey(root)
-  const list = (cur.trustedRepos ?? []).filter((x) => x !== k)
-  list.push(k)
-  await persist({ ...cur, trustedRepos: list.slice(-500) })
+  const k = folderKey(root)
+  const list = (cur.trustedFolders ?? []).filter((f) => f.path !== k)
+  list.push({ path: k, id, folder })
+  await persist({ ...cur, trustedFolders: list.slice(-500) })
 }
 
 /** custom default parent folder for new projects, or null (→ Documents/doplan) */

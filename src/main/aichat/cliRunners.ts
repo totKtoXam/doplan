@@ -100,6 +100,9 @@ export async function runClaude(ctx: RunCtx, bin: ResolvedBin): Promise<void> {
     JSON.stringify({ mcpServers: { doplan: { type: 'http', url: endpoint.url, headers: { Authorization: `Bearer ${endpoint.token}` } } } }),
     { mode: 0o600 },
   )
+  // through a file: with AGENTS.md inlined the prompt can exceed the Windows command-line limit (32767)
+  const promptPath = join(dir, `prompt-${req.runId.replace(/[^A-Za-z0-9_-]/g, '')}.md`)
+  await writeFile(promptPath, ctx.systemPrompt, { mode: 0o600 })
   const s = req.settings
   const args = [
     '-p',
@@ -112,8 +115,8 @@ export async function runClaude(ctx: RunCtx, bin: ResolvedBin): Promise<void> {
     '--mcp-config',
     cfgPath,
     '--strict-mcp-config',
-    '--append-system-prompt',
-    ctx.systemPrompt,
+    '--append-system-prompt-file',
+    promptPath,
     '--permission-mode',
     'dontAsk',
     '--allowedTools',
@@ -138,6 +141,7 @@ export async function runClaude(ctx: RunCtx, bin: ResolvedBin): Promise<void> {
   })
   for (const ev of parser.end()) emit(ev)
   await rm(cfgPath, { force: true }).catch(() => {})
+  await rm(promptPath, { force: true }).catch(() => {})
 
   if (ctx.signal.aborted) return emit({ type: 'done', ok: false, stopped: true })
   const r = parser.result
@@ -202,12 +206,14 @@ export async function runGemini(ctx: RunCtx, bin: ResolvedBin): Promise<void> {
     JSON.stringify({ mcpServers: { doplan: { httpUrl: endpoint.url, headers: { Authorization: `Bearer ${endpoint.token}` }, timeout: Number(TOOL_TIMEOUT_MS), trust: true } } }),
     { mode: 0o600 },
   )
-  const args = ['-p', `<doplan-instructions>\n${ctx.systemPrompt}\n</doplan-instructions>\n\n${ctx.userText}`, '--allowed-mcp-server-names', 'doplan']
+  // the prompt goes through stdin (argv would hit the Windows command-line limit); -p is appended to it
+  const stdin = `<doplan-instructions>\n${ctx.systemPrompt}\n</doplan-instructions>\n\n${ctx.userText}\n`
+  const args = ['-p', 'Answer the user message above, following the doplan instructions.', '--allowed-mcp-server-names', 'doplan']
   if (req.settings.models.gemini) args.push('-m', req.settings.models.gemini)
   const env = { ...process.env, GEMINI_CLI_SYSTEM_SETTINGS_PATH: settingsPath }
   emit({ type: 'status', text: 'Gemini CLI запущен…' })
   const partId = `g${Date.now()}`
-  const out = await runProcess(ctx, bin, args, env, '', (d) => emit({ type: 'text', partId, delta: d }))
+  const out = await runProcess(ctx, bin, args, env, stdin, (d) => emit({ type: 'text', partId, delta: d }))
   await rm(settingsPath, { force: true }).catch(() => {})
   if (ctx.signal.aborted) return emit({ type: 'done', ok: false, stopped: true })
   if (out.code === 0) return emit({ type: 'done', ok: true })

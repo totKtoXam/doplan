@@ -8,7 +8,7 @@
  * history is unavailable (the UI says how to install git).
  */
 import { execFile } from 'node:child_process'
-import { existsSync, mkdirSync, statSync } from 'node:fs'
+import { mkdirSync, statSync } from 'node:fs'
 import { delimiter, isAbsolute, join } from 'node:path'
 import { app } from 'electron'
 import { msg } from './settings'
@@ -82,7 +82,8 @@ function emptyHooksDir(): string {
  * `-c` flags on every call: no hooks, no fsmonitor command, no signing programs, stable UTF-8 output.
  * Command-line config wins over the repository's own .git/config. Commands that could still run
  * programs from a repository's config (clean/smudge filters, textconv) are avoided or switched off
- * per call; repositories not created by doplan additionally need the user's trust (see projectFolder).
+ * per call (see filterOffArgs); repositories not created by doplan additionally need the user's
+ * trust (see projectFolder.folderTrust).
  */
 function hardeningArgs(): string[] {
   return [
@@ -135,6 +136,8 @@ class GitError extends Error {
 }
 
 interface RunOpts {
+  /** extra `-c` flags placed before the command */
+  config?: string[]
   input?: string
   binary?: boolean
   /** do not throw on a non-zero exit code */
@@ -144,7 +147,7 @@ interface RunOpts {
 async function run(root: string, args: string[], opts: RunOpts = {}): Promise<{ code: number; out: Buffer; err: string }> {
   const exe = await findGit()
   if (!exe) throw new Error(msg('Git не найден. Установите Git (https://git-scm.com), чтобы вести историю версий.', 'Git not found. Install Git (https://git-scm.com) to keep the version history.'))
-  const fullArgs = [...hardeningArgs(), ...args]
+  const fullArgs = [...hardeningArgs(), ...(opts.config ?? []), ...args]
   return new Promise((resolve, reject) => {
     const child = execFile(
       exe,
@@ -179,21 +182,22 @@ async function run(root: string, args: string[], opts: RunOpts = {}): Promise<{ 
 const text = async (root: string, args: string[], opts?: RunOpts) => (await run(root, args, opts)).out.toString('utf8')
 
 /**
- * true when `root` has its own repository directory (`.git/`). Checked without running git, so it
- * is safe on folders that are not trusted yet. A `.git` file (gitdir pointer to elsewhere) is not
- * treated as a project repository.
+ * `-c` flags that switch off the clean/smudge filter drivers a repository defines in its own config
+ * (.git/config and the files it includes): `git add` would otherwise run those programs. Drivers from
+ * the user's global or system config (git-lfs…) are the user's own and stay.
  */
-export function isRepo(root: string): boolean {
-  try {
-    return statSync(join(root, '.git')).isDirectory()
-  } catch {
-    return false
+async function filterOffArgs(root: string): Promise<string[]> {
+  const r = await run(root, ['config', '--show-scope', '--get-regexp', '^filter\\.'], { allowFail: true })
+  const names = new Set<string>()
+  for (const line of r.out.toString('utf8').split('\n')) {
+    const m = /^(\S+)\s+filter\.(.+)\.[^.\s]+(?:\s|$)/.exec(line)
+    if (m && m[1] !== 'system' && m[1] !== 'global') names.add(m[2])
   }
-}
-
-/** true when `root` has some `.git` entry (directory or gitdir file) */
-export function hasGitEntry(root: string): boolean {
-  return existsSync(join(root, '.git'))
+  const out: string[] = []
+  for (const n of names) {
+    out.push('-c', `filter.${n}.clean=`, '-c', `filter.${n}.smudge=`, '-c', `filter.${n}.process=`, '-c', `filter.${n}.required=false`)
+  }
+  return out
 }
 
 /** identity used when the user has none configured (commits must never fail because of it) */
@@ -218,19 +222,20 @@ export async function gitInit(root: string): Promise<void> {
  */
 export async function gitCommit(root: string, message: string, paths?: string[]): Promise<string | null> {
   const subject = message.trim() || msg('Сохранение', 'Save')
-  if (paths?.length) await run(root, ['add', '--', ...paths])
-  else await run(root, ['add', '-A'])
+  const config = await filterOffArgs(root)
+  if (paths?.length) await run(root, ['add', '--', ...paths], { config })
+  else await run(root, ['add', '-A'], { config })
   const diffArgs = ['diff', '--cached', '--quiet', '--no-ext-diff', '--no-textconv']
   // an unborn branch has nothing to diff against: always commit
   const hasHead = (await run(root, ['rev-parse', '--verify', '--quiet', 'HEAD'], { allowFail: true })).code === 0
   if (hasHead) {
-    const d = await run(root, paths?.length ? [...diffArgs, '--', ...paths] : diffArgs, { allowFail: true })
+    const d = await run(root, paths?.length ? [...diffArgs, '--', ...paths] : diffArgs, { allowFail: true, config })
     if (d.code === 0) return null
   }
   const id = await identityArgs(root)
   const args = [...id, 'commit', '--quiet', '--no-verify', '-F', '-']
   if (paths?.length) args.push('--', ...paths)
-  await run(root, args, { input: `${subject}\n` })
+  await run(root, args, { input: `${subject}\n`, config })
   return (await text(root, ['rev-parse', 'HEAD'])).trim()
 }
 

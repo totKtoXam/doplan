@@ -15,15 +15,19 @@ export interface ProjectState {
   /** project folder (null: unsaved document or a .doplan / .json file) */
   root: string | null
   kind: ProjectKind | null
-  /** the folder is a git repository doplan may use */
+  /** doplan keeps the version history of the folder in git (the repository exists or is created on save) */
   git: boolean
   /** the folder came with a .git that the user has not trusted yet (doplan runs no git there) */
   untrustedGit: boolean
+  /** .git in the folder is a file (submodule, worktree): no version history there */
+  gitFile: boolean
   /** document history position of the last commit; labels after it make the next commit message */
   commitMarker: number
   /** an old version loaded from history (Ctrl+S restores it as a new commit) */
   viewing: ProjectVersion | null
   dialog: ProjectDialog
+  /** unsaved edits in the AGENTS.md editor (window close and opening another project ask about them) */
+  instructionsDraft: { root: string; text: string } | null
   /** bumped when the history changed (new commit / tag) */
   historyRev: number
 }
@@ -33,9 +37,11 @@ export const projectStore = createStore<ProjectState>()(() => ({
   kind: null,
   git: false,
   untrustedGit: false,
+  gitFile: false,
   commitMarker: 0,
   viewing: null,
   dialog: null,
+  instructionsDraft: null,
   historyRev: 0,
 }))
 

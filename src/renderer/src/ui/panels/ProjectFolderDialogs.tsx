@@ -14,7 +14,7 @@ import {
   restoreVersion,
   viewVersion,
   createProjectFolder,
-  offerTrustGit,
+  offerTrustFolder,
 } from '@/actions/project'
 import { useT } from '@/i18n'
 import { api } from '@/store/api'
@@ -214,6 +214,12 @@ function HistoryDialog() {
             https://git-scm.com/downloads
           </a>
         </div>
+      ) : info && info.gitFile ? (
+        <div className="flex flex-col gap-2 text-[12px] leading-relaxed">
+          <div>
+            {t('В папке .git — это файл: папка входит в другой репозиторий (подмодуль или git worktree). doplan не ведёт историю версий в такой папке; сохранение пишет только файлы. Историей управляйте в своём git-клиенте.')}
+          </div>
+        </div>
       ) : info && info.repo && !info.trusted ? (
         <div className="flex flex-col gap-2 text-[12px] leading-relaxed">
           {error && <div className="text-[11px] text-[#ff8589]">{error}</div>}
@@ -224,7 +230,7 @@ function HistoryDialog() {
             <Button variant="primary" 
               onClick={() =>
                 run(async () => {
-                  if (await offerTrustGit()) projectStore.setState({ dialog: 'history' })
+                  if (await offerTrustFolder('git')) projectStore.setState({ dialog: 'history' })
                 })
               }
             >
@@ -334,6 +340,12 @@ function InstructionsDialog() {
     else close()
   }
 
+  // the folder whose AGENTS.md this editor holds; another project opened meanwhile closes the editor
+  const [openedRoot] = useState(root)
+  useEffect(() => {
+    if (root !== openedRoot) close()
+  }, [root, openedRoot])
+
   useEffect(() => {
     let alive = true
     api.project
@@ -347,7 +359,13 @@ function InstructionsDialog() {
     return () => {
       alive = false
     }
-  }, [root])
+  }, [])
+
+  // unsaved edits are visible to the window-close and open-project paths (actions/project.ts)
+  useEffect(() => {
+    projectStore.setState({ instructionsDraft: changed && openedRoot ? { root: openedRoot, text: text ?? '' } : null })
+  }, [changed, text, openedRoot])
+  useEffect(() => () => projectStore.setState({ instructionsDraft: null }), [])
 
   const save = async () => {
     if (text === null) return
@@ -477,6 +495,7 @@ export function ProjectFolderSection() {
   const root = useProject((s) => s.root)
   const git = useProject((s) => s.git)
   const untrustedGit = useProject((s) => s.untrustedGit)
+  const gitFile = useProject((s) => s.gitFile)
   const filePath = useDoc((s) => s.filePath)
   if (api.platform === 'browser') return null
   return (
@@ -488,6 +507,8 @@ export function ProjectFolderSection() {
           </div>
           {untrustedGit ? (
             <div className="text-[11px] text-[var(--muted)]">{t('История версий выключена: папке не доверяют')}</div>
+          ) : gitFile ? (
+            <div className="text-[11px] text-[var(--muted)]">{t('Папка входит в другой репозиторий git — история версий doplan выключена')}</div>
           ) : (
             !git && <div className="text-[11px] text-[var(--muted)]">{t('Git не найден — история версий недоступна')}</div>
           )}

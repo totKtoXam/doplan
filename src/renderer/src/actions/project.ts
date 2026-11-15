@@ -20,7 +20,7 @@ function kindOfPath(path: string | null): ProjectKind | null {
 }
 
 /** Load a document into the store and reset the per-document UI state. */
-export function loadDocument(doc: Doc, filePath: string | null, project?: { kind?: ProjectKind | null; git?: boolean; untrustedGit?: boolean }): void {
+export function loadDocument(doc: Doc, filePath: string | null, project?: { kind?: ProjectKind | null; git?: boolean; untrustedGit?: boolean; gitFile?: boolean }): void {
   docStore.getState().load(doc, filePath)
   const d = docStore.getState().doc
   uiStore.getState().set({
@@ -39,6 +39,7 @@ export function loadDocument(doc: Doc, filePath: string | null, project?: { kind
     kind,
     git: root ? !!project?.git : false,
     untrustedGit: root ? !!project?.untrustedGit : false,
+    gitFile: root ? !!project?.gitFile : false,
     commitMarker: historyPosition(),
     viewing: null,
   })
@@ -48,10 +49,39 @@ export function loadDocument(doc: Doc, filePath: string | null, project?: { kind
 }
 
 /**
- * Asks what to do with unsaved changes. Resolves true when it is OK to continue
- * (saved or discarded), false when the user cancelled.
+ * Unsaved edits in the AGENTS.md editor: asks whether to save them before the window closes or another
+ * project opens. Resolves true when it is OK to continue (saved or discarded; the editor is closed).
+ */
+export async function confirmInstructionsDiscard(): Promise<boolean> {
+  const draft = projectStore.getState().instructionsDraft
+  if (!draft) return true
+  const choice = await choiceDialog(t('Несохранённые инструкции'), t('Сохранить изменения в AGENTS.md?'), [
+    { id: 'cancel', label: t('Отмена') },
+    { id: 'discard', label: t('Не сохранять'), variant: 'danger' },
+    { id: 'save', label: t('Сохранить'), variant: 'primary' },
+  ])
+  if (choice !== 'save' && choice !== 'discard') return false
+  if (choice === 'save') {
+    if (projectStore.getState().root !== draft.root) return false // the project changed meanwhile: keep the editor
+    try {
+      const commit = await api.project.setInstructions(draft.text)
+      if (commit) projectStore.setState((s) => ({ historyRev: s.historyRev + 1 }))
+      toast(t('Инструкции сохранены'), 'success')
+    } catch (err) {
+      await alertDialog(t('Не удалось сохранить инструкции'), errorText(err))
+      return false
+    }
+  }
+  projectStore.setState({ dialog: null, instructionsDraft: null })
+  return true
+}
+
+/**
+ * Asks what to do with unsaved changes (the plan and the AGENTS.md editor). Resolves true when it is
+ * OK to continue (saved or discarded), false when the user cancelled.
  */
 export async function confirmDiscard(): Promise<boolean> {
+  if (!(await confirmInstructionsDiscard())) return false
   if (!docStore.getState().dirty) return true
   const choice = await choiceDialog(t('Несохранённые изменения'), t('Сохранить изменения в проекте «{name}»?', { name: currentDoc().meta.name }), [
     { id: 'cancel', label: t('Отмена') },
@@ -113,7 +143,7 @@ export async function createProjectFolder(mode: 'new' | 'saveAs', name: string, 
       if (store.doc.meta.name !== clean) store.transact(t('Название проекта'), (d) => void (d.meta.name = clean))
       const res = await api.project.create(docStore.getState().doc, clean, parent)
       docStore.getState().markSaved(res.path)
-      projectStore.setState({ root: res.path, kind: 'folder', git: !!res.git, untrustedGit: false, commitMarker: historyPosition(), viewing: null })
+      projectStore.setState({ root: res.path, kind: 'folder', git: !!res.git, untrustedGit: false, gitFile: false, commitMarker: historyPosition(), viewing: null })
       void api.project.clearRecovery().catch(() => {})
     }
     refreshRecent()
@@ -143,10 +173,10 @@ async function afterOpen(res: Awaited<ReturnType<typeof api.project.open>>): Pro
     await alertDialog(t('Не удалось открыть проект'), errorText(err))
     return
   }
-  loadDocument(doc, res.path, { kind: res.kind ?? kindOfPath(res.path), git: res.git, untrustedGit: res.untrustedGit })
+  loadDocument(doc, res.path, { kind: res.kind ?? kindOfPath(res.path), git: res.git, untrustedGit: res.untrustedGit, gitFile: res.gitFile })
   refreshRecent()
   toast(t('Проект открыт'), 'success')
-  if (res.untrustedGit) await offerTrustGit()
+  if (res.untrustedGit) await offerTrustFolder('git')
   if (res.kind === 'zip' && api.platform !== 'browser') {
     const choice = await choiceDialog(
       t('Проект в одном файле .doplan'),
@@ -160,30 +190,66 @@ async function afterOpen(res: Awaited<ReturnType<typeof api.project.open>>): Pro
   }
 }
 
+/** folders (lower-cased) the user chose not to trust in this session: the AI chat does not ask again */
+const notTrusted = new Set<string>()
+
 /**
- * The opened folder already had a .git that doplan did not create: its config and hooks are not trusted,
- * so doplan runs no git commands there until the user says the folder is theirs.
+ * Asks whether the user trusts the open project folder.
+ * 'git': the opened folder already had a .git that doplan did not create — its config and hooks are
+ * not trusted, so doplan runs no git commands there until the user says the folder is theirs.
+ * 'ai': before the first AI agent run in a folder doplan did not create here (or that was replaced or
+ * moved): an untrusted folder is not the agent's working directory.
  */
-export async function offerTrustGit(): Promise<boolean> {
+export async function offerTrustFolder(reason: 'git' | 'ai'): Promise<boolean> {
+  const root = projectStore.getState().root
+  if (!root) return false
   const choice = await choiceDialog(
-    t('В папке уже есть репозиторий git'),
-    t('Эту папку создал не doplan, и в её настройках git могут быть чужие команды. Пока вы не доверяете папке, doplan не запускает в ней git: история версий выключена, сохранение пишет только файлы. Доверяйте, только если папка ваша или получена из надёжного источника.'),
-    [
-      { id: 'no', label: t('Не доверять') },
-      { id: 'yes', label: t('Доверять этой папке'), variant: 'primary' },
-    ],
+    reason === 'git' ? t('В папке уже есть репозиторий git') : t('Доверять папке проекта?'),
+    reason === 'git'
+      ? t('Эту папку создал не doplan, и в её настройках git могут быть чужие команды. Пока вы не доверяете папке, doplan не запускает в ней git: история версий выключена, сохранение пишет только файлы, а ИИ-агент работает в отдельной папке. Доверяйте, только если папка ваша или получена из надёжного источника.')
+      : t('Папку «{name}» doplan не создавал на этом компьютере (или её заменили либо переместили). В доверенной папке ИИ-агент работает прямо в ней: следует её AGENTS.md как вашим инструкциям, читает её настройки агента (.claude, .codex, .gemini) и запускает в ней git. Иначе агент работает в отдельной папке и видит AGENTS.md только как заметки автора. Доверяйте, только если папка ваша или получена из надёжного источника.', { name: root.split(/[\\/]/).filter(Boolean).pop() ?? root }),
+    reason === 'git'
+      ? [
+          { id: 'no', label: t('Не доверять') },
+          { id: 'yes', label: t('Доверять этой папке'), variant: 'primary' },
+        ]
+      : [
+          { id: 'cancel', label: t('Отмена') },
+          { id: 'no', label: t('Работать вне папки') },
+          { id: 'yes', label: t('Доверять этой папке'), variant: 'primary' },
+        ],
   )
+  if (choice === 'no') notTrusted.add(root.toLowerCase())
   if (choice !== 'yes') return false
   try {
-    const ok = await api.project.trustGit()
+    const ok = await api.project.trustFolder()
     if (!ok) return false
+    notTrusted.delete(root.toLowerCase())
     const info = await api.project.info()
-    projectStore.setState((s) => ({ git: info.gitAvailable && info.repo && info.trusted, untrustedGit: !info.trusted, historyRev: s.historyRev + 1 }))
+    projectStore.setState((s) => ({ git: info.gitAvailable && info.trusted && !info.gitFile, untrustedGit: !info.trusted, historyRev: s.historyRev + 1 }))
     return true
   } catch (err) {
-    await alertDialog(t('Не удалось включить историю версий'), errorText(err))
+    await alertDialog(t('Не удалось доверить папку'), errorText(err))
     return false
   }
+}
+
+/**
+ * Before an AI agent run: in an open project folder the user has not trusted yet, asks once per
+ * session. Resolves false when the user cancelled the run.
+ */
+export async function ensureAiFolderTrust(): Promise<boolean> {
+  const root = projectStore.getState().root
+  if (!root || api.platform === 'browser' || notTrusted.has(root.toLowerCase())) return true
+  let info: Awaited<ReturnType<typeof api.project.info>>
+  try {
+    info = await api.project.info()
+  } catch {
+    return true // main decides the working directory itself: an unknown state only means no question
+  }
+  if (!info.root || info.folderTrusted) return true
+  // «Работать вне папки» adds the folder to notTrusted: the run goes on in the separate work folder
+  return (await offerTrustFolder('ai')) || notTrusted.has(root.toLowerCase())
 }
 
 /** Opens a project folder, its plan.json or a .doplan / .json file (dialog when `path` is omitted). */
@@ -283,7 +349,7 @@ async function saveFileLegacy(target: string | null): Promise<boolean> {
     const res = await api.project.save(doc, target)
     if (!res) return false
     docStore.getState().markSaved(res.path)
-    projectStore.setState({ root: null, kind: kindOfPath(res.path), git: false, untrustedGit: false, commitMarker: historyPosition(), viewing: null })
+    projectStore.setState({ root: null, kind: kindOfPath(res.path), git: false, untrustedGit: false, gitFile: false, commitMarker: historyPosition(), viewing: null })
     void api.project.clearRecovery().catch(() => {})
     refreshRecent()
     toast(t('Проект сохранён'), 'success')
@@ -340,8 +406,8 @@ export async function viewVersion(v: ProjectVersion): Promise<boolean> {
     await alertDialog(t('Не удалось открыть версию'), errorText(err))
     return false
   }
-  const { git, untrustedGit } = projectStore.getState()
-  loadDocument(doc, root, { kind: 'folder', git, untrustedGit })
+  const { git, untrustedGit, gitFile } = projectStore.getState()
+  loadDocument(doc, root, { kind: 'folder', git, untrustedGit, gitFile })
   projectStore.setState({ viewing: v, dialog: null })
   toast(t('Открыта версия от {date}', { date: versionDate(v) }), 'info')
   return true
@@ -395,6 +461,7 @@ export async function autosaveNow(): Promise<void> {
 
 /** Main asked to close the window. */
 export async function handleCloseRequest(): Promise<void> {
+  if (!(await confirmInstructionsDiscard())) return
   if (docStore.getState().dirty) {
     const ok = await confirmDiscard()
     if (!ok) return
@@ -444,12 +511,14 @@ export async function offerRecovery(): Promise<boolean> {
   }
   let git = false
   let untrustedGit = false
+  let gitFile = false
   if (isFolder) {
     const info = await api.project.info().catch(() => null)
-    git = !!info && info.gitAvailable && info.repo && info.trusted
+    git = !!info && info.gitAvailable && info.trusted && !info.gitFile
     untrustedGit = !!info && !info.trusted
+    gitFile = !!info?.gitFile
   }
-  loadDocument(doc, isFolder || kindOfPath(snap.path) !== 'folder' ? snap.path : null, { kind: isFolder ? 'folder' : undefined, git, untrustedGit })
+  loadDocument(doc, isFolder || kindOfPath(snap.path) !== 'folder' ? snap.path : null, { kind: isFolder ? 'folder' : undefined, git, untrustedGit, gitFile })
   docStore.getState().setDirty(true)
   toast(t('Проект восстановлен'), 'success')
   return true

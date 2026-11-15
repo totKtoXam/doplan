@@ -44,13 +44,15 @@ export interface ProjectOpenResult {
   doc: unknown
   /** 'folder' = project folder (path is the folder); 'zip' = .doplan; 'json' = bare document JSON */
   kind?: 'folder' | 'zip' | 'json'
-  /** folder projects: the folder is a git repository */
+  /** folder projects: doplan keeps the version history in git (the repository exists or is created on the first save) */
   git?: boolean
   /**
    * folders: the folder came with a git repository doplan did not create and the user has not trusted
-   * yet. No git command runs there until project.trustGit() (git may run programs from a repo's config).
+   * yet. No git command runs there until project.trustFolder() (git may run programs from a repo's config).
    */
   untrustedGit?: boolean
+  /** folders: .git is a file (submodule, worktree) — doplan keeps no version history there */
+  gitFile?: boolean
 }
 
 export interface ProjectSaveOptions {
@@ -78,6 +80,13 @@ export interface ProjectInfo {
   repo: boolean
   /** false when the folder's repository is not trusted yet (history, tags and commits are off) */
   trusted: boolean
+  /** .git in the folder is a file (submodule, worktree): doplan keeps no version history there */
+  gitFile: boolean
+  /**
+   * the folder itself is trusted (doplan created it or the user confirmed it): the AI agent runs inside
+   * it. Otherwise the agent runs in a separate work folder and gets AGENTS.md as quoted text.
+   */
+  folderTrusted: boolean
   gitVersion: string
 }
 
@@ -177,8 +186,8 @@ export interface DoplanApi {
      * null detaches the folder.
      */
     attach(path: string | null): Promise<boolean>
-    /** trusts the git repository that came with the open project folder (see ProjectOpenResult.untrustedGit) */
-    trustGit(): Promise<boolean>
+    /** trusts the open project folder: the git repository that came with it (see ProjectOpenResult.untrustedGit) and the AI agent in it */
+    trustFolder(): Promise<boolean>
     /** git log of the open project folder, newest first */
     history(): Promise<ProjectVersion[]>
     /** plan.json of an old version (unvalidated); its assets become available under doplan-asset://project/ */

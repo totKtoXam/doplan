@@ -5,7 +5,7 @@
  */
 import { execFile, spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { delimiter, dirname, join } from 'node:path'
+import { delimiter, dirname, isAbsolute, join } from 'node:path'
 
 export interface ResolvedBin {
   /** what was found on PATH */
@@ -34,8 +34,15 @@ export function shimEntry(cmdPath: string, content: string): string | null {
   return existsSync(p) ? p : null
 }
 
+/**
+ * Absolute PATH entries only: a relative one ('.', 'bin') would resolve against the current directory,
+ * and the found name is later spawned with the agent's working directory as cwd.
+ */
 export function findOnPath(name: string, env: NodeJS.ProcessEnv = process.env): ResolvedBin | null {
-  const dirs = (env['PATH'] ?? env['Path'] ?? '').split(delimiter).filter(Boolean)
+  const dirs = (env['PATH'] ?? env['Path'] ?? '')
+    .split(delimiter)
+    .map((d) => d.trim().replace(/^"(.*)"$/, '$1'))
+    .filter((d) => d && isAbsolute(d))
   const win = process.platform === 'win32'
   const exts = win ? ['.exe', '.cmd', '.bat', ''] : ['']
   for (const d of dirs) {

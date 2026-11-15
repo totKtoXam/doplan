@@ -4,7 +4,7 @@
  * Also provides the agent working directory for projects without their own folder.
  */
 import { createHash } from 'node:crypto'
-import { readdir, rm, stat } from 'node:fs/promises'
+import { readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { app } from 'electron'
 import { type AiChatMeta, type AiChatRecord, type AiChatSettings, DEFAULT_AI_SETTINGS } from '../../shared/aiChat'
@@ -95,20 +95,11 @@ export async function deleteChat(projectPath: string | null, chatId: unknown): P
   await rm(chatFile(projectPath, chatId), { force: true })
 }
 
-async function isDir(p: string): Promise<boolean> {
-  try {
-    return (await stat(p)).isDirectory()
-  } catch {
-    return false
-  }
-}
-
 /**
- * Agent working directory: the project folder when the app knows one (its CLAUDE.md / AGENTS.md load
- * natively), otherwise a per-project folder under userData seeded with the default instructions.
+ * Per-project agent working directory under userData, seeded with the default instructions. Used
+ * when there is no trusted project folder to run in (see aichat/index.ts agentPlace).
  */
-export async function agentWorkDir(projectPath: string | null, projectRoot?: string | null): Promise<string> {
-  if (projectRoot && typeof projectRoot === 'string' && (await isDir(projectRoot))) return projectRoot
+export async function agentWorkDir(projectPath: string | null): Promise<string> {
   const dir = join(app.getPath('userData'), 'ai-work', projectKey(projectPath))
   await ensureDir(dir)
   const agents = join(dir, 'AGENTS.md')

@@ -7,7 +7,7 @@ import type { AppSettings, ProjectInfo, ProjectOpenResult, ProjectSaveOptions, P
 import { PLAN_FILE, tagNameFrom } from '../shared/projectFormat'
 import { assertReadable, grantPath } from './access'
 import { atomicWrite, cleanExt, cleanFileName, ensureDir, exists, readJson, rmrf, toBytes } from './fsutil'
-import { findGit, gitLog, gitTag, gitVersion, isRepo } from './git'
+import { findGit, gitLog, gitTag, gitVersion } from './git'
 import {
   ASSET_NAME_RE,
   commitFolder,
@@ -15,8 +15,8 @@ import {
   defaultProjectsDir,
   docName,
   folderRootOf,
+  folderTrust,
   getProjectRoot,
-  gitTrust,
   isDirectory,
   loadFolderAssets,
   parseJsonText,
@@ -27,12 +27,13 @@ import {
   referencedAssets,
   rememberPlanOnDisk,
   setProjectRoot,
+  trustFolder,
   untrustedError,
   writeFolderProject,
   writeInstructions,
 } from './projectFolder'
 import { paths } from './paths'
-import { addRecent, getProjectsDir, msg, setProjectsDir, trustRepo } from './settings'
+import { addRecent, getProjectsDir, msg, setProjectsDir } from './settings'
 import { getMainWindow } from './window'
 
 const FORMAT_VERSION = 1
@@ -114,9 +115,10 @@ async function openFolderAt(root: string): Promise<ProjectOpenResult> {
   const doc = await readFolderPlan(root)
   grantPath(root)
   pendingOpen = { path: root, root, staged: null, name: docName(doc) }
-  const trust = await gitTrust(root)
-  const git = trust === 'trusted' && !!(await findGit())
-  return { path: root, doc, kind: 'folder', git, untrustedGit: trust === 'untrusted' }
+  const trust = await folderTrust(root)
+  // no repository yet: doplan creates one on the first save
+  const git = (trust.git === 'trusted' || trust.git === 'none') && !!(await findGit())
+  return { path: root, doc, kind: 'folder', git, untrustedGit: trust.git === 'untrusted', gitFile: trust.git === 'gitfile' }
 }
 
 export async function openProject(pathArg?: unknown): Promise<ProjectOpenResult | null> {
@@ -384,9 +386,16 @@ export async function createProject(doc: unknown, nameArg: unknown, parentArg: u
 export async function projectInfo(): Promise<ProjectInfo> {
   const root = getProjectRoot()
   const gitAvailable = !!(await findGit())
-  const repo = !!root && gitAvailable && isRepo(root)
-  const trusted = !root || (await gitTrust(root)) !== 'untrusted'
-  return { root, gitAvailable, repo, trusted, gitVersion: gitVersion() }
+  const trust = root ? await folderTrust(root) : null
+  return {
+    root,
+    gitAvailable,
+    repo: gitAvailable && (trust?.git === 'trusted' || trust?.git === 'untrusted'),
+    trusted: trust?.git !== 'untrusted',
+    gitFile: trust?.git === 'gitfile',
+    folderTrusted: !!trust?.folder,
+    gitVersion: gitVersion(),
+  }
 }
 
 function requireRoot(): string {
@@ -395,11 +404,11 @@ function requireRoot(): string {
   return root
 }
 
-/** the user trusts the git repository that came with the open project folder */
-export async function trustProjectGit(): Promise<boolean> {
+/** the user trusts the open project folder: its git repository (if it came with one) and the AI agent running in it */
+export async function trustProjectFolder(): Promise<boolean> {
   const root = requireRoot()
-  if (!isRepo(root)) return false
-  await trustRepo(root)
+  if (!(await isDirectory(root))) return false
+  await trustFolder(root)
   return true
 }
 
@@ -416,7 +425,7 @@ export async function setProjectInstructions(text: unknown): Promise<string | nu
 
 export async function projectHistory(): Promise<ProjectVersion[]> {
   const root = getProjectRoot()
-  if (!root || !(await findGit()) || (await gitTrust(root)) !== 'trusted') return []
+  if (!root || !(await findGit()) || (await folderTrust(root)).git !== 'trusted') return []
   return gitLog(root)
 }
 
@@ -430,7 +439,7 @@ export async function tagProjectVersion(sha: unknown, label: unknown): Promise<v
   const name = tagNameFrom(label)
   if (!name) throw new Error(msg('Введите название метки', 'Enter a tag name'))
   const root = requireRoot()
-  if ((await gitTrust(root)) !== 'trusted') throw untrustedError()
+  if ((await folderTrust(root)).git !== 'trusted') throw untrustedError()
   await gitTag(root, sha, name, label.trim())
 }
 

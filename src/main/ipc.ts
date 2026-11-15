@@ -18,7 +18,7 @@ import {
   projectVersionDoc,
   setProjectInstructions,
   tagProjectVersion,
-  trustProjectGit,
+  trustProjectFolder,
 } from './project'
 import { getProjectRoot } from './projectFolder'
 import { getSettings, setApiKey, setSettings } from './settings'
@@ -73,7 +73,7 @@ export function registerIpc(): void {
   handle(CH.projectOpenFolder, () => openProjectFolder())
   handle(CH.projectExportZip, (doc: unknown) => exportZip(doc))
   handle(CH.projectAttach, (path: unknown) => attachProject(path))
-  handle(CH.projectTrustGit, () => trustProjectGit())
+  handle(CH.projectTrustFolder, () => trustProjectFolder())
   handle(CH.projectHistory, () => projectHistory())
   handle(CH.projectVersionDoc, (sha: unknown) => projectVersionDoc(sha))
   handle(CH.projectTagVersion, (sha: unknown, label: unknown) => tagProjectVersion(sha, label))

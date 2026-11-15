@@ -551,6 +551,7 @@ export function readProduct(v: unknown): ProductRef | undefined {
   const pack = optNum(v.pack, 0.001, 1e6)
   if (pack !== undefined) p.pack = pack
   if (typeof v.source === 'string' && (PRODUCT_SOURCES as readonly string[]).includes(v.source)) p.source = v.source as ProductRef['source']
+  if (v.noPrice === true && p.price === undefined) p.noPrice = true
   return Object.keys(p).length ? p : undefined
 }
 

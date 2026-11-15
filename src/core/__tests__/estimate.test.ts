@@ -14,6 +14,7 @@ import {
   productUrl,
   wallpaperStrip,
   wasteFor,
+  unpricedLots,
   type BomRow,
 } from '../bom'
 import { parseDoc, serializeDoc } from '../io'
@@ -309,5 +310,77 @@ describe('estimate: review fixes', () => {
     const csv = bomToCsv(computeBom(doc), 'EUR', tr)
     expect(csv.split('\n')[0]).toContain('Price (EUR)')
     expect(csv).toMatch(/\nTotal;/)
+  })
+})
+
+describe('estimate: lots', () => {
+  const TWO = {
+    ...SPEC,
+    rooms: [
+      { id: 'a', name: 'Санузел', type: 'bathroom', rect: [0, 0, 2000, 2000] },
+      { id: 'b', name: 'Кухня', type: 'kitchen', rect: [2100, 0, 3000, 3000] },
+    ],
+  }
+  function two(m: Material, patternA?: TilePattern, patternB?: TilePattern) {
+    const r = compilePlanSpecDetailed(parsePlanSpec(TWO))
+    const doc = r.doc
+    doc.materials[m.id] = m
+    const byName = (n: string) => Object.values(doc.rooms).find((x) => x.name === n)!
+    for (const [room, pat] of [[byName('Санузел'), patternA], [byName('Кухня'), patternB]] as const) {
+      const floor = { ...room.floor, materialId: m.id }
+      if (pat) floor.pattern = pat
+      else delete floor.pattern
+      room.floor = floor
+    }
+    return doc
+  }
+  const mat = (id: string, category: Material['category'], product?: Material['product']): Material => ({
+    id,
+    name: id,
+    category,
+    color: '#ccc',
+    roughness: 0.5,
+    metalness: 0,
+    ...(product ? { product } : {}),
+  })
+
+  it('a sizeless tile laid in one room and not in the other: both rooms are priced per m²', () => {
+    const doc = two(mat('m_t', 'tile', { price: 1000, priceUnit: 'м²' }), GRID)
+    const rows = computeBom(doc)
+    const floor = rows.filter((r) => r.group === 'Полы' && r.refId === 'm_t')
+    const tile = floor.find((r) => r.purchase)!
+    const bare = floor.find((r) => !r.purchase && r.lot !== tile.lot)!
+    expect(tile.total).toBeCloseTo(1000 * tile.alt!['м²']!, 2)
+    expect(bare.total).toBeCloseTo(1000 * bare.quantity, 2)
+    const t = bomTotals(rows)
+    expect(t.byGroup['Полы']).toBeCloseTo(tile.total! + bare.total!, 2)
+  })
+
+  it('a lot the price unit does not fit is shown and counted as unpriced', () => {
+    // wood in herringbone (tiles, шт) in one room, as planks (packs) in the other; priced per piece
+    const doc = two(mat('m_w', 'wood', { price: 90, priceUnit: 'шт' }), { ...GRID, type: 'herringbone', tileW: 600, tileH: 100, grout: 0 })
+    const rows = computeBom(doc)
+    const floor = rows.filter((r) => r.group === 'Полы' && r.refId === 'm_w')
+    expect(floor.filter((r) => r.total !== undefined)).toHaveLength(1)
+    const missed = [...unpricedLots(rows)]
+    expect(missed).toHaveLength(1)
+    expect(missed[0].refId).toBe('m_w')
+    expect(bomTotals(rows).unpriced).toBeGreaterThanOrEqual(1)
+  })
+
+  it('a price without a unit is read in one unit for all lots', () => {
+    const doc = two(mat('m_p', 'tile', { price: 300 }), { ...GRID, type: 'planks' }, GRID)
+    const priced = computeBom(doc).filter((r) => r.refId === 'm_p' && r.total !== undefined)
+    expect(priced.length).toBeGreaterThan(0)
+    expect(new Set(priced.map((r) => r.priceUnit)).size).toBe(1)
+  })
+
+  it('a card price erased in the project is not used; the card stays', () => {
+    const doc = two(mat('m_c', 'tile', { price: 1000, priceUnit: 'м²', vendor: 'V' }), GRID)
+    doc.design = { priceList: { m_c: { noPrice: true } } }
+    expect(productFor(doc, undefined, 'm_c')).toEqual({ priceUnit: 'м²', vendor: 'V' })
+    expect(computeBom(doc).some((r) => r.refId === 'm_c' && r.total !== undefined)).toBe(false)
+    expect(doc.materials.m_c.product?.price).toBe(1000)
+    expect(parseDoc(serializeDoc(doc)).design?.priceList?.m_c).toEqual({ noPrice: true })
   })
 })

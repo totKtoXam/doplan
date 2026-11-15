@@ -634,8 +634,10 @@ export function applyStyle(doc: Doc, style: StylePreset, opts: ApplyStyleOptions
         const side = doc.walls[f.wallId][f.side]
         const k = faceKey(f.wallId, f.side)
         const isAccent = k === accentKey
-        // with finishes off only the accent face is dressed
-        if (!parts.finishes && !isAccent) continue
+        // with finishes off only the accent face is dressed, and an old accent face of this style
+        // (the accent moved, e.g. a window was cut into it) goes back to the main finish
+        const oldAccent = parts.accent && !wet && !!F.wallAccent && side.materialId === F.wallAccent
+        if (!parts.finishes && !isAccent && !oldAccent) continue
         const materialId = wet ? F.wallWet : isAccent ? F.wallAccent! : F.wallMain
         if (side.materialId !== materialId) {
           side.materialId = materialId

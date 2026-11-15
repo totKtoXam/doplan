@@ -272,7 +272,10 @@ export function MaterialEditorDialog({ open, onClose, materialId, onSaved }: Mat
       const name = draft.name.trim() || t('Мой материал')
       const code = draft.code.trim()
       const colorCode = draft.codeSystem !== 'none' && code ? { system: draft.codeSystem, code } : undefined
-      const extra = productOf(draft, editId ? lookupMaterial(editId) : undefined)
+      // the material edited in place, or the library / catalog one a copy is made of: fields the
+      // editor does not show (wallpaper match, product note, price source) come from it
+      const sourceId = editId ?? materialId ?? null
+      const extra = productOf(draft, sourceId ? lookupMaterial(sourceId) : undefined)
       const base: Omit<Material, 'id'> = {
         name,
         nameRu: name,
@@ -284,7 +287,7 @@ export function MaterialEditorDialog({ open, onClose, materialId, onSaved }: Mat
         ...(colorCode ? { colorCode } : {}),
         ...(extra.product ? { product: extra.product } : {}),
         ...(extra.wallpaper ? { wallpaper: extra.wallpaper } : {}),
-        ...(extra.paint ? { paint: { ...(prevPaint(editId) ?? {}), ...extra.paint } } : {}),
+        ...(extra.paint ? { paint: { ...(prevPaint(sourceId) ?? {}), ...extra.paint } } : {}),
         custom: true,
       }
       const id = editId ?? newId('m')
@@ -300,6 +303,9 @@ export function MaterialEditorDialog({ open, onClose, materialId, onSaved }: Mat
         if (!extra.wallpaper) delete next.wallpaper
         if (!extra.paint) delete next.paint
         d.materials[id] = next
+        // a price typed on the card is used again even if it was erased in the estimate before
+        const own = d.design?.priceList?.[id]
+        if (own?.noPrice && extra.product?.price !== undefined) delete own.noPrice
       })
 
       if (toLibrary) {

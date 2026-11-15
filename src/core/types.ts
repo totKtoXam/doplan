@@ -465,6 +465,8 @@ export interface ProductRef {
   /** where the price came from */
   source?: 'manual' | 'csv' | 'link' | 'feed'
   note?: string
+  /** project price list only: the material card's price is not used (the price was erased in the estimate) */
+  noPrice?: boolean
 }
 
 export interface Material {

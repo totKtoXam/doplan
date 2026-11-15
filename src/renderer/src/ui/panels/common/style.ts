@@ -1,13 +1,12 @@
 import type { Id, Material } from '@core/types'
-import { applyStyle, findStyle, type ApplyStyleParts, type ApplyStyleReport } from '@core'
+import { BUILTIN_STYLES, applyStyle, findStyle, type ApplyStyleParts, type ApplyStyleReport } from '@core'
 import { docStore } from '@/store/document'
 import { uiStore } from '@/store/ui'
-import { addTranslations, t } from '@/i18n'
+import { addTranslations } from '@/i18n'
 import { tx } from './catalog'
 
 // M2: finishes v2 (layout start, waste, wall/zone patterns) and product cards
 addTranslations('en', {
-  'Стиль «{name}»': 'Style “{name}”',
   'Начало раскладки': 'Layout start',
   'сдвиг первой целой плитки от угла, мм': 'offset of the first whole tile from the corner, mm',
   'Запас на подрезку': 'Cutting waste',
@@ -32,6 +31,9 @@ addTranslations('en', {
   'Ссылка на товар': 'Product link',
   'прайс-лист': 'price list',
 })
+
+// undo labels «Стиль «…»» are dictionary keys, so the Undo tooltip follows a later language switch
+addTranslations('en', Object.fromEntries(BUILTIN_STYLES.map((s) => [styleUndoLabel(s.nameRu), `Style “${s.name}”`])))
 
 addTranslations('en', {
   Стиль: 'Style',
@@ -143,6 +145,10 @@ export function extraCodeText(m: Material | undefined, shownName: string): strin
   return code && !shownName.includes(m!.colorCode!.code) ? code : ''
 }
 
+function styleUndoLabel(nameRu: string): string {
+  return `Стиль «${nameRu}»`
+}
+
 /** apply a style as one undo step; returns what changed (null if the style is unknown) */
 export function applyStyleTo(styleId: Id, rooms: Id[] | 'all', parts?: Partial<ApplyStyleParts>): ApplyStyleReport | null {
   const style = findStyle(styleId)
@@ -150,9 +156,7 @@ export function applyStyleTo(styleId: Id, rooms: Id[] | 'all', parts?: Partial<A
   const derived = docStore.getState().derived
   const catalog = uiStore.getState().catalog
   let report: ApplyStyleReport | null = null
-  // the undo label is built in the current language: a label with the name inside cannot be translated later
-  const name = uiStore.getState().lang === 'en' ? style.name : style.nameRu
-  tx(t('Стиль «{name}»', { name }), (d) => {
+  tx(styleUndoLabel(style.nameRu), (d) => {
     report = applyStyle(d, style, { rooms, parts, catalog, derived })
   })
   return report

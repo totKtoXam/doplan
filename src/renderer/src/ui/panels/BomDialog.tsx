@@ -8,6 +8,7 @@ import {
   CURRENCIES,
   currencySymbol,
   decodeCsvBytes,
+  defaultPriceUnit,
   formatMoney,
   localDate,
   mergeCatalog,
@@ -16,6 +17,7 @@ import {
   priceTargets,
   productFor,
   rowsByRef,
+  unpricedLots,
 } from '@core'
 import type { PriceUnit, ProductRef } from '@core/types'
 import { useDoc } from '@/store/document'
@@ -39,6 +41,7 @@ addTranslations('en', {
   'Валюта проекта': 'Project currency',
   'Импорт прайс-листа': 'Import price list',
   'без цены': 'without price',
+  'Цена не подходит к единицам этой строки': 'The price is quoted in a unit this line has no quantity in',
   'с ценой': 'priced',
   'Цены из прайс-листа проекта; правьте прямо в таблице или выгрузите прайс-лист, заполните и загрузите обратно.':
     'Prices come from the project price list: edit them in the table, or export the price list, fill it in and import it back.',
@@ -77,7 +80,8 @@ function priceRows(rows: BomRow[], unitOf: (refId: string) => PriceUnit | undefi
   for (const l of rowsByRef(rows).values()) {
     const priced = l.filter((r) => r.price !== undefined)
     const targets = priced.length ? priced : priceTargets(l, unitOf(l[0].refId!))
-    for (const r of targets.length ? targets : [l[0]]) out.add(r)
+    // no row fits the unit: the input goes on the purchase row (paint litres, not the wall area)
+    for (const r of targets.length ? targets : [l.find((x) => x.purchase) ?? l[0]]) out.add(r)
   }
   return out
 }
@@ -107,6 +111,7 @@ export function BomDialog({ open, onClose }: DialogPropsBase) {
   const unitOf = (refId: string) => productFor(doc, cat, refId)?.priceUnit
   const editable = useMemo(() => priceRows(rows, (id) => productFor(doc, cat, id)?.priceUnit), [rows, doc, cat])
   const totals = useMemo(() => bomTotals(rows), [rows])
+  const missed = useMemo(() => unpricedLots(rows), [rows])
   const money = (v: number) => formatMoney(v, currency, locale)
 
   const groups = useMemo(() => {
@@ -130,8 +135,14 @@ export function BomDialog({ open, onClose }: DialogPropsBase) {
         const design = (d.design ??= {})
         const list = (design.priceList ??= {})
         const prev = list[refId]
-        const unit = prev?.priceUnit ?? unitOf(refId) ?? r.priceUnit ?? asPriceUnit(r.unit)
+        // the first unit some row of this thing has a quantity in: a card unit no row has (paint
+        // per can without a can size) would make the typed price vanish
+        const mine = rows.filter((x) => x.refId === refId)
+        const unit =
+          [prev?.priceUnit, unitOf(refId), r.priceUnit, asPriceUnit(r.unit), defaultPriceUnit(mine)].find((u) => u && priceTargets(mine, u).length > 0) ??
+          asPriceUnit(r.unit)
         const next: ProductRef = { ...(prev ?? {}), price: v, source: 'manual', updatedAt: localDate() }
+        delete next.noPrice
         if (unit) next.priceUnit = unit
         list[refId] = next
       },
@@ -139,19 +150,31 @@ export function BomDialog({ open, onClose }: DialogPropsBase) {
     )
   }
 
-  /** erase the price (the project's own and the project material card's); vendor, link etc. stay */
+  /**
+   * Erase the price. A price of the project's own price list is removed; when a material card (in the
+   * project or in the library / catalog) would then show its price, the project marks the card price
+   * as not used, so the card itself stays as it is. A price on a project material card without a
+   * price list entry is removed from that card.
+   */
   const clearPrice = (r: BomRow) => {
     if (!r.refId) return
     const refId = r.refId
     tx('Цена позиции', (d) => {
-      const list = d.design?.priceList
-      const own = list?.[refId]
-      if (list && own) {
-        delete own.price
-        if (!Object.keys(own).some((k) => k !== 'source' && k !== 'updatedAt' && k !== 'priceUnit')) delete list[refId]
+      const own = d.design?.priceList?.[refId]
+      const local = d.materials[refId]?.product
+      if (own?.price === undefined && local?.price !== undefined) {
+        delete local.price
+        return
       }
-      const card = d.materials[refId]?.product
-      if (card) delete card.price
+      // the card's price (project or library / catalog card), without the price list over it
+      const cardPrice = productFor({ ...d, design: undefined }, cat, refId)?.price
+      const next: ProductRef = { ...(own ?? {}) }
+      delete next.price
+      if (cardPrice !== undefined) next.noPrice = true
+      else delete next.noPrice
+      const keep = Object.keys(next).some((k) => k !== 'source' && k !== 'updatedAt' && k !== 'priceUnit')
+      if (keep) ((d.design ??= {}).priceList ??= {})[refId] = next
+      else if (own) delete d.design!.priceList![refId]
     })
   }
 
@@ -185,7 +208,11 @@ export function BomDialog({ open, onClose }: DialogPropsBase) {
         tx('Импорт прайс-листа', (d) => {
           const design = (d.design ??= {})
           const list = (design.priceList ??= {})
-          for (const [id, p] of Object.entries(res.entries)) list[id] = { ...(list[id] ?? {}), ...p }
+          for (const [id, p] of Object.entries(res.entries)) {
+            const next: ProductRef = { ...(list[id] ?? {}), ...p }
+            delete next.noPrice
+            list[id] = next
+          }
         })
       setStatus(`${t('Загружено цен')}: ${n}${res.skipped.length ? `, ${t('пропущено строк')}: ${res.skipped.length}` : ''}`)
     } catch (e) {
@@ -308,7 +335,17 @@ export function BomDialog({ open, onClose }: DialogPropsBase) {
                         />
                       ) : null}
                     </td>
-                    <td className="py-1 pr-2 text-right tabular-nums">{r.total !== undefined ? money(r.total) : ''}</td>
+                    <td className="py-1 pr-2 text-right tabular-nums">
+                      {r.total !== undefined ? (
+                        money(r.total)
+                      ) : missed.has(r) ? (
+                        <span className="text-[10px] text-[#e5a50a]" title={t('Цена не подходит к единицам этой строки')}>
+                          {t('без цены')}
+                        </span>
+                      ) : (
+                        ''
+                      )}
+                    </td>
                     <td className="py-1 text-[var(--muted)]">{r.note}</td>
                   </tr>
                 ))}

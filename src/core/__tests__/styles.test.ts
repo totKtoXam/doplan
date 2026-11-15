@@ -186,4 +186,21 @@ describe('applyStyle', () => {
     expect(changed[0].materialId).toBe(style.finishes.wallAccent)
     expect(doc.rooms[roomIds.living].floor).toEqual(before.rooms[roomIds.living].floor)
   })
+
+  it('accent-only re-apply moves the accent: the old accent face goes back to the main finish', () => {
+    const { doc, roomIds } = build()
+    applyStyle(doc, style, { rooms: [roomIds.living] })
+    const accentFaces = () =>
+      Object.values(doc.walls).flatMap((w) => (['left', 'right'] as const).filter((k) => w[k].materialId === style.finishes.wallAccent).map((k) => ({ w, k })))
+    const [first] = accentFaces()
+    expect(accentFaces()).toHaveLength(1)
+    // a window cut into the accent wall
+    const win = Object.values(doc.openings).find((o) => o.kind === 'window')!
+    doc.openings.o_new = { ...win, id: 'o_new', wallId: first.w.id }
+    applyStyle(doc, style, { rooms: [roomIds.living], parts: { finishes: false, accent: true, openings: false, furniture: false, lights: false } })
+    const now = accentFaces()
+    expect(now).toHaveLength(1)
+    expect(now[0].w.id).not.toBe(first.w.id)
+    expect(first.w[first.k].materialId).toBe(style.finishes.wallMain)
+  })
 })

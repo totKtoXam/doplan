@@ -47,6 +47,12 @@ export interface BomRow {
   purchase?: boolean
   /** the same purchase in other units (tiles: шт and м²; packs: уп. and м²; paint: л and cans) */
   alt?: Partial<Record<PriceUnit, number>>
+  /**
+   * rows of one take-off share a lot: a measured row and the purchase row made from it. One material
+   * can give several lots (two layouts, a room with and one without a layout); each lot is priced
+   * on its own and a lot left without a price counts as unpriced.
+   */
+  lot?: number
   /** price per `priceUnit` in the project currency, the unit it is quoted in, and the row total */
   price?: number
   priceUnit?: PriceUnit
@@ -171,8 +177,13 @@ export function productFor(doc: Doc, catalog: Catalog | undefined, refId: Id | u
   if (!refId) return undefined
   const own = doc.design?.priceList?.[refId]
   const card = lookupMaterial(doc, catalog, refId)?.product
-  if (own && card) return { ...card, ...own }
-  return own ?? card
+  const p = own && card ? { ...card, ...own } : (own ?? card)
+  if (!own?.noPrice || !p) return p
+  // the project dropped the card's price
+  const { price: _price, noPrice: _no, ...rest } = p
+  void _price
+  void _no
+  return rest
 }
 
 /** wallpaper strip length for a band height, with trimming allowance and pattern repeat */
@@ -563,8 +574,43 @@ export function computeBom(doc: Doc, catalog?: Catalog, opts: BomOptions = {}): 
       rows.push({ group: 'Освещение', name: LIGHT_NAMES[kind], unit: 'шт', quantity: e.n, note: `всего ${Math.round(e.lumens)} лм`, refId: `light:${kind}` })
     }
   }
+  assignLots(rows)
   attachPrices(rows, doc, catalog)
   return rows
+}
+
+/** a measured row starts a lot, the purchase rows made from it (pushed right after it) join it */
+function assignLots(rows: BomRow[]): void {
+  let lot = 0
+  let head: BomRow | undefined
+  for (const r of rows) {
+    const joins = r.purchase && head && head.group === r.group && head.refId === r.refId
+    if (!joins) {
+      lot++
+      head = r.purchase ? undefined : r
+    }
+    r.lot = lot
+  }
+}
+
+const PRICE_UNITS: readonly PriceUnit[] = ['м²', 'м', 'шт', 'л', 'рул.', 'уп.']
+const asPriceUnit = (u: string | undefined): PriceUnit | undefined => PRICE_UNITS.find((x) => x === u)
+
+/** rows split into lots (a row without a lot is a lot of its own) */
+function lotsOf(list: BomRow[]): BomRow[][] {
+  const m = new Map<number | BomRow, BomRow[]>()
+  for (const r of list) {
+    const k = r.lot ?? r
+    const l = m.get(k) ?? []
+    l.push(r)
+    m.set(k, l)
+  }
+  return [...m.values()]
+}
+
+/** the unit a price without a unit is read in: the first purchase row's unit, else the first row's */
+export function defaultPriceUnit(list: BomRow[]): PriceUnit | undefined {
+  return asPriceUnit((list.find((r) => r.purchase) ?? list[0])?.unit)
 }
 
 /** quantity of a row in `unit`, if it is known in that unit */
@@ -573,17 +619,21 @@ function qtyIn(r: BomRow, unit: PriceUnit): number | undefined {
 }
 
 /**
- * The rows of one refId within one group that a price goes on: every purchase row that has a
- * quantity in the price unit, else every measured row that has one. One material can produce
- * several rows (e.g. the same tile in two layouts), and each of them must be priced.
- * A price without a unit goes on the purchase rows in their own unit, else on the measured rows.
+ * The rows of one refId that a price goes on, lot by lot: the lot's purchase rows that have a
+ * quantity in the price unit, else its measured row when that has one. A lot with neither stays
+ * unpriced (and is counted so). A price without a unit is read in defaultPriceUnit, so one number
+ * is never charged per pack on one row and per piece on another.
  */
 export function priceTargets(list: BomRow[], priceUnit?: PriceUnit): BomRow[] {
-  const buy = list.filter((r) => r.purchase)
-  const measured = list.filter((r) => !r.purchase)
-  if (!priceUnit) return buy.length ? buy : measured
-  const has = (r: BomRow) => qtyIn(r, priceUnit) !== undefined
-  return buy.some(has) ? buy.filter(has) : measured.filter(has)
+  const unit = priceUnit ?? defaultPriceUnit(list)
+  if (!unit) return []
+  const has = (r: BomRow) => qtyIn(r, unit) !== undefined
+  const out: BomRow[] = []
+  for (const lot of lotsOf(list)) {
+    const buy = lot.filter((r) => r.purchase && has(r))
+    out.push(...(buy.length ? buy : lot.filter((r) => !r.purchase && has(r))))
+  }
+  return out
 }
 
 /** rows grouped by `group|refId` (rows without a refId are left out) */
@@ -610,8 +660,9 @@ export function attachPrices(rows: BomRow[], doc: Doc, catalog?: Catalog): void 
       if (p.url) r.url = p.url
     }
     if (p.price === undefined) continue
-    for (const target of priceTargets(list, p.priceUnit)) {
-      const unit = p.priceUnit ?? (target.unit as PriceUnit)
+    const unit = p.priceUnit ?? defaultPriceUnit(list)
+    if (!unit) continue
+    for (const target of priceTargets(list, unit)) {
       const q = qtyIn(target, unit) ?? target.quantity
       target.price = p.price
       target.priceUnit = unit
@@ -630,22 +681,29 @@ export interface BomTotals {
 
 export function bomTotals(rows: BomRow[]): BomTotals {
   const t: BomTotals = { total: 0, byGroup: {}, priced: 0, unpriced: 0 }
-  const pricedKeys = new Set<string>()
-  for (const r of rows) if (r.total !== undefined && r.refId) pricedKeys.add(`${r.group}|${r.refId}`)
-  const seen = new Set<string>()
   for (const r of rows) {
-    if (r.total !== undefined) {
-      t.total += r.total
-      t.byGroup[r.group] = (t.byGroup[r.group] ?? 0) + r.total
-      t.priced++
-    } else if (r.refId) {
-      const k = `${r.group}|${r.refId}`
-      if (!pricedKeys.has(k) && !seen.has(k)) t.unpriced++
-      seen.add(k)
-    }
+    if (r.total === undefined) continue
+    t.total += r.total
+    t.byGroup[r.group] = (t.byGroup[r.group] ?? 0) + r.total
+    t.priced++
   }
+  // every lot of a priceable thing without a price is counted, also next to priced lots of the same material
+  for (const lot of lotsOf(rows.filter((r) => r.refId))) if (!lot.some((r) => r.total !== undefined)) t.unpriced++
   t.total = round(t.total, 2)
   return t
+}
+
+/**
+ * The first row of each lot that has no price while another lot of the same material is priced
+ * (e.g. a room without a layout next to a tiled one priced per piece): shown as «без цены».
+ */
+export function unpricedLots(rows: BomRow[]): Set<BomRow> {
+  const out = new Set<BomRow>()
+  for (const list of rowsByRef(rows).values()) {
+    if (!list.some((r) => r.total !== undefined)) continue
+    for (const lot of lotsOf(list)) if (!lot.some((r) => r.total !== undefined)) out.add(lot[0])
+  }
+  return out
 }
 
 /** currencies offered in the project settings (ISO 4217); any other 3-letter code is accepted too */

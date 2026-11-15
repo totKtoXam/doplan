@@ -757,9 +757,8 @@ export function parseDoc(json: unknown): Doc {
     if (labelledArea !== undefined && labelledArea > 0) room.labelledArea = labelledArea
     if (isObj(v.design)) {
       const styleId = optStr(v.design.styleId)
-      // '' is kept: the style was applied without an accent wall
-      const accentFace = typeof v.design.accentFace === 'string' ? v.design.accentFace : undefined
-      if (styleId || accentFace !== undefined) room.design = { ...(styleId ? { styleId } : {}), ...(accentFace !== undefined ? { accentFace } : {}) }
+      const accentFace = optStr(v.design.accentFace)
+      if (styleId || accentFace) room.design = { ...(styleId ? { styleId } : {}), ...(accentFace ? { accentFace } : {}) }
     }
     doc.rooms[id] = room
   }

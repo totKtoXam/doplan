@@ -271,8 +271,10 @@ export interface RoomDesign {
   /** id of the style preset last applied to the room (BUILTIN_STYLES or a project style) */
   styleId?: Id
   /**
-   * the wall face (`wallId:side`) the style made the accent wall, so a later apply can move it;
-   * '' = the style was applied without an accent wall. Missing in projects saved by 0.8.0.
+   * the wall face (`wallId:side`) the style made the accent wall, so a later apply can move it.
+   * Missing when the style gave the room no accent wall, the wall was not copied with the room, or
+   * the style was applied by 0.8.0 (no way to tell these apart: accent-material walls are then the
+   * user's and are never reset)
    */
   accentFace?: string
 }

@@ -5,6 +5,10 @@
  */
 import type { AppSettings, DoplanApi, FileFilter, MenuCommand } from '@shared/ipc'
 import { DEFAULT_AI_SETTINGS } from '@shared/aiChat'
+import { releasePageUrl } from '@shared/updater'
+
+/** version shown by the web build (no Electron); keep in step with package.json */
+const WEB_VERSION = '0.9.0-web'
 
 const SETTINGS_KEY = 'doplan.settings'
 
@@ -95,7 +99,7 @@ function createFallbackApi(): DoplanApi {
   const noopUnsub = () => () => {}
   return {
     platform: 'browser',
-    version: '0.5.1-web',
+    version: WEB_VERSION,
     project: {
       async open(path?: string) {
         let file: File | undefined = path ? pickedFiles.get(path) : undefined
@@ -280,12 +284,32 @@ function createFallbackApi(): DoplanApi {
         return { ...DEFAULT_AI_SETTINGS, models: {} }
       },
       async setSettings() {},
+      async moveChats() {
+        return { sessionsKept: true }
+      },
+      async dropChats() {},
+      async claimDocument(ref) {
+        return ref
+      },
       async login() {},
       async loginInput() {},
       async loginCancel() {},
       onLogin: noopUnsub,
     },
     // ── end ai-chat block ──
+    updates: {
+      async get() {
+        return { mode: 'disabled', current: WEB_VERSION, status: { kind: 'idle' } }
+      },
+      async check() {
+        return { mode: 'disabled', current: WEB_VERSION, status: { kind: 'idle' } }
+      },
+      async install() {},
+      async openReleasePage(version?: string) {
+        window.open(releasePageUrl(version), '_blank', 'noopener')
+      },
+      onState: noopUnsub,
+    },
     window: {
       setTitle(title: string, dirty: boolean) {
         document.title = `${dirty ? '• ' : ''}${title} — doplan`

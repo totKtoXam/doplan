@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import { useT } from '@/i18n'
 import { dismissToast, type ModalRequest, useNotify } from '@/store/notify'
 import { TextBtn } from './primitives'
+import { UpdateNotice } from './UpdateNotice'
 
 function Modal({ req }: { req: ModalRequest }) {
   const t = useT()
@@ -89,6 +90,7 @@ export function Overlays() {
   return createPortal(
     <>
       <div className="pointer-events-none fixed right-3 bottom-9 z-[960] flex w-[340px] flex-col items-end gap-2">
+        <UpdateNotice />
         {toasts.map((tst) => (
           <div
             key={tst.id}

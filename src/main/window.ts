@@ -67,6 +67,11 @@ export function confirmClose(): void {
   w.close()
 }
 
+/** the app is about to quit for an update install: let the window close without asking the renderer */
+export function allowQuitWithoutPrompt(on: boolean): void {
+  allowClose = on
+}
+
 export function setWindowTitle(title: unknown, dirty: unknown): void {
   const w = getMainWindow()
   if (!w) return
@@ -125,7 +130,8 @@ export function createMainWindow(): BrowserWindow {
   win.webContents.setWindowOpenHandler(({ url }) => {
     try {
       const u = new URL(url)
-      if (u.protocol === 'https:') void shell.openExternal(u.toString())
+      // web links only (product pages in the estimate may be plain http)
+      if (u.protocol === 'https:' || u.protocol === 'http:') void shell.openExternal(u.toString())
     } catch {
       /* ignore */
     }

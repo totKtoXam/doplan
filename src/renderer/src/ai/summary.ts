@@ -200,13 +200,14 @@ const KIND_LABEL: Record<EntityKind, string> = {
   underlay: 'Подложка',
 }
 
-export function chipFor(doc: Doc, plan: DerivedPlan | undefined, ref: EntityRef, lk: Lookup): AiChip {
+/** `lang`: the chip label is shown to the user (the summary goes to the agent) */
+export function chipFor(doc: Doc, plan: DerivedPlan | undefined, ref: EntityRef, lk: Lookup, lang: 'ru' | 'en' = 'ru'): AiChip {
   let label = KIND_LABEL[ref.kind]
   if (ref.kind === 'room' && doc.rooms[ref.id]) label = roomName(doc, ref.id)
   if (ref.kind === 'item') {
     const it = doc.items[ref.id]
     const a = it ? lk.asset(it.assetId) : undefined
-    if (it) label = it.name ?? a?.nameRu ?? a?.name ?? label
+    if (it) label = it.name ?? (a ? (lang === 'en' ? a.name : (a.nameRu ?? a.name)) : label)
   }
   return { kind: ref.kind, id: ref.id, label, summary: entitySummary(doc, plan, ref, lk) }
 }

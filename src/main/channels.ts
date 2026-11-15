@@ -56,6 +56,9 @@ export const CH = {
   aiChatDelete: 'aiChat:delete',
   aiChatGetSettings: 'aiChat:getSettings',
   aiChatSetSettings: 'aiChat:setSettings',
+  aiChatMove: 'aiChat:move',
+  aiChatDrop: 'aiChat:drop',
+  aiChatClaim: 'aiChat:claim',
   aiChatLogin: 'aiChat:login',
   aiChatLoginInput: 'aiChat:loginInput',
   aiChatLoginCancel: 'aiChat:loginCancel',
@@ -63,6 +66,12 @@ export const CH = {
   evAiChatEvent: 'ev:aiChatEvent',
   evAiChatToolCall: 'ev:aiChatToolCall',
   // ── end ai-chat block ──
+
+  updatesGet: 'updates:get',
+  updatesCheck: 'updates:check',
+  updatesInstall: 'updates:install',
+  updatesOpenRelease: 'updates:openRelease',
+  evUpdateState: 'ev:updateState',
 
   // renderer → main (fire and forget)
   windowSetTitle: 'window:setTitle',

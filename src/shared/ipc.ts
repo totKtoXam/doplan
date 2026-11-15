@@ -12,6 +12,7 @@ import type { Asset, Catalog, Hdri, Material } from '../core/types'
 // ── ai-chat block ──
 import type { AiChatApi } from './aiChat'
 // ── end ai-chat block ──
+import type { UpdatesApi } from './updater'
 
 export interface FileFilter {
   name: string
@@ -123,6 +124,8 @@ export type MenuCommand =
   | 'viewSplit'
   | 'zoomFit'
   | 'settings'
+  | 'checkUpdates'
+  | 'installUpdate'
   | 'about'
   // project folders + git versions
   | 'openFolder'
@@ -241,6 +244,9 @@ export interface DoplanApi {
   /** AI chat: providers (Claude Code / Codex / Anthropic API), runs, doc tool bridge, chat storage */
   aiChat: AiChatApi
   // ── end ai-chat block ──
+
+  /** GitHub Releases updates (electron-updater); see src/shared/updater.ts */
+  updates: UpdatesApi
 
   window: {
     setTitle(title: string, dirty: boolean): void

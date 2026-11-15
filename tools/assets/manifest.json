@@ -1,6 +1,6 @@
 {
  "generated": "2026-11-12",
- "notes": "verified:true = URL answered HTTP 200 (HEAD) or 302->200 (ambientCG) on 2026-11-12. files: keys are paths relative to the .gltf. ph maps2k resolved via API but not HEAD-checked individually. Added by assets tool: ph:kloofendal_overcast_puresky (HEAD 200).",
+ "notes": "verified:true = URL answered HTTP 200 (HEAD) or 302->200 (ambientCG) on 2026-11-12. files: keys are paths relative to the .gltf. ph maps2k resolved via API but not HEAD-checked individually. Added by assets tool: ph:kloofendal_overcast_puresky (HEAD 200). Added: Poly Haven furniture/decor batch (2026-11-15, files via api.polyhaven.com/files) and 52 CC-BY-4.0 Sketchfab models via the Objaverse HF mirror (licence and author checked on the Sketchfab API; sizeMm = real size in mm, see sizeNote).",
  "models": [
   {
    "id": "ph:ArmChair_01",
@@ -3323,6 +3323,1994 @@
    "approxSizeMB": 0.1,
    "style": "stylized; sketch mode only",
    "verified": "path-from-git-tree"
+  },
+  {
+   "id": "ph:GothicCommode_01",
+   "name": "Gothic Commode 01",
+   "nameRu": "Комод готический резной",
+   "category": "sideboard",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/GothicCommode_01/GothicCommode_01_1k.gltf",
+   "files": {
+    "textures/GothicCommode_01_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/GothicCommode_01/GothicCommode_01_arm_1k.jpg",
+    "textures/GothicCommode_01_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/GothicCommode_01/GothicCommode_01_nor_gl_1k.jpg",
+    "GothicCommode_01.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/GothicCommode_01/GothicCommode_01.bin",
+    "textures/GothicCommode_01_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/GothicCommode_01/GothicCommode_01_diff_1k.jpg"
+   },
+   "approxSizeMB": 0.58,
+   "dimensionsM": [
+    1.201,
+    0.581,
+    1.212
+   ],
+   "polycount": 3897,
+   "verified": true
+  },
+  {
+   "id": "ph:WoodenTable_03",
+   "name": "Wooden Table 03",
+   "nameRu": "Стол деревянный рабочий",
+   "category": "table",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/WoodenTable_03/WoodenTable_03_1k.gltf",
+   "files": {
+    "textures/WoodenTable_03_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/WoodenTable_03/WoodenTable_03_diff_1k.jpg",
+    "WoodenTable_03.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/WoodenTable_03/WoodenTable_03.bin",
+    "textures/WoodenTable_03_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/WoodenTable_03/WoodenTable_03_nor_gl_1k.jpg",
+    "textures/WoodenTable_03_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/WoodenTable_03/WoodenTable_03_arm_1k.jpg"
+   },
+   "approxSizeMB": 0.61,
+   "dimensionsM": [
+    1.327,
+    0.562,
+    0.83
+   ],
+   "polycount": 2298,
+   "verified": true
+  },
+  {
+   "id": "ph:antique_ceramic_vase_01",
+   "name": "Antique Ceramic Vase 01",
+   "nameRu": "Ваза керамическая антикварная",
+   "category": "decor",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/antique_ceramic_vase_01/antique_ceramic_vase_01_1k.gltf",
+   "files": {
+    "textures/antique_ceramic_vase_01_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/antique_ceramic_vase_01/antique_ceramic_vase_01_nor_gl_1k.jpg",
+    "antique_ceramic_vase_01.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/antique_ceramic_vase_01/antique_ceramic_vase_01.bin",
+    "textures/antique_ceramic_vase_01_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/antique_ceramic_vase_01/antique_ceramic_vase_01_diff_1k.jpg",
+    "textures/antique_ceramic_vase_01_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/antique_ceramic_vase_01/antique_ceramic_vase_01_arm_1k.jpg"
+   },
+   "approxSizeMB": 0.5,
+   "dimensionsM": [
+    0.255,
+    0.255,
+    0.44
+   ],
+   "polycount": 9408,
+   "verified": true
+  },
+  {
+   "id": "ph:boombox",
+   "name": "Boombox",
+   "nameRu": "Магнитола",
+   "category": "electronics",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/boombox/boombox_1k.gltf",
+   "files": {
+    "textures/boombox_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/boombox/boombox_nor_gl_1k.jpg",
+    "textures/boombox_speakers_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/boombox/boombox_speakers_arm_1k.jpg",
+    "textures/boombox_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/boombox/boombox_diff_1k.jpg",
+    "boombox.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/boombox/boombox.bin",
+    "textures/boombox_speakers_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/boombox/boombox_speakers_diff_1k.jpg",
+    "textures/boombox_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/boombox/boombox_arm_1k.jpg"
+   },
+   "approxSizeMB": 2.93,
+   "dimensionsM": [
+    0.724,
+    0.186,
+    0.47
+   ],
+   "polycount": 10168,
+   "verified": true
+  },
+  {
+   "id": "ph:ceramic_vase_04",
+   "name": "Ceramic Vase 04",
+   "nameRu": "Ваза керамическая",
+   "category": "decor",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/ceramic_vase_04/ceramic_vase_04_1k.gltf",
+   "files": {
+    "ceramic_vase_04.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/ceramic_vase_04/ceramic_vase_04.bin",
+    "textures/ceramic_vase_04_rough_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/ceramic_vase_04/ceramic_vase_04_rough_1k.jpg",
+    "textures/ceramic_vase_04_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/ceramic_vase_04/ceramic_vase_04_diff_1k.jpg",
+    "textures/ceramic_vase_04_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/ceramic_vase_04/ceramic_vase_04_nor_gl_1k.jpg"
+   },
+   "approxSizeMB": 0.57,
+   "dimensionsM": [
+    0.183,
+    0.182,
+    0.342
+   ],
+   "polycount": 2224,
+   "verified": true
+  },
+  {
+   "id": "ph:chinese_armchair",
+   "name": "Chinese Armchair",
+   "nameRu": "Кресло в китайском стиле",
+   "category": "armchair",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/chinese_armchair/chinese_armchair_1k.gltf",
+   "files": {
+    "textures/chinese_armchair_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_armchair/chinese_armchair_arm_1k.jpg",
+    "textures/chinese_armchair_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_armchair/chinese_armchair_nor_gl_1k.jpg",
+    "chinese_armchair.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/chinese_armchair/chinese_armchair.bin",
+    "textures/chinese_armchair_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_armchair/chinese_armchair_diff_1k.jpg"
+   },
+   "approxSizeMB": 1.62,
+   "dimensionsM": [
+    0.848,
+    0.789,
+    1.587
+   ],
+   "polycount": 2675,
+   "verified": true
+  },
+  {
+   "id": "ph:chinese_chandelier",
+   "name": "Chinese Chandelier",
+   "nameRu": "Люстра в китайском стиле",
+   "category": "lamp-ceiling",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/chinese_chandelier/chinese_chandelier_1k.gltf",
+   "files": {
+    "textures/chinese_chandelier_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_chandelier/chinese_chandelier_arm_1k.jpg",
+    "chinese_chandelier.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/chinese_chandelier/chinese_chandelier.bin",
+    "textures/chinese_chandelier_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_chandelier/chinese_chandelier_nor_gl_1k.jpg",
+    "textures/chinese_chandelier_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_chandelier/chinese_chandelier_diff_1k.jpg"
+   },
+   "approxSizeMB": 2.06,
+   "dimensionsM": [
+    0.878,
+    0.879,
+    0.748
+   ],
+   "polycount": 7828,
+   "verified": true
+  },
+  {
+   "id": "ph:chinese_console_table",
+   "name": "Chinese Console Table",
+   "nameRu": "Консоль в китайском стиле",
+   "category": "sideboard",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/chinese_console_table/chinese_console_table_1k.gltf",
+   "files": {
+    "textures/chinese_console_table_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_console_table/chinese_console_table_arm_1k.jpg",
+    "textures/chinese_console_table_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_console_table/chinese_console_table_diff_1k.jpg",
+    "textures/chinese_console_table_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_console_table/chinese_console_table_nor_gl_1k.jpg",
+    "chinese_console_table.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/chinese_console_table/chinese_console_table.bin"
+   },
+   "approxSizeMB": 2.66,
+   "dimensionsM": [
+    1.72,
+    0.339,
+    0.661
+   ],
+   "polycount": 13648,
+   "verified": true
+  },
+  {
+   "id": "ph:chinese_screen_panels",
+   "name": "Chinese Screen Panels",
+   "nameRu": "Ширма в китайском стиле",
+   "category": "decor",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/chinese_screen_panels/chinese_screen_panels_1k.gltf",
+   "files": {
+    "textures/chinese_screen_panels_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_screen_panels/chinese_screen_panels_arm_1k.jpg",
+    "textures/chinese_screen_panels_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_screen_panels/chinese_screen_panels_diff_1k.jpg",
+    "chinese_screen_panels.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/chinese_screen_panels/chinese_screen_panels.bin",
+    "textures/chinese_screen_panels_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_screen_panels/chinese_screen_panels_nor_gl_1k.jpg"
+   },
+   "approxSizeMB": 1.61,
+   "dimensionsM": [
+    1.294,
+    0.377,
+    1.603
+   ],
+   "polycount": 784,
+   "verified": true
+  },
+  {
+   "id": "ph:chinese_stool",
+   "name": "Chinese Stool",
+   "nameRu": "Табурет в китайском стиле",
+   "category": "stool",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/chinese_stool/chinese_stool_1k.gltf",
+   "files": {
+    "textures/chinese_stool_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_stool/chinese_stool_diff_1k.jpg",
+    "textures/chinese_stool_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_stool/chinese_stool_arm_1k.jpg",
+    "chinese_stool.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/chinese_stool/chinese_stool.bin",
+    "textures/chinese_stool_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_stool/chinese_stool_nor_gl_1k.jpg"
+   },
+   "approxSizeMB": 1.71,
+   "dimensionsM": [
+    0.599,
+    0.506,
+    0.631
+   ],
+   "polycount": 1090,
+   "verified": true
+  },
+  {
+   "id": "ph:chinese_tea_table",
+   "name": "Chinese Tea Table",
+   "nameRu": "Чайный столик в китайском стиле",
+   "category": "coffee-table",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/chinese_tea_table/chinese_tea_table_1k.gltf",
+   "files": {
+    "textures/chinese_tea_table_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_tea_table/chinese_tea_table_arm_1k.jpg",
+    "chinese_tea_table.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/chinese_tea_table/chinese_tea_table.bin",
+    "textures/chinese_tea_table_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_tea_table/chinese_tea_table_nor_gl_1k.jpg",
+    "textures/chinese_tea_table_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_tea_table/chinese_tea_table_diff_1k.jpg"
+   },
+   "approxSizeMB": 1.51,
+   "dimensionsM": [
+    0.841,
+    0.836,
+    0.499
+   ],
+   "polycount": 2508,
+   "verified": true
+  },
+  {
+   "id": "ph:fancy_picture_frame_02",
+   "name": "Fancy Picture Frame 02",
+   "nameRu": "Картина в резной раме",
+   "category": "decor-wall",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/fancy_picture_frame_02/fancy_picture_frame_02_1k.gltf",
+   "files": {
+    "textures/fancy_picture_frame_02_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fancy_picture_frame_02/fancy_picture_frame_02_diff_1k.jpg",
+    "fancy_picture_frame_02.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/fancy_picture_frame_02/fancy_picture_frame_02.bin",
+    "textures/fancy_picture_frame_02_canvas_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fancy_picture_frame_02/fancy_picture_frame_02_canvas_nor_gl_1k.jpg",
+    "textures/fancy_picture_frame_02_canvas_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fancy_picture_frame_02/fancy_picture_frame_02_canvas_diff_1k.jpg",
+    "textures/fancy_picture_frame_02_rough_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fancy_picture_frame_02/fancy_picture_frame_02_rough_1k.jpg",
+    "textures/fancy_picture_frame_02_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fancy_picture_frame_02/fancy_picture_frame_02_nor_gl_1k.jpg",
+    "textures/fancy_picture_frame_02_canvas_rough_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fancy_picture_frame_02/fancy_picture_frame_02_canvas_rough_1k.jpg"
+   },
+   "approxSizeMB": 1.65,
+   "dimensionsM": [
+    0.661,
+    0.089,
+    0.771
+   ],
+   "polycount": 35102,
+   "verified": true
+  },
+  {
+   "id": "ph:gallinera_chair",
+   "name": "Gallinera Chair",
+   "nameRu": "Стул деревянный с плетёным сиденьем",
+   "category": "chair",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/gallinera_chair/gallinera_chair_1k.gltf",
+   "files": {
+    "textures/gallinera_chair_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/gallinera_chair/gallinera_chair_nor_gl_1k.jpg",
+    "textures/gallinera_chair_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/gallinera_chair/gallinera_chair_diff_1k.jpg",
+    "textures/gallinera_chair_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/gallinera_chair/gallinera_chair_arm_1k.jpg",
+    "gallinera_chair.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/gallinera_chair/gallinera_chair.bin"
+   },
+   "approxSizeMB": 2.25,
+   "dimensionsM": [
+    0.581,
+    0.604,
+    1.034
+   ],
+   "polycount": 11560,
+   "verified": true
+  },
+  {
+   "id": "ph:gallinera_table",
+   "name": "Gallinera Table",
+   "nameRu": "Столик деревянный низкий",
+   "category": "side-table",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/gallinera_table/gallinera_table_1k.gltf",
+   "files": {
+    "textures/gallinera_table_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/gallinera_table/gallinera_table_diff_1k.jpg",
+    "textures/gallinera_table_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/gallinera_table/gallinera_table_nor_gl_1k.jpg",
+    "textures/gallinera_table_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/gallinera_table/gallinera_table_arm_1k.jpg",
+    "gallinera_table.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/gallinera_table/gallinera_table.bin"
+   },
+   "approxSizeMB": 1.75,
+   "dimensionsM": [
+    0.83,
+    0.518,
+    0.488
+   ],
+   "polycount": 5528,
+   "verified": true
+  },
+  {
+   "id": "ph:hanging_picture_frame_02",
+   "name": "Hanging Picture Frame 02",
+   "nameRu": "Картина в раме горизонтальная",
+   "category": "decor-wall",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/hanging_picture_frame_02/hanging_picture_frame_02_1k.gltf",
+   "files": {
+    "textures/hanging_picture_frame_02_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_02/hanging_picture_frame_02_diff_1k.jpg",
+    "textures/hanging_picture_frame_02_artwork_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_02/hanging_picture_frame_02_artwork_diff_1k.jpg",
+    "textures/hanging_picture_frame_02_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_02/hanging_picture_frame_02_arm_1k.jpg",
+    "textures/hanging_picture_frame_02_artwork_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_02/hanging_picture_frame_02_artwork_nor_gl_1k.jpg",
+    "textures/hanging_picture_frame_02_artwork_roughness_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_02/hanging_picture_frame_02_artwork_roughness_1k.jpg",
+    "hanging_picture_frame_02.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/hanging_picture_frame_02/hanging_picture_frame_02.bin",
+    "textures/hanging_picture_frame_02_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_02/hanging_picture_frame_02_nor_gl_1k.jpg"
+   },
+   "approxSizeMB": 0.66,
+   "dimensionsM": [
+    0.752,
+    0.033,
+    0.5
+   ],
+   "polycount": 3678,
+   "verified": true
+  },
+  {
+   "id": "ph:hanging_picture_frame_03",
+   "name": "Hanging Picture Frame 03",
+   "nameRu": "Картина в раме вертикальная",
+   "category": "decor-wall",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/hanging_picture_frame_03/hanging_picture_frame_03_1k.gltf",
+   "files": {
+    "textures/hanging_picture_frame_03_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_03/hanging_picture_frame_03_nor_gl_1k.jpg",
+    "textures/hanging_picture_frame_03_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_03/hanging_picture_frame_03_diff_1k.jpg",
+    "textures/hanging_picture_frame_03_artwork_rough_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_03/hanging_picture_frame_03_artwork_rough_1k.jpg",
+    "textures/hanging_picture_frame_03_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_03/hanging_picture_frame_03_arm_1k.jpg",
+    "textures/hanging_picture_frame_03_rough_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_03/hanging_picture_frame_03_rough_1k.jpg",
+    "textures/hanging_picture_frame_03_artwork_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_03/hanging_picture_frame_03_artwork_nor_gl_1k.jpg",
+    "textures/hanging_picture_frame_03_artwork_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_03/hanging_picture_frame_03_artwork_diff_1k.jpg",
+    "hanging_picture_frame_03.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/hanging_picture_frame_03/hanging_picture_frame_03.bin"
+   },
+   "approxSizeMB": 1.2,
+   "dimensionsM": [
+    0.385,
+    0.032,
+    0.502
+   ],
+   "polycount": 24348,
+   "verified": true
+  },
+  {
+   "id": "ph:metal_jug",
+   "name": "Metal Jug",
+   "nameRu": "Кувшин металлический",
+   "category": "decor",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/metal_jug/metal_jug_1k.gltf",
+   "files": {
+    "textures/metal_jug_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_jug/metal_jug_diff_1k.jpg",
+    "textures/metal_jug_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_jug/metal_jug_arm_1k.jpg",
+    "textures/metal_jug_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_jug/metal_jug_nor_gl_1k.jpg",
+    "metal_jug.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/metal_jug/metal_jug.bin"
+   },
+   "approxSizeMB": 1.71,
+   "dimensionsM": [
+    0.197,
+    0.195,
+    0.288
+   ],
+   "polycount": 6040,
+   "verified": true
+  },
+  {
+   "id": "ph:metal_stool_01",
+   "name": "Metal Stool 01",
+   "nameRu": "Табурет барный металлический",
+   "category": "stool",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/metal_stool_01/metal_stool_01_1k.gltf",
+   "files": {
+    "textures/metal_stool_01_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_stool_01/metal_stool_01_nor_gl_1k.jpg",
+    "textures/metal_stool_01_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_stool_01/metal_stool_01_diff_1k.jpg",
+    "textures/metal_stool_01_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_stool_01/metal_stool_01_arm_1k.jpg",
+    "metal_stool_01.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/metal_stool_01/metal_stool_01.bin"
+   },
+   "approxSizeMB": 2.18,
+   "dimensionsM": [
+    0.352,
+    0.355,
+    0.883
+   ],
+   "polycount": 8334,
+   "verified": true
+  },
+  {
+   "id": "ph:metal_stool_02",
+   "name": "Metal Stool 02",
+   "nameRu": "Табурет металлический низкий",
+   "category": "stool",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/metal_stool_02/metal_stool_02_1k.gltf",
+   "files": {
+    "textures/metal_stool_02_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_stool_02/metal_stool_02_nor_gl_1k.jpg",
+    "textures/metal_stool_02_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_stool_02/metal_stool_02_diff_1k.jpg",
+    "textures/metal_stool_02_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_stool_02/metal_stool_02_arm_1k.jpg",
+    "metal_stool_02.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/metal_stool_02/metal_stool_02.bin"
+   },
+   "approxSizeMB": 2.42,
+   "dimensionsM": [
+    0.448,
+    0.473,
+    0.458
+   ],
+   "polycount": 6532,
+   "verified": true
+  },
+  {
+   "id": "ph:metal_stool_03",
+   "name": "Metal Stool 03",
+   "nameRu": "Стул барный металлический со спинкой",
+   "category": "stool",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/metal_stool_03/metal_stool_03_1k.gltf",
+   "files": {
+    "textures/metal_stool_03_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_stool_03/metal_stool_03_nor_gl_1k.jpg",
+    "textures/metal_stool_03_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_stool_03/metal_stool_03_diff_1k.jpg",
+    "textures/metal_stool_03_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_stool_03/metal_stool_03_arm_1k.jpg",
+    "metal_stool_03.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/metal_stool_03/metal_stool_03.bin"
+   },
+   "approxSizeMB": 2.18,
+   "dimensionsM": [
+    0.461,
+    0.471,
+    1.023
+   ],
+   "polycount": 6576,
+   "verified": true
+  },
+  {
+   "id": "ph:painted_wooden_cabinet_02",
+   "name": "Painted Wooden Cabinet 02",
+   "nameRu": "Шкаф деревянный крашеный",
+   "category": "wardrobe",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/painted_wooden_cabinet_02/painted_wooden_cabinet_02_1k.gltf",
+   "files": {
+    "textures/painted_wooden_cabinet_02_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_cabinet_02/painted_wooden_cabinet_02_arm_1k.jpg",
+    "painted_wooden_cabinet_02.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/painted_wooden_cabinet_02/painted_wooden_cabinet_02.bin",
+    "textures/painted_wooden_cabinet_02_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_cabinet_02/painted_wooden_cabinet_02_nor_gl_1k.jpg",
+    "textures/painted_wooden_cabinet_02_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_cabinet_02/painted_wooden_cabinet_02_diff_1k.jpg"
+   },
+   "approxSizeMB": 1.52,
+   "dimensionsM": [
+    0.997,
+    0.729,
+    2.569
+   ],
+   "polycount": 966,
+   "verified": true
+  },
+  {
+   "id": "ph:painted_wooden_chair_02",
+   "name": "Painted Wooden Chair 02",
+   "nameRu": "Стул деревянный крашеный",
+   "category": "chair",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/painted_wooden_chair_02/painted_wooden_chair_02_1k.gltf",
+   "files": {
+    "textures/painted_wooden_chair_02_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_chair_02/painted_wooden_chair_02_nor_gl_1k.jpg",
+    "textures/painted_wooden_chair_02_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_chair_02/painted_wooden_chair_02_diff_1k.jpg",
+    "textures/painted_wooden_chair_02_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_chair_02/painted_wooden_chair_02_arm_1k.jpg",
+    "painted_wooden_chair_02.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/painted_wooden_chair_02/painted_wooden_chair_02.bin"
+   },
+   "approxSizeMB": 2.29,
+   "dimensionsM": [
+    0.639,
+    0.662,
+    1.264
+   ],
+   "polycount": 1246,
+   "verified": true
+  },
+  {
+   "id": "ph:painted_wooden_shelves",
+   "name": "Painted Wooden Shelves",
+   "nameRu": "Стеллаж деревянный крашеный",
+   "category": "shelf",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/painted_wooden_shelves/painted_wooden_shelves_1k.gltf",
+   "files": {
+    "textures/painted_wooden_shelves_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_shelves/painted_wooden_shelves_nor_gl_1k.jpg",
+    "painted_wooden_shelves.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/painted_wooden_shelves/painted_wooden_shelves.bin",
+    "textures/painted_wooden_shelves_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_shelves/painted_wooden_shelves_arm_1k.jpg",
+    "textures/painted_wooden_shelves_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_shelves/painted_wooden_shelves_diff_1k.jpg"
+   },
+   "approxSizeMB": 2.01,
+   "dimensionsM": [
+    0.511,
+    0.367,
+    1.125
+   ],
+   "polycount": 524,
+   "verified": true
+  },
+  {
+   "id": "ph:painted_wooden_sofa",
+   "name": "Painted Wooden Sofa",
+   "nameRu": "Диван-скамья деревянная крашеная",
+   "category": "sofa",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/painted_wooden_sofa/painted_wooden_sofa_1k.gltf",
+   "files": {
+    "textures/painted_wooden_sofa_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_sofa/painted_wooden_sofa_nor_gl_1k.jpg",
+    "textures/painted_wooden_sofa_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_sofa/painted_wooden_sofa_diff_1k.jpg",
+    "painted_wooden_sofa.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/painted_wooden_sofa/painted_wooden_sofa.bin",
+    "textures/painted_wooden_sofa_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_sofa/painted_wooden_sofa_arm_1k.jpg"
+   },
+   "approxSizeMB": 2,
+   "dimensionsM": [
+    2.452,
+    0.787,
+    1.281
+   ],
+   "polycount": 5826,
+   "verified": true
+  },
+  {
+   "id": "ph:painted_wooden_stool",
+   "name": "Painted Wooden Stool",
+   "nameRu": "Табурет деревянный крашеный",
+   "category": "stool",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/painted_wooden_stool/painted_wooden_stool_1k.gltf",
+   "files": {
+    "textures/painted_wooden_stool_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_stool/painted_wooden_stool_nor_gl_1k.jpg",
+    "textures/painted_wooden_stool_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_stool/painted_wooden_stool_arm_1k.jpg",
+    "textures/painted_wooden_stool_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_stool/painted_wooden_stool_diff_1k.jpg",
+    "painted_wooden_stool.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/painted_wooden_stool/painted_wooden_stool.bin"
+   },
+   "approxSizeMB": 1.79,
+   "dimensionsM": [
+    0.385,
+    0.406,
+    0.579
+   ],
+   "polycount": 676,
+   "verified": true
+  },
+  {
+   "id": "ph:painted_wooden_table",
+   "name": "Painted Wooden Table",
+   "nameRu": "Стол обеденный деревянный крашеный",
+   "category": "table",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/painted_wooden_table/painted_wooden_table_1k.gltf",
+   "files": {
+    "textures/painted_wooden_table_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_table/painted_wooden_table_nor_gl_1k.jpg",
+    "textures/painted_wooden_table_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_table/painted_wooden_table_diff_1k.jpg",
+    "painted_wooden_table.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/painted_wooden_table/painted_wooden_table.bin",
+    "textures/painted_wooden_table_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_table/painted_wooden_table_arm_1k.jpg"
+   },
+   "approxSizeMB": 1.7,
+   "dimensionsM": [
+    2.406,
+    1.137,
+    0.959
+   ],
+   "polycount": 600,
+   "verified": true
+  },
+  {
+   "id": "ph:planter_box_02",
+   "name": "Planter Box 02",
+   "nameRu": "Ящик с растениями низкий",
+   "category": "plant",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/planter_box_02/planter_box_02_1k.gltf",
+   "files": {
+    "textures/planter_box_02_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/planter_box_02/planter_box_02_diff_1k.jpg",
+    "textures/planter_box_02_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/planter_box_02/planter_box_02_nor_gl_1k.jpg",
+    "textures/planter_box_02_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/planter_box_02/planter_box_02_arm_1k.jpg",
+    "planter_box_02.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/planter_box_02/planter_box_02.bin"
+   },
+   "approxSizeMB": 2.35,
+   "dimensionsM": [
+    1.252,
+    0.467,
+    0.453
+   ],
+   "polycount": 10944,
+   "verified": true
+  },
+  {
+   "id": "ph:planter_box_03",
+   "name": "Planter Box 03",
+   "nameRu": "Ящик с растениями",
+   "category": "plant",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/planter_box_03/planter_box_03_1k.gltf",
+   "files": {
+    "textures/planter_box_03_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/planter_box_03/planter_box_03_diff_1k.jpg",
+    "textures/planter_box_03_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/planter_box_03/planter_box_03_arm_1k.jpg",
+    "textures/planter_box_03_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/planter_box_03/planter_box_03_nor_gl_1k.jpg",
+    "planter_box_03.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/planter_box_03/planter_box_03.bin"
+   },
+   "approxSizeMB": 2.44,
+   "dimensionsM": [
+    0.914,
+    0.656,
+    0.855
+   ],
+   "polycount": 13112,
+   "verified": true
+  },
+  {
+   "id": "ph:round_wooden_table_02",
+   "name": "Round Wooden Table 02",
+   "nameRu": "Стол круглый деревянный",
+   "category": "table",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/round_wooden_table_02/round_wooden_table_02_1k.gltf",
+   "files": {
+    "textures/round_wooden_table_02_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/round_wooden_table_02/round_wooden_table_02_nor_gl_1k.jpg",
+    "textures/round_wooden_table_02_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/round_wooden_table_02/round_wooden_table_02_diff_1k.jpg",
+    "textures/round_wooden_table_02_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/round_wooden_table_02/round_wooden_table_02_arm_1k.jpg",
+    "round_wooden_table_02.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/round_wooden_table_02/round_wooden_table_02.bin"
+   },
+   "approxSizeMB": 1.83,
+   "dimensionsM": [
+    0.796,
+    0.796,
+    0.746
+   ],
+   "polycount": 4254,
+   "verified": true
+  },
+  {
+   "id": "ph:small_wooden_table_01",
+   "name": "Small Wooden Table 01",
+   "nameRu": "Столик деревянный приставной",
+   "category": "side-table",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/small_wooden_table_01/small_wooden_table_01_1k.gltf",
+   "files": {
+    "textures/small_wooden_table_01_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/small_wooden_table_01/small_wooden_table_01_arm_1k.jpg",
+    "small_wooden_table_01.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/small_wooden_table_01/small_wooden_table_01.bin",
+    "textures/small_wooden_table_01_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/small_wooden_table_01/small_wooden_table_01_diff_1k.jpg",
+    "textures/small_wooden_table_01_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/small_wooden_table_01/small_wooden_table_01_nor_gl_1k.jpg"
+   },
+   "approxSizeMB": 0.4,
+   "dimensionsM": [
+    0.916,
+    0.44,
+    0.533
+   ],
+   "polycount": 3410,
+   "verified": true
+  },
+  {
+   "id": "ph:steel_frame_shelves_02",
+   "name": "Steel Frame Shelves 02",
+   "nameRu": "Стеллаж металлический узкий",
+   "category": "shelf",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/steel_frame_shelves_02/steel_frame_shelves_02_1k.gltf",
+   "files": {
+    "textures/steel_frame_shelves_02_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/steel_frame_shelves_02/steel_frame_shelves_02_nor_gl_1k.jpg",
+    "steel_frame_shelves_02.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/steel_frame_shelves_02/steel_frame_shelves_02.bin",
+    "textures/steel_frame_shelves_02_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/steel_frame_shelves_02/steel_frame_shelves_02_diff_1k.jpg",
+    "textures/steel_frame_shelves_02_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/steel_frame_shelves_02/steel_frame_shelves_02_arm_1k.jpg"
+   },
+   "approxSizeMB": 0.52,
+   "dimensionsM": [
+    0.593,
+    0.502,
+    2.142
+   ],
+   "polycount": 4348,
+   "verified": true
+  },
+  {
+   "id": "ph:steel_frame_shelves_03",
+   "name": "Steel Frame Shelves 03",
+   "nameRu": "Стеллаж металлический широкий",
+   "category": "shelf",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/steel_frame_shelves_03/steel_frame_shelves_03_1k.gltf",
+   "files": {
+    "textures/steel_frame_shelves_03_drawers_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/steel_frame_shelves_03/steel_frame_shelves_03_drawers_arm_1k.jpg",
+    "textures/steel_frame_shelves_03_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/steel_frame_shelves_03/steel_frame_shelves_03_diff_1k.jpg",
+    "steel_frame_shelves_03.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/steel_frame_shelves_03/steel_frame_shelves_03.bin",
+    "textures/steel_frame_shelves_03_drawers_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/steel_frame_shelves_03/steel_frame_shelves_03_drawers_nor_gl_1k.jpg",
+    "textures/steel_frame_shelves_03_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/steel_frame_shelves_03/steel_frame_shelves_03_arm_1k.jpg",
+    "textures/steel_frame_shelves_03_drawers_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/steel_frame_shelves_03/steel_frame_shelves_03_drawers_diff_1k.jpg",
+    "textures/steel_frame_shelves_03_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/steel_frame_shelves_03/steel_frame_shelves_03_nor_gl_1k.jpg"
+   },
+   "approxSizeMB": 3.4,
+   "dimensionsM": [
+    2.351,
+    0.721,
+    2.312
+   ],
+   "polycount": 8396,
+   "verified": true
+  },
+  {
+   "id": "ph:vintage_grandfather_clock_01",
+   "name": "Vintage Grandfather Clock 01",
+   "nameRu": "Часы напольные винтажные",
+   "category": "decor",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/vintage_grandfather_clock_01/vintage_grandfather_clock_01_1k.gltf",
+   "files": {
+    "textures/vintage_grandfather_clock_01_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/vintage_grandfather_clock_01/vintage_grandfather_clock_01_nor_gl_1k.jpg",
+    "textures/vintage_grandfather_clock_01_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/vintage_grandfather_clock_01/vintage_grandfather_clock_01_diff_1k.jpg",
+    "textures/vintage_grandfather_clock_01_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/vintage_grandfather_clock_01/vintage_grandfather_clock_01_arm_1k.jpg",
+    "vintage_grandfather_clock_01.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/vintage_grandfather_clock_01/vintage_grandfather_clock_01.bin"
+   },
+   "approxSizeMB": 2.25,
+   "dimensionsM": [
+    0.997,
+    0.795,
+    2.191
+   ],
+   "polycount": 12604,
+   "verified": true
+  },
+  {
+   "id": "ph:vintage_oil_lamp",
+   "name": "Vintage Oil Lamp",
+   "nameRu": "Лампа керосиновая винтажная",
+   "category": "lamp-table",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/vintage_oil_lamp/vintage_oil_lamp_1k.gltf",
+   "files": {
+    "textures/vintage_oil_lamp_glass_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/vintage_oil_lamp/vintage_oil_lamp_glass_diff_1k.jpg",
+    "textures/vintage_oil_lamp_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/vintage_oil_lamp/vintage_oil_lamp_nor_gl_1k.jpg",
+    "textures/vintage_oil_lamp_flame_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/vintage_oil_lamp/vintage_oil_lamp_flame_diff_1k.jpg",
+    "textures/vintage_oil_lamp_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/vintage_oil_lamp/vintage_oil_lamp_diff_1k.jpg",
+    "vintage_oil_lamp.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/vintage_oil_lamp/vintage_oil_lamp.bin",
+    "textures/vintage_oil_lamp_glass_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/vintage_oil_lamp/vintage_oil_lamp_glass_nor_gl_1k.jpg",
+    "textures/vintage_oil_lamp_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/vintage_oil_lamp/vintage_oil_lamp_arm_1k.jpg",
+    "textures/vintage_oil_lamp_glass_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/vintage_oil_lamp/vintage_oil_lamp_glass_arm_1k.jpg"
+   },
+   "approxSizeMB": 1.97,
+   "dimensionsM": [
+    0.22,
+    0.22,
+    0.802
+   ],
+   "polycount": 7208,
+   "verified": true
+  },
+  {
+   "id": "ph:vintage_wooden_drawer_01",
+   "name": "Vintage Wooden Drawer 01",
+   "nameRu": "Комод винтажный с ящиками",
+   "category": "sideboard",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/vintage_wooden_drawer_01/vintage_wooden_drawer_01_1k.gltf",
+   "files": {
+    "textures/vintage_wooden_drawer_01_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/vintage_wooden_drawer_01/vintage_wooden_drawer_01_nor_gl_1k.jpg",
+    "textures/vintage_wooden_drawer_01_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/vintage_wooden_drawer_01/vintage_wooden_drawer_01_diff_1k.jpg",
+    "textures/vintage_wooden_drawer_01_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/vintage_wooden_drawer_01/vintage_wooden_drawer_01_arm_1k.jpg",
+    "vintage_wooden_drawer_01.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/vintage_wooden_drawer_01/vintage_wooden_drawer_01.bin"
+   },
+   "approxSizeMB": 1.99,
+   "dimensionsM": [
+    1.715,
+    1.007,
+    1.091
+   ],
+   "polycount": 5184,
+   "verified": true
+  },
+  {
+   "id": "ph:wicker_basket_02",
+   "name": "Wicker Basket 02",
+   "nameRu": "Корзина плетёная",
+   "category": "decor",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/wicker_basket_02/wicker_basket_02_1k.gltf",
+   "files": {
+    "textures/wicker_basket_02_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wicker_basket_02/wicker_basket_02_nor_gl_1k.jpg",
+    "wicker_basket_02.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/wicker_basket_02/wicker_basket_02.bin",
+    "textures/wicker_basket_02_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wicker_basket_02/wicker_basket_02_arm_1k.jpg",
+    "textures/wicker_basket_02_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wicker_basket_02/wicker_basket_02_diff_1k.jpg"
+   },
+   "approxSizeMB": 2.92,
+   "dimensionsM": [
+    0.375,
+    0.271,
+    0.218
+   ],
+   "polycount": 17850,
+   "verified": true
+  },
+  {
+   "id": "ph:wooden_bookshelf_worn",
+   "name": "Wooden Bookshelf Worn",
+   "nameRu": "Книжный шкаф деревянный старый",
+   "category": "shelf",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/wooden_bookshelf_worn/wooden_bookshelf_worn_1k.gltf",
+   "files": {
+    "textures/wooden_bookshelf_worn_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_bookshelf_worn/wooden_bookshelf_worn_nor_gl_1k.jpg",
+    "wooden_bookshelf_worn.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/wooden_bookshelf_worn/wooden_bookshelf_worn.bin",
+    "textures/wooden_bookshelf_worn_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_bookshelf_worn/wooden_bookshelf_worn_arm_1k.jpg",
+    "textures/wooden_bookshelf_worn_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_bookshelf_worn/wooden_bookshelf_worn_diff_1k.jpg"
+   },
+   "approxSizeMB": 2.65,
+   "dimensionsM": [
+    1.374,
+    0.581,
+    2.063
+   ],
+   "polycount": 10106,
+   "verified": true
+  },
+  {
+   "id": "ph:wooden_table_02",
+   "name": "Wooden Table 02",
+   "nameRu": "Стол деревянный",
+   "category": "table",
+   "source": "polyhaven",
+   "licence": "CC0-1.0",
+   "format": "gltf",
+   "gltf": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/wooden_table_02/wooden_table_02_1k.gltf",
+   "files": {
+    "textures/wooden_table_02_diff_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_table_02/wooden_table_02_diff_1k.jpg",
+    "textures/wooden_table_02_nor_gl_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_table_02/wooden_table_02_nor_gl_1k.jpg",
+    "wooden_table_02.bin": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/wooden_table_02/wooden_table_02.bin",
+    "textures/wooden_table_02_arm_1k.jpg": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_table_02/wooden_table_02_arm_1k.jpg"
+   },
+   "approxSizeMB": 0.46,
+   "dimensionsM": [
+    1.134,
+    0.706,
+    0.8
+   ],
+   "polycount": 196,
+   "verified": true
+  },
+  {
+   "id": "sf:sliding_wardrobe_shk_276_1d71",
+   "name": "Sliding wardrobe SHK-276",
+   "nameRu": "Шкаф-купе трёхдверный чёрный с зеркалами",
+   "category": "wardrobe",
+   "source": "https://sketchfab.com/3d-models/1d716799774c445690e6099c3d0af344 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (Эльба Мебель)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-117/1d716799774c445690e6099c3d0af344.glb",
+   "thumb": "https://media.sketchfab.com/models/1d716799774c445690e6099c3d0af344/thumbnails/594c8d5fe2f241c398befb56385714ec/7eead715a90047569654bf0978ddcef8.jpeg",
+   "sizeMm": [
+    2195,
+    658,
+    2355
+   ],
+   "sizeNote": "Manufacturer model (Эльба Мебель SHK-276), authored in millimetres at true size; 3-door sliding wardrobe ~2200×660×2355",
+   "approxSizeMB": 1.01,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:wardrobe_classic_4727",
+   "name": "Wardrobe Classic",
+   "nameRu": "Шкаф платяной двухдверный белый",
+   "category": "wardrobe",
+   "source": "https://sketchfab.com/3d-models/47270ac8a40c4af8bb55d076b159122a (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (Blaž Mraz)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-027/47270ac8a40c4af8bb55d076b159122a.glb",
+   "thumb": "https://media.sketchfab.com/models/47270ac8a40c4af8bb55d076b159122a/thumbnails/5ab45af06505451a94767c8967ed2eea/383310ea5e5e42e99491ada024981483.jpeg",
+   "sizeMm": [
+    916,
+    570,
+    2032
+   ],
+   "sizeNote": "Model authored in metres at plausible scale; matches a typical 2-door wardrobe (~900×570×2030, cf. IKEA HEMNES 2-door 1000×590×1970)",
+   "approxSizeMB": 1.29,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:poliform_bed_1607",
+   "name": "Poliform_Bed",
+   "nameRu": "Кровать двуспальная мягкая на подиуме",
+   "category": "bed",
+   "source": "https://sketchfab.com/3d-models/16070c2e6faa405391ab7ada8bb0aed6 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (Alexis Ramos)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-122/16070c2e6faa405391ab7ada8bb0aed6.glb",
+   "thumb": "https://media.sketchfab.com/models/16070c2e6faa405391ab7ada8bb0aed6/thumbnails/469fc45ce0a541f184a4f5ec498402b3/5294106eceb74aa5992b424830f9dd16.jpeg",
+   "sizeMm": [
+    2220,
+    2399,
+    811
+   ],
+   "sizeNote": "Model in cm; Poliform-style low upholstered platform bed for a 180×200 mattress (overall ~2220×2400, headboard 810)",
+   "approxSizeMB": 2.52,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:soho_bed_3d_model_97e3",
+   "name": "Soho bed - 3D Model",
+   "nameRu": "Кровать двуспальная мягкая с высоким изголовьем",
+   "category": "bed",
+   "source": "https://sketchfab.com/3d-models/97e361e8beda4112ac5b1b5bcd388cdf (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (BertO)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-043/97e361e8beda4112ac5b1b5bcd388cdf.glb",
+   "thumb": "https://media.sketchfab.com/models/97e361e8beda4112ac5b1b5bcd388cdf/thumbnails/75e5feedc2604e068b97418c1de77192/121071436bda40a99f379e0e883472b4.jpeg",
+   "sizeMm": [
+    1801,
+    2253,
+    939
+   ],
+   "sizeNote": "Model in metres; Soho-type upholstered bed for 160×200 mattress (overall ~1800×2250, headboard ~940)",
+   "approxSizeMB": 2.35,
+   "attributionRequired": true,
+   "fix": {
+    "metalRough": true,
+    "maxTexture": 1024
+   }
+  },
+  {
+   "id": "sf:single_bed_2_81ad",
+   "name": "Single Bed 2",
+   "nameRu": "Кровать односпальная деревянная",
+   "category": "bed",
+   "source": "https://sketchfab.com/3d-models/81ada0e24e1647d8a0d6d0708a696f84 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (rhcreations)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-063/81ada0e24e1647d8a0d6d0708a696f84.glb",
+   "thumb": "https://media.sketchfab.com/models/81ada0e24e1647d8a0d6d0708a696f84/thumbnails/dec5402cd5a74bddbf358bec4249bfc2/e1505e7efd754cfdb0d21deaeb7734d1.jpeg",
+   "sizeMm": [
+    1033,
+    2050,
+    829
+   ],
+   "sizeNote": "Single wooden bed for a 90×200 mattress: overall length ~2050 mm",
+   "approxSizeMB": 3.85,
+   "attributionRequired": true,
+   "fix": {
+    "metalRough": true,
+    "maxTexture": 1024
+   }
+  },
+  {
+   "id": "sf:nightstand_1478",
+   "name": "Nightstand",
+   "nameRu": "Тумба прикроватная на ножках (mid-century)",
+   "category": "nightstand",
+   "source": "https://sketchfab.com/3d-models/147801240ff74f2fb7025be8a8e002d7 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (Luiza Moreira)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-067/147801240ff74f2fb7025be8a8e002d7.glb",
+   "thumb": "https://media.sketchfab.com/models/147801240ff74f2fb7025be8a8e002d7/thumbnails/6d90c754cfb4466f8ed1553fa92169fa/1d1656716016449eb85603e85f2859ce.jpeg",
+   "sizeMm": [
+    402,
+    415,
+    650
+   ],
+   "sizeNote": "Mid-century 2-drawer nightstand on splayed legs, height ~650 mm (e.g. West Elm Mid-Century nightstand ~610–660)",
+   "approxSizeMB": 1.8,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:bedside_andrea_889d",
+   "name": "Bedside Andrea",
+   "nameRu": "Тумба прикроватная с двумя ящиками",
+   "category": "nightstand",
+   "source": "https://sketchfab.com/3d-models/889d490a0fcb49ad9e9200ef8e370ab5 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (Digital_MHC)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-066/889d490a0fcb49ad9e9200ef8e370ab5.glb",
+   "thumb": "https://media.sketchfab.com/models/889d490a0fcb49ad9e9200ef8e370ab5/thumbnails/38939c1381124ab48a126e96c2138075/0028d256499a447dace0e8f4e27f8dfd.jpeg",
+   "sizeMm": [
+    630,
+    500,
+    517
+   ],
+   "sizeNote": "Product model (Digital_MHC «Andrea» bedside) authored in cm: 630×500×517",
+   "approxSizeMB": 2.4,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:table_in_recycled_wood_1ed7",
+   "name": "Table in recycled wood.",
+   "nameRu": "Стол обеденный из массива (прямоугольный)",
+   "category": "table",
+   "source": "https://sketchfab.com/3d-models/1ed75823ea0842d2938482597862791a (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (Juan Carlos)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-110/1ed75823ea0842d2938482597862791a.glb",
+   "thumb": "https://media.sketchfab.com/models/1ed75823ea0842d2938482597862791a/thumbnails/52e161a525b046d3bd6541d749f1e04d/9228cc3ec826429899f14abdc9ce1154.jpeg",
+   "sizeMm": [
+    2000,
+    900,
+    801
+   ],
+   "sizeNote": "Model in metres: 2000×900×800 rustic/recycled-wood farmhouse dining table (standard 6–8 seat size)",
+   "approxSizeMB": 1.79,
+   "attributionRequired": true,
+   "fix": {
+    "metalRough": true,
+    "maxTexture": 1024
+   }
+  },
+  {
+   "id": "sf:table_1132",
+   "name": "Table",
+   "nameRu": "Стол обеденный круглый на опоре",
+   "category": "table",
+   "source": "https://sketchfab.com/3d-models/1132fa2850a24917892733566bd68e74 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (yryabchenko)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-054/1132fa2850a24917892733566bd68e74.glb",
+   "thumb": "https://media.sketchfab.com/models/1132fa2850a24917892733566bd68e74/thumbnails/d47a4a8f6e37493696b6922e45ac5a30/8f65120e92b1421cbd697bf69afe0c39.jpeg",
+   "sizeMm": [
+    1032,
+    1032,
+    750
+   ],
+   "sizeNote": "Standard dining height 750 mm; round pedestal table ⌀ ~1030 (4-seat)",
+   "approxSizeMB": 2.17,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:simple_soviet_wooden_chair_3086",
+   "name": "Simple Soviet Wooden Chair",
+   "nameRu": "Стул деревянный венский",
+   "category": "chair",
+   "source": "https://sketchfab.com/3d-models/30861044fa0d4d0b858cdc9eaa843af4 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (Artem P)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-128/30861044fa0d4d0b858cdc9eaa843af4.glb",
+   "thumb": "https://media.sketchfab.com/models/30861044fa0d4d0b858cdc9eaa843af4/thumbnails/14c8af41fc544afea0d5f6ea3400382a/ed673bb6ea3344ed9a4f47fe7607257a.jpeg",
+   "sizeMm": [
+    498,
+    481,
+    900
+   ],
+   "sizeNote": "Soviet bentwood-style dining chair, back height ~900 mm",
+   "approxSizeMB": 3.52,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:chair_2e92",
+   "name": "Chair",
+   "nameRu": "Стул обеденный с мягкой спинкой",
+   "category": "chair",
+   "source": "https://sketchfab.com/3d-models/2e92000d99d74c8a993badf99be4435a (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (augusto.v)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-145/2e92000d99d74c8a993badf99be4435a.glb",
+   "thumb": "https://media.sketchfab.com/models/2e92000d99d74c8a993badf99be4435a/thumbnails/1df96fda5aa242f2a67f794b51858bf7/ce49b098ed5343fb82bbb8161d42db94.jpeg",
+   "sizeMm": [
+    699,
+    689,
+    780
+   ],
+   "sizeNote": "Modern dining armchair, back height ~780 mm",
+   "approxSizeMB": 4.62,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:office_desk_140x60_9262",
+   "name": "Office Desk 140x60",
+   "nameRu": "Стол письменный с тумбой 140×60",
+   "category": "desk",
+   "source": "https://sketchfab.com/3d-models/9262f311271c4c4390341e526d3fe103 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (AleixoAlonso)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-051/9262f311271c4c4390341e526d3fe103.glb",
+   "thumb": "https://media.sketchfab.com/models/9262f311271c4c4390341e526d3fe103/thumbnails/f212e858ee1a40abacf2269b6c30bed5/3ca2a0de9e5746769513d477d79c431a.jpeg",
+   "sizeMm": [
+    1400,
+    600,
+    757
+   ],
+   "sizeNote": "Model in metres, named 140×60: 1400×600×757 office desk with drawer pedestal",
+   "approxSizeMB": 2.15,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:office_desk_3b6d",
+   "name": "Office Desk",
+   "nameRu": "Стол письменный угловой",
+   "category": "desk",
+   "source": "https://sketchfab.com/3d-models/3b6df50cc1124d90a90f163676631c6a (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (HippoStance)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-105/3b6df50cc1124d90a90f163676631c6a.glb",
+   "thumb": "https://media.sketchfab.com/models/3b6df50cc1124d90a90f163676631c6a/thumbnails/147e25fc49e74d58a9eaf0e35a1ba2f0/5e9b97ca65ef422badc211d8dbaf0b12.jpeg",
+   "sizeMm": [
+    1575,
+    1575,
+    775
+   ],
+   "sizeNote": "Model in metres: L-shaped corner desk 1575×1575×775 (typical 1500×1500×750)",
+   "approxSizeMB": 1.87,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:high_poly_pbr_office_chair_fa2d",
+   "name": "High-Poly PBR Office Chair",
+   "nameRu": "Кресло офисное кожаное на колёсах",
+   "category": "chair",
+   "source": "https://sketchfab.com/3d-models/fa2d5243f916407a93db7efcaae75e0d (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (kilicarslan)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-137/fa2d5243f916407a93db7efcaae75e0d.glb",
+   "thumb": "https://media.sketchfab.com/models/fa2d5243f916407a93db7efcaae75e0d/thumbnails/2c16af00eee84fb8a0c152955dda797d/e2510d8754c94878b860a51d77f66f57.jpeg",
+   "sizeMm": [
+    724,
+    760,
+    1150
+   ],
+   "sizeNote": "Executive swivel chair, overall height ~1150 mm (base ⌀ ~700)",
+   "approxSizeMB": 4.57,
+   "attributionRequired": true,
+   "fix": {
+    "metalRough": true,
+    "maxTexture": 1024
+   }
+  },
+  {
+   "id": "sf:ergonomic_mesh_office_chair_cd5e",
+   "name": "Ergonomic mesh office chair",
+   "nameRu": "Кресло офисное эргономичное сетчатое",
+   "category": "chair",
+   "source": "https://sketchfab.com/3d-models/cd5ef0305d8545dd8cd934ebb99cf7d5 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (guillaumecrz)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-046/cd5ef0305d8545dd8cd934ebb99cf7d5.glb",
+   "thumb": "https://media.sketchfab.com/models/cd5ef0305d8545dd8cd934ebb99cf7d5/thumbnails/80b6558cdd064cf09ddb02f22466e67a/10066ffb0d7547ef80352c45d9184c70.jpeg",
+   "sizeMm": [
+    795,
+    826,
+    1050
+   ],
+   "sizeNote": "Ergonomic mesh task chair (Aeron-type), height ~1050 mm",
+   "approxSizeMB": 5.37,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:solid_wood_bookcase_42b8",
+   "name": "Solid Wood Bookcase.",
+   "nameRu": "Стеллаж деревянный с ячейками",
+   "category": "shelf",
+   "source": "https://sketchfab.com/3d-models/42b8a5e3f6c7425d97e9e6c82c51aafe (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (Juan Carlos)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-083/42b8a5e3f6c7425d97e9e6c82c51aafe.glb",
+   "thumb": "https://media.sketchfab.com/models/42b8a5e3f6c7425d97e9e6c82c51aafe/thumbnails/f20e3c4bad464d3bbd7f15b44e5c6c1d/e8d14a64a8ce4320851d80d84d81b97b.jpeg",
+   "sizeMm": [
+    1370,
+    350,
+    1800
+   ],
+   "sizeNote": "Model in metres: 1370×350×1800 open cube bookcase (cf. IKEA KALLAX 4×4 1470×390×1470)",
+   "approxSizeMB": 0.3,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:bookshelf_71af",
+   "name": "Bookshelf [CC0]",
+   "nameRu": "Книжный шкаф с книгами",
+   "category": "shelf",
+   "source": "https://sketchfab.com/3d-models/71af93b1d15f4f48ad836d36110626f7 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (Crew Froebel)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-098/71af93b1d15f4f48ad836d36110626f7.glb",
+   "thumb": "https://media.sketchfab.com/models/71af93b1d15f4f48ad836d36110626f7/thumbnails/a2cb9ab8abef404b94e0806ae3f66e48/3d567b0274f64cfbb94e4940da3e4bdb.jpeg",
+   "sizeMm": [
+    617,
+    211,
+    1150
+   ],
+   "sizeNote": "Model in metres: small bookcase 617×211×1150 filled with books",
+   "approxSizeMB": 4.39,
+   "attributionRequired": true,
+   "fix": {
+    "rotateY": 90,
+    "maxTexture": 1024
+   }
+  },
+  {
+   "id": "sf:lounger_armchair_e9d9",
+   "name": "Lounger Armchair",
+   "nameRu": "Кресло для отдыха с подголовником",
+   "category": "armchair",
+   "source": "https://sketchfab.com/3d-models/e9d9d87c32f144e2873765e66814f727 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (Nikolay Kudrin)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-117/e9d9d87c32f144e2873765e66814f727.glb",
+   "thumb": "https://media.sketchfab.com/models/e9d9d87c32f144e2873765e66814f727/thumbnails/4f5124ce520447628be1e1c346d9fe11/d01d83290cb7415c94fa2c3ff07ff4d1.jpeg",
+   "sizeMm": [
+    983,
+    1162,
+    1365
+   ],
+   "sizeNote": "Model in metres: Jaime Hayon \"Lounger\"-style wing armchair ~985×1160×1365",
+   "approxSizeMB": 2.1,
+   "attributionRequired": true,
+   "fix": {
+    "metalRough": true,
+    "maxTexture": 1024
+   }
+  },
+  {
+   "id": "sf:arm_chair_furniture_ec62",
+   "name": "Arm chair / Furniture",
+   "nameRu": "Кресло мягкое современное",
+   "category": "armchair",
+   "source": "https://sketchfab.com/3d-models/ec62634ebb5a41f491bbb9da04cd9dd1 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (maxsbond.work)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-147/ec62634ebb5a41f491bbb9da04cd9dd1.glb",
+   "thumb": "https://media.sketchfab.com/models/ec62634ebb5a41f491bbb9da04cd9dd1/thumbnails/5d91896709a24307927f1ecc8bc7c368/8fdde384c5b74cd9a7390eb36d4a816d.jpeg",
+   "sizeMm": [
+    844,
+    845,
+    800
+   ],
+   "sizeNote": "Modern upholstered lounge armchair, overall height ~800 mm",
+   "approxSizeMB": 5.89,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:noguchi_coffee_table_8f8a",
+   "name": "Noguchi Coffee Table",
+   "nameRu": "Столик журнальный стеклянный на деревянной опоре",
+   "category": "coffee-table",
+   "source": "https://sketchfab.com/3d-models/8f8a3dbd45534152b5771c36cc4742d9 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (Deborah Kumagai)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-041/8f8a3dbd45534152b5771c36cc4742d9.glb",
+   "thumb": "https://media.sketchfab.com/models/8f8a3dbd45534152b5771c36cc4742d9/thumbnails/d2220d243d624f839d6a334474fffeb4/0a87b8b408404376bd7d2518a0b5c605.jpeg",
+   "sizeMm": [
+    1280,
+    922,
+    391
+   ],
+   "sizeNote": "Vitra Noguchi Coffee Table 1280×930×400",
+   "approxSizeMB": 0.94,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:coffee_table_marina_52a1",
+   "name": "coffee table Marina",
+   "nameRu": "Столик журнальный круглый",
+   "category": "coffee-table",
+   "source": "https://sketchfab.com/3d-models/52a1075958804cd18f96701ad3f49406 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (robula72)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-097/52a1075958804cd18f96701ad3f49406.glb",
+   "thumb": "https://media.sketchfab.com/models/52a1075958804cd18f96701ad3f49406/thumbnails/fb99642f464f47768509be4c05dadeaa/fe5930e4b34e4c7db35e806f509226ce.jpeg",
+   "sizeMm": [
+    626,
+    600,
+    395
+   ],
+   "sizeNote": "Model authored in mm: round side/coffee table ⌀600, h 395",
+   "approxSizeMB": 1.57,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:kuuma_ye_rug_by_kristiina_lassus_5f5d",
+   "name": "Kuuma YE rug by Kristiina Lassus",
+   "nameRu": "Ковёр современный жёлтый",
+   "category": "rug",
+   "source": "https://sketchfab.com/3d-models/5f5de1ba643746fc9da76d2cac94fbb3 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (mfb64)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-115/5f5de1ba643746fc9da76d2cac94fbb3.glb",
+   "thumb": "https://media.sketchfab.com/models/5f5de1ba643746fc9da76d2cac94fbb3/thumbnails/b3a9d1d6916648aeb1506953fe6f98f8/8ab905d21cc44117816b93ea221e750a.jpeg",
+   "sizeMm": [
+    2421,
+    2107,
+    8
+   ],
+   "sizeNote": "Kristiina Lassus \"Kuuma\" rug scanned at real size ~2420×2105",
+   "approxSizeMB": 1.65,
+   "attributionRequired": true,
+   "mount": "floor"
+  },
+  {
+   "id": "sf:persian_tabriz_pictorial_carpet_0ce2",
+   "name": "Persian Tabriz Pictorial Carpet",
+   "nameRu": "Ковёр персидский",
+   "category": "rug",
+   "source": "https://sketchfab.com/3d-models/0ce2fc1e54724cb79cbb08ab2182760a (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (mfb64)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-155/0ce2fc1e54724cb79cbb08ab2182760a.glb",
+   "thumb": "https://media.sketchfab.com/models/0ce2fc1e54724cb79cbb08ab2182760a/thumbnails/98f93ed40bcd469782f5daa8db2e794e/46dcc4820c184c0d94f81ec369d1415b.jpeg",
+   "sizeMm": [
+    3611,
+    2621,
+    6
+   ],
+   "sizeNote": "Real Persian Tabriz carpet digitised at true size 3610×2620",
+   "approxSizeMB": 1.01,
+   "attributionRequired": true,
+   "mount": "floor"
+  },
+  {
+   "id": "sf:curtains_a83e",
+   "name": "Curtains",
+   "nameRu": "Шторы на карнизе (пара)",
+   "category": "curtain",
+   "source": "https://sketchfab.com/3d-models/a83e1baf822a4442b0f50ed70d449198 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (Heliona)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-115/a83e1baf822a4442b0f50ed70d449198.glb",
+   "thumb": "https://media.sketchfab.com/models/a83e1baf822a4442b0f50ed70d449198/thumbnails/cc58e2a2f0ec48b28c76e373e89eb668/11cc4da551c34b2982982968dd998729.jpeg",
+   "sizeMm": [
+    2985,
+    425,
+    2600
+   ],
+   "sizeNote": "Floor-length curtains for a 2700 mm ceiling: drop ~2600 mm",
+   "approxSizeMB": 2.46,
+   "attributionRequired": true,
+   "mount": "floor"
+  },
+  {
+   "id": "sf:curtain_7187",
+   "name": "Curtain",
+   "nameRu": "Шторы белые на карнизе",
+   "category": "curtain",
+   "source": "https://sketchfab.com/3d-models/7187bae2a1944e2ab5b9c91b400558f1 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (miranda.j.rice)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-049/7187bae2a1944e2ab5b9c91b400558f1.glb",
+   "thumb": "https://media.sketchfab.com/models/7187bae2a1944e2ab5b9c91b400558f1/thumbnails/265b4cc1cfee48229946fbfdd674c7ef/2ac0a32ef7dc4408927ff91e2e844918.jpeg",
+   "sizeMm": [
+    2487,
+    544,
+    2344
+   ],
+   "sizeNote": "Model in metres: 2490 wide, 2345 drop (standard ready-made curtain drop 2400)",
+   "approxSizeMB": 2.79,
+   "attributionRequired": true,
+   "mount": "floor"
+  },
+  {
+   "id": "sf:mario_floor_lamp_15b2",
+   "name": "Mario Floor Lamp",
+   "nameRu": "Торшер-прожектор на треноге",
+   "category": "lamp-floor",
+   "source": "https://sketchfab.com/3d-models/15b2782b523b486ea169d6e16e72123f (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (Andriano Milanovic)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-052/15b2782b523b486ea169d6e16e72123f.glb",
+   "thumb": "https://media.sketchfab.com/models/15b2782b523b486ea169d6e16e72123f/thumbnails/1a75a86d1078415db639ebbc47eedab6/be49310a11774e6792c10c5dc9d1ebe1.jpeg",
+   "sizeMm": [
+    688,
+    756,
+    1650
+   ],
+   "sizeNote": "Tripod spotlight floor lamp, height ~1650 mm",
+   "approxSizeMB": 3.18,
+   "attributionRequired": true,
+   "fix": {
+    "dropFlat": true,
+    "maxTexture": 1024
+   }
+  },
+  {
+   "id": "sf:floor_lamp_61bd",
+   "name": "Floor Lamp",
+   "nameRu": "Торшер с абажуром на гибкой ножке",
+   "category": "lamp-floor",
+   "source": "https://sketchfab.com/3d-models/61bdf5230e5f44b3b5ea53d95f2ab872 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (Agha.Najam)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-019/61bdf5230e5f44b3b5ea53d95f2ab872.glb",
+   "thumb": "https://media.sketchfab.com/models/61bdf5230e5f44b3b5ea53d95f2ab872/thumbnails/bf5a78ad4660490b9059496deba83d4d/97bbaaaadab644aa9595bb8e724cec25.jpeg",
+   "sizeMm": [
+    865,
+    559,
+    1650
+   ],
+   "sizeNote": "Gooseneck floor lamp with fabric shade, height ~1650 mm",
+   "approxSizeMB": 4.1,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:desk_lamp_7377",
+   "name": "Desk lamp",
+   "nameRu": "Лампа настольная на кронштейне",
+   "category": "lamp-table",
+   "source": "https://sketchfab.com/3d-models/7377ec591df04445a1aae370017aaa13 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (KaramellGlass)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-004/7377ec591df04445a1aae370017aaa13.glb",
+   "thumb": "https://media.sketchfab.com/models/7377ec591df04445a1aae370017aaa13/thumbnails/893640cef26f4640b28bfea42b11bfbd/2702a00d110e41a5852f1f50e71b821b.jpeg",
+   "sizeMm": [
+    430,
+    216,
+    600
+   ],
+   "sizeNote": "Architect (Luxo-type) desk lamp, ~600 mm high in this pose",
+   "approxSizeMB": 1.15,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:vintage_desk_lamp_b8e1",
+   "name": "vintage desk lamp",
+   "nameRu": "Лампа настольная банкирская",
+   "category": "lamp-table",
+   "source": "https://sketchfab.com/3d-models/b8e13a49528e4231a0512bb5f18f07e5 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (Noah)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-069/b8e13a49528e4231a0512bb5f18f07e5.glb",
+   "thumb": "https://media.sketchfab.com/models/b8e13a49528e4231a0512bb5f18f07e5/thumbnails/7c3ef849e81449cd8eeb45a2ddaa5530/805080864fe841669ab6e1c7f5f142ca.jpeg",
+   "sizeMm": [
+    326,
+    248,
+    420
+   ],
+   "sizeNote": "Classic banker's lamp, height ~420 mm",
+   "approxSizeMB": 4.7,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:modern_ceiling_lamp_01_4k_ab22",
+   "name": "Modern Ceiling Lamp 01 4k",
+   "nameRu": "Светильник подвесной шар",
+   "category": "lamp-ceiling",
+   "source": "https://sketchfab.com/3d-models/ab22729ecda54178ba4f0b4212b170a9 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (mohamedhussien)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-050/ab22729ecda54178ba4f0b4212b170a9.glb",
+   "thumb": "https://media.sketchfab.com/models/ab22729ecda54178ba4f0b4212b170a9/thumbnails/4a110a03c2334e019a1f83d9defedac0/06459b28186d49179d0a5abd29536d42.jpeg",
+   "sizeMm": [
+    432,
+    432,
+    952
+   ],
+   "sizeNote": "Model in metres: opal glass globe pendant ⌀430, drop 950 incl. cord",
+   "approxSizeMB": 2.57,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:ikea_svartnora_lamp_cb55",
+   "name": "IKEA SVARTNORA Lamp",
+   "nameRu": "Светильник подвесной металлический",
+   "category": "lamp-ceiling",
+   "source": "https://sketchfab.com/3d-models/cb55859f3bad4c4e8821d3bc9d01e55d (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (mfb64)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-087/cb55859f3bad4c4e8821d3bc9d01e55d.glb",
+   "thumb": "https://media.sketchfab.com/models/cb55859f3bad4c4e8821d3bc9d01e55d/thumbnails/8b859c27563947f4a9d7e0ac2430b814/4b44603b02224b6ca534fef5af4f2368.jpeg",
+   "sizeMm": [
+    384,
+    384,
+    937
+   ],
+   "sizeNote": "IKEA SVARTNORA pendant ⌀38 cm (model at true size, drop 937 incl. cord)",
+   "approxSizeMB": 5.32,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:pothos_potted_plant_money_plant_e983",
+   "name": "[FREE] Pothos Potted Plant - Money Plant",
+   "nameRu": "Растение потос в кашпо на подставке",
+   "category": "plant",
+   "source": "https://sketchfab.com/3d-models/e9832f38484f4f85b3f9081b51fa3799 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (AllQuad)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-059/e9832f38484f4f85b3f9081b51fa3799.glb",
+   "thumb": "https://media.sketchfab.com/models/e9832f38484f4f85b3f9081b51fa3799/thumbnails/c4d73d40e4fa45689ee04a5dea3ebe48/9af787b38c894c9789b3988ba44526d9.jpeg",
+   "sizeMm": [
+    827,
+    974,
+    792
+   ],
+   "sizeNote": "Model in metres: pothos in a terracotta pot on wooden stand ~830×975×790",
+   "approxSizeMB": 3.71,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:ficus_e499",
+   "name": "Ficus",
+   "nameRu": "Фикус в горшке",
+   "category": "plant",
+   "source": "https://sketchfab.com/3d-models/e4999d6251ba42ac8ee2cea7d3e30596 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (gilles.schaeck)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-018/e4999d6251ba42ac8ee2cea7d3e30596.glb",
+   "thumb": "https://media.sketchfab.com/models/e4999d6251ba42ac8ee2cea7d3e30596/thumbnails/c940e9102bad478981ea909c80d5828d/efcb86e6cc894af286c62b674192e8d9.jpeg",
+   "sizeMm": [
+    1026,
+    883,
+    901
+   ],
+   "sizeNote": "Model in cm: ficus elastica (rubber plant) in red pot, ~900 high",
+   "approxSizeMB": 3.38,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:snake_plant_b02c",
+   "name": "Snake Plant",
+   "nameRu": "Сансевиерия (щучий хвост) в горшке",
+   "category": "plant",
+   "source": "https://sketchfab.com/3d-models/b02cbf156a024565ab6e89e27261b30f (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (digitalurban)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-062/b02cbf156a024565ab6e89e27261b30f.glb",
+   "thumb": "https://media.sketchfab.com/models/b02cbf156a024565ab6e89e27261b30f/thumbnails/9512c99ba9a1415a9431be1e7764e0ef/e43bbfa25d09406d98c62fa34057a5ac.jpeg",
+   "sizeMm": [
+    465,
+    471,
+    700
+   ],
+   "sizeNote": "Snake plant (Sansevieria trifasciata) in a ~200 mm pot, total height ~700 mm",
+   "approxSizeMB": 3.26,
+   "attributionRequired": true,
+   "fix": {
+    "metalRough": true,
+    "maxTexture": 1024
+   }
+  },
+  {
+   "id": "sf:wooden_ethnic_square_wall_mirror_d72a",
+   "name": "Wooden Ethnic Square Wall Mirror",
+   "nameRu": "Зеркало настенное в деревянной раме",
+   "category": "decor-wall",
+   "source": "https://sketchfab.com/3d-models/d72a45ba83574b97b66fb3ff61ea9c9f (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (Eugene Gorun)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-153/d72a45ba83574b97b66fb3ff61ea9c9f.glb",
+   "thumb": "https://media.sketchfab.com/models/d72a45ba83574b97b66fb3ff61ea9c9f/thumbnails/198adc178a2c45c49417a3cd24d97cdc/fd3683ea115544cc87240f005b215fa1.jpeg",
+   "sizeMm": [
+    938,
+    12,
+    1896
+   ],
+   "sizeNote": "Model in metres: full-length wall mirror 938×1896 in carved wooden frame (frame depth modelled as 12 mm)",
+   "approxSizeMB": 6.39,
+   "attributionRequired": true,
+   "mount": "wall",
+   "elevation": 250
+  },
+  {
+   "id": "sf:wash_basin_stand_b027",
+   "name": "Wash Basin Stand",
+   "nameRu": "Тумба с раковиной подвесная",
+   "category": "bathroom",
+   "source": "https://sketchfab.com/3d-models/b02727808f1f46468e071edfd291060e (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (Ren Viro Store)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-035/b02727808f1f46468e071edfd291060e.glb",
+   "thumb": "https://media.sketchfab.com/models/b02727808f1f46468e071edfd291060e/thumbnails/33e8f98585cb4a2fb03673edc3424e90/feae2b1b98e046869dd3c502cfe09536.jpeg",
+   "sizeMm": [
+    481,
+    471,
+    630
+   ],
+   "sizeNote": "Model in mm: wall-hung vanity 480×470×630 incl. basin (cf. 500 mm compact vanity units); mount with basin rim at ~850",
+   "approxSizeMB": 1.6,
+   "attributionRequired": true,
+   "mount": "wall",
+   "elevation": 220
+  },
+  {
+   "id": "sf:sink_with_faucet_e7c2",
+   "name": "Sink with Faucet",
+   "nameRu": "Тумба с раковиной напольная белая",
+   "category": "bathroom",
+   "source": "https://sketchfab.com/3d-models/e7c2bddaebe94dd0a28fd89981de5195 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (blendffnike)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-063/e7c2bddaebe94dd0a28fd89981de5195.glb",
+   "thumb": "https://media.sketchfab.com/models/e7c2bddaebe94dd0a28fd89981de5195/thumbnails/92490b71edef4fde81a56264e82786cd/c6a4e865214a4998b96547f4250aed24.jpeg",
+   "sizeMm": [
+    600,
+    450,
+    941
+   ],
+   "sizeNote": "Model in metres: 600×450 floor vanity with basin, 940 high incl. tap (basin rim ~850)",
+   "approxSizeMB": 0.97,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:heated_towel_rail_atlant_by_lari_6be3",
+   "name": "Heated towel rail Atlant by Laris.",
+   "nameRu": "Полотенцесушитель электрический лесенка",
+   "category": "bathroom",
+   "source": "https://sketchfab.com/3d-models/6be3bba8ac6c452caf5cbdad6aaff656 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (Eugene Gorun)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-001/6be3bba8ac6c452caf5cbdad6aaff656.glb",
+   "thumb": "https://media.sketchfab.com/models/6be3bba8ac6c452caf5cbdad6aaff656/thumbnails/d97087add2e84596bf67bf544a15f31c/dbe0230c85254d5aaac0e2f1902da008.jpeg",
+   "sizeMm": [
+    931,
+    116,
+    1200
+   ],
+   "sizeNote": "Laris Atlant electric ladder towel rail, 1200 mm high; width includes the side cable and wall socket",
+   "approxSizeMB": 6.9,
+   "attributionRequired": true,
+   "mount": "wall",
+   "elevation": 400
+  },
+  {
+   "id": "sf:heated_towel_rail_b363",
+   "name": "Heated towel rail",
+   "nameRu": "Полотенцесушитель хромированный",
+   "category": "bathroom",
+   "source": "https://sketchfab.com/3d-models/b3636221263546c4ae457b54de6e5d39 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (nester1279)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-152/b3636221263546c4ae457b54de6e5d39.glb",
+   "thumb": "https://media.sketchfab.com/models/b3636221263546c4ae457b54de6e5d39/thumbnails/cf52d81038cd42d9988636c29fe41e35/f775d3cf517142db9b81311b7a9b5d87.jpeg",
+   "sizeMm": [
+    538,
+    188,
+    1496
+   ],
+   "sizeNote": "Model in metres: tall arched chrome towel rail 538×188×1496 (cf. 500×1500 designer rails)",
+   "approxSizeMB": 5.82,
+   "attributionRequired": true,
+   "mount": "wall",
+   "elevation": 300
+  },
+  {
+   "id": "sf:toilet_132a",
+   "name": "Toilet",
+   "nameRu": "Унитаз-компакт с бачком",
+   "category": "bathroom",
+   "source": "https://sketchfab.com/3d-models/132a8ee2af3a40d39d270fbed3d3666c (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (HippoStance)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-014/132a8ee2af3a40d39d270fbed3d3666c.glb",
+   "thumb": "https://media.sketchfab.com/models/132a8ee2af3a40d39d270fbed3d3666c/thumbnails/12d273ffc7d940c5bbbccba7b4fb9d46/6ae4b734bddf454c856f72ca1ce33aeb.jpeg",
+   "sizeMm": [
+    478,
+    607,
+    744
+   ],
+   "sizeNote": "Model in metres: 478×607×744 close-coupled toilet (US style with supply line)",
+   "approxSizeMB": 2.18,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:toilet_adb3",
+   "name": "Toilet",
+   "nameRu": "Унитаз-компакт европейский",
+   "category": "bathroom",
+   "source": "https://sketchfab.com/3d-models/adb3b931f3ef4941830eea9705657a3d (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (Urpo)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-119/adb3b931f3ef4941830eea9705657a3d.glb",
+   "thumb": "https://media.sketchfab.com/models/adb3b931f3ef4941830eea9705657a3d/thumbnails/694c1c2699d94114b5ba08815abf4dbb/32fff4bb5b394eb89befc834bd32b162.jpeg",
+   "sizeMm": [
+    360,
+    650,
+    780
+   ],
+   "sizeNote": "European close-coupled toilet, real unit 360×650×780 mm (model stretched within the aspect tolerance)",
+   "approxSizeMB": 2.87,
+   "attributionRequired": true,
+   "fix": {
+    "rotateY": 90,
+    "maxTexture": 1024
+   }
+  },
+  {
+   "id": "sf:washing_machine_new_82c9",
+   "name": "Washing Machine (new)",
+   "nameRu": "Стиральная машина фронтальная",
+   "category": "appliance",
+   "source": "https://sketchfab.com/3d-models/82c91049303f4664a56cc0eaffa8d662 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (nikita.bulgakov)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-073/82c91049303f4664a56cc0eaffa8d662.glb",
+   "thumb": "https://media.sketchfab.com/models/82c91049303f4664a56cc0eaffa8d662/thumbnails/41b06311d9034300b1cd103196c85fbc/89afc9d78515464d9d113ab403e320ad.jpeg",
+   "sizeMm": [
+    590,
+    580,
+    850
+   ],
+   "sizeNote": "Standard front-load washer 600×600×850 (width/depth from model ratio)",
+   "approxSizeMB": 12.78,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:french_door_refrigerator_stainle_ebe6",
+   "name": "French Door Refrigerator - Stainless",
+   "nameRu": "Холодильник с французскими дверями",
+   "category": "appliance-kitchen",
+   "source": "https://sketchfab.com/3d-models/ebe62ed6dd9b446a9c9b7d7d6a8086e7 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (Smokahontas)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-090/ebe62ed6dd9b446a9c9b7d7d6a8086e7.glb",
+   "thumb": "https://media.sketchfab.com/models/ebe62ed6dd9b446a9c9b7d7d6a8086e7/thumbnails/40479d5be78e4509b89d9a99d2cdc2cf/79099bbc83e94b73b9cc3095fc1b0f2d.jpeg",
+   "sizeMm": [
+    960,
+    621,
+    1818
+   ],
+   "sizeNote": "Model in metres: 960×620×1818 French-door fridge (cf. typical 910×740×1780)",
+   "approxSizeMB": 3.24,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:retro_fridge_3b13",
+   "name": "Retro Fridge",
+   "nameRu": "Холодильник в ретро-стиле",
+   "category": "appliance-kitchen",
+   "source": "https://sketchfab.com/3d-models/3b130f0ba4304966a101c82be2429cc7 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (dylanheyes)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-011/3b130f0ba4304966a101c82be2429cc7.glb",
+   "thumb": "https://media.sketchfab.com/models/3b130f0ba4304966a101c82be2429cc7/thumbnails/b7768f2f5221480292c43255dd557245/11cfc941da6f4e95bda9d37dd4e9f203.jpeg",
+   "sizeMm": [
+    600,
+    580,
+    1005
+   ],
+   "sizeNote": "Retro two-door fridge, standard 600 mm appliance width; height from model proportions (~1000, compact retro type)",
+   "approxSizeMB": 1.35,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:microwave_oven_3421",
+   "name": "Microwave Oven",
+   "nameRu": "Микроволновая печь",
+   "category": "appliance-kitchen",
+   "source": "https://sketchfab.com/3d-models/3421e492257f40959859104f46128304 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (MustafaYerebasmaz)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-073/3421e492257f40959859104f46128304.glb",
+   "thumb": "https://media.sketchfab.com/models/3421e492257f40959859104f46128304/thumbnails/4998f8b07efc4ac1a42f4da0c9d40d69/8deb03fd3b4e4f8cad33231f7dff1c54.jpeg",
+   "sizeMm": [
+    550,
+    488,
+    342
+   ],
+   "sizeNote": "Model in cm: countertop microwave 550×490×340 (typical 1.6 cu ft)",
+   "approxSizeMB": 0.93,
+   "attributionRequired": true,
+   "mount": "surface"
+  },
+  {
+   "id": "sf:coffee_maker_9ccd",
+   "name": "Coffee maker",
+   "nameRu": "Кофеварка капельная",
+   "category": "appliance-kitchen",
+   "source": "https://sketchfab.com/3d-models/9ccda2fddba846e6ba97eb774b8a09c6 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (Fredrik Johansen)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-007/9ccda2fddba846e6ba97eb774b8a09c6.glb",
+   "thumb": "https://media.sketchfab.com/models/9ccda2fddba846e6ba97eb774b8a09c6/thumbnails/e71fc61ae188460fbd9674ecb56ecf5a/0a1424fd95a142af8cffc212eb823886.jpeg",
+   "sizeMm": [
+    357,
+    180,
+    355
+   ],
+   "sizeNote": "Moccamaster-type drip coffee maker, height ~355 mm",
+   "approxSizeMB": 3.94,
+   "attributionRequired": true,
+   "mount": "surface",
+   "fix": {
+    "rotateY": 90,
+    "maxTexture": 1024
+   }
+  },
+  {
+   "id": "sf:electrolux_electric_kettle_0445",
+   "name": "Electrolux electric kettle",
+   "nameRu": "Чайник электрический",
+   "category": "appliance-kitchen",
+   "source": "https://sketchfab.com/3d-models/0445b3baee4b4a6fb40d7e03be4e8550 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (gorzi)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-040/0445b3baee4b4a6fb40d7e03be4e8550.glb",
+   "thumb": "https://media.sketchfab.com/models/0445b3baee4b4a6fb40d7e03be4e8550/thumbnails/7671afad598143908b8cf16634e0155f/f120e9ee52ea4252ab86c19772d46725.jpeg",
+   "sizeMm": [
+    223,
+    159,
+    250
+   ],
+   "sizeNote": "Electrolux electric kettle on base, height ~250 mm",
+   "approxSizeMB": 1.86,
+   "attributionRequired": true,
+   "mount": "surface"
+  },
+  {
+   "id": "sf:toaster_0dd6",
+   "name": "Toaster",
+   "nameRu": "Тостер",
+   "category": "appliance-kitchen",
+   "source": "https://sketchfab.com/3d-models/0dd620043178479db6752ab103b1e04e (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (Artem P)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-156/0dd620043178479db6752ab103b1e04e.glb",
+   "thumb": "https://media.sketchfab.com/models/0dd620043178479db6752ab103b1e04e/thumbnails/a1832418f9da497aa7d4ea08fbdb78a3/0f5a5d039bd34da2bb90461f4d1dbcfc.jpeg",
+   "sizeMm": [
+    356,
+    185,
+    233
+   ],
+   "sizeNote": "Model authored in mm: 2-slice long toaster 356×185×233",
+   "approxSizeMB": 2.2,
+   "attributionRequired": true,
+   "mount": "surface",
+   "fix": {
+    "rotateY": 90,
+    "maxTexture": 1024
+   }
+  },
+  {
+   "id": "sf:flat_screen_television_f90d",
+   "name": "Flat Screen Television",
+   "nameRu": "Телевизор плоский 50″ на ножках",
+   "category": "tv",
+   "source": "https://sketchfab.com/3d-models/f90d4fb91dd34b6791e8d66d00f96591 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (HippoStance)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-127/f90d4fb91dd34b6791e8d66d00f96591.glb",
+   "thumb": "https://media.sketchfab.com/models/f90d4fb91dd34b6791e8d66d00f96591/thumbnails/5353a4aab9294889a655b5758ec066f7/eaf2498ab4ae4ceaba0eebe568dffddb.jpeg",
+   "sizeMm": [
+    1161,
+    366,
+    716
+   ],
+   "sizeNote": "Model in metres: 1161×716 incl. feet ≈ 50–52″ TV (50″ panel ~1117×648)",
+   "approxSizeMB": 1.84,
+   "attributionRequired": true,
+   "fix": {
+    "rotateY": 90,
+    "maxTexture": 1024
+   }
+  },
+  {
+   "id": "sf:q_acoustics_m3_soundbar_7cf3",
+   "name": "Q-Acoustics M3 Soundbar",
+   "nameRu": "Саундбар",
+   "category": "electronics",
+   "source": "https://sketchfab.com/3d-models/7cf33febf603401586ffa5e18c312d31 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (Q-Acoustics)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-035/7cf33febf603401586ffa5e18c312d31.glb",
+   "thumb": "https://media.sketchfab.com/models/7cf33febf603401586ffa5e18c312d31/thumbnails/79f6a3e2cda24511bda0387f9bf3919f/256x144.jpeg",
+   "sizeMm": [
+    1000,
+    127,
+    72
+   ],
+   "sizeNote": "Q Acoustics M3 soundbar, ~1000 mm wide (manufacturer upload)",
+   "approxSizeMB": 0.5,
+   "attributionRequired": true,
+   "fix": {
+    "metalRough": true,
+    "dropFlat": true,
+    "maxTexture": 1024
+   }
+  },
+  {
+   "id": "sf:sofa_80ed",
+   "name": "Sofa",
+   "nameRu": "Диван трёхместный серый",
+   "category": "sofa",
+   "source": "https://sketchfab.com/3d-models/80edec2de8c04a4fb335a48b550a2336 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (Urpo)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-006/80edec2de8c04a4fb335a48b550a2336.glb",
+   "thumb": "https://media.sketchfab.com/models/80edec2de8c04a4fb335a48b550a2336/thumbnails/4af0a3703bca444cbfceb1641f7f64ec/036afdadd2d54cfb813d6f0e255f443c.jpeg",
+   "sizeMm": [
+    2000,
+    839,
+    659
+   ],
+   "sizeNote": "Model in metres: 2000×840×660 low-back 3-seat sofa (cf. typical 2000–2200 × 850–950)",
+   "approxSizeMB": 1.84,
+   "attributionRequired": true
+  },
+  {
+   "id": "sf:modern_couch_b7f1",
+   "name": "Modern Couch",
+   "nameRu": "Диван кожаный современный",
+   "category": "sofa",
+   "source": "https://sketchfab.com/3d-models/b7f1a6a036b141f0a02fca99c475e084 (Sketchfab, via Objaverse)",
+   "licence": "CC-BY-4.0 (Tiago Lopes)",
+   "format": "glb",
+   "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-040/b7f1a6a036b141f0a02fca99c475e084.glb",
+   "thumb": "https://media.sketchfab.com/models/b7f1a6a036b141f0a02fca99c475e084/thumbnails/444f2d260db74ed48e4dfed96cfcc9c0/16670a04906e4903825172d5725e8474.jpeg",
+   "sizeMm": [
+    2200,
+    1057,
+    872
+   ],
+   "sizeNote": "Modern 3-seat leather sofa, width 2200 mm",
+   "approxSizeMB": 7.47,
+   "attributionRequired": true
   }
  ],
  "materials": [

@@ -110,8 +110,12 @@ export function startLogin(provider: AiProviderId, bin: ResolvedBin, emit: (ev: 
     // the CLI insists on a real terminal: finish the sign-in in a console window
     if (/not a terminal|raw mode is not supported|isTTY/i.test(text) && !me.manual) {
       me.manual = true
-      openInTerminal(bin, args)
-      emit({ type: 'output', text: '\nОткрыто окно терминала — завершите вход там.\n' })
+      const opened = openInTerminal(bin, args)
+      emit({
+        type: 'output',
+        text: opened ? `\n${LOGIN_TEXT.opened}\n` : `\n${LOGIN_TEXT.runYourself} ${provider} ${args.join(' ')}\n`,
+      })
+      // either way the piped CLI cannot finish: wait for the sign-in made in the terminal
       void pollUntilSignedIn(provider, bin, me, emit, onFinished)
     }
   }
@@ -129,14 +133,48 @@ export function startLogin(provider: AiProviderId, bin: ResolvedBin, emit: (ev: 
   })
 }
 
-function openInTerminal(bin: ResolvedBin, args: string[]): void {
-  if (process.platform !== 'win32') return
+const LOGIN_TEXT = {
+  opened: 'Открыто окно терминала — завершите вход там.',
+  runYourself: 'Этой CLI нужен настоящий терминал. Выполните в терминале:',
+}
+
+/**
+ * The console command line for a sign-in window: `/s /c "start "title" cmd /k ""bin" "arg" sub""`.
+ * Passed verbatim (Node would re-quote it with backslashes, which cmd.exe does not understand).
+ * The outer cmd strips the first and last quote; in what is left the `""` before each path opens and
+ * closes a quote, so the outer cmd sees the paths unquoted and their metacharacters (`R&D`) get a `^`.
+ * The inner `cmd /k` strips the pair around the command and sees the paths quoted.
+ * null when a part cannot be passed safely (`"`, `%`, `!`, line breaks): the user runs it by hand.
+ */
+export function terminalCommandLine(command: string, prefix: string[], args: string[]): string | null {
+  const paths = [command, ...prefix]
+  if (paths.some((s) => !s || /["%!\r\n]/.test(s))) return null
+  if (args.some((a) => !/^[\w.:=/-]+$/.test(a))) return null
+  const q = (s: string) => `"${s.replace(/[&|<>^()]/g, '^$&')}"`
+  const cmd = [...paths.map(q), ...args].join(' ')
+  return `/d /s /c "start "doplan" cmd /k "${cmd}""`
+}
+
+/** Opens a console window running the CLI sign-in; false where the app cannot open one. */
+function openInTerminal(bin: ResolvedBin, args: string[]): boolean {
+  if (process.platform !== 'win32') return false
+  const line = terminalCommandLine(bin.command, bin.prefix, args)
+  if (!line) return false
   const env = { ...process.env }
   if (bin.asNode) env['ELECTRON_RUN_AS_NODE'] = '1'
-  // `start` opens a new console; arguments are app-controlled (binary path + fixed subcommands)
-  const q = (s: string) => `"${s.replace(/"/g, '')}"`
-  const cmd = [q(bin.command), ...bin.prefix.map(q), ...args].join(' ')
-  spawn('cmd.exe', ['/d', '/c', 'start', '"Вход"', 'cmd', '/k', cmd], { env, windowsHide: false, detached: true, stdio: 'ignore' }).unref()
+  try {
+    // arguments are app-controlled (binary path + fixed subcommands)
+    spawn('cmd.exe', [line], {
+      env,
+      windowsHide: false,
+      windowsVerbatimArguments: true,
+      detached: true,
+      stdio: 'ignore',
+    }).unref()
+    return true
+  } catch {
+    return false
+  }
 }
 
 async function pollUntilSignedIn(

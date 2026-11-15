@@ -46,6 +46,8 @@ export function findOnPath(name: string, env: NodeJS.ProcessEnv = process.env): 
   const win = process.platform === 'win32'
   const exts = win ? ['.exe', '.cmd', '.bat', ''] : ['']
   for (const d of dirs) {
+    // relative entries ('.', 'bin') would resolve against the app's current folder
+    if (!isAbsolute(d)) continue
     for (const ext of exts) {
       const p = join(d, name + ext)
       if (!isFile(p)) continue

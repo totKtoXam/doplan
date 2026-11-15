@@ -3,11 +3,13 @@
  * «Добавить в чат» button, the 3D right-click menu and the Ctrl+L shortcut.
  */
 import { type RefObject, useCallback, useEffect, useState } from 'react'
+import { t, useT } from '@/i18n'
 import { RightPanel } from '@/ui/panels'
 import { useUi } from '@/store/ui'
 import { cn } from '@/ui/kit'
 import { ContextMenu } from '@/ui/shell/primitives'
 import { ChatPanel } from './ChatPanel'
+import './i18n'
 import { addSelectionToChat, focusChat, initAi, setDockTab, useAi } from './store'
 
 export { addRefsToChat, addSelectionToChat, focusChat } from './store'
@@ -36,6 +38,7 @@ function useChatShortcut(): void {
 export function RightDock() {
   const tab = useAi((s) => s.dockTab)
   const running = useAi((s) => !!s.running)
+  const tr = useT()
   useEffect(() => initAi(), [])
   useChatShortcut()
   const tabBtn = (id: 'props' | 'ai', label: string) => (
@@ -52,10 +55,10 @@ export function RightDock() {
     </button>
   )
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col" data-ai-dock>
       <div role="tablist" className="flex shrink-0 border-b border-border">
-        {tabBtn('props', 'Свойства')}
-        {tabBtn('ai', 'ИИ')}
+        {tabBtn('props', tr('Свойства'))}
+        {tabBtn('ai', tr('ИИ'))}
       </div>
       {tab === 'props' ? <RightPanel /> : <ChatPanel />}
     </div>
@@ -94,8 +97,8 @@ export function Ai3DMenu({ host }: { host: RefObject<HTMLElement | null> }) {
       onClose={close}
       items={[
         hasSel
-          ? { label: 'Добавить в чат', kbd: 'Ctrl+L', onSelect: () => addSelectionToChat() }
-          : { label: 'Открыть ИИ-чат', kbd: 'Ctrl+L', onSelect: () => focusChat() },
+          ? { label: t('Добавить в чат'), kbd: 'Ctrl+L', onSelect: () => addSelectionToChat() }
+          : { label: t('Открыть ИИ-чат'), kbd: 'Ctrl+L', onSelect: () => focusChat() },
       ]}
     />
   )

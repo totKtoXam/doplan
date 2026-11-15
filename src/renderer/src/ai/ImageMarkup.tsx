@@ -1,14 +1,20 @@
 /**
- * Full-screen editor for drawing pencil marks on a chat image before it is sent: lines, frames,
- * arrows in a few colours; every mark gets a number ①② to refer to in the message.
- * «Готово» bakes the marks into the attached picture and keeps the clean one for re-editing.
+ * Editor for drawing pencil marks on a chat image before it is sent: lines, frames, arrows in a few
+ * colours, each numbered (the numbers run on from the plan marks, so «③» is never ambiguous).
+ * It covers the work area only — the chat stays open on the right. Marks go into the attached
+ * picture at once (the clean one is kept for re-editing); a mini field next to each new mark
+ * takes a note for it, like replying to a text selection.
  */
-import { ArrowUpRight, Pencil, Square, Trash2, Undo2, X } from 'lucide-react'
+import { ArrowUpRight, Pencil, RotateCcw, Square, Trash2, Undo2, X } from 'lucide-react'
 import { type PointerEvent as ReactPointerEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useT } from '@/i18n'
 import { cn } from '@/ui/kit'
+import './i18n'
+import { tAi } from './i18n'
+import { MarkPrompt } from './MarkPrompt'
 import { drawMarkup, isMeaningful, MARKUP_COLORS, type MarkupShape, type MarkupTool, markupBadge, markupMetrics } from './markup'
-import type { PendingImage } from './store'
+import { insertIntoComposer, nextImageMarkNumber, type PendingImage, useAi } from './store'
 
 const TOOLS: { id: MarkupTool; label: string; key: string; icon: typeof Pencil }[] = [
   { id: 'pen', label: 'Линия', key: '1', icon: Pencil },
@@ -16,11 +22,13 @@ const TOOLS: { id: MarkupTool; label: string; key: string; icon: typeof Pencil }
   { id: 'arrow', label: 'Стрелка', key: '3', icon: ArrowUpRight },
 ]
 
+const TOOLBAR_H = 44
+
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image()
     img.onload = () => resolve(img)
-    img.onerror = () => reject(new Error('Не удалось открыть изображение'))
+    img.onerror = () => reject(new Error(tAi('Не удалось открыть изображение')))
     img.src = src
   })
 }
@@ -46,32 +54,70 @@ function bake(img: HTMLImageElement, base: string, shapes: MarkupShape[], prev: 
   return { mime, data: url.slice(url.indexOf(',') + 1), url, name: prev.name, markup: { base, shapes } }
 }
 
-export function ImageMarkup({ image, onDone, onClose }: { image: PendingImage; onDone(img: PendingImage): void; onClose(): void }) {
-  const base = image.markup?.base ?? image.url
+/** the screen area left of the chat dock (the editor must not hide the chat) */
+function workArea(): { right: number; w: number; h: number } {
+  const dock = document.querySelector<HTMLElement>('[data-ai-dock]')
+  const r = dock?.getBoundingClientRect()
+  const right = r && r.width > 0 ? Math.max(0, window.innerWidth - r.left) : 0
+  return { right, w: window.innerWidth - right, h: window.innerHeight }
+}
+
+const isTyping = (t: EventTarget | null) => t instanceof HTMLElement && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.isContentEditable)
+
+export function ImageMarkup({ image, onChange, onClose }: { image: PendingImage; onChange(img: PendingImage): void; onClose(): void }) {
+  const initial = useRef(image).current
+  const base = initial.markup?.base ?? initial.url
+  const busy = useAi((s) => !!s.running)
+  const tr = useT()
   const [img, setImg] = useState<HTMLImageElement | null>(null)
   const [error, setError] = useState('')
-  const [shapes, setShapes] = useState<MarkupShape[]>(image.markup?.shapes ?? [])
+  const [shapes, setShapes] = useState<MarkupShape[]>(initial.markup?.shapes ?? [])
   const [tool, setTool] = useState<MarkupTool>('pen')
   const [color, setColor] = useState<string>(MARKUP_COLORS[0])
-  const [view, setView] = useState({ w: window.innerWidth, h: window.innerHeight })
+  const [area, setArea] = useState(workArea)
+  const [ask, setAsk] = useState<{ n: number; x: number; y: number } | null>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
+  const root = useRef<HTMLDivElement>(null)
   const drawing = useRef<MarkupShape | null>(null)
   const [, redraw] = useState(0)
+
+  // take the keyboard from the chat input so 1/2/3 and Ctrl+Z reach the editor
+  useEffect(() => root.current?.focus(), [])
 
   useEffect(() => {
     loadImage(base).then(setImg, (e: Error) => setError(e.message))
   }, [base])
 
+  // follow the window and the dock width
   useEffect(() => {
-    const onResize = () => setView({ w: window.innerWidth, h: window.innerHeight })
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
+    const update = () => setArea(workArea())
+    window.addEventListener('resize', update)
+    const dock = document.querySelector('[data-ai-dock]')
+    const ro = dock ? new ResizeObserver(update) : null
+    if (dock) ro!.observe(dock)
+    return () => {
+      window.removeEventListener('resize', update)
+      ro?.disconnect()
+    }
   }, [])
 
-  // fit the picture into the window under the toolbar
+  // marks go into the attached picture right away (so a note sent from the mini field carries them)
+  const first = useRef(true)
+  const changeRef = useRef(onChange)
+  changeRef.current = onChange
+  useEffect(() => {
+    if (!img) return
+    if (first.current) {
+      first.current = false
+      return
+    }
+    changeRef.current(bake(img, base, shapes, initial))
+  }, [shapes, img, base, initial])
+
+  // fit the picture into the work area under the toolbar
   const iw = img?.naturalWidth ?? 1
   const ih = img?.naturalHeight ?? 1
-  const k = Math.min((view.w - 48) / iw, (view.h - 120) / ih, 2)
+  const k = Math.min((area.w - 32) / iw, (area.h - TOOLBAR_H - 32) / ih, 2)
   const cw = Math.max(1, Math.round(iw * k))
   const ch = Math.max(1, Math.round(ih * k))
   const metrics = markupMetrics(iw, ih)
@@ -89,21 +135,25 @@ export function ImageMarkup({ image, onDone, onClose }: { image: PendingImage; o
     drawMarkup(c, drawing.current ? [...shapes, drawing.current] : shapes, k, metrics)
   })
 
-  const done = () => {
-    if (!img) return
-    onDone(bake(img, base, shapes, image))
+  const undo = () => {
+    setAsk(null)
+    setShapes((s) => s.slice(0, -1))
+  }
+  const revert = () => {
+    changeRef.current(initial)
+    onClose()
   }
 
-  // the editor owns the keyboard while open (no plan hotkeys underneath)
-  const keys = useRef({ done, onClose, undo: () => setShapes((s) => s.slice(0, -1)) })
-  keys.current = { done, onClose, undo: () => setShapes((s) => s.slice(0, -1)) }
+  // editor keys, unless the user is typing (chat input, mini field)
+  const keys = useRef({ onClose, undo })
+  keys.current = { onClose, undo }
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (isTyping(e.target)) return
       e.stopPropagation()
-      if (e.key === 'Escape') keys.current.onClose()
-      else if (e.key === 'Enter') {
+      if (e.key === 'Escape' || e.key === 'Enter') {
         e.preventDefault()
-        keys.current.done()
+        keys.current.onClose()
       } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') {
         e.preventDefault()
         keys.current.undo()
@@ -122,7 +172,9 @@ export function ImageMarkup({ image, onDone, onClose }: { image: PendingImage; o
   }
   const down = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     if (e.button !== 0 || !img) return
+    root.current?.focus()
     e.currentTarget.setPointerCapture(e.pointerId)
+    setAsk(null)
     const p = at(e)
     drawing.current = { kind: tool, color, points: [p, p] }
     redraw((n) => n + 1)
@@ -137,26 +189,38 @@ export function ImageMarkup({ image, onDone, onClose }: { image: PendingImage; o
     } else s.points = [s.points[0], p]
     redraw((n) => n + 1)
   }
-  const up = () => {
+  const up = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     const s = drawing.current
     drawing.current = null
-    if (s && isMeaningful(s, 6 / k)) setShapes((list) => [...list, s.kind === 'pen' ? { ...s, points: s.points.slice(1) } : s])
-    else redraw((n) => n + 1)
+    if (!s || !isMeaningful(s, 6 / k)) {
+      redraw((n) => n + 1)
+      return
+    }
+    const n = nextImageMarkNumber(shapes)
+    setShapes((list) => [...list, { ...s, points: s.kind === 'pen' ? s.points.slice(1) : s.points, n }])
+    setAsk({ n, x: e.clientX, y: e.clientY })
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[200] flex flex-col bg-black/80 text-xs text-text" role="dialog" aria-label="Пометки на картинке">
-      <div className="flex flex-wrap items-center gap-1.5 border-b border-border bg-panel px-3 py-2">
-        <span className="mr-1 font-medium">Пометки на картинке</span>
+    <div
+      ref={root}
+      tabIndex={-1}
+      className="fixed top-0 bottom-0 left-0 z-[200] flex flex-col bg-black/80 text-xs text-text outline-none"
+      style={{ right: area.right }}
+      role="dialog"
+      aria-label={tr('Пометки на картинке')}
+    >
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-border bg-panel px-3 py-2" style={{ minHeight: TOOLBAR_H }}>
+        <span className="mr-1 font-medium">{tr('Пометки на картинке')}</span>
         {TOOLS.map((t) => (
           <button
             key={t.id}
             type="button"
-            title={`${t.label} (${t.key})`}
+            title={`${tr(t.label)} (${t.key})`}
             className={cn('flex items-center gap-1 rounded-md border px-2 py-1', tool === t.id ? 'border-accent bg-accent-soft' : 'border-border text-muted hover:text-text')}
             onClick={() => setTool(t.id)}
           >
-            <t.icon size={13} /> {t.label}
+            <t.icon size={13} /> {tr(t.label)}
           </button>
         ))}
         <span className="mx-1 h-5 w-px bg-border" />
@@ -164,35 +228,44 @@ export function ImageMarkup({ image, onDone, onClose }: { image: PendingImage; o
           <button
             key={c}
             type="button"
-            aria-label={`Цвет ${c}`}
+            aria-label={tr('Цвет {c}', { c })}
             className={cn('h-5 w-5 rounded-full border-2', color === c ? 'border-text' : 'border-transparent')}
             style={{ background: c }}
             onClick={() => setColor(c)}
           />
         ))}
         <span className="mx-1 h-5 w-px bg-border" />
-        <button type="button" title="Отменить (Ctrl+Z)" disabled={!shapes.length} className="rounded-md p-1 text-muted hover:text-text disabled:opacity-40" onClick={() => setShapes((s) => s.slice(0, -1))}>
+        <button type="button" title={tr('Убрать последнюю пометку (Ctrl+Z)')} disabled={!shapes.length} className="rounded-md p-1 text-muted hover:text-text disabled:opacity-40" onClick={undo}>
           <Undo2 size={14} />
         </button>
-        <button type="button" title="Стереть все пометки" disabled={!shapes.length} className="rounded-md p-1 text-muted hover:text-danger disabled:opacity-40" onClick={() => setShapes([])}>
+        <button
+          type="button"
+          title={tr('Стереть все пометки')}
+          disabled={!shapes.length}
+          className="rounded-md p-1 text-muted hover:text-danger disabled:opacity-40"
+          onClick={() => {
+            setAsk(null)
+            setShapes([])
+          }}
+        >
           <Trash2 size={14} />
         </button>
         <span className="ml-2 min-w-0 flex-1 truncate text-muted">
           {shapes.length
-            ? `Пометки ${shapes.map((_, i) => markupBadge(i + 1)).join(' ')} — сошлитесь на номер в сообщении: «в ① …»`
-            : 'Обведите или укажите стрелкой, что изменить; у каждой пометки будет номер'}
+            ? tr('Пометки {list} уже на картинке в чате — напишите, что сделать', { list: shapes.map((s, i) => markupBadge(s.n ?? i + 1)).join(' ') })
+            : tr('Обведите или укажите стрелкой, что изменить — рядом откроется поле для комментария')}
         </span>
-        <button type="button" className="rounded-md border border-border px-2.5 py-1 hover:bg-hover" onClick={onClose}>
-          Отмена
+        <button type="button" title={tr('Вернуть картинку как была до открытия')} className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-muted hover:text-text" onClick={revert}>
+          <RotateCcw size={12} /> {tr('Отменить правки')}
         </button>
-        <button type="button" disabled={!img} className="rounded-md bg-accent px-3 py-1 text-accent-fg hover:bg-accent-hover disabled:opacity-50" onClick={done}>
-          Готово
+        <button type="button" className="rounded-md bg-accent px-3 py-1 text-accent-fg hover:bg-accent-hover" onClick={onClose}>
+          {tr('Готово')}
         </button>
-        <button type="button" aria-label="Закрыть" className="rounded-md p-1 text-muted hover:text-text" onClick={onClose}>
+        <button type="button" aria-label={tr('Закрыть')} className="rounded-md p-1 text-muted hover:text-text" onClick={onClose}>
           <X size={14} />
         </button>
       </div>
-      <div className="flex min-h-0 flex-1 items-center justify-center p-4" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="flex min-h-0 flex-1 items-center justify-center p-4">
         {error ? (
           <div className="text-danger">{error}</div>
         ) : (
@@ -204,10 +277,31 @@ export function ImageMarkup({ image, onDone, onClose }: { image: PendingImage; o
             onPointerDown={down}
             onPointerMove={move}
             onPointerUp={up}
-            onPointerCancel={up}
+            onPointerCancel={() => {
+              drawing.current = null
+              redraw((n) => n + 1)
+            }}
           />
         )}
       </div>
+      {ask && (
+        <MarkPrompt
+          x={ask.x}
+          y={ask.y}
+          badge={markupBadge(ask.n)}
+          quote={tr('пометка на картинке')}
+          busy={busy}
+          onClose={() => {
+            setAsk(null)
+            root.current?.focus()
+          }}
+          onSubmit={(text, send) => {
+            setAsk(null)
+            if (text) insertIntoComposer(`${markupBadge(ask.n)} ${text}`, send)
+            if (!send) root.current?.focus()
+          }}
+        />
+      )}
     </div>,
     document.body,
   )

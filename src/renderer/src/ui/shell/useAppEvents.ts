@@ -11,8 +11,8 @@ import { dialogStore } from '@/store/dialogs'
 import { docStore } from '@/store/document'
 import { notifyStore, alertDialog } from '@/store/notify'
 import { projectStore } from '@/store/project'
+import { checkForUpdatesManually, initUpdates, installUpdate } from '@/store/updates'
 import { uiStore } from '@/store/ui'
-import { APP_GIT } from './appVersion'
 import type { ToolId } from '@/contracts'
 import { shortcutKey } from './keys'
 import { activateTool, TOOLS } from './ToolRail'
@@ -30,7 +30,7 @@ function isEditable(target: EventTarget | null): boolean {
 
 function anyDialogOpen(): boolean {
   const d = dialogStore.getState()
-  return d.bom || d.importModel || d.materialEditor || d.settings || d.photoPlan || d.render || notifyStore.getState().modals.length > 0 || projectStore.getState().dialog !== null
+  return d.bom || d.importModel || d.materialEditor || d.settings || d.photoPlan || d.render || d.about || notifyStore.getState().modals.length > 0 || projectStore.getState().dialog !== null
 }
 
 const TOOL_KEYS = new Map<string, ToolId>()
@@ -213,11 +213,14 @@ function onMenu(cmd: MenuCommand): void {
     case 'instructions':
       void actions.openInstructions()
       break
+    case 'checkUpdates':
+      void checkForUpdatesManually()
+      break
+    case 'installUpdate':
+      void installUpdate()
+      break
     case 'about':
-      void alertDialog(
-        'doplan',
-        `${t('Планировки, фотореалистичное 3D и дизайн интерьера')}\n${t('Версия')} ${api.version}${APP_GIT ? ` (${APP_GIT})` : ''} · ${api.platform}\n\n${t('Материалы и модели: Poly Haven, ambientCG, Kenney, Quaternius (CC0) и другие — см. лицензии в папке программы.')}`,
-      )
+      dialogStore.getState().open('about')
       break
   }
 }
@@ -263,6 +266,7 @@ export function useAppEvents(enabled: boolean): { dragOver: boolean } {
     offs.push(api.window.onMenu(onMenu))
     offs.push(api.window.onCloseRequest(() => void actions.handleCloseRequest()))
     offs.push(api.window.onOpenFile((p) => void onOpenFile(p)))
+    offs.push(initUpdates())
 
     // title / dirty flag
     syncTitle()

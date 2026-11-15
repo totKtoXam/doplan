@@ -10894,6 +10894,7 @@
     "h": 1864
    },
    "mount": "floor",
+   "thumb": "thumbs/asset_khr_lightspunctuallamp.webp",
    "tags": [
     "lamp-floor"
    ],
@@ -10908,8 +10909,7 @@
       "path": "models/lightspunctuallamp/LightsPunctualLamp.glb"
      }
     ]
-   },
-   "thumb": "thumbs/asset_khr_lightspunctuallamp.webp"
+   }
   },
   {
    "id": "asset_kk_couch",
@@ -11087,6 +11087,3280 @@
      {
       "url": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Furniture-Bits-1.0/main/addons/kaykit_furniture_bits/Assets/gltf/furniturebits_texture.png",
       "path": "models/cabinet_medium/furniturebits_texture.png"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_gothiccommode_01",
+   "name": "Gothic Commode 01",
+   "nameRu": "Комод готический резной",
+   "category": "storage",
+   "kind": "model",
+   "src": "models/gothiccommode_01/GothicCommode_01_1k.gltf",
+   "size": {
+    "w": 1201,
+    "d": 581,
+    "h": 1212
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_gothiccommode_01.webp",
+   "tags": [
+    "sideboard"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/GothicCommode_01/GothicCommode_01_1k.gltf",
+      "path": "models/gothiccommode_01/GothicCommode_01_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/GothicCommode_01/GothicCommode_01_arm_1k.jpg",
+      "path": "models/gothiccommode_01/textures/GothicCommode_01_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/GothicCommode_01/GothicCommode_01_nor_gl_1k.jpg",
+      "path": "models/gothiccommode_01/textures/GothicCommode_01_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/GothicCommode_01/GothicCommode_01.bin",
+      "path": "models/gothiccommode_01/GothicCommode_01.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/GothicCommode_01/GothicCommode_01_diff_1k.jpg",
+      "path": "models/gothiccommode_01/textures/GothicCommode_01_diff_1k.jpg"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_woodentable_03",
+   "name": "Wooden Table 03",
+   "nameRu": "Стол деревянный рабочий",
+   "category": "table",
+   "kind": "model",
+   "src": "models/woodentable_03/WoodenTable_03_1k.gltf",
+   "size": {
+    "w": 1327,
+    "d": 575,
+    "h": 830
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_woodentable_03.webp",
+   "tags": [
+    "table"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/WoodenTable_03/WoodenTable_03_1k.gltf",
+      "path": "models/woodentable_03/WoodenTable_03_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/WoodenTable_03/WoodenTable_03_diff_1k.jpg",
+      "path": "models/woodentable_03/textures/WoodenTable_03_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/WoodenTable_03/WoodenTable_03.bin",
+      "path": "models/woodentable_03/WoodenTable_03.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/WoodenTable_03/WoodenTable_03_nor_gl_1k.jpg",
+      "path": "models/woodentable_03/textures/WoodenTable_03_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/WoodenTable_03/WoodenTable_03_arm_1k.jpg",
+      "path": "models/woodentable_03/textures/WoodenTable_03_arm_1k.jpg"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_antique_ceramic_vase_01",
+   "name": "Antique Ceramic Vase 01",
+   "nameRu": "Ваза керамическая антикварная",
+   "category": "decor",
+   "kind": "model",
+   "src": "models/antique_ceramic_vase_01/antique_ceramic_vase_01_1k.gltf",
+   "size": {
+    "w": 255,
+    "d": 255,
+    "h": 440
+   },
+   "mount": "surface",
+   "thumb": "thumbs/asset_ph_antique_ceramic_vase_01.webp",
+   "tags": [
+    "decor"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/antique_ceramic_vase_01/antique_ceramic_vase_01_1k.gltf",
+      "path": "models/antique_ceramic_vase_01/antique_ceramic_vase_01_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/antique_ceramic_vase_01/antique_ceramic_vase_01_nor_gl_1k.jpg",
+      "path": "models/antique_ceramic_vase_01/textures/antique_ceramic_vase_01_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/antique_ceramic_vase_01/antique_ceramic_vase_01.bin",
+      "path": "models/antique_ceramic_vase_01/antique_ceramic_vase_01.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/antique_ceramic_vase_01/antique_ceramic_vase_01_diff_1k.jpg",
+      "path": "models/antique_ceramic_vase_01/textures/antique_ceramic_vase_01_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/antique_ceramic_vase_01/antique_ceramic_vase_01_arm_1k.jpg",
+      "path": "models/antique_ceramic_vase_01/textures/antique_ceramic_vase_01_arm_1k.jpg"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_boombox",
+   "name": "Boombox",
+   "nameRu": "Магнитола",
+   "category": "electronics",
+   "kind": "model",
+   "src": "models/boombox/boombox_1k.gltf",
+   "size": {
+    "w": 724,
+    "d": 186,
+    "h": 470
+   },
+   "mount": "surface",
+   "thumb": "thumbs/asset_ph_boombox.webp",
+   "tags": [
+    "electronics"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/boombox/boombox_1k.gltf",
+      "path": "models/boombox/boombox_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/boombox/boombox_nor_gl_1k.jpg",
+      "path": "models/boombox/textures/boombox_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/boombox/boombox_speakers_arm_1k.jpg",
+      "path": "models/boombox/textures/boombox_speakers_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/boombox/boombox_diff_1k.jpg",
+      "path": "models/boombox/textures/boombox_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/boombox/boombox.bin",
+      "path": "models/boombox/boombox.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/boombox/boombox_speakers_diff_1k.jpg",
+      "path": "models/boombox/textures/boombox_speakers_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/boombox/boombox_arm_1k.jpg",
+      "path": "models/boombox/textures/boombox_arm_1k.jpg"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_ceramic_vase_04",
+   "name": "Ceramic Vase 04",
+   "nameRu": "Ваза керамическая",
+   "category": "decor",
+   "kind": "model",
+   "src": "models/ceramic_vase_04/ceramic_vase_04_1k.gltf",
+   "size": {
+    "w": 181,
+    "d": 181,
+    "h": 342
+   },
+   "mount": "surface",
+   "thumb": "thumbs/asset_ph_ceramic_vase_04.webp",
+   "tags": [
+    "decor"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/ceramic_vase_04/ceramic_vase_04_1k.gltf",
+      "path": "models/ceramic_vase_04/ceramic_vase_04_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/ceramic_vase_04/ceramic_vase_04.bin",
+      "path": "models/ceramic_vase_04/ceramic_vase_04.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/ceramic_vase_04/ceramic_vase_04_rough_1k.jpg",
+      "path": "models/ceramic_vase_04/textures/ceramic_vase_04_rough_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/ceramic_vase_04/ceramic_vase_04_diff_1k.jpg",
+      "path": "models/ceramic_vase_04/textures/ceramic_vase_04_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/ceramic_vase_04/ceramic_vase_04_nor_gl_1k.jpg",
+      "path": "models/ceramic_vase_04/textures/ceramic_vase_04_nor_gl_1k.jpg"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_chinese_armchair",
+   "name": "Chinese Armchair",
+   "nameRu": "Кресло в китайском стиле",
+   "category": "armchair",
+   "kind": "model",
+   "src": "models/chinese_armchair/chinese_armchair_1k.gltf",
+   "size": {
+    "w": 848,
+    "d": 789,
+    "h": 1587
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_chinese_armchair.webp",
+   "tags": [
+    "armchair"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/chinese_armchair/chinese_armchair_1k.gltf",
+      "path": "models/chinese_armchair/chinese_armchair_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_armchair/chinese_armchair_arm_1k.jpg",
+      "path": "models/chinese_armchair/textures/chinese_armchair_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_armchair/chinese_armchair_nor_gl_1k.jpg",
+      "path": "models/chinese_armchair/textures/chinese_armchair_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/chinese_armchair/chinese_armchair.bin",
+      "path": "models/chinese_armchair/chinese_armchair.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_armchair/chinese_armchair_diff_1k.jpg",
+      "path": "models/chinese_armchair/textures/chinese_armchair_diff_1k.jpg"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_chinese_chandelier",
+   "name": "Chinese Chandelier",
+   "nameRu": "Люстра в китайском стиле",
+   "category": "lighting",
+   "kind": "model",
+   "src": "models/chinese_chandelier/chinese_chandelier_1k.gltf",
+   "size": {
+    "w": 878,
+    "d": 879,
+    "h": 748
+   },
+   "mount": "ceiling",
+   "thumb": "thumbs/asset_ph_chinese_chandelier.webp",
+   "tags": [
+    "lamp-ceiling"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/chinese_chandelier/chinese_chandelier_1k.gltf",
+      "path": "models/chinese_chandelier/chinese_chandelier_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_chandelier/chinese_chandelier_arm_1k.jpg",
+      "path": "models/chinese_chandelier/textures/chinese_chandelier_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/chinese_chandelier/chinese_chandelier.bin",
+      "path": "models/chinese_chandelier/chinese_chandelier.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_chandelier/chinese_chandelier_nor_gl_1k.jpg",
+      "path": "models/chinese_chandelier/textures/chinese_chandelier_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_chandelier/chinese_chandelier_diff_1k.jpg",
+      "path": "models/chinese_chandelier/textures/chinese_chandelier_diff_1k.jpg"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_chinese_console_table",
+   "name": "Chinese Console Table",
+   "nameRu": "Консоль в китайском стиле",
+   "category": "storage",
+   "kind": "model",
+   "src": "models/chinese_console_table/chinese_console_table_1k.gltf",
+   "size": {
+    "w": 1720,
+    "d": 339,
+    "h": 661
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_chinese_console_table.webp",
+   "tags": [
+    "sideboard"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/chinese_console_table/chinese_console_table_1k.gltf",
+      "path": "models/chinese_console_table/chinese_console_table_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_console_table/chinese_console_table_arm_1k.jpg",
+      "path": "models/chinese_console_table/textures/chinese_console_table_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_console_table/chinese_console_table_diff_1k.jpg",
+      "path": "models/chinese_console_table/textures/chinese_console_table_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_console_table/chinese_console_table_nor_gl_1k.jpg",
+      "path": "models/chinese_console_table/textures/chinese_console_table_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/chinese_console_table/chinese_console_table.bin",
+      "path": "models/chinese_console_table/chinese_console_table.bin"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_chinese_screen_panels",
+   "name": "Chinese Screen Panels",
+   "nameRu": "Ширма в китайском стиле",
+   "category": "decor",
+   "kind": "model",
+   "src": "models/chinese_screen_panels/chinese_screen_panels_1k.gltf",
+   "size": {
+    "w": 1294,
+    "d": 377,
+    "h": 1603
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_chinese_screen_panels.webp",
+   "tags": [
+    "decor"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/chinese_screen_panels/chinese_screen_panels_1k.gltf",
+      "path": "models/chinese_screen_panels/chinese_screen_panels_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_screen_panels/chinese_screen_panels_arm_1k.jpg",
+      "path": "models/chinese_screen_panels/textures/chinese_screen_panels_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_screen_panels/chinese_screen_panels_diff_1k.jpg",
+      "path": "models/chinese_screen_panels/textures/chinese_screen_panels_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/chinese_screen_panels/chinese_screen_panels.bin",
+      "path": "models/chinese_screen_panels/chinese_screen_panels.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_screen_panels/chinese_screen_panels_nor_gl_1k.jpg",
+      "path": "models/chinese_screen_panels/textures/chinese_screen_panels_nor_gl_1k.jpg"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_chinese_stool",
+   "name": "Chinese Stool",
+   "nameRu": "Табурет в китайском стиле",
+   "category": "chair",
+   "kind": "model",
+   "src": "models/chinese_stool/chinese_stool_1k.gltf",
+   "size": {
+    "w": 599,
+    "d": 506,
+    "h": 631
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_chinese_stool.webp",
+   "tags": [
+    "stool"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/chinese_stool/chinese_stool_1k.gltf",
+      "path": "models/chinese_stool/chinese_stool_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_stool/chinese_stool_diff_1k.jpg",
+      "path": "models/chinese_stool/textures/chinese_stool_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_stool/chinese_stool_arm_1k.jpg",
+      "path": "models/chinese_stool/textures/chinese_stool_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/chinese_stool/chinese_stool.bin",
+      "path": "models/chinese_stool/chinese_stool.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_stool/chinese_stool_nor_gl_1k.jpg",
+      "path": "models/chinese_stool/textures/chinese_stool_nor_gl_1k.jpg"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_chinese_tea_table",
+   "name": "Chinese Tea Table",
+   "nameRu": "Чайный столик в китайском стиле",
+   "category": "table",
+   "kind": "model",
+   "src": "models/chinese_tea_table/chinese_tea_table_1k.gltf",
+   "size": {
+    "w": 841,
+    "d": 836,
+    "h": 499
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_chinese_tea_table.webp",
+   "tags": [
+    "coffee-table"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/chinese_tea_table/chinese_tea_table_1k.gltf",
+      "path": "models/chinese_tea_table/chinese_tea_table_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_tea_table/chinese_tea_table_arm_1k.jpg",
+      "path": "models/chinese_tea_table/textures/chinese_tea_table_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/chinese_tea_table/chinese_tea_table.bin",
+      "path": "models/chinese_tea_table/chinese_tea_table.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_tea_table/chinese_tea_table_nor_gl_1k.jpg",
+      "path": "models/chinese_tea_table/textures/chinese_tea_table_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_tea_table/chinese_tea_table_diff_1k.jpg",
+      "path": "models/chinese_tea_table/textures/chinese_tea_table_diff_1k.jpg"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_fancy_picture_frame_02",
+   "name": "Fancy Picture Frame 02",
+   "nameRu": "Картина в резной раме",
+   "category": "decor",
+   "kind": "model",
+   "src": "models/fancy_picture_frame_02/fancy_picture_frame_02_1k.gltf",
+   "size": {
+    "w": 661,
+    "d": 89,
+    "h": 771
+   },
+   "mount": "wall",
+   "elevation": 1500,
+   "thumb": "thumbs/asset_ph_fancy_picture_frame_02.webp",
+   "tags": [
+    "decor-wall"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/fancy_picture_frame_02/fancy_picture_frame_02_1k.gltf",
+      "path": "models/fancy_picture_frame_02/fancy_picture_frame_02_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fancy_picture_frame_02/fancy_picture_frame_02_diff_1k.jpg",
+      "path": "models/fancy_picture_frame_02/textures/fancy_picture_frame_02_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/fancy_picture_frame_02/fancy_picture_frame_02.bin",
+      "path": "models/fancy_picture_frame_02/fancy_picture_frame_02.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fancy_picture_frame_02/fancy_picture_frame_02_canvas_nor_gl_1k.jpg",
+      "path": "models/fancy_picture_frame_02/textures/fancy_picture_frame_02_canvas_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fancy_picture_frame_02/fancy_picture_frame_02_canvas_diff_1k.jpg",
+      "path": "models/fancy_picture_frame_02/textures/fancy_picture_frame_02_canvas_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fancy_picture_frame_02/fancy_picture_frame_02_rough_1k.jpg",
+      "path": "models/fancy_picture_frame_02/textures/fancy_picture_frame_02_rough_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fancy_picture_frame_02/fancy_picture_frame_02_nor_gl_1k.jpg",
+      "path": "models/fancy_picture_frame_02/textures/fancy_picture_frame_02_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fancy_picture_frame_02/fancy_picture_frame_02_canvas_rough_1k.jpg",
+      "path": "models/fancy_picture_frame_02/textures/fancy_picture_frame_02_canvas_rough_1k.jpg"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_gallinera_chair",
+   "name": "Gallinera Chair",
+   "nameRu": "Стул деревянный с плетёным сиденьем",
+   "category": "chair",
+   "kind": "model",
+   "src": "models/gallinera_chair/gallinera_chair_1k.gltf",
+   "size": {
+    "w": 581,
+    "d": 604,
+    "h": 1034
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_gallinera_chair.webp",
+   "tags": [
+    "chair"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/gallinera_chair/gallinera_chair_1k.gltf",
+      "path": "models/gallinera_chair/gallinera_chair_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/gallinera_chair/gallinera_chair_nor_gl_1k.jpg",
+      "path": "models/gallinera_chair/textures/gallinera_chair_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/gallinera_chair/gallinera_chair_diff_1k.jpg",
+      "path": "models/gallinera_chair/textures/gallinera_chair_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/gallinera_chair/gallinera_chair_arm_1k.jpg",
+      "path": "models/gallinera_chair/textures/gallinera_chair_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/gallinera_chair/gallinera_chair.bin",
+      "path": "models/gallinera_chair/gallinera_chair.bin"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_gallinera_table",
+   "name": "Gallinera Table",
+   "nameRu": "Столик деревянный низкий",
+   "category": "table",
+   "kind": "model",
+   "src": "models/gallinera_table/gallinera_table_1k.gltf",
+   "size": {
+    "w": 830,
+    "d": 518,
+    "h": 488
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_gallinera_table.webp",
+   "tags": [
+    "side-table"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/gallinera_table/gallinera_table_1k.gltf",
+      "path": "models/gallinera_table/gallinera_table_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/gallinera_table/gallinera_table_diff_1k.jpg",
+      "path": "models/gallinera_table/textures/gallinera_table_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/gallinera_table/gallinera_table_nor_gl_1k.jpg",
+      "path": "models/gallinera_table/textures/gallinera_table_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/gallinera_table/gallinera_table_arm_1k.jpg",
+      "path": "models/gallinera_table/textures/gallinera_table_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/gallinera_table/gallinera_table.bin",
+      "path": "models/gallinera_table/gallinera_table.bin"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_hanging_picture_frame_02",
+   "name": "Hanging Picture Frame 02",
+   "nameRu": "Картина в раме горизонтальная",
+   "category": "decor",
+   "kind": "model",
+   "src": "models/hanging_picture_frame_02/hanging_picture_frame_02_1k.gltf",
+   "size": {
+    "w": 752,
+    "d": 33,
+    "h": 500
+   },
+   "mount": "wall",
+   "elevation": 1500,
+   "thumb": "thumbs/asset_ph_hanging_picture_frame_02.webp",
+   "tags": [
+    "decor-wall"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/hanging_picture_frame_02/hanging_picture_frame_02_1k.gltf",
+      "path": "models/hanging_picture_frame_02/hanging_picture_frame_02_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_02/hanging_picture_frame_02_diff_1k.jpg",
+      "path": "models/hanging_picture_frame_02/textures/hanging_picture_frame_02_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_02/hanging_picture_frame_02_artwork_diff_1k.jpg",
+      "path": "models/hanging_picture_frame_02/textures/hanging_picture_frame_02_artwork_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_02/hanging_picture_frame_02_arm_1k.jpg",
+      "path": "models/hanging_picture_frame_02/textures/hanging_picture_frame_02_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_02/hanging_picture_frame_02_artwork_nor_gl_1k.jpg",
+      "path": "models/hanging_picture_frame_02/textures/hanging_picture_frame_02_artwork_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_02/hanging_picture_frame_02_artwork_roughness_1k.jpg",
+      "path": "models/hanging_picture_frame_02/textures/hanging_picture_frame_02_artwork_roughness_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/hanging_picture_frame_02/hanging_picture_frame_02.bin",
+      "path": "models/hanging_picture_frame_02/hanging_picture_frame_02.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_02/hanging_picture_frame_02_nor_gl_1k.jpg",
+      "path": "models/hanging_picture_frame_02/textures/hanging_picture_frame_02_nor_gl_1k.jpg"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_hanging_picture_frame_03",
+   "name": "Hanging Picture Frame 03",
+   "nameRu": "Картина в раме вертикальная",
+   "category": "decor",
+   "kind": "model",
+   "src": "models/hanging_picture_frame_03/hanging_picture_frame_03_1k.gltf",
+   "size": {
+    "w": 385,
+    "d": 32,
+    "h": 502
+   },
+   "mount": "wall",
+   "elevation": 1500,
+   "thumb": "thumbs/asset_ph_hanging_picture_frame_03.webp",
+   "tags": [
+    "decor-wall"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/hanging_picture_frame_03/hanging_picture_frame_03_1k.gltf",
+      "path": "models/hanging_picture_frame_03/hanging_picture_frame_03_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_03/hanging_picture_frame_03_nor_gl_1k.jpg",
+      "path": "models/hanging_picture_frame_03/textures/hanging_picture_frame_03_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_03/hanging_picture_frame_03_diff_1k.jpg",
+      "path": "models/hanging_picture_frame_03/textures/hanging_picture_frame_03_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_03/hanging_picture_frame_03_artwork_rough_1k.jpg",
+      "path": "models/hanging_picture_frame_03/textures/hanging_picture_frame_03_artwork_rough_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_03/hanging_picture_frame_03_arm_1k.jpg",
+      "path": "models/hanging_picture_frame_03/textures/hanging_picture_frame_03_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_03/hanging_picture_frame_03_rough_1k.jpg",
+      "path": "models/hanging_picture_frame_03/textures/hanging_picture_frame_03_rough_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_03/hanging_picture_frame_03_artwork_nor_gl_1k.jpg",
+      "path": "models/hanging_picture_frame_03/textures/hanging_picture_frame_03_artwork_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_03/hanging_picture_frame_03_artwork_diff_1k.jpg",
+      "path": "models/hanging_picture_frame_03/textures/hanging_picture_frame_03_artwork_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/hanging_picture_frame_03/hanging_picture_frame_03.bin",
+      "path": "models/hanging_picture_frame_03/hanging_picture_frame_03.bin"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_metal_jug",
+   "name": "Metal Jug",
+   "nameRu": "Кувшин металлический",
+   "category": "decor",
+   "kind": "model",
+   "src": "models/metal_jug/metal_jug_1k.gltf",
+   "size": {
+    "w": 197,
+    "d": 195,
+    "h": 288
+   },
+   "mount": "surface",
+   "thumb": "thumbs/asset_ph_metal_jug.webp",
+   "tags": [
+    "decor"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/metal_jug/metal_jug_1k.gltf",
+      "path": "models/metal_jug/metal_jug_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_jug/metal_jug_diff_1k.jpg",
+      "path": "models/metal_jug/textures/metal_jug_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_jug/metal_jug_arm_1k.jpg",
+      "path": "models/metal_jug/textures/metal_jug_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_jug/metal_jug_nor_gl_1k.jpg",
+      "path": "models/metal_jug/textures/metal_jug_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/metal_jug/metal_jug.bin",
+      "path": "models/metal_jug/metal_jug.bin"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_metal_stool_01",
+   "name": "Metal Stool 01",
+   "nameRu": "Табурет барный металлический",
+   "category": "chair",
+   "kind": "model",
+   "src": "models/metal_stool_01/metal_stool_01_1k.gltf",
+   "size": {
+    "w": 352,
+    "d": 355,
+    "h": 883
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_metal_stool_01.webp",
+   "tags": [
+    "stool"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/metal_stool_01/metal_stool_01_1k.gltf",
+      "path": "models/metal_stool_01/metal_stool_01_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_stool_01/metal_stool_01_nor_gl_1k.jpg",
+      "path": "models/metal_stool_01/textures/metal_stool_01_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_stool_01/metal_stool_01_diff_1k.jpg",
+      "path": "models/metal_stool_01/textures/metal_stool_01_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_stool_01/metal_stool_01_arm_1k.jpg",
+      "path": "models/metal_stool_01/textures/metal_stool_01_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/metal_stool_01/metal_stool_01.bin",
+      "path": "models/metal_stool_01/metal_stool_01.bin"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_metal_stool_02",
+   "name": "Metal Stool 02",
+   "nameRu": "Табурет металлический низкий",
+   "category": "chair",
+   "kind": "model",
+   "src": "models/metal_stool_02/metal_stool_02_1k.gltf",
+   "size": {
+    "w": 448,
+    "d": 473,
+    "h": 458
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_metal_stool_02.webp",
+   "tags": [
+    "stool"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/metal_stool_02/metal_stool_02_1k.gltf",
+      "path": "models/metal_stool_02/metal_stool_02_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_stool_02/metal_stool_02_nor_gl_1k.jpg",
+      "path": "models/metal_stool_02/textures/metal_stool_02_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_stool_02/metal_stool_02_diff_1k.jpg",
+      "path": "models/metal_stool_02/textures/metal_stool_02_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_stool_02/metal_stool_02_arm_1k.jpg",
+      "path": "models/metal_stool_02/textures/metal_stool_02_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/metal_stool_02/metal_stool_02.bin",
+      "path": "models/metal_stool_02/metal_stool_02.bin"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_metal_stool_03",
+   "name": "Metal Stool 03",
+   "nameRu": "Стул барный металлический со спинкой",
+   "category": "chair",
+   "kind": "model",
+   "src": "models/metal_stool_03/metal_stool_03_1k.gltf",
+   "size": {
+    "w": 461,
+    "d": 471,
+    "h": 1023
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_metal_stool_03.webp",
+   "tags": [
+    "stool"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/metal_stool_03/metal_stool_03_1k.gltf",
+      "path": "models/metal_stool_03/metal_stool_03_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_stool_03/metal_stool_03_nor_gl_1k.jpg",
+      "path": "models/metal_stool_03/textures/metal_stool_03_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_stool_03/metal_stool_03_diff_1k.jpg",
+      "path": "models/metal_stool_03/textures/metal_stool_03_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_stool_03/metal_stool_03_arm_1k.jpg",
+      "path": "models/metal_stool_03/textures/metal_stool_03_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/metal_stool_03/metal_stool_03.bin",
+      "path": "models/metal_stool_03/metal_stool_03.bin"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_painted_wooden_cabinet_02",
+   "name": "Painted Wooden Cabinet 02",
+   "nameRu": "Шкаф деревянный крашеный",
+   "category": "storage",
+   "kind": "model",
+   "src": "models/painted_wooden_cabinet_02/painted_wooden_cabinet_02_1k.gltf",
+   "size": {
+    "w": 997,
+    "d": 729,
+    "h": 2569
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_painted_wooden_cabinet_02.webp",
+   "tags": [
+    "wardrobe"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/painted_wooden_cabinet_02/painted_wooden_cabinet_02_1k.gltf",
+      "path": "models/painted_wooden_cabinet_02/painted_wooden_cabinet_02_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_cabinet_02/painted_wooden_cabinet_02_arm_1k.jpg",
+      "path": "models/painted_wooden_cabinet_02/textures/painted_wooden_cabinet_02_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/painted_wooden_cabinet_02/painted_wooden_cabinet_02.bin",
+      "path": "models/painted_wooden_cabinet_02/painted_wooden_cabinet_02.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_cabinet_02/painted_wooden_cabinet_02_nor_gl_1k.jpg",
+      "path": "models/painted_wooden_cabinet_02/textures/painted_wooden_cabinet_02_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_cabinet_02/painted_wooden_cabinet_02_diff_1k.jpg",
+      "path": "models/painted_wooden_cabinet_02/textures/painted_wooden_cabinet_02_diff_1k.jpg"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_painted_wooden_chair_02",
+   "name": "Painted Wooden Chair 02",
+   "nameRu": "Стул деревянный крашеный",
+   "category": "chair",
+   "kind": "model",
+   "src": "models/painted_wooden_chair_02/painted_wooden_chair_02_1k.gltf",
+   "size": {
+    "w": 639,
+    "d": 662,
+    "h": 1264
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_painted_wooden_chair_02.webp",
+   "tags": [
+    "chair"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/painted_wooden_chair_02/painted_wooden_chair_02_1k.gltf",
+      "path": "models/painted_wooden_chair_02/painted_wooden_chair_02_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_chair_02/painted_wooden_chair_02_nor_gl_1k.jpg",
+      "path": "models/painted_wooden_chair_02/textures/painted_wooden_chair_02_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_chair_02/painted_wooden_chair_02_diff_1k.jpg",
+      "path": "models/painted_wooden_chair_02/textures/painted_wooden_chair_02_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_chair_02/painted_wooden_chair_02_arm_1k.jpg",
+      "path": "models/painted_wooden_chair_02/textures/painted_wooden_chair_02_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/painted_wooden_chair_02/painted_wooden_chair_02.bin",
+      "path": "models/painted_wooden_chair_02/painted_wooden_chair_02.bin"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_painted_wooden_shelves",
+   "name": "Painted Wooden Shelves",
+   "nameRu": "Стеллаж деревянный крашеный",
+   "category": "storage",
+   "kind": "model",
+   "src": "models/painted_wooden_shelves/painted_wooden_shelves_1k.gltf",
+   "size": {
+    "w": 511,
+    "d": 367,
+    "h": 1125
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_painted_wooden_shelves.webp",
+   "tags": [
+    "shelf"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/painted_wooden_shelves/painted_wooden_shelves_1k.gltf",
+      "path": "models/painted_wooden_shelves/painted_wooden_shelves_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_shelves/painted_wooden_shelves_nor_gl_1k.jpg",
+      "path": "models/painted_wooden_shelves/textures/painted_wooden_shelves_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/painted_wooden_shelves/painted_wooden_shelves.bin",
+      "path": "models/painted_wooden_shelves/painted_wooden_shelves.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_shelves/painted_wooden_shelves_arm_1k.jpg",
+      "path": "models/painted_wooden_shelves/textures/painted_wooden_shelves_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_shelves/painted_wooden_shelves_diff_1k.jpg",
+      "path": "models/painted_wooden_shelves/textures/painted_wooden_shelves_diff_1k.jpg"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_painted_wooden_sofa",
+   "name": "Painted Wooden Sofa",
+   "nameRu": "Диван-скамья деревянная крашеная",
+   "category": "sofa",
+   "kind": "model",
+   "src": "models/painted_wooden_sofa/painted_wooden_sofa_1k.gltf",
+   "size": {
+    "w": 2452,
+    "d": 787,
+    "h": 1281
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_painted_wooden_sofa.webp",
+   "tags": [
+    "sofa"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/painted_wooden_sofa/painted_wooden_sofa_1k.gltf",
+      "path": "models/painted_wooden_sofa/painted_wooden_sofa_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_sofa/painted_wooden_sofa_nor_gl_1k.jpg",
+      "path": "models/painted_wooden_sofa/textures/painted_wooden_sofa_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_sofa/painted_wooden_sofa_diff_1k.jpg",
+      "path": "models/painted_wooden_sofa/textures/painted_wooden_sofa_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/painted_wooden_sofa/painted_wooden_sofa.bin",
+      "path": "models/painted_wooden_sofa/painted_wooden_sofa.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_sofa/painted_wooden_sofa_arm_1k.jpg",
+      "path": "models/painted_wooden_sofa/textures/painted_wooden_sofa_arm_1k.jpg"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_painted_wooden_stool",
+   "name": "Painted Wooden Stool",
+   "nameRu": "Табурет деревянный крашеный",
+   "category": "chair",
+   "kind": "model",
+   "src": "models/painted_wooden_stool/painted_wooden_stool_1k.gltf",
+   "size": {
+    "w": 385,
+    "d": 406,
+    "h": 579
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_painted_wooden_stool.webp",
+   "tags": [
+    "stool"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/painted_wooden_stool/painted_wooden_stool_1k.gltf",
+      "path": "models/painted_wooden_stool/painted_wooden_stool_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_stool/painted_wooden_stool_nor_gl_1k.jpg",
+      "path": "models/painted_wooden_stool/textures/painted_wooden_stool_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_stool/painted_wooden_stool_arm_1k.jpg",
+      "path": "models/painted_wooden_stool/textures/painted_wooden_stool_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_stool/painted_wooden_stool_diff_1k.jpg",
+      "path": "models/painted_wooden_stool/textures/painted_wooden_stool_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/painted_wooden_stool/painted_wooden_stool.bin",
+      "path": "models/painted_wooden_stool/painted_wooden_stool.bin"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_painted_wooden_table",
+   "name": "Painted Wooden Table",
+   "nameRu": "Стол обеденный деревянный крашеный",
+   "category": "table",
+   "kind": "model",
+   "src": "models/painted_wooden_table/painted_wooden_table_1k.gltf",
+   "size": {
+    "w": 2406,
+    "d": 1137,
+    "h": 959
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_painted_wooden_table.webp",
+   "tags": [
+    "table"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/painted_wooden_table/painted_wooden_table_1k.gltf",
+      "path": "models/painted_wooden_table/painted_wooden_table_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_table/painted_wooden_table_nor_gl_1k.jpg",
+      "path": "models/painted_wooden_table/textures/painted_wooden_table_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_table/painted_wooden_table_diff_1k.jpg",
+      "path": "models/painted_wooden_table/textures/painted_wooden_table_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/painted_wooden_table/painted_wooden_table.bin",
+      "path": "models/painted_wooden_table/painted_wooden_table.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_table/painted_wooden_table_arm_1k.jpg",
+      "path": "models/painted_wooden_table/textures/painted_wooden_table_arm_1k.jpg"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_planter_box_02",
+   "name": "Planter Box 02",
+   "nameRu": "Ящик с растениями низкий",
+   "category": "plant",
+   "kind": "model",
+   "src": "models/planter_box_02/planter_box_02_1k.gltf",
+   "size": {
+    "w": 1252,
+    "d": 467,
+    "h": 453
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_planter_box_02.webp",
+   "tags": [
+    "plant"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/planter_box_02/planter_box_02_1k.gltf",
+      "path": "models/planter_box_02/planter_box_02_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/planter_box_02/planter_box_02_diff_1k.jpg",
+      "path": "models/planter_box_02/textures/planter_box_02_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/planter_box_02/planter_box_02_nor_gl_1k.jpg",
+      "path": "models/planter_box_02/textures/planter_box_02_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/planter_box_02/planter_box_02_arm_1k.jpg",
+      "path": "models/planter_box_02/textures/planter_box_02_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/planter_box_02/planter_box_02.bin",
+      "path": "models/planter_box_02/planter_box_02.bin"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_planter_box_03",
+   "name": "Planter Box 03",
+   "nameRu": "Ящик с растениями",
+   "category": "plant",
+   "kind": "model",
+   "src": "models/planter_box_03/planter_box_03_1k.gltf",
+   "size": {
+    "w": 914,
+    "d": 656,
+    "h": 855
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_planter_box_03.webp",
+   "tags": [
+    "plant"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/planter_box_03/planter_box_03_1k.gltf",
+      "path": "models/planter_box_03/planter_box_03_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/planter_box_03/planter_box_03_diff_1k.jpg",
+      "path": "models/planter_box_03/textures/planter_box_03_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/planter_box_03/planter_box_03_arm_1k.jpg",
+      "path": "models/planter_box_03/textures/planter_box_03_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/planter_box_03/planter_box_03_nor_gl_1k.jpg",
+      "path": "models/planter_box_03/textures/planter_box_03_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/planter_box_03/planter_box_03.bin",
+      "path": "models/planter_box_03/planter_box_03.bin"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_round_wooden_table_02",
+   "name": "Round Wooden Table 02",
+   "nameRu": "Стол круглый деревянный",
+   "category": "table",
+   "kind": "model",
+   "src": "models/round_wooden_table_02/round_wooden_table_02_1k.gltf",
+   "size": {
+    "w": 796,
+    "d": 796,
+    "h": 746
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_round_wooden_table_02.webp",
+   "tags": [
+    "table"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/round_wooden_table_02/round_wooden_table_02_1k.gltf",
+      "path": "models/round_wooden_table_02/round_wooden_table_02_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/round_wooden_table_02/round_wooden_table_02_nor_gl_1k.jpg",
+      "path": "models/round_wooden_table_02/textures/round_wooden_table_02_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/round_wooden_table_02/round_wooden_table_02_diff_1k.jpg",
+      "path": "models/round_wooden_table_02/textures/round_wooden_table_02_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/round_wooden_table_02/round_wooden_table_02_arm_1k.jpg",
+      "path": "models/round_wooden_table_02/textures/round_wooden_table_02_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/round_wooden_table_02/round_wooden_table_02.bin",
+      "path": "models/round_wooden_table_02/round_wooden_table_02.bin"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_small_wooden_table_01",
+   "name": "Small Wooden Table 01",
+   "nameRu": "Столик деревянный приставной",
+   "category": "table",
+   "kind": "model",
+   "src": "models/small_wooden_table_01/small_wooden_table_01_1k.gltf",
+   "size": {
+    "w": 916,
+    "d": 440,
+    "h": 533
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_small_wooden_table_01.webp",
+   "tags": [
+    "side-table"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/small_wooden_table_01/small_wooden_table_01_1k.gltf",
+      "path": "models/small_wooden_table_01/small_wooden_table_01_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/small_wooden_table_01/small_wooden_table_01_arm_1k.jpg",
+      "path": "models/small_wooden_table_01/textures/small_wooden_table_01_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/small_wooden_table_01/small_wooden_table_01.bin",
+      "path": "models/small_wooden_table_01/small_wooden_table_01.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/small_wooden_table_01/small_wooden_table_01_diff_1k.jpg",
+      "path": "models/small_wooden_table_01/textures/small_wooden_table_01_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/small_wooden_table_01/small_wooden_table_01_nor_gl_1k.jpg",
+      "path": "models/small_wooden_table_01/textures/small_wooden_table_01_nor_gl_1k.jpg"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_steel_frame_shelves_02",
+   "name": "Steel Frame Shelves 02",
+   "nameRu": "Стеллаж металлический узкий",
+   "category": "storage",
+   "kind": "model",
+   "src": "models/steel_frame_shelves_02/steel_frame_shelves_02_1k.gltf",
+   "size": {
+    "w": 593,
+    "d": 502,
+    "h": 2142
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_steel_frame_shelves_02.webp",
+   "tags": [
+    "shelf"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/steel_frame_shelves_02/steel_frame_shelves_02_1k.gltf",
+      "path": "models/steel_frame_shelves_02/steel_frame_shelves_02_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/steel_frame_shelves_02/steel_frame_shelves_02_nor_gl_1k.jpg",
+      "path": "models/steel_frame_shelves_02/textures/steel_frame_shelves_02_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/steel_frame_shelves_02/steel_frame_shelves_02.bin",
+      "path": "models/steel_frame_shelves_02/steel_frame_shelves_02.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/steel_frame_shelves_02/steel_frame_shelves_02_diff_1k.jpg",
+      "path": "models/steel_frame_shelves_02/textures/steel_frame_shelves_02_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/steel_frame_shelves_02/steel_frame_shelves_02_arm_1k.jpg",
+      "path": "models/steel_frame_shelves_02/textures/steel_frame_shelves_02_arm_1k.jpg"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_steel_frame_shelves_03",
+   "name": "Steel Frame Shelves 03",
+   "nameRu": "Стеллаж металлический широкий",
+   "category": "storage",
+   "kind": "model",
+   "src": "models/steel_frame_shelves_03/steel_frame_shelves_03_1k.gltf",
+   "size": {
+    "w": 2351,
+    "d": 721,
+    "h": 2312
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_steel_frame_shelves_03.webp",
+   "tags": [
+    "shelf"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/steel_frame_shelves_03/steel_frame_shelves_03_1k.gltf",
+      "path": "models/steel_frame_shelves_03/steel_frame_shelves_03_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/steel_frame_shelves_03/steel_frame_shelves_03_drawers_arm_1k.jpg",
+      "path": "models/steel_frame_shelves_03/textures/steel_frame_shelves_03_drawers_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/steel_frame_shelves_03/steel_frame_shelves_03_diff_1k.jpg",
+      "path": "models/steel_frame_shelves_03/textures/steel_frame_shelves_03_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/steel_frame_shelves_03/steel_frame_shelves_03.bin",
+      "path": "models/steel_frame_shelves_03/steel_frame_shelves_03.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/steel_frame_shelves_03/steel_frame_shelves_03_drawers_nor_gl_1k.jpg",
+      "path": "models/steel_frame_shelves_03/textures/steel_frame_shelves_03_drawers_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/steel_frame_shelves_03/steel_frame_shelves_03_arm_1k.jpg",
+      "path": "models/steel_frame_shelves_03/textures/steel_frame_shelves_03_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/steel_frame_shelves_03/steel_frame_shelves_03_drawers_diff_1k.jpg",
+      "path": "models/steel_frame_shelves_03/textures/steel_frame_shelves_03_drawers_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/steel_frame_shelves_03/steel_frame_shelves_03_nor_gl_1k.jpg",
+      "path": "models/steel_frame_shelves_03/textures/steel_frame_shelves_03_nor_gl_1k.jpg"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_vintage_grandfather_clock_01",
+   "name": "Vintage Grandfather Clock 01",
+   "nameRu": "Часы напольные винтажные",
+   "category": "decor",
+   "kind": "model",
+   "src": "models/vintage_grandfather_clock_01/vintage_grandfather_clock_01_1k.gltf",
+   "size": {
+    "w": 626,
+    "d": 427,
+    "h": 2191
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_vintage_grandfather_clock_01.webp",
+   "tags": [
+    "decor"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/vintage_grandfather_clock_01/vintage_grandfather_clock_01_1k.gltf",
+      "path": "models/vintage_grandfather_clock_01/vintage_grandfather_clock_01_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/vintage_grandfather_clock_01/vintage_grandfather_clock_01_nor_gl_1k.jpg",
+      "path": "models/vintage_grandfather_clock_01/textures/vintage_grandfather_clock_01_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/vintage_grandfather_clock_01/vintage_grandfather_clock_01_diff_1k.jpg",
+      "path": "models/vintage_grandfather_clock_01/textures/vintage_grandfather_clock_01_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/vintage_grandfather_clock_01/vintage_grandfather_clock_01_arm_1k.jpg",
+      "path": "models/vintage_grandfather_clock_01/textures/vintage_grandfather_clock_01_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/vintage_grandfather_clock_01/vintage_grandfather_clock_01.bin",
+      "path": "models/vintage_grandfather_clock_01/vintage_grandfather_clock_01.bin"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_vintage_oil_lamp",
+   "name": "Vintage Oil Lamp",
+   "nameRu": "Лампа керосиновая винтажная",
+   "category": "lighting",
+   "kind": "model",
+   "src": "models/vintage_oil_lamp/vintage_oil_lamp_1k.gltf",
+   "size": {
+    "w": 220,
+    "d": 220,
+    "h": 802
+   },
+   "mount": "surface",
+   "thumb": "thumbs/asset_ph_vintage_oil_lamp.webp",
+   "tags": [
+    "lamp-table"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/vintage_oil_lamp/vintage_oil_lamp_1k.gltf",
+      "path": "models/vintage_oil_lamp/vintage_oil_lamp_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/vintage_oil_lamp/vintage_oil_lamp_glass_diff_1k.jpg",
+      "path": "models/vintage_oil_lamp/textures/vintage_oil_lamp_glass_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/vintage_oil_lamp/vintage_oil_lamp_nor_gl_1k.jpg",
+      "path": "models/vintage_oil_lamp/textures/vintage_oil_lamp_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/vintage_oil_lamp/vintage_oil_lamp_flame_diff_1k.jpg",
+      "path": "models/vintage_oil_lamp/textures/vintage_oil_lamp_flame_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/vintage_oil_lamp/vintage_oil_lamp_diff_1k.jpg",
+      "path": "models/vintage_oil_lamp/textures/vintage_oil_lamp_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/vintage_oil_lamp/vintage_oil_lamp.bin",
+      "path": "models/vintage_oil_lamp/vintage_oil_lamp.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/vintage_oil_lamp/vintage_oil_lamp_glass_nor_gl_1k.jpg",
+      "path": "models/vintage_oil_lamp/textures/vintage_oil_lamp_glass_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/vintage_oil_lamp/vintage_oil_lamp_arm_1k.jpg",
+      "path": "models/vintage_oil_lamp/textures/vintage_oil_lamp_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/vintage_oil_lamp/vintage_oil_lamp_glass_arm_1k.jpg",
+      "path": "models/vintage_oil_lamp/textures/vintage_oil_lamp_glass_arm_1k.jpg"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_vintage_wooden_drawer_01",
+   "name": "Vintage Wooden Drawer 01",
+   "nameRu": "Комод винтажный с ящиками",
+   "category": "storage",
+   "kind": "model",
+   "src": "models/vintage_wooden_drawer_01/vintage_wooden_drawer_01_1k.gltf",
+   "size": {
+    "w": 1715,
+    "d": 1007,
+    "h": 1091
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_vintage_wooden_drawer_01.webp",
+   "tags": [
+    "sideboard"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/vintage_wooden_drawer_01/vintage_wooden_drawer_01_1k.gltf",
+      "path": "models/vintage_wooden_drawer_01/vintage_wooden_drawer_01_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/vintage_wooden_drawer_01/vintage_wooden_drawer_01_nor_gl_1k.jpg",
+      "path": "models/vintage_wooden_drawer_01/textures/vintage_wooden_drawer_01_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/vintage_wooden_drawer_01/vintage_wooden_drawer_01_diff_1k.jpg",
+      "path": "models/vintage_wooden_drawer_01/textures/vintage_wooden_drawer_01_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/vintage_wooden_drawer_01/vintage_wooden_drawer_01_arm_1k.jpg",
+      "path": "models/vintage_wooden_drawer_01/textures/vintage_wooden_drawer_01_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/vintage_wooden_drawer_01/vintage_wooden_drawer_01.bin",
+      "path": "models/vintage_wooden_drawer_01/vintage_wooden_drawer_01.bin"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_wicker_basket_02",
+   "name": "Wicker Basket 02",
+   "nameRu": "Корзина плетёная",
+   "category": "decor",
+   "kind": "model",
+   "src": "models/wicker_basket_02/wicker_basket_02_1k.gltf",
+   "size": {
+    "w": 375,
+    "d": 271,
+    "h": 218
+   },
+   "mount": "surface",
+   "thumb": "thumbs/asset_ph_wicker_basket_02.webp",
+   "tags": [
+    "decor"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/wicker_basket_02/wicker_basket_02_1k.gltf",
+      "path": "models/wicker_basket_02/wicker_basket_02_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wicker_basket_02/wicker_basket_02_nor_gl_1k.jpg",
+      "path": "models/wicker_basket_02/textures/wicker_basket_02_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/wicker_basket_02/wicker_basket_02.bin",
+      "path": "models/wicker_basket_02/wicker_basket_02.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wicker_basket_02/wicker_basket_02_arm_1k.jpg",
+      "path": "models/wicker_basket_02/textures/wicker_basket_02_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wicker_basket_02/wicker_basket_02_diff_1k.jpg",
+      "path": "models/wicker_basket_02/textures/wicker_basket_02_diff_1k.jpg"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_wooden_bookshelf_worn",
+   "name": "Wooden Bookshelf Worn",
+   "nameRu": "Книжный шкаф деревянный старый",
+   "category": "storage",
+   "kind": "model",
+   "src": "models/wooden_bookshelf_worn/wooden_bookshelf_worn_1k.gltf",
+   "size": {
+    "w": 1374,
+    "d": 581,
+    "h": 2063
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_wooden_bookshelf_worn.webp",
+   "tags": [
+    "shelf"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/wooden_bookshelf_worn/wooden_bookshelf_worn_1k.gltf",
+      "path": "models/wooden_bookshelf_worn/wooden_bookshelf_worn_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_bookshelf_worn/wooden_bookshelf_worn_nor_gl_1k.jpg",
+      "path": "models/wooden_bookshelf_worn/textures/wooden_bookshelf_worn_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/wooden_bookshelf_worn/wooden_bookshelf_worn.bin",
+      "path": "models/wooden_bookshelf_worn/wooden_bookshelf_worn.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_bookshelf_worn/wooden_bookshelf_worn_arm_1k.jpg",
+      "path": "models/wooden_bookshelf_worn/textures/wooden_bookshelf_worn_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_bookshelf_worn/wooden_bookshelf_worn_diff_1k.jpg",
+      "path": "models/wooden_bookshelf_worn/textures/wooden_bookshelf_worn_diff_1k.jpg"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_ph_wooden_table_02",
+   "name": "Wooden Table 02",
+   "nameRu": "Стол деревянный",
+   "category": "table",
+   "kind": "model",
+   "src": "models/wooden_table_02/wooden_table_02_1k.gltf",
+   "size": {
+    "w": 1134,
+    "d": 706,
+    "h": 800
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_ph_wooden_table_02.webp",
+   "tags": [
+    "table"
+   ],
+   "source": "polyhaven",
+   "licence": "CC0",
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/wooden_table_02/wooden_table_02_1k.gltf",
+      "path": "models/wooden_table_02/wooden_table_02_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_table_02/wooden_table_02_diff_1k.jpg",
+      "path": "models/wooden_table_02/textures/wooden_table_02_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_table_02/wooden_table_02_nor_gl_1k.jpg",
+      "path": "models/wooden_table_02/textures/wooden_table_02_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/wooden_table_02/wooden_table_02.bin",
+      "path": "models/wooden_table_02/wooden_table_02.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_table_02/wooden_table_02_arm_1k.jpg",
+      "path": "models/wooden_table_02/textures/wooden_table_02_arm_1k.jpg"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_sliding_wardrobe_shk_276_1d71",
+   "name": "Sliding wardrobe SHK-276",
+   "nameRu": "Шкаф-купе трёхдверный чёрный с зеркалами",
+   "category": "storage",
+   "kind": "model",
+   "src": "models/sliding_wardrobe_shk_276_1d71/1d716799774c445690e6099c3d0af344.glb",
+   "size": {
+    "w": 2195,
+    "d": 658,
+    "h": 2355
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_sliding_wardrobe_shk_276_1d71.webp",
+   "tags": [
+    "wardrobe"
+   ],
+   "source": "https://sketchfab.com/3d-models/1d716799774c445690e6099c3d0af344",
+   "licence": "CC-BY-4.0",
+   "author": "Эльба Мебель",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-117/1d716799774c445690e6099c3d0af344.glb",
+      "path": "models/sliding_wardrobe_shk_276_1d71/1d716799774c445690e6099c3d0af344.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_wardrobe_classic_4727",
+   "name": "Wardrobe Classic",
+   "nameRu": "Шкаф платяной двухдверный белый",
+   "category": "storage",
+   "kind": "model",
+   "src": "models/wardrobe_classic_4727/47270ac8a40c4af8bb55d076b159122a.glb",
+   "size": {
+    "w": 916,
+    "d": 570,
+    "h": 2032
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_wardrobe_classic_4727.webp",
+   "tags": [
+    "wardrobe"
+   ],
+   "source": "https://sketchfab.com/3d-models/47270ac8a40c4af8bb55d076b159122a",
+   "licence": "CC-BY-4.0",
+   "author": "Blaž Mraz",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-027/47270ac8a40c4af8bb55d076b159122a.glb",
+      "path": "models/wardrobe_classic_4727/47270ac8a40c4af8bb55d076b159122a.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_poliform_bed_1607",
+   "name": "Poliform_Bed",
+   "nameRu": "Кровать двуспальная мягкая на подиуме",
+   "category": "bed",
+   "kind": "model",
+   "src": "models/poliform_bed_1607/16070c2e6faa405391ab7ada8bb0aed6.glb",
+   "size": {
+    "w": 2220,
+    "d": 2399,
+    "h": 811
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_poliform_bed_1607.webp",
+   "tags": [
+    "bed"
+   ],
+   "source": "https://sketchfab.com/3d-models/16070c2e6faa405391ab7ada8bb0aed6",
+   "licence": "CC-BY-4.0",
+   "author": "Alexis Ramos",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-122/16070c2e6faa405391ab7ada8bb0aed6.glb",
+      "path": "models/poliform_bed_1607/16070c2e6faa405391ab7ada8bb0aed6.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_soho_bed_3d_model_97e3",
+   "name": "Soho bed - 3D Model",
+   "nameRu": "Кровать двуспальная мягкая с высоким изголовьем",
+   "category": "bed",
+   "kind": "model",
+   "src": "models/soho_bed_3d_model_97e3/97e361e8beda4112ac5b1b5bcd388cdf.glb",
+   "size": {
+    "w": 1801,
+    "d": 2253,
+    "h": 939
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_soho_bed_3d_model_97e3.webp",
+   "tags": [
+    "bed"
+   ],
+   "source": "https://sketchfab.com/3d-models/97e361e8beda4112ac5b1b5bcd388cdf",
+   "licence": "CC-BY-4.0",
+   "author": "BertO"
+  },
+  {
+   "id": "asset_sf_single_bed_2_81ad",
+   "name": "Single Bed 2",
+   "nameRu": "Кровать односпальная деревянная",
+   "category": "bed",
+   "kind": "model",
+   "src": "models/single_bed_2_81ad/81ada0e24e1647d8a0d6d0708a696f84.glb",
+   "size": {
+    "w": 1033,
+    "d": 2050,
+    "h": 829
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_single_bed_2_81ad.webp",
+   "tags": [
+    "bed"
+   ],
+   "source": "https://sketchfab.com/3d-models/81ada0e24e1647d8a0d6d0708a696f84",
+   "licence": "CC-BY-4.0",
+   "author": "rhcreations"
+  },
+  {
+   "id": "asset_sf_nightstand_1478",
+   "name": "Nightstand",
+   "nameRu": "Тумба прикроватная на ножках (mid-century)",
+   "category": "storage",
+   "kind": "model",
+   "src": "models/nightstand_1478/147801240ff74f2fb7025be8a8e002d7.glb",
+   "size": {
+    "w": 402,
+    "d": 415,
+    "h": 650
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_nightstand_1478.webp",
+   "tags": [
+    "nightstand"
+   ],
+   "source": "https://sketchfab.com/3d-models/147801240ff74f2fb7025be8a8e002d7",
+   "licence": "CC-BY-4.0",
+   "author": "Luiza Moreira",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-067/147801240ff74f2fb7025be8a8e002d7.glb",
+      "path": "models/nightstand_1478/147801240ff74f2fb7025be8a8e002d7.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_bedside_andrea_889d",
+   "name": "Bedside Andrea",
+   "nameRu": "Тумба прикроватная с двумя ящиками",
+   "category": "storage",
+   "kind": "model",
+   "src": "models/bedside_andrea_889d/889d490a0fcb49ad9e9200ef8e370ab5.glb",
+   "size": {
+    "w": 630,
+    "d": 500,
+    "h": 517
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_bedside_andrea_889d.webp",
+   "tags": [
+    "nightstand"
+   ],
+   "source": "https://sketchfab.com/3d-models/889d490a0fcb49ad9e9200ef8e370ab5",
+   "licence": "CC-BY-4.0",
+   "author": "Digital_MHC",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-066/889d490a0fcb49ad9e9200ef8e370ab5.glb",
+      "path": "models/bedside_andrea_889d/889d490a0fcb49ad9e9200ef8e370ab5.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_table_in_recycled_wood_1ed7",
+   "name": "Table in recycled wood.",
+   "nameRu": "Стол обеденный из массива (прямоугольный)",
+   "category": "table",
+   "kind": "model",
+   "src": "models/table_in_recycled_wood_1ed7/1ed75823ea0842d2938482597862791a.glb",
+   "size": {
+    "w": 2000,
+    "d": 900,
+    "h": 801
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_table_in_recycled_wood_1ed7.webp",
+   "tags": [
+    "table"
+   ],
+   "source": "https://sketchfab.com/3d-models/1ed75823ea0842d2938482597862791a",
+   "licence": "CC-BY-4.0",
+   "author": "Juan Carlos"
+  },
+  {
+   "id": "asset_sf_table_1132",
+   "name": "Table",
+   "nameRu": "Стол обеденный круглый на опоре",
+   "category": "table",
+   "kind": "model",
+   "src": "models/table_1132/1132fa2850a24917892733566bd68e74.glb",
+   "size": {
+    "w": 1032,
+    "d": 1032,
+    "h": 750
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_table_1132.webp",
+   "tags": [
+    "table"
+   ],
+   "source": "https://sketchfab.com/3d-models/1132fa2850a24917892733566bd68e74",
+   "licence": "CC-BY-4.0",
+   "author": "yryabchenko",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-054/1132fa2850a24917892733566bd68e74.glb",
+      "path": "models/table_1132/1132fa2850a24917892733566bd68e74.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_simple_soviet_wooden_chair_3086",
+   "name": "Simple Soviet Wooden Chair",
+   "nameRu": "Стул деревянный венский",
+   "category": "chair",
+   "kind": "model",
+   "src": "models/simple_soviet_wooden_chair_3086/30861044fa0d4d0b858cdc9eaa843af4.glb",
+   "size": {
+    "w": 498,
+    "d": 481,
+    "h": 900
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_simple_soviet_wooden_chair_3086.webp",
+   "tags": [
+    "chair"
+   ],
+   "source": "https://sketchfab.com/3d-models/30861044fa0d4d0b858cdc9eaa843af4",
+   "licence": "CC-BY-4.0",
+   "author": "Artem P",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-128/30861044fa0d4d0b858cdc9eaa843af4.glb",
+      "path": "models/simple_soviet_wooden_chair_3086/30861044fa0d4d0b858cdc9eaa843af4.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_chair_2e92",
+   "name": "Chair",
+   "nameRu": "Стул обеденный с мягкой спинкой",
+   "category": "chair",
+   "kind": "model",
+   "src": "models/chair_2e92/2e92000d99d74c8a993badf99be4435a.glb",
+   "size": {
+    "w": 699,
+    "d": 689,
+    "h": 780
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_chair_2e92.webp",
+   "tags": [
+    "chair"
+   ],
+   "source": "https://sketchfab.com/3d-models/2e92000d99d74c8a993badf99be4435a",
+   "licence": "CC-BY-4.0",
+   "author": "augusto.v",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-145/2e92000d99d74c8a993badf99be4435a.glb",
+      "path": "models/chair_2e92/2e92000d99d74c8a993badf99be4435a.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_office_desk_140x60_9262",
+   "name": "Office Desk 140x60",
+   "nameRu": "Стол письменный с тумбой 140×60",
+   "category": "office",
+   "kind": "model",
+   "src": "models/office_desk_140x60_9262/9262f311271c4c4390341e526d3fe103.glb",
+   "size": {
+    "w": 1400,
+    "d": 600,
+    "h": 757
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_office_desk_140x60_9262.webp",
+   "tags": [
+    "desk"
+   ],
+   "source": "https://sketchfab.com/3d-models/9262f311271c4c4390341e526d3fe103",
+   "licence": "CC-BY-4.0",
+   "author": "AleixoAlonso",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-051/9262f311271c4c4390341e526d3fe103.glb",
+      "path": "models/office_desk_140x60_9262/9262f311271c4c4390341e526d3fe103.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_office_desk_3b6d",
+   "name": "Office Desk",
+   "nameRu": "Стол письменный угловой",
+   "category": "office",
+   "kind": "model",
+   "src": "models/office_desk_3b6d/3b6df50cc1124d90a90f163676631c6a.glb",
+   "size": {
+    "w": 1575,
+    "d": 1575,
+    "h": 775
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_office_desk_3b6d.webp",
+   "tags": [
+    "desk"
+   ],
+   "source": "https://sketchfab.com/3d-models/3b6df50cc1124d90a90f163676631c6a",
+   "licence": "CC-BY-4.0",
+   "author": "HippoStance",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-105/3b6df50cc1124d90a90f163676631c6a.glb",
+      "path": "models/office_desk_3b6d/3b6df50cc1124d90a90f163676631c6a.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_high_poly_pbr_office_chair_fa2d",
+   "name": "High-Poly PBR Office Chair",
+   "nameRu": "Кресло офисное кожаное на колёсах",
+   "category": "chair",
+   "kind": "model",
+   "src": "models/high_poly_pbr_office_chair_fa2d/fa2d5243f916407a93db7efcaae75e0d.glb",
+   "size": {
+    "w": 724,
+    "d": 760,
+    "h": 1150
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_high_poly_pbr_office_chair_fa2d.webp",
+   "tags": [
+    "chair"
+   ],
+   "source": "https://sketchfab.com/3d-models/fa2d5243f916407a93db7efcaae75e0d",
+   "licence": "CC-BY-4.0",
+   "author": "kilicarslan"
+  },
+  {
+   "id": "asset_sf_ergonomic_mesh_office_chair_cd5e",
+   "name": "Ergonomic mesh office chair",
+   "nameRu": "Кресло офисное эргономичное сетчатое",
+   "category": "chair",
+   "kind": "model",
+   "src": "models/ergonomic_mesh_office_chair_cd5e/cd5ef0305d8545dd8cd934ebb99cf7d5.glb",
+   "size": {
+    "w": 795,
+    "d": 826,
+    "h": 1050
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_ergonomic_mesh_office_chair_cd5e.webp",
+   "tags": [
+    "chair"
+   ],
+   "source": "https://sketchfab.com/3d-models/cd5ef0305d8545dd8cd934ebb99cf7d5",
+   "licence": "CC-BY-4.0",
+   "author": "guillaumecrz",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-046/cd5ef0305d8545dd8cd934ebb99cf7d5.glb",
+      "path": "models/ergonomic_mesh_office_chair_cd5e/cd5ef0305d8545dd8cd934ebb99cf7d5.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_solid_wood_bookcase_42b8",
+   "name": "Solid Wood Bookcase.",
+   "nameRu": "Стеллаж деревянный с ячейками",
+   "category": "storage",
+   "kind": "model",
+   "src": "models/solid_wood_bookcase_42b8/42b8a5e3f6c7425d97e9e6c82c51aafe.glb",
+   "size": {
+    "w": 1370,
+    "d": 350,
+    "h": 1800
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_solid_wood_bookcase_42b8.webp",
+   "tags": [
+    "shelf"
+   ],
+   "source": "https://sketchfab.com/3d-models/42b8a5e3f6c7425d97e9e6c82c51aafe",
+   "licence": "CC-BY-4.0",
+   "author": "Juan Carlos",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-083/42b8a5e3f6c7425d97e9e6c82c51aafe.glb",
+      "path": "models/solid_wood_bookcase_42b8/42b8a5e3f6c7425d97e9e6c82c51aafe.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_bookshelf_71af",
+   "name": "Bookshelf [CC0]",
+   "nameRu": "Книжный шкаф с книгами",
+   "category": "storage",
+   "kind": "model",
+   "src": "models/bookshelf_71af/71af93b1d15f4f48ad836d36110626f7.glb",
+   "size": {
+    "w": 617,
+    "d": 211,
+    "h": 1150
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_bookshelf_71af.webp",
+   "tags": [
+    "shelf"
+   ],
+   "source": "https://sketchfab.com/3d-models/71af93b1d15f4f48ad836d36110626f7",
+   "licence": "CC-BY-4.0",
+   "author": "Crew Froebel"
+  },
+  {
+   "id": "asset_sf_lounger_armchair_e9d9",
+   "name": "Lounger Armchair",
+   "nameRu": "Кресло для отдыха с подголовником",
+   "category": "armchair",
+   "kind": "model",
+   "src": "models/lounger_armchair_e9d9/e9d9d87c32f144e2873765e66814f727.glb",
+   "size": {
+    "w": 983,
+    "d": 1162,
+    "h": 1365
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_lounger_armchair_e9d9.webp",
+   "tags": [
+    "armchair"
+   ],
+   "source": "https://sketchfab.com/3d-models/e9d9d87c32f144e2873765e66814f727",
+   "licence": "CC-BY-4.0",
+   "author": "Nikolay Kudrin"
+  },
+  {
+   "id": "asset_sf_arm_chair_furniture_ec62",
+   "name": "Arm chair / Furniture",
+   "nameRu": "Кресло мягкое современное",
+   "category": "armchair",
+   "kind": "model",
+   "src": "models/arm_chair_furniture_ec62/ec62634ebb5a41f491bbb9da04cd9dd1.glb",
+   "size": {
+    "w": 844,
+    "d": 845,
+    "h": 800
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_arm_chair_furniture_ec62.webp",
+   "tags": [
+    "armchair"
+   ],
+   "source": "https://sketchfab.com/3d-models/ec62634ebb5a41f491bbb9da04cd9dd1",
+   "licence": "CC-BY-4.0",
+   "author": "maxsbond.work",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-147/ec62634ebb5a41f491bbb9da04cd9dd1.glb",
+      "path": "models/arm_chair_furniture_ec62/ec62634ebb5a41f491bbb9da04cd9dd1.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_noguchi_coffee_table_8f8a",
+   "name": "Noguchi Coffee Table",
+   "nameRu": "Столик журнальный стеклянный на деревянной опоре",
+   "category": "table",
+   "kind": "model",
+   "src": "models/noguchi_coffee_table_8f8a/8f8a3dbd45534152b5771c36cc4742d9.glb",
+   "size": {
+    "w": 1280,
+    "d": 922,
+    "h": 391
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_noguchi_coffee_table_8f8a.webp",
+   "tags": [
+    "coffee-table"
+   ],
+   "source": "https://sketchfab.com/3d-models/8f8a3dbd45534152b5771c36cc4742d9",
+   "licence": "CC-BY-4.0",
+   "author": "Deborah Kumagai",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-041/8f8a3dbd45534152b5771c36cc4742d9.glb",
+      "path": "models/noguchi_coffee_table_8f8a/8f8a3dbd45534152b5771c36cc4742d9.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_coffee_table_marina_52a1",
+   "name": "coffee table Marina",
+   "nameRu": "Столик журнальный круглый",
+   "category": "table",
+   "kind": "model",
+   "src": "models/coffee_table_marina_52a1/52a1075958804cd18f96701ad3f49406.glb",
+   "size": {
+    "w": 626,
+    "d": 600,
+    "h": 395
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_coffee_table_marina_52a1.webp",
+   "tags": [
+    "coffee-table"
+   ],
+   "source": "https://sketchfab.com/3d-models/52a1075958804cd18f96701ad3f49406",
+   "licence": "CC-BY-4.0",
+   "author": "robula72",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-097/52a1075958804cd18f96701ad3f49406.glb",
+      "path": "models/coffee_table_marina_52a1/52a1075958804cd18f96701ad3f49406.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_kuuma_ye_rug_by_kristiina_lassus_5f5d",
+   "name": "Kuuma YE rug by Kristiina Lassus",
+   "nameRu": "Ковёр современный жёлтый",
+   "category": "textile",
+   "kind": "model",
+   "src": "models/kuuma_ye_rug_by_kristiina_lassus_5f5d/5f5de1ba643746fc9da76d2cac94fbb3.glb",
+   "size": {
+    "w": 2421,
+    "d": 2107,
+    "h": 8
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_kuuma_ye_rug_by_kristiina_lassus_5f5d.webp",
+   "tags": [
+    "rug"
+   ],
+   "source": "https://sketchfab.com/3d-models/5f5de1ba643746fc9da76d2cac94fbb3",
+   "licence": "CC-BY-4.0",
+   "author": "mfb64",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-115/5f5de1ba643746fc9da76d2cac94fbb3.glb",
+      "path": "models/kuuma_ye_rug_by_kristiina_lassus_5f5d/5f5de1ba643746fc9da76d2cac94fbb3.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_persian_tabriz_pictorial_carpet_0ce2",
+   "name": "Persian Tabriz Pictorial Carpet",
+   "nameRu": "Ковёр персидский",
+   "category": "textile",
+   "kind": "model",
+   "src": "models/persian_tabriz_pictorial_carpet_0ce2/0ce2fc1e54724cb79cbb08ab2182760a.glb",
+   "size": {
+    "w": 3611,
+    "d": 2621,
+    "h": 6
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_persian_tabriz_pictorial_carpet_0ce2.webp",
+   "tags": [
+    "rug"
+   ],
+   "source": "https://sketchfab.com/3d-models/0ce2fc1e54724cb79cbb08ab2182760a",
+   "licence": "CC-BY-4.0",
+   "author": "mfb64",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-155/0ce2fc1e54724cb79cbb08ab2182760a.glb",
+      "path": "models/persian_tabriz_pictorial_carpet_0ce2/0ce2fc1e54724cb79cbb08ab2182760a.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_curtains_a83e",
+   "name": "Curtains",
+   "nameRu": "Шторы на карнизе (пара)",
+   "category": "textile",
+   "kind": "model",
+   "src": "models/curtains_a83e/a83e1baf822a4442b0f50ed70d449198.glb",
+   "size": {
+    "w": 2985,
+    "d": 425,
+    "h": 2600
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_curtains_a83e.webp",
+   "tags": [
+    "curtain"
+   ],
+   "source": "https://sketchfab.com/3d-models/a83e1baf822a4442b0f50ed70d449198",
+   "licence": "CC-BY-4.0",
+   "author": "Heliona",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-115/a83e1baf822a4442b0f50ed70d449198.glb",
+      "path": "models/curtains_a83e/a83e1baf822a4442b0f50ed70d449198.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_curtain_7187",
+   "name": "Curtain",
+   "nameRu": "Шторы белые на карнизе",
+   "category": "textile",
+   "kind": "model",
+   "src": "models/curtain_7187/7187bae2a1944e2ab5b9c91b400558f1.glb",
+   "size": {
+    "w": 2487,
+    "d": 544,
+    "h": 2344
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_curtain_7187.webp",
+   "tags": [
+    "curtain"
+   ],
+   "source": "https://sketchfab.com/3d-models/7187bae2a1944e2ab5b9c91b400558f1",
+   "licence": "CC-BY-4.0",
+   "author": "miranda.j.rice",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-049/7187bae2a1944e2ab5b9c91b400558f1.glb",
+      "path": "models/curtain_7187/7187bae2a1944e2ab5b9c91b400558f1.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_mario_floor_lamp_15b2",
+   "name": "Mario Floor Lamp",
+   "nameRu": "Торшер-прожектор на треноге",
+   "category": "lighting",
+   "kind": "model",
+   "src": "models/mario_floor_lamp_15b2/15b2782b523b486ea169d6e16e72123f.glb",
+   "size": {
+    "w": 688,
+    "d": 756,
+    "h": 1650
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_mario_floor_lamp_15b2.webp",
+   "tags": [
+    "lamp-floor"
+   ],
+   "source": "https://sketchfab.com/3d-models/15b2782b523b486ea169d6e16e72123f",
+   "licence": "CC-BY-4.0",
+   "author": "Andriano Milanovic"
+  },
+  {
+   "id": "asset_sf_floor_lamp_61bd",
+   "name": "Floor Lamp",
+   "nameRu": "Торшер с абажуром на гибкой ножке",
+   "category": "lighting",
+   "kind": "model",
+   "src": "models/floor_lamp_61bd/61bdf5230e5f44b3b5ea53d95f2ab872.glb",
+   "size": {
+    "w": 865,
+    "d": 559,
+    "h": 1650
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_floor_lamp_61bd.webp",
+   "tags": [
+    "lamp-floor"
+   ],
+   "source": "https://sketchfab.com/3d-models/61bdf5230e5f44b3b5ea53d95f2ab872",
+   "licence": "CC-BY-4.0",
+   "author": "Agha.Najam",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-019/61bdf5230e5f44b3b5ea53d95f2ab872.glb",
+      "path": "models/floor_lamp_61bd/61bdf5230e5f44b3b5ea53d95f2ab872.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_desk_lamp_7377",
+   "name": "Desk lamp",
+   "nameRu": "Лампа настольная на кронштейне",
+   "category": "lighting",
+   "kind": "model",
+   "src": "models/desk_lamp_7377/7377ec591df04445a1aae370017aaa13.glb",
+   "size": {
+    "w": 430,
+    "d": 216,
+    "h": 600
+   },
+   "mount": "surface",
+   "thumb": "thumbs/asset_sf_desk_lamp_7377.webp",
+   "tags": [
+    "lamp-table"
+   ],
+   "source": "https://sketchfab.com/3d-models/7377ec591df04445a1aae370017aaa13",
+   "licence": "CC-BY-4.0",
+   "author": "KaramellGlass",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-004/7377ec591df04445a1aae370017aaa13.glb",
+      "path": "models/desk_lamp_7377/7377ec591df04445a1aae370017aaa13.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_vintage_desk_lamp_b8e1",
+   "name": "vintage desk lamp",
+   "nameRu": "Лампа настольная банкирская",
+   "category": "lighting",
+   "kind": "model",
+   "src": "models/vintage_desk_lamp_b8e1/b8e13a49528e4231a0512bb5f18f07e5.glb",
+   "size": {
+    "w": 326,
+    "d": 248,
+    "h": 420
+   },
+   "mount": "surface",
+   "thumb": "thumbs/asset_sf_vintage_desk_lamp_b8e1.webp",
+   "tags": [
+    "lamp-table"
+   ],
+   "source": "https://sketchfab.com/3d-models/b8e13a49528e4231a0512bb5f18f07e5",
+   "licence": "CC-BY-4.0",
+   "author": "Noah",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-069/b8e13a49528e4231a0512bb5f18f07e5.glb",
+      "path": "models/vintage_desk_lamp_b8e1/b8e13a49528e4231a0512bb5f18f07e5.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_modern_ceiling_lamp_01_4k_ab22",
+   "name": "Modern Ceiling Lamp 01 4k",
+   "nameRu": "Светильник подвесной шар",
+   "category": "lighting",
+   "kind": "model",
+   "src": "models/modern_ceiling_lamp_01_4k_ab22/ab22729ecda54178ba4f0b4212b170a9.glb",
+   "size": {
+    "w": 432,
+    "d": 432,
+    "h": 952
+   },
+   "mount": "ceiling",
+   "thumb": "thumbs/asset_sf_modern_ceiling_lamp_01_4k_ab22.webp",
+   "tags": [
+    "lamp-ceiling"
+   ],
+   "source": "https://sketchfab.com/3d-models/ab22729ecda54178ba4f0b4212b170a9",
+   "licence": "CC-BY-4.0",
+   "author": "mohamedhussien",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-050/ab22729ecda54178ba4f0b4212b170a9.glb",
+      "path": "models/modern_ceiling_lamp_01_4k_ab22/ab22729ecda54178ba4f0b4212b170a9.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_ikea_svartnora_lamp_cb55",
+   "name": "IKEA SVARTNORA Lamp",
+   "nameRu": "Светильник подвесной металлический",
+   "category": "lighting",
+   "kind": "model",
+   "src": "models/ikea_svartnora_lamp_cb55/cb55859f3bad4c4e8821d3bc9d01e55d.glb",
+   "size": {
+    "w": 384,
+    "d": 384,
+    "h": 937
+   },
+   "mount": "ceiling",
+   "thumb": "thumbs/asset_sf_ikea_svartnora_lamp_cb55.webp",
+   "tags": [
+    "lamp-ceiling"
+   ],
+   "source": "https://sketchfab.com/3d-models/cb55859f3bad4c4e8821d3bc9d01e55d",
+   "licence": "CC-BY-4.0",
+   "author": "mfb64",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-087/cb55859f3bad4c4e8821d3bc9d01e55d.glb",
+      "path": "models/ikea_svartnora_lamp_cb55/cb55859f3bad4c4e8821d3bc9d01e55d.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_pothos_potted_plant_money_plant_e983",
+   "name": "[FREE] Pothos Potted Plant - Money Plant",
+   "nameRu": "Растение потос в кашпо на подставке",
+   "category": "plant",
+   "kind": "model",
+   "src": "models/pothos_potted_plant_money_plant_e983/e9832f38484f4f85b3f9081b51fa3799.glb",
+   "size": {
+    "w": 827,
+    "d": 974,
+    "h": 792
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_pothos_potted_plant_money_plant_e983.webp",
+   "tags": [
+    "plant"
+   ],
+   "source": "https://sketchfab.com/3d-models/e9832f38484f4f85b3f9081b51fa3799",
+   "licence": "CC-BY-4.0",
+   "author": "AllQuad",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-059/e9832f38484f4f85b3f9081b51fa3799.glb",
+      "path": "models/pothos_potted_plant_money_plant_e983/e9832f38484f4f85b3f9081b51fa3799.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_ficus_e499",
+   "name": "Ficus",
+   "nameRu": "Фикус в горшке",
+   "category": "plant",
+   "kind": "model",
+   "src": "models/ficus_e499/e4999d6251ba42ac8ee2cea7d3e30596.glb",
+   "size": {
+    "w": 1026,
+    "d": 883,
+    "h": 901
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_ficus_e499.webp",
+   "tags": [
+    "plant"
+   ],
+   "source": "https://sketchfab.com/3d-models/e4999d6251ba42ac8ee2cea7d3e30596",
+   "licence": "CC-BY-4.0",
+   "author": "gilles.schaeck",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-018/e4999d6251ba42ac8ee2cea7d3e30596.glb",
+      "path": "models/ficus_e499/e4999d6251ba42ac8ee2cea7d3e30596.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_snake_plant_b02c",
+   "name": "Snake Plant",
+   "nameRu": "Сансевиерия (щучий хвост) в горшке",
+   "category": "plant",
+   "kind": "model",
+   "src": "models/snake_plant_b02c/b02cbf156a024565ab6e89e27261b30f.glb",
+   "size": {
+    "w": 465,
+    "d": 471,
+    "h": 700
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_snake_plant_b02c.webp",
+   "tags": [
+    "plant"
+   ],
+   "source": "https://sketchfab.com/3d-models/b02cbf156a024565ab6e89e27261b30f",
+   "licence": "CC-BY-4.0",
+   "author": "digitalurban"
+  },
+  {
+   "id": "asset_sf_wooden_ethnic_square_wall_mirror_d72a",
+   "name": "Wooden Ethnic Square Wall Mirror",
+   "nameRu": "Зеркало настенное в деревянной раме",
+   "category": "decor",
+   "kind": "model",
+   "src": "models/wooden_ethnic_square_wall_mirror_d72a/d72a45ba83574b97b66fb3ff61ea9c9f.glb",
+   "size": {
+    "w": 938,
+    "d": 12,
+    "h": 1896
+   },
+   "mount": "wall",
+   "elevation": 250,
+   "thumb": "thumbs/asset_sf_wooden_ethnic_square_wall_mirror_d72a.webp",
+   "tags": [
+    "decor-wall"
+   ],
+   "source": "https://sketchfab.com/3d-models/d72a45ba83574b97b66fb3ff61ea9c9f",
+   "licence": "CC-BY-4.0",
+   "author": "Eugene Gorun",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-153/d72a45ba83574b97b66fb3ff61ea9c9f.glb",
+      "path": "models/wooden_ethnic_square_wall_mirror_d72a/d72a45ba83574b97b66fb3ff61ea9c9f.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_wash_basin_stand_b027",
+   "name": "Wash Basin Stand",
+   "nameRu": "Тумба с раковиной подвесная",
+   "category": "bathroom",
+   "kind": "model",
+   "src": "models/wash_basin_stand_b027/b02727808f1f46468e071edfd291060e.glb",
+   "size": {
+    "w": 481,
+    "d": 471,
+    "h": 630
+   },
+   "mount": "wall",
+   "elevation": 220,
+   "thumb": "thumbs/asset_sf_wash_basin_stand_b027.webp",
+   "tags": [
+    "bathroom"
+   ],
+   "source": "https://sketchfab.com/3d-models/b02727808f1f46468e071edfd291060e",
+   "licence": "CC-BY-4.0",
+   "author": "Ren Viro Store",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-035/b02727808f1f46468e071edfd291060e.glb",
+      "path": "models/wash_basin_stand_b027/b02727808f1f46468e071edfd291060e.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_sink_with_faucet_e7c2",
+   "name": "Sink with Faucet",
+   "nameRu": "Тумба с раковиной напольная белая",
+   "category": "bathroom",
+   "kind": "model",
+   "src": "models/sink_with_faucet_e7c2/e7c2bddaebe94dd0a28fd89981de5195.glb",
+   "size": {
+    "w": 600,
+    "d": 450,
+    "h": 941
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_sink_with_faucet_e7c2.webp",
+   "tags": [
+    "bathroom"
+   ],
+   "source": "https://sketchfab.com/3d-models/e7c2bddaebe94dd0a28fd89981de5195",
+   "licence": "CC-BY-4.0",
+   "author": "blendffnike",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-063/e7c2bddaebe94dd0a28fd89981de5195.glb",
+      "path": "models/sink_with_faucet_e7c2/e7c2bddaebe94dd0a28fd89981de5195.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_heated_towel_rail_atlant_by_lari_6be3",
+   "name": "Heated towel rail Atlant by Laris.",
+   "nameRu": "Полотенцесушитель электрический лесенка",
+   "category": "bathroom",
+   "kind": "model",
+   "src": "models/heated_towel_rail_atlant_by_lari_6be3/6be3bba8ac6c452caf5cbdad6aaff656.glb",
+   "size": {
+    "w": 931,
+    "d": 116,
+    "h": 1200
+   },
+   "mount": "wall",
+   "elevation": 400,
+   "thumb": "thumbs/asset_sf_heated_towel_rail_atlant_by_lari_6be3.webp",
+   "tags": [
+    "bathroom"
+   ],
+   "source": "https://sketchfab.com/3d-models/6be3bba8ac6c452caf5cbdad6aaff656",
+   "licence": "CC-BY-4.0",
+   "author": "Eugene Gorun",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-001/6be3bba8ac6c452caf5cbdad6aaff656.glb",
+      "path": "models/heated_towel_rail_atlant_by_lari_6be3/6be3bba8ac6c452caf5cbdad6aaff656.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_heated_towel_rail_b363",
+   "name": "Heated towel rail",
+   "nameRu": "Полотенцесушитель хромированный",
+   "category": "bathroom",
+   "kind": "model",
+   "src": "models/heated_towel_rail_b363/b3636221263546c4ae457b54de6e5d39.glb",
+   "size": {
+    "w": 538,
+    "d": 188,
+    "h": 1496
+   },
+   "mount": "wall",
+   "elevation": 300,
+   "thumb": "thumbs/asset_sf_heated_towel_rail_b363.webp",
+   "tags": [
+    "bathroom"
+   ],
+   "source": "https://sketchfab.com/3d-models/b3636221263546c4ae457b54de6e5d39",
+   "licence": "CC-BY-4.0",
+   "author": "nester1279",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-152/b3636221263546c4ae457b54de6e5d39.glb",
+      "path": "models/heated_towel_rail_b363/b3636221263546c4ae457b54de6e5d39.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_toilet_132a",
+   "name": "Toilet",
+   "nameRu": "Унитаз-компакт с бачком",
+   "category": "bathroom",
+   "kind": "model",
+   "src": "models/toilet_132a/132a8ee2af3a40d39d270fbed3d3666c.glb",
+   "size": {
+    "w": 478,
+    "d": 607,
+    "h": 744
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_toilet_132a.webp",
+   "tags": [
+    "bathroom"
+   ],
+   "source": "https://sketchfab.com/3d-models/132a8ee2af3a40d39d270fbed3d3666c",
+   "licence": "CC-BY-4.0",
+   "author": "HippoStance",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-014/132a8ee2af3a40d39d270fbed3d3666c.glb",
+      "path": "models/toilet_132a/132a8ee2af3a40d39d270fbed3d3666c.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_toilet_adb3",
+   "name": "Toilet",
+   "nameRu": "Унитаз-компакт европейский",
+   "category": "bathroom",
+   "kind": "model",
+   "src": "models/toilet_adb3/adb3b931f3ef4941830eea9705657a3d.glb",
+   "size": {
+    "w": 360,
+    "d": 650,
+    "h": 780
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_toilet_adb3.webp",
+   "tags": [
+    "bathroom"
+   ],
+   "source": "https://sketchfab.com/3d-models/adb3b931f3ef4941830eea9705657a3d",
+   "licence": "CC-BY-4.0",
+   "author": "Urpo"
+  },
+  {
+   "id": "asset_sf_washing_machine_new_82c9",
+   "name": "Washing Machine (new)",
+   "nameRu": "Стиральная машина фронтальная",
+   "category": "appliance",
+   "kind": "model",
+   "src": "models/washing_machine_new_82c9/82c91049303f4664a56cc0eaffa8d662.glb",
+   "size": {
+    "w": 590,
+    "d": 580,
+    "h": 850
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_washing_machine_new_82c9.webp",
+   "tags": [
+    "appliance"
+   ],
+   "source": "https://sketchfab.com/3d-models/82c91049303f4664a56cc0eaffa8d662",
+   "licence": "CC-BY-4.0",
+   "author": "nikita.bulgakov",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-073/82c91049303f4664a56cc0eaffa8d662.glb",
+      "path": "models/washing_machine_new_82c9/82c91049303f4664a56cc0eaffa8d662.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_french_door_refrigerator_stainle_ebe6",
+   "name": "French Door Refrigerator - Stainless",
+   "nameRu": "Холодильник с французскими дверями",
+   "category": "appliance",
+   "kind": "model",
+   "src": "models/french_door_refrigerator_stainle_ebe6/ebe62ed6dd9b446a9c9b7d7d6a8086e7.glb",
+   "size": {
+    "w": 960,
+    "d": 621,
+    "h": 1818
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_french_door_refrigerator_stainle_ebe6.webp",
+   "tags": [
+    "appliance-kitchen"
+   ],
+   "source": "https://sketchfab.com/3d-models/ebe62ed6dd9b446a9c9b7d7d6a8086e7",
+   "licence": "CC-BY-4.0",
+   "author": "Smokahontas",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-090/ebe62ed6dd9b446a9c9b7d7d6a8086e7.glb",
+      "path": "models/french_door_refrigerator_stainle_ebe6/ebe62ed6dd9b446a9c9b7d7d6a8086e7.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_retro_fridge_3b13",
+   "name": "Retro Fridge",
+   "nameRu": "Холодильник в ретро-стиле",
+   "category": "appliance",
+   "kind": "model",
+   "src": "models/retro_fridge_3b13/3b130f0ba4304966a101c82be2429cc7.glb",
+   "size": {
+    "w": 600,
+    "d": 580,
+    "h": 1005
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_retro_fridge_3b13.webp",
+   "tags": [
+    "appliance-kitchen"
+   ],
+   "source": "https://sketchfab.com/3d-models/3b130f0ba4304966a101c82be2429cc7",
+   "licence": "CC-BY-4.0",
+   "author": "dylanheyes",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-011/3b130f0ba4304966a101c82be2429cc7.glb",
+      "path": "models/retro_fridge_3b13/3b130f0ba4304966a101c82be2429cc7.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_microwave_oven_3421",
+   "name": "Microwave Oven",
+   "nameRu": "Микроволновая печь",
+   "category": "appliance",
+   "kind": "model",
+   "src": "models/microwave_oven_3421/3421e492257f40959859104f46128304.glb",
+   "size": {
+    "w": 550,
+    "d": 488,
+    "h": 342
+   },
+   "mount": "surface",
+   "thumb": "thumbs/asset_sf_microwave_oven_3421.webp",
+   "tags": [
+    "appliance-kitchen"
+   ],
+   "source": "https://sketchfab.com/3d-models/3421e492257f40959859104f46128304",
+   "licence": "CC-BY-4.0",
+   "author": "MustafaYerebasmaz",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-073/3421e492257f40959859104f46128304.glb",
+      "path": "models/microwave_oven_3421/3421e492257f40959859104f46128304.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_coffee_maker_9ccd",
+   "name": "Coffee maker",
+   "nameRu": "Кофеварка капельная",
+   "category": "appliance",
+   "kind": "model",
+   "src": "models/coffee_maker_9ccd/9ccda2fddba846e6ba97eb774b8a09c6.glb",
+   "size": {
+    "w": 357,
+    "d": 180,
+    "h": 355
+   },
+   "mount": "surface",
+   "thumb": "thumbs/asset_sf_coffee_maker_9ccd.webp",
+   "tags": [
+    "appliance-kitchen"
+   ],
+   "source": "https://sketchfab.com/3d-models/9ccda2fddba846e6ba97eb774b8a09c6",
+   "licence": "CC-BY-4.0",
+   "author": "Fredrik Johansen"
+  },
+  {
+   "id": "asset_sf_electrolux_electric_kettle_0445",
+   "name": "Electrolux electric kettle",
+   "nameRu": "Чайник электрический",
+   "category": "appliance",
+   "kind": "model",
+   "src": "models/electrolux_electric_kettle_0445/0445b3baee4b4a6fb40d7e03be4e8550.glb",
+   "size": {
+    "w": 223,
+    "d": 159,
+    "h": 250
+   },
+   "mount": "surface",
+   "thumb": "thumbs/asset_sf_electrolux_electric_kettle_0445.webp",
+   "tags": [
+    "appliance-kitchen"
+   ],
+   "source": "https://sketchfab.com/3d-models/0445b3baee4b4a6fb40d7e03be4e8550",
+   "licence": "CC-BY-4.0",
+   "author": "gorzi",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-040/0445b3baee4b4a6fb40d7e03be4e8550.glb",
+      "path": "models/electrolux_electric_kettle_0445/0445b3baee4b4a6fb40d7e03be4e8550.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_toaster_0dd6",
+   "name": "Toaster",
+   "nameRu": "Тостер",
+   "category": "appliance",
+   "kind": "model",
+   "src": "models/toaster_0dd6/0dd620043178479db6752ab103b1e04e.glb",
+   "size": {
+    "w": 356,
+    "d": 185,
+    "h": 233
+   },
+   "mount": "surface",
+   "thumb": "thumbs/asset_sf_toaster_0dd6.webp",
+   "tags": [
+    "appliance-kitchen"
+   ],
+   "source": "https://sketchfab.com/3d-models/0dd620043178479db6752ab103b1e04e",
+   "licence": "CC-BY-4.0",
+   "author": "Artem P"
+  },
+  {
+   "id": "asset_sf_flat_screen_television_f90d",
+   "name": "Flat Screen Television",
+   "nameRu": "Телевизор плоский 50″ на ножках",
+   "category": "electronics",
+   "kind": "model",
+   "src": "models/flat_screen_television_f90d/f90d4fb91dd34b6791e8d66d00f96591.glb",
+   "size": {
+    "w": 1161,
+    "d": 366,
+    "h": 716
+   },
+   "mount": "surface",
+   "thumb": "thumbs/asset_sf_flat_screen_television_f90d.webp",
+   "tags": [
+    "tv"
+   ],
+   "source": "https://sketchfab.com/3d-models/f90d4fb91dd34b6791e8d66d00f96591",
+   "licence": "CC-BY-4.0",
+   "author": "HippoStance"
+  },
+  {
+   "id": "asset_sf_q_acoustics_m3_soundbar_7cf3",
+   "name": "Q-Acoustics M3 Soundbar",
+   "nameRu": "Саундбар",
+   "category": "electronics",
+   "kind": "model",
+   "src": "models/q_acoustics_m3_soundbar_7cf3/7cf33febf603401586ffa5e18c312d31.glb",
+   "size": {
+    "w": 1000,
+    "d": 127,
+    "h": 72
+   },
+   "mount": "surface",
+   "thumb": "thumbs/asset_sf_q_acoustics_m3_soundbar_7cf3.webp",
+   "tags": [
+    "electronics"
+   ],
+   "source": "https://sketchfab.com/3d-models/7cf33febf603401586ffa5e18c312d31",
+   "licence": "CC-BY-4.0",
+   "author": "Q-Acoustics"
+  },
+  {
+   "id": "asset_sf_sofa_80ed",
+   "name": "Sofa",
+   "nameRu": "Диван трёхместный серый",
+   "category": "sofa",
+   "kind": "model",
+   "src": "models/sofa_80ed/80edec2de8c04a4fb335a48b550a2336.glb",
+   "size": {
+    "w": 2000,
+    "d": 839,
+    "h": 659
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_sofa_80ed.webp",
+   "tags": [
+    "sofa"
+   ],
+   "source": "https://sketchfab.com/3d-models/80edec2de8c04a4fb335a48b550a2336",
+   "licence": "CC-BY-4.0",
+   "author": "Urpo",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-006/80edec2de8c04a4fb335a48b550a2336.glb",
+      "path": "models/sofa_80ed/80edec2de8c04a4fb335a48b550a2336.glb"
+     }
+    ]
+   }
+  },
+  {
+   "id": "asset_sf_modern_couch_b7f1",
+   "name": "Modern Couch",
+   "nameRu": "Диван кожаный современный",
+   "category": "sofa",
+   "kind": "model",
+   "src": "models/modern_couch_b7f1/b7f1a6a036b141f0a02fca99c475e084.glb",
+   "size": {
+    "w": 2200,
+    "d": 1057,
+    "h": 872
+   },
+   "mount": "floor",
+   "thumb": "thumbs/asset_sf_modern_couch_b7f1.webp",
+   "tags": [
+    "sofa"
+   ],
+   "source": "https://sketchfab.com/3d-models/b7f1a6a036b141f0a02fca99c475e084",
+   "licence": "CC-BY-4.0",
+   "author": "Tiago Lopes",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-040/b7f1a6a036b141f0a02fca99c475e084.glb",
+      "path": "models/modern_couch_b7f1/b7f1a6a036b141f0a02fca99c475e084.glb"
      }
     ]
    }

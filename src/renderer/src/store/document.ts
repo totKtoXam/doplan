@@ -230,6 +230,7 @@ export const docStore = createStore<DocStoreState>()((set, get) => {
     doc: initialDoc,
     derived: deriveAll(initialDoc),
     revision: 0,
+    loadId: 0,
     filePath: null,
     dirty: false,
     canUndo: false,
@@ -389,6 +390,7 @@ export const docStore = createStore<DocStoreState>()((set, get) => {
         doc: prepared,
         derived: deriveAll(prepared),
         revision: get().revision + 1,
+        loadId: get().loadId + 1,
         filePath,
         dirty: false,
         transientActive: false,
@@ -400,9 +402,16 @@ export const docStore = createStore<DocStoreState>()((set, get) => {
       get().load(createEmptyDoc(name), null)
     },
 
-    markSaved(filePath) {
+    markSaved(filePath, id) {
       savedId = currentId()
-      set({ filePath, dirty: computeDirty() })
+      // the id the file was written with (Save As / the first save of an older file give a new one); not an edit
+      const doc = id && id !== get().doc.meta.id ? { ...get().doc, meta: { ...get().doc.meta, id } } : get().doc
+      set({ doc, filePath, dirty: computeDirty() })
+    },
+
+    setDocId(id) {
+      const doc = get().doc
+      if (doc.meta.id !== id) set({ doc: { ...doc, meta: { ...doc.meta, id } } })
     },
 
     setDirty(dirty) {

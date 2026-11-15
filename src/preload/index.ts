@@ -7,6 +7,7 @@ import type { DoplanApi, MenuCommand } from '../shared/ipc'
 // ── ai-chat block ──
 import type { AiLoginEvent, AiProviderId, AiRunEvent, AiToolCall } from '../shared/aiChat'
 // ── end ai-chat block ──
+import type { UpdateState } from '../shared/updater'
 import { CH, VERSION_ARG } from '../main/channels'
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> => ipcRenderer.invoke(channel, ...args) as Promise<T>
@@ -125,12 +126,23 @@ const api: DoplanApi = {
     deleteChat: (projectPath, chatId) => invoke(CH.aiChatDelete, projectPath, chatId),
     getSettings: (projectPath) => invoke(CH.aiChatGetSettings, projectPath),
     setSettings: (projectPath, s) => invoke(CH.aiChatSetSettings, projectPath, s),
+    moveChats: (from, to, copy, path) => invoke(CH.aiChatMove, from, to, copy, path),
+    dropChats: (p) => invoke(CH.aiChatDrop, p),
+    claimDocument: (ref, path) => invoke(CH.aiChatClaim, ref, path),
     login: (provider) => invoke(CH.aiChatLogin, provider),
     loginInput: (text) => invoke(CH.aiChatLoginInput, text),
     loginCancel: () => invoke(CH.aiChatLoginCancel),
     onLogin: (cb) => subscribe<[AiProviderId, AiLoginEvent]>(CH.evAiChatLogin, (provider, ev) => cb(provider, ev)),
   },
   // ── end ai-chat block ──
+
+  updates: {
+    get: () => invoke(CH.updatesGet),
+    check: () => invoke(CH.updatesCheck),
+    install: () => invoke(CH.updatesInstall),
+    openReleasePage: (version) => invoke(CH.updatesOpenRelease, version ?? null),
+    onState: (cb) => subscribe<[UpdateState]>(CH.evUpdateState, (s) => cb(s)),
+  },
 
   window: {
     setTitle: (title, dirty) => ipcRenderer.send(CH.windowSetTitle, title, dirty),

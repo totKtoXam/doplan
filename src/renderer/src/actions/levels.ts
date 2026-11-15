@@ -71,6 +71,11 @@ export function copyLevelInto(src: Doc, srcLevel: Id, draft: Doc, dstLevel: Id, 
 }
 
 /** Removes a level and everything on it (draft mutation). */
+/** pencil marks of a deleted level go too (they would keep pushing up the mark numbers) */
+export function removeLevelMarks(d: Doc, levelId: Id): void {
+  if (d.annotations) for (const [id, m] of Object.entries(d.annotations)) if (m.levelId === levelId) delete d.annotations[id]
+}
+
 export function removeLevelFromDraft(d: Doc, levelId: Id): void {
   const walls = new Set(Object.values(d.walls).filter((w) => w.levelId === levelId).map((w) => w.id))
   for (const o of Object.values(d.openings)) if (walls.has(o.wallId)) delete d.openings[o.id]
@@ -80,6 +85,7 @@ export function removeLevelFromDraft(d: Doc, levelId: Id): void {
     const rec = d[c] as Record<Id, { levelId: Id }>
     for (const [id, e] of Object.entries(rec)) if (e.levelId === levelId) delete rec[id]
   }
+  removeLevelMarks(d, levelId)
   delete d.levels[levelId]
   d.levelOrder = d.levelOrder.filter((id) => id !== levelId)
 }

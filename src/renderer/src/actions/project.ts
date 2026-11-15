@@ -1,4 +1,4 @@
-import { createEmptyDoc, parseDoc } from '@core'
+import { createEmptyDoc, newProjectId, parseDoc } from '@core'
 import type { Doc } from '@core/types'
 import type { ProjectVersion } from '@shared/ipc'
 import { buildCommitMessage } from '@shared/projectFormat'
@@ -8,6 +8,7 @@ import { docStore, historyPosition, undoLabelsSince } from '@/store/document'
 import { handles } from '@/store/handles'
 import { alertDialog, choiceDialog, confirmDialog, promptDialog, toast } from '@/store/notify'
 import { finishCreateDialog, openCreateDialog, type ProjectKind, projectStore } from '@/store/project'
+import { runProjectHooks } from '@/store/projectHooks'
 import { buildSampleApartment } from '@/store/sample'
 import { uiStore } from '@/store/ui'
 import { currentDoc, errorText } from './util'
@@ -118,6 +119,18 @@ export async function newSampleProject(): Promise<void> {
   loadDocument(buildSampleApartment(t('Пример квартиры')), null)
 }
 
+/**
+ * The id a document is written with: Save As of a saved file makes a new project (its own chats); the
+ * first save of a new document keeps its id whichever command does it; an older file without one gets one now.
+ */
+function saveId(doc: Doc, filePath: string | null, saveAs: boolean): string {
+  return (saveAs && filePath) || !doc.meta.id ? newProjectId() : doc.meta.id
+}
+
+function withId(doc: Doc, id: string): Doc {
+  return id === doc.meta.id ? doc : { ...doc, meta: { ...doc.meta, id } }
+}
+
 function refreshRecent(): void {
   void api.settings
     .get()
@@ -141,10 +154,14 @@ export async function createProjectFolder(mode: 'new' | 'saveAs', name: string, 
     } else {
       const store = docStore.getState()
       if (store.doc.meta.name !== clean) store.transact(t('Название проекта'), (d) => void (d.meta.name = clean))
-      const res = await api.project.create(docStore.getState().doc, clean, parent)
-      docStore.getState().markSaved(res.path)
+      const doc = docStore.getState().doc
+      const id = saveId(doc, docStore.getState().filePath, true)
+      const res = await api.project.create(withId(doc, id), clean, parent)
+      docStore.getState().markSaved(res.path, id)
       projectStore.setState({ root: res.path, kind: 'folder', git: !!res.git, untrustedGit: false, gitFile: false, commitMarker: historyPosition(), viewing: null })
       void api.project.clearRecovery().catch(() => {})
+      // the chats follow the document (a copy of a saved file gets its own); awaited like any save
+      await runProjectHooks('saved', true)
     }
     refreshRecent()
     projectStore.setState((s) => ({ historyRev: s.historyRev + 1 }))
@@ -312,7 +329,8 @@ export async function saveProject(saveAs = false, opts?: { message?: string; ove
   message ??= pendingCommitMessage()
 
   try {
-    const res = await api.project.save(doc, filePath, { message, overwrite: opts?.overwrite })
+    const id = saveId(doc, filePath, false)
+    const res = await api.project.save(withId(doc, id), filePath, { message, overwrite: opts?.overwrite })
     if (!res) return false
     if (res.externalChange) {
       const choice = await choiceDialog(
@@ -328,8 +346,9 @@ export async function saveProject(saveAs = false, opts?: { message?: string; ove
       if (choice === 'reload') await openProject(filePath, { skipConfirm: true })
       return false
     }
-    docStore.getState().markSaved(res.path)
+    docStore.getState().markSaved(res.path, id)
     projectStore.setState((s) => ({ commitMarker: historyPosition(), viewing: null, historyRev: s.historyRev + 1 }))
+    await runProjectHooks('saved', false)
     void api.project.clearRecovery().catch(() => {})
     refreshRecent()
     if (res.commitError) toast(t('Сохранено, но версия не записана: {err}', { err: res.commitError }), 'warning', 7000)
@@ -344,12 +363,16 @@ export async function saveProject(saveAs = false, opts?: { message?: string; ove
 
 /** single-file save (.doplan opened earlier, or the browser fallback) */
 async function saveFileLegacy(target: string | null): Promise<boolean> {
-  const { doc } = docStore.getState()
+  const { doc, filePath } = docStore.getState()
+  const saveAs = target === null
+  const id = saveId(doc, filePath, saveAs)
   try {
-    const res = await api.project.save(doc, target)
+    const res = await api.project.save(withId(doc, id), target)
     if (!res) return false
-    docStore.getState().markSaved(res.path)
+    docStore.getState().markSaved(res.path, id)
     projectStore.setState({ root: null, kind: kindOfPath(res.path), git: false, untrustedGit: false, gitFile: false, commitMarker: historyPosition(), viewing: null })
+    // awaited: a save from the close dialog is followed by the window closing
+    await runProjectHooks('saved', saveAs)
     void api.project.clearRecovery().catch(() => {})
     refreshRecent()
     toast(t('Проект сохранён'), 'success')
@@ -406,6 +429,10 @@ export async function viewVersion(v: ProjectVersion): Promise<boolean> {
     await alertDialog(t('Не удалось открыть версию'), errorText(err))
     return false
   }
+  // an old version is the same project: it keeps the project's id (and so its AI chats), even one
+  // written before documents had an id
+  const id = docStore.getState().doc.meta.id
+  if (id && doc.meta.id !== id) doc = { ...doc, meta: { ...doc.meta, id } }
   const { git, untrustedGit, gitFile } = projectStore.getState()
   loadDocument(doc, root, { kind: 'folder', git, untrustedGit, gitFile })
   projectStore.setState({ viewing: v, dialog: null })
@@ -466,6 +493,7 @@ export async function handleCloseRequest(): Promise<void> {
     const ok = await confirmDiscard()
     if (!ok) return
   }
+  await runProjectHooks('closing')
   try {
     await api.project.clearRecovery()
   } catch {
@@ -503,6 +531,8 @@ export async function offerRecovery(): Promise<boolean> {
   )
   if (choice !== 'restore') {
     await api.project.clearRecovery().catch(() => {})
+    // the copy of a never-saved document was its only way back to its chats (a saved one keeps them)
+    if (!snap.path && doc.meta.id) await api.aiChat.dropChats(`id:${doc.meta.id}`).catch(() => {})
     return false
   }
   let isFolder = false

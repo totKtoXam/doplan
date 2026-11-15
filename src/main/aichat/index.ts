@@ -13,13 +13,13 @@ import { CH } from '../channels'
 import { handleIpc, onIpc } from '../ipc'
 import { sendToRenderer } from '../window'
 import { API_MODELS, runAnthropicApi } from './anthropicApi'
-import { abortRunCalls, onToolResult } from './bridge'
+import { abortRunCalls, closeRun, forgetRun, onToolResult } from './bridge'
 import { runClaude, runCodex, runGemini, type RunCtx } from './cliRunners'
 import { binVersion, findOnPath, killTree, type ResolvedBin } from './detect'
 import { authStatus, cancelLogin, isAuthError, loginInput, startLogin } from './login'
 import { closeMcpServer, openEndpoint, revokeRun } from './mcpServer'
 import { AGENT_SYSTEM_PROMPT, PLAN_MODE_NOTE, PROJECT_FOLDER_NOTE, PROJECT_INSTRUCTIONS_NOTE, UNTRUSTED_FOLDER_NOTE } from './prompt'
-import { agentWorkDir, deleteChat, getChatSettings, listChats, loadChat, sanitizeSettings, saveChat, setChatSettings } from './store'
+import { agentWorkDir, claimDocument, deleteChat, dropChats, getChatSettings, listChats, loadChat, moveChats, sanitizeSettings, saveChat, setChatSettings } from './store'
 
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 
@@ -172,7 +172,7 @@ async function agentPlace(req: AiRunRequest): Promise<AgentPlace> {
   const provider = req.settings.provider
   const trusted = await isFolderTrusted(root)
   const inFolder = trusted && provider !== 'api'
-  const cwd = inFolder ? root : await agentWorkDir(root)
+  const cwd = inFolder ? root : await agentWorkDir(req.projectPath)
   // Codex reads AGENTS.md from its working directory; Claude Code reads CLAUDE.md (which is "@AGENTS.md")
   const native = inFolder && (provider === 'codex' || (provider === 'claude' && existsSync(join(root, 'CLAUDE.md'))))
   if (native) return { cwd, root, trusted, inFolder, inline: null }
@@ -196,12 +196,26 @@ function systemPrompt(req: AiRunRequest, place: AgentPlace | null): string {
 async function startRun(raw: unknown): Promise<void> {
   const req = validRequest(raw)
   if (runs.has(req.runId)) throw new Error('Запуск уже идёт')
-  const list = await providers(false)
-  const prov = list.find((p) => p.info.id === req.settings.provider)
-  if (!prov || !prov.info.available) throw new Error(prov?.info.reason ?? 'Провайдер недоступен')
-
+  // registered before the first await: a Stop that comes while providers are still being detected counts
   const run: Run = { abort: new AbortController(), children: new Set() }
   runs.set(req.runId, run)
+  let found: Awaited<ReturnType<typeof providers>>[number] | undefined
+  try {
+    found = (await providers(false)).find((p) => p.info.id === req.settings.provider)
+    if (!found || !found.info.available) throw new Error(found?.info.reason ?? 'Провайдер недоступен')
+  } catch (e) {
+    runs.delete(req.runId)
+    forgetRun(req.runId)
+    throw e
+  }
+  if (run.abort.signal.aborted) {
+    // stopped before it started: nothing is spawned
+    runs.delete(req.runId)
+    forgetRun(req.runId)
+    sendToRenderer(CH.evAiChatEvent, req.runId, { type: 'done', ok: false, stopped: true } satisfies AiRunEvent)
+    return
+  }
+  const prov = found
   let finished = false
   const emit = (ev: AiRunEvent) => {
     if (finished) return
@@ -223,6 +237,11 @@ async function startRun(raw: unknown): Promise<void> {
         await runAnthropicApi({ req, emit, signal: run.abort.signal, systemPrompt: systemPrompt(req, place), userText })
       } else {
         const endpoint = await openEndpoint(req.runId)
+        // stopped while the endpoint was opening: the token is born revoked
+        if (run.abort.signal.aborted) {
+          revokeRun(req.runId)
+          return
+        }
         const ctx: RunCtx = {
           req,
           emit,
@@ -247,6 +266,7 @@ async function startRun(raw: unknown): Promise<void> {
       emit({ type: 'done', ok: !run.abort.signal.aborted, stopped: run.abort.signal.aborted })
       revokeRun(req.runId)
       abortRunCalls(req.runId, 'Запуск завершён')
+      forgetRun(req.runId)
       runs.delete(req.runId)
     }
   })()
@@ -257,7 +277,9 @@ function stopRun(runId: unknown): void {
   const run = runs.get(runId)
   if (!run) return
   run.abort.abort()
-  abortRunCalls(runId)
+  // the agent loses access at once, not when its process finally exits
+  revokeRun(runId)
+  closeRun(runId)
   for (const c of run.children) killTree(c)
 }
 
@@ -272,6 +294,11 @@ export function registerAiChat(): void {
   handleIpc(CH.aiChatDelete, (p: unknown, id: unknown) => deleteChat(typeof p === 'string' ? p : null, id))
   handleIpc(CH.aiChatGetSettings, (p: unknown) => getChatSettings(typeof p === 'string' ? p : null))
   handleIpc(CH.aiChatSetSettings, (p: unknown, s: unknown) => setChatSettings(typeof p === 'string' ? p : null, s))
+  handleIpc(CH.aiChatMove, (from: unknown, to: unknown, copy: unknown, path: unknown) =>
+    typeof from === 'string' && typeof to === 'string' ? moveChats(from, to, copy === true, typeof path === 'string' ? path : null) : { sessionsKept: true },
+  )
+  handleIpc(CH.aiChatDrop, (p: unknown) => dropChats(typeof p === 'string' ? p : null))
+  handleIpc(CH.aiChatClaim, (ref: unknown, path: unknown) => (typeof ref === 'string' && typeof path === 'string' ? claimDocument(ref, path) : ref))
   handleIpc(CH.aiChatLogin, async (id: unknown) => {
     const prov = (await providers(false)).find((p) => p.info.id === id)
     if (!prov?.bin || !prov.info.canLogin) throw new Error('Вход для этого провайдера недоступен')

@@ -17,12 +17,20 @@ import type {
   Id,
   Item,
   Material,
+  Opening,
   OpeningKind,
   QualityPreset,
   SurfaceFinish,
   Vec2,
   WallKind,
 } from '@core/types'
+
+/** a door look picked from the Construction panel (kind + fields copied onto the new opening) */
+export interface OpeningPreset {
+  id: string
+  kind: OpeningKind
+  patch: Partial<Pick<Opening, 'width' | 'height' | 'style' | 'slide' | 'leafMaterialId' | 'frameMaterialId'>>
+}
 
 // ───────────────────────────── stores ─────────────────────────────
 
@@ -33,6 +41,8 @@ export interface DocState {
   derived: Record<Id, DerivedPlan>
   /** monotonically increasing; bumped on every commit/undo/redo/load */
   revision: number
+  /** bumped only by load/newDoc: another document is open (a save keeps it, even when filePath changes) */
+  loadId: number
   filePath: string | null
   dirty: boolean
   canUndo: boolean
@@ -51,7 +61,10 @@ export interface DocState {
   redo(): void
   load(doc: Doc, filePath: string | null): void
   newDoc(name?: string): void
-  markSaved(filePath: string): void
+  /** `id`: the Doc.meta.id the file was written with */
+  markSaved(filePath: string, id?: string): void
+  /** a copy of another file was opened: it gets an id of its own (written with its next save; not an edit) */
+  setDocId(id: string): void
 }
 
 export type ToolId =
@@ -88,6 +101,8 @@ export interface UiState {
   wallThickness: number
   wallHeight: number
   openingKind: OpeningKind
+  /** door preset picked in the Construction panel: applied by the opening tool to new openings of its kind */
+  openingPreset: OpeningPreset | null
   /** asset being placed by the `item` tool */
   placingAssetId: Id | null
   /** finish applied by the `paint` tool */

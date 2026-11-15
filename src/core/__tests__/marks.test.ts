@@ -150,4 +150,37 @@ describe('applyNodeDistance', () => {
     expect(doc.nodes[a.id].x).toBe(0)
     expect(applyNodeDistance(doc, levelId, a.id, a.id, 1000).ok).toBe(false)
   })
+
+  it('refuses a diagonal: moving one corner alone would skew the room', () => {
+    const { doc, levelId } = room()
+    const nodes = Object.values(doc.nodes)
+    const a = nodes.find((n) => n.x === 0 && n.y === 0)!
+    const c = nodes.find((n) => n.x === 4000 && n.y === 3000)!
+    const before = JSON.stringify(doc.nodes)
+    const res = applyNodeDistance(doc, levelId, a.id, c.id, 5100)
+    expect(res.ok).toBe(false)
+    expect(JSON.stringify(doc.nodes)).toBe(before)
+  })
+
+  it('refuses a length that would flip a wall along the line (T-junction in between)', () => {
+    const doc = createEmptyDoc('t')
+    const levelId = doc.levelOrder[0]
+    addWall(doc, levelId, { x: 0, y: 0 }, { x: 2000, y: 0 })
+    addWall(doc, levelId, { x: 2000, y: 0 }, { x: 4000, y: 0 })
+    addWall(doc, levelId, { x: 2000, y: 0 }, { x: 2000, y: 3000 })
+    addWall(doc, levelId, { x: 4000, y: 0 }, { x: 4000, y: 3000 })
+    normalize(doc)
+    const nodes = Object.values(doc.nodes)
+    const a = nodes.find((n) => n.x === 0 && n.y === 0)!
+    const b = nodes.find((n) => n.x === 4000 && n.y === 0)!
+    const before = JSON.stringify(doc.nodes)
+    expect(applyNodeDistance(doc, levelId, a.id, b.id, 1500).ok).toBe(false)
+    expect(JSON.stringify(doc.nodes)).toBe(before)
+    // shortening that keeps every wall's direction is fine; the wall hanging on B follows
+    const ok = applyNodeDistance(doc, levelId, a.id, b.id, 3000)
+    expect(ok.ok, ok.error).toBe(true)
+    expect(Math.round(doc.nodes[b.id].x)).toBe(3000)
+    const far = Object.values(doc.nodes).find((n) => n.y === 3000 && n.x > 2500)!
+    expect(Math.round(far.x)).toBe(3000)
+  })
 })

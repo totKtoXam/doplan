@@ -1,4 +1,4 @@
-import { compilePlanSpec, newId, parseDoc, parsePlanSpec, validatePlanSpec } from '@core'
+import { compilePlanSpec, newId, newProjectId, parseDoc, parsePlanSpec, validatePlanSpec } from '@core'
 import type { Doc } from '@core/types'
 import { t } from '@/i18n'
 import { api } from '@/store/api'
@@ -101,7 +101,9 @@ function looksLikeDoc(json: unknown): boolean {
 
 async function importDocJson(json: unknown): Promise<boolean> {
   try {
-    const doc = parseDoc(json)
+    // a copy of a project, not that file: its own id (and chats)
+    const doc = { ...parseDoc(json) }
+    doc.meta = { ...doc.meta, id: newProjectId() }
     if (!(await confirmDiscard())) return false
     loadDocument(doc, null)
     toast(t('Проект открыт'), 'success')
@@ -238,6 +240,8 @@ async function openDoplanBytes(f: File): Promise<void> {
   const raw = entries['doc.json']
   if (!raw) throw new Error(t('В архиве нет doc.json'))
   const doc = parseDoc(JSON.parse(strFromU8(raw)))
+  // opened without its file: a copy of the project with its own id (and chats)
+  doc.meta.id = newProjectId()
   if (!(await confirmDiscard())) return
   loadDocument(doc, null)
   toast(t('Проект открыт без встроенных файлов — сохраните его заново.'), 'warning', 6000)

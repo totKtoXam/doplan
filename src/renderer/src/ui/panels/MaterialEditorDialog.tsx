@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ImagePlus, Link2, Link2Off, Wallpaper, X } from 'lucide-react'
-import type { Material, MaterialCategory } from '@core/types'
-import { newId } from '@core'
+import type { Material, MaterialCategory, PriceUnit, ProductRef } from '@core/types'
+import { localDate, newId, productUrl } from '@core'
 import { docStore } from '@/store/document'
 import { useT } from '@/i18n'
 import { Button, ColorInput, Dialog, IconButton, Input, NumberInput, Row, Select, Slider, Toggle, fmtNum } from '@/ui/kit'
@@ -30,6 +30,78 @@ interface Draft {
   metalness: number
   maps: Partial<Record<MapKey, MapSlot>>
   sizeMm: [number, number]
+  /** colour-system code (paints); system 'none' = no code */
+  codeSystem: string
+  code: string
+  /** product card: where to buy and for how much (price in the project currency) */
+  vendor: string
+  sku: string
+  url: string
+  price: number | null
+  priceUnit: PriceUnit | 'none'
+  pack: number | null
+  /** wallpaper roll (mm) and pattern repeat; paint coverage (m²/l per coat) */
+  rollW: number | null
+  rollL: number | null
+  repeat: number | null
+  coverage: number | null
+}
+
+const CODE_SYSTEMS = ['none', 'NCS', 'RAL', 'custom']
+const PRICE_UNITS: PriceUnit[] = ['м²', 'м', 'шт', 'л', 'рул.', 'уп.']
+const EMPTY_PRODUCT = {
+  vendor: '',
+  sku: '',
+  url: '',
+  price: null,
+  priceUnit: 'none',
+  pack: null,
+  rollW: null,
+  rollL: null,
+  repeat: null,
+  coverage: null,
+} satisfies Partial<Draft>
+
+/** paint settings the editor does not show (coats) survive an edit */
+const prevPaint = (id: string | null | undefined) => (id ? lookupMaterial(id)?.paint : undefined)
+
+/** product fields the editor shows; the rest of a card (note…) is kept as it was */
+const EDITED_PRODUCT_KEYS = ['vendor', 'sku', 'url', 'price', 'priceUnit', 'pack', 'source', 'updatedAt'] as const
+
+/**
+ * Product / wallpaper / paint fields of the draft as material fields (undefined = not set). Fields the
+ * editor does not show (wallpaper match, product note, a feed source when nothing changed) survive.
+ */
+function productOf(d: Draft, prev?: Material): Pick<Material, 'product' | 'wallpaper' | 'paint'> {
+  const shown: ProductRef = {}
+  if (d.vendor.trim()) shown.vendor = d.vendor.trim()
+  if (d.sku.trim()) shown.sku = d.sku.trim()
+  const url = productUrl(d.url)
+  if (url) shown.url = url
+  if (d.price !== null) shown.price = d.price
+  if (d.priceUnit !== 'none') shown.priceUnit = d.priceUnit
+  if (d.pack !== null && d.pack > 0) shown.pack = d.pack
+  const old = prev?.product
+  const kept: ProductRef = { ...(old ?? {}) }
+  for (const k of EDITED_PRODUCT_KEYS) delete kept[k]
+  const product: ProductRef = { ...kept, ...shown }
+  const changed = !old || (['vendor', 'sku', 'url', 'price', 'priceUnit', 'pack'] as const).some((k) => old[k] !== shown[k])
+  if (Object.keys(shown).length > 0 || Object.keys(kept).length > 0) {
+    product.source = changed ? (shown.url ? 'link' : 'manual') : (old?.source ?? 'manual')
+    product.updatedAt = changed ? localDate() : (old?.updatedAt ?? localDate())
+  }
+  const hasProduct = Object.keys(product).length > 0
+
+  let wallpaper: Material['wallpaper']
+  if (d.category === 'wallpaper' && (d.rollW || d.rollL || d.repeat || prev?.wallpaper)) {
+    const pw = prev?.wallpaper
+    // unset roll sizes fall back to the standard 0.53 × 10.05 m roll the placeholders show
+    wallpaper = { ...(pw ?? {}), rollW: d.rollW ?? pw?.rollW ?? 530, rollL: d.rollL ?? pw?.rollL ?? 10050 }
+    if (d.repeat) wallpaper.repeat = d.repeat
+    else delete wallpaper.repeat
+  }
+  const paint = d.category === 'paint' && d.coverage ? { coverage: d.coverage } : undefined
+  return { product: hasProduct ? product : undefined, wallpaper, paint }
 }
 
 export interface MaterialEditorDialogProps {
@@ -41,7 +113,7 @@ export interface MaterialEditorDialogProps {
 }
 
 function emptyDraft(): Draft {
-  return { name: 'Мой материал', category: 'paint', color: '#d8d4cc', roughness: 0.8, metalness: 0, maps: {}, sizeMm: [1000, 1000] }
+  return { name: 'Мой материал', category: 'paint', color: '#d8d4cc', roughness: 0.8, metalness: 0, maps: {}, sizeMm: [1000, 1000], codeSystem: 'none', code: '', ...EMPTY_PRODUCT }
 }
 
 function draftFrom(m: Material, copy: boolean): Draft {
@@ -58,6 +130,18 @@ function draftFrom(m: Material, copy: boolean): Draft {
     metalness: m.metalness,
     maps,
     sizeMm: m.sizeMm ? [m.sizeMm[0], m.sizeMm[1]] : [1000, 1000],
+    codeSystem: m.colorCode?.system ?? 'none',
+    code: m.colorCode?.code ?? '',
+    vendor: m.product?.vendor ?? '',
+    sku: m.product?.sku ?? '',
+    url: m.product?.url ?? '',
+    price: m.product?.price ?? null,
+    priceUnit: m.product?.priceUnit ?? 'none',
+    pack: m.product?.pack ?? null,
+    rollW: m.wallpaper?.rollW ?? null,
+    rollL: m.wallpaper?.rollL ?? null,
+    repeat: m.wallpaper?.repeat ?? null,
+    coverage: m.paint?.coverage ?? null,
   }
 }
 
@@ -186,6 +270,12 @@ export function MaterialEditorDialog({ open, onClose, materialId, onSaved }: Mat
         maps[k] = s.data ? await window.doplan.project.addAsset(s.data, s.ext || 'png') : s.url
       }
       const name = draft.name.trim() || t('Мой материал')
+      const code = draft.code.trim()
+      const colorCode = draft.codeSystem !== 'none' && code ? { system: draft.codeSystem, code } : undefined
+      // the material edited in place, or the library / catalog one a copy is made of: fields the
+      // editor does not show (wallpaper match, product note, price source) come from it
+      const sourceId = editId ?? materialId ?? null
+      const extra = productOf(draft, sourceId ? lookupMaterial(sourceId) : undefined)
       const base: Omit<Material, 'id'> = {
         name,
         nameRu: name,
@@ -194,6 +284,10 @@ export function MaterialEditorDialog({ open, onClose, materialId, onSaved }: Mat
         roughness: draft.roughness,
         metalness: draft.metalness,
         ...(hasMaps ? { maps, sizeMm: [draft.sizeMm[0], draft.sizeMm[1]] as [number, number] } : {}),
+        ...(colorCode ? { colorCode } : {}),
+        ...(extra.product ? { product: extra.product } : {}),
+        ...(extra.wallpaper ? { wallpaper: extra.wallpaper } : {}),
+        ...(extra.paint ? { paint: { ...(prevPaint(sourceId) ?? {}), ...extra.paint } } : {}),
         custom: true,
       }
       const id = editId ?? newId('m')
@@ -204,7 +298,16 @@ export function MaterialEditorDialog({ open, onClose, materialId, onSaved }: Mat
           delete next.maps
           delete next.sizeMm
         }
+        if (!colorCode) delete next.colorCode
+        if (!extra.product) delete next.product
+        if (!extra.wallpaper) delete next.wallpaper
+        if (!extra.paint) delete next.paint
+        const before = prev?.product?.price
         d.materials[id] = next
+        // a new price typed on the card is used again even if the price was erased in the estimate;
+        // the card's old price, pre-filled in the draft, is not
+        const own = d.design?.priceList?.[id]
+        if (own?.noPrice && extra.product?.price !== undefined && extra.product.price !== before) delete own.noPrice
       })
 
       if (toLibrary) {
@@ -289,11 +392,63 @@ export function MaterialEditorDialog({ open, onClose, materialId, onSaved }: Mat
           <Row label={t('Цвет')}>
             <ColorInput value={draft.color} onChange={(v) => patch({ color: v })} aria-label={t('Цвет')} />
           </Row>
+          <Row label={t('Код цвета')} hint={t('NCS / RAL / код производителя; цвет на экране — приближённый')}>
+            <Select<string>
+              value={draft.codeSystem}
+              onChange={(v) => patch({ codeSystem: v })}
+              options={CODE_SYSTEMS.map((v) => ({ value: v, label: v === 'none' ? '—' : v === 'custom' ? t('Другая') : v }))}
+              className="w-20 shrink-0"
+              aria-label={t('Система цвета')}
+            />
+            <Input
+              value={draft.code}
+              onChange={(v) => patch({ code: v })}
+              onKeyDown={(e) => e.stopPropagation()}
+              placeholder={draft.codeSystem === 'RAL' ? '9010' : 'S 1002-Y'}
+              disabled={draft.codeSystem === 'none'}
+              aria-label={t('Код цвета')}
+            />
+          </Row>
           <Row label={t('Шероховатость')}>
             <Slider value={draft.roughness} min={0} max={1} step={0.01} onChange={(v) => patch({ roughness: v })} format={(v) => fmtNum(v, 2)} />
           </Row>
           <Row label={t('Металличность')}>
             <Slider value={draft.metalness} min={0} max={1} step={0.01} onChange={(v) => patch({ metalness: v })} format={(v) => fmtNum(v, 2)} />
+          </Row>
+
+          {draft.category === 'wallpaper' && (
+            <Row label={t('Рулон')} hint={t('ширина × длина рулона и раппорт рисунка, мм')}>
+              <NumberInput kind="length" unit="mm" label={t('Ш')} value={draft.rollW} min={100} max={3000} round={1} placeholder="530" onChange={(v) => patch({ rollW: v })} onClear={() => patch({ rollW: null })} />
+              <NumberInput kind="length" unit="mm" label={t('Д')} value={draft.rollL} min={1000} max={50000} round={10} placeholder="10050" onChange={(v) => patch({ rollL: v })} onClear={() => patch({ rollL: null })} />
+              <NumberInput kind="length" unit="mm" label={t('Р')} value={draft.repeat} min={0} max={2000} round={1} placeholder="0" onChange={(v) => patch({ repeat: v })} onClear={() => patch({ repeat: null })} />
+            </Row>
+          )}
+          {draft.category === 'paint' && (
+            <Row label={t('Расход')} hint={t('м² на литр за один слой')}>
+              <NumberInput value={draft.coverage} min={1} max={30} step={0.5} decimals={1} suffix={t('м²/л')} placeholder="8" onChange={(v) => patch({ coverage: v })} onClear={() => patch({ coverage: null })} />
+            </Row>
+          )}
+
+          <div className="mt-1 text-[11px] font-semibold">{t('Товар')}</div>
+          <Row label={t('Цена')} hint={t('в валюте проекта; цена в смете проекта важнее')}>
+            <NumberInput value={draft.price} min={0} step={1} decimals={2} placeholder="—" onChange={(v) => patch({ price: v })} onClear={() => patch({ price: null })} aria-label={t('Цена')} />
+            <Select<PriceUnit | 'none'>
+              value={draft.priceUnit}
+              onChange={(v) => patch({ priceUnit: v })}
+              options={[{ value: 'none', label: t('за ед. сметы') }, ...PRICE_UNITS.map((u) => ({ value: u, label: `/${t(u)}` }))]}
+              className="w-28 shrink-0"
+              aria-label={t('Единица цены')}
+            />
+          </Row>
+          <Row label={t('Упаковка')} hint={t('м² в упаковке, литров в банке, штук в коробке')}>
+            <NumberInput value={draft.pack} min={0} step={0.1} decimals={2} placeholder="—" onChange={(v) => patch({ pack: v })} onClear={() => patch({ pack: null })} aria-label={t('Упаковка')} />
+          </Row>
+          <Row label={t('Поставщик')}>
+            <Input value={draft.vendor} onChange={(v) => patch({ vendor: v })} onKeyDown={(e) => e.stopPropagation()} aria-label={t('Поставщик')} />
+            <Input value={draft.sku} onChange={(v) => patch({ sku: v })} onKeyDown={(e) => e.stopPropagation()} placeholder={t('Артикул')} aria-label={t('Артикул')} className="w-28 shrink-0" />
+          </Row>
+          <Row label={t('Ссылка')}>
+            <Input value={draft.url} onChange={(v) => patch({ url: v })} onKeyDown={(e) => e.stopPropagation()} placeholder="https://" aria-label={t('Ссылка на товар')} />
           </Row>
 
           <div className="mt-1 text-[11px] font-semibold">{t('Текстуры')}</div>

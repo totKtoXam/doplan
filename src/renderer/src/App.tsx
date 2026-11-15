@@ -8,6 +8,7 @@ import { dialogStore, type DialogKey, useDialogs } from '@/store/dialogs'
 import { buildSampleApartment } from '@/store/sample'
 import { uiStore, useUi } from '@/store/ui'
 import {
+  AboutDialog,
   BomDialog,
   ImportModelDialog,
   LeftPanel,
@@ -91,6 +92,7 @@ const DIALOGS: [DialogKey, ComponentType<{ open: boolean; onClose(): void }>][] 
   ['settings', SettingsDialog],
   ['photoPlan', PhotoPlanDialog],
   ['render', RenderDialog],
+  ['about', AboutDialog],
 ]
 
 function Dialogs() {

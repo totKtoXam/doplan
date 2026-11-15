@@ -4,7 +4,8 @@ import type { AppSettings } from '@shared/ipc'
 import { uiStore } from '@/store/ui'
 import { useT } from '@/i18n'
 import { Button, Dialog, IconButton, Input, NumberInput, Row, Section, Segmented, Spinner } from '@/ui/kit'
-import { errorText } from './common/catalog'
+import { displayName, errorText, useAllAssets, useLang } from './common/catalog'
+import '@/ui/catalogI18n'
 import type { DialogPropsBase } from './BomDialog'
 
 type Editable = Pick<AppSettings, 'lang' | 'theme' | 'backend' | 'autosaveSec'>
@@ -210,9 +211,39 @@ export function SettingsDialog({ open, onClose }: DialogPropsBase) {
               </div>
             </div>
           </Section>
+          <ModelCredits />
           {error && <p className="text-[#ff8589]">{error}</p>}
         </div>
       )}
     </Dialog>
+  )
+}
+
+/** CC-BY models need visible attribution: author, source and licence of every such catalog entry */
+function ModelCredits() {
+  const t = useT()
+  const lang = useLang()
+  const assets = useAllAssets()
+  const credited = assets
+    .filter((a) => a.licence?.startsWith('CC-BY') && a.author)
+    .sort((a, b) => displayName(a, lang).localeCompare(displayName(b, lang), lang))
+  return (
+    <Section title={t('Авторы 3D-моделей')} id="settings-credits" defaultOpen={false}>
+      <div className="flex flex-col gap-1.5" data-testid="model-credits">
+        <p className="text-[11px] leading-snug text-[var(--muted)]">
+          {t('Модели Poly Haven, ambientCG и KayKit — CC0. Модели ниже распространяются по CC BY 4.0: автор, источник и лицензия указаны для каждой.')}
+        </p>
+        <ul className="flex max-h-56 flex-col gap-1 overflow-y-auto pr-1 text-[11px] leading-snug">
+          {credited.map((a) => (
+            <li key={a.id}>
+              <span className="text-[var(--text)]">{displayName(a, lang)}</span>
+              <span className="text-[var(--muted)]">{` — ${lang === 'ru' && a.nameRu ? `«${a.name}», ` : ''}${a.author}, ${a.licence}`}</span>
+              {a.source && /^https?:/.test(a.source) && <span className="block truncate text-[10px] text-[var(--muted)]">{a.source}</span>}
+            </li>
+          ))}
+          {!credited.length && <li className="text-[var(--muted)]">{t('Нет')}</li>}
+        </ul>
+      </div>
+    </Section>
   )
 }

@@ -52,6 +52,11 @@ export interface ProjectOpenResult {
    * yet. No git command runs there until project.trustFolder() (git may run programs from a repo's config).
    */
   untrustedGit?: boolean
+  /**
+   * folders: no repository yet, and doplan did not create the folder (a received copy, a folder replaced
+   * at the same path). doplan creates no repository there until project.trustFolder(); saving writes the files.
+   */
+  untrustedFolder?: boolean
   /** folders: .git is a file (submodule, worktree) — doplan keeps no version history there */
   gitFile?: boolean
   /** folders: the repository config has keys outside doplan's allowlist; no git command runs there (see UnsafeGitConfig) */
@@ -93,7 +98,10 @@ export interface ProjectInfo {
   gitAvailable: boolean
   /** the open folder is a git repository */
   repo: boolean
-  /** false when the folder's repository is not trusted yet (history, tags and commits are off) */
+  /**
+   * false when the folder's repository is not trusted yet, or the folder has no repository and doplan did
+   * not create it (repo false): history, tags and commits are off
+   */
   trusted: boolean
   /** .git in the folder is a file (submodule, worktree): doplan keeps no version history there */
   gitFile: boolean

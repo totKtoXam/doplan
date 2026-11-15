@@ -239,6 +239,25 @@ function HistoryDialog() {
             </Button>
           </div>
         </div>
+      ) : info && !info.repo && !info.trusted ? (
+        <div className="flex flex-col gap-2 text-[12px] leading-relaxed">
+          {error && <div className="text-[11px] text-[#ff8589]">{error}</div>}
+          <div>
+            {t('Эту папку создал не doplan (или её заменили либо переместили). Пока вы не доверяете папке, doplan не создаёт в ней репозиторий git: история версий выключена, сохранение пишет только файлы.')}
+          </div>
+          <div>
+            <Button
+              variant="primary"
+              onClick={() =>
+                run(async () => {
+                  if (await offerTrustFolder('folder')) projectStore.setState({ dialog: 'history' })
+                })
+              }
+            >
+              {t('Доверять этой папке…')}
+            </Button>
+          </div>
+        </div>
       ) : info && info.unsafeGit ? (
         <div className="flex flex-col gap-2 text-[12px] leading-relaxed">
           {error && <div className="text-[11px] text-[#ff8589]">{error}</div>}

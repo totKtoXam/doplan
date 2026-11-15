@@ -8,7 +8,7 @@
  * history is unavailable (the UI says how to install git).
  */
 import { execFile } from 'node:child_process'
-import { existsSync, lstatSync, mkdirSync, statSync } from 'node:fs'
+import { constants as fsConstants, type Dirent, lstatSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import fsp from 'node:fs/promises'
 import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path'
 import { app } from 'electron'
@@ -99,6 +99,11 @@ function hardeningArgs(): string[] {
     // verifying signatures runs gpg.program / gpg.ssh.program / gpg.x509.program; doplan never fetches
     '-c', 'log.showSignature=false',
     '-c', 'protocol.allow=never',
+    // a folder that only looks like a bare repository is never one (doplan names the gitdir itself)
+    '-c', 'safe.bareRepository=explicit',
+    // no automatic gc / maintenance: it would prune worktrees (stat paths named in .git/worktrees/*) and run more programs
+    '-c', 'gc.auto=0',
+    '-c', 'maintenance.auto=false',
     '-c', 'core.quotepath=off',
     '-c', 'i18n.logOutputEncoding=utf-8',
     '-c', 'i18n.commitEncoding=utf-8',
@@ -168,12 +173,28 @@ interface SpawnOpts extends RunOpts {
 type RunResult = { code: number; out: Buffer; err: string }
 
 /**
- * A git command in a project folder. Its repository config is checked against the allowlist first
- * (assertRepoSafe): with any other key in it no git command runs there at all.
+ * A git command in a project folder. Its repository is checked first (assertRepoSafe): with a config
+ * key outside the allowlist, or a `.git` that is not a plain repository, no git command runs there
+ * at all.
  */
 async function run(root: string, args: string[], opts: RunOpts = {}): Promise<RunResult> {
-  await assertRepoSafe(root, args[0] === 'init')
-  return spawnGit(root, args, opts)
+  const init = args[0] === 'init'
+  await assertRepoSafe(root, init)
+  return spawnGit(root, init ? args : [...repoArgs(root), ...args], { ...opts, env: ceilingEnv(root) })
+}
+
+/**
+ * The repository is `<root>/.git` and the work tree `<root>`, named explicitly: git never takes the
+ * folder itself for a bare repository (an empty or broken .git) nor walks up to a parent repository.
+ */
+function repoArgs(root: string): string[] {
+  const abs = resolve(root)
+  return [`--git-dir=${join(abs, '.git')}`, `--work-tree=${abs}`]
+}
+
+/** git looks for no repository above the folder (`git init`, and a second line of defence for the rest) */
+function ceilingEnv(root: string): Record<string, string> {
+  return { GIT_CEILING_DIRECTORIES: dirname(resolve(root)) }
 }
 
 /** git reads no repository here: an always-empty folder of doplan's own, and no looking above it */
@@ -238,6 +259,10 @@ const SAFE_REPO_KEYS: RegExp[] = [
   /^init\.defaultbranch$/,
   // format extensions that only say how the repository is stored
   /^extensions\.(objectformat|refstorage|worktreeconfig)$/,
+  // markers git-lfs writes itself (the format version on `git lfs track` and on every add of a tracked
+  // file, the auth mode and lock check of a server after a push); checked by value below
+  /^lfs\.repositoryformatversion$/,
+  /^lfs\..+\.(access|locksverify)$/,
 ]
 
 interface ConfigEntry {
@@ -247,6 +272,9 @@ interface ConfigEntry {
 
 function safeRepoEntry(e: ConfigEntry): boolean {
   if (e.key === 'core.repositoryformatversion') return /^\s*[01]\s*$/.test(e.value)
+  if (e.key === 'lfs.repositoryformatversion') return /^\s*0\s*$/.test(e.value)
+  if (/^lfs\..+\.access$/.test(e.key)) return /^\s*(basic|none|negotiate|ntlm|private)\s*$/i.test(e.value)
+  if (/^lfs\..+\.locksverify$/.test(e.key)) return /^\s*(true|false)\s*$/i.test(e.value)
   return SAFE_REPO_KEYS.some((re) => re.test(e.key))
 }
 
@@ -285,7 +313,7 @@ async function repoConfigFiles(root: string): Promise<RepoConfigFiles> {
     main: await readConfigFile(join(dir, 'config')),
     // read whenever it is there: git reads it with extensions.worktreeConfig, which may come and go
     worktree: await readConfigFile(join(dir, 'config.worktree')),
-    commondir: existsSync(join(dir, 'commondir')),
+    commondir: !!lstatOrNull(join(dir, 'commondir')),
   }
 }
 
@@ -322,13 +350,74 @@ const configChecks = new Map<string, { sig: string; result: UnsafeGitConfig | nu
  * may run git there. Read by doplan itself, nothing of the repository runs; cached while the files stay as they are.
  */
 export async function unsafeRepoConfig(root: string): Promise<UnsafeGitConfig | null> {
+  // the layout is checked every time (a few lstat calls), the config files only when they changed
+  const layout = repoLayoutProblems(root)
   const key = pathKey(root)
   const sig = configSignature(root)
   const hit = configChecks.get(key)
-  if (hit && hit.sig === sig) return hit.result
-  const result = await checkRepoConfig(root)
-  configChecks.set(key, { sig, result })
-  return result
+  let result: UnsafeGitConfig | null
+  if (hit && hit.sig === sig) result = hit.result
+  else {
+    result = await checkRepoConfig(root)
+    configChecks.set(key, { sig, result })
+  }
+  if (!layout.length) return result
+  return { keys: [...layout, ...(result?.keys ?? [])], resettable: false }
+}
+
+const lstatOrNull = (p: string) => {
+  try {
+    return lstatSync(p)
+  } catch {
+    return null
+  }
+}
+
+/** a small regular file's text (not through a link), or null */
+function readSmall(p: string): string | null {
+  const st = lstatOrNull(p)
+  if (!st?.isFile() || st.size > 1024 * 1024) return null
+  try {
+    return readFileSync(p, 'utf8')
+  } catch {
+    return null
+  }
+}
+
+/** a path that reaches another machine (Windows UNC: \\host\share, //host/share, \\?\UNC\…) */
+const networkPath = (p: string) => /^[\\/]{2}/.test(p)
+
+/**
+ * What in `<root>/.git` besides the config makes it no plain repository of this folder: missing
+ * HEAD/objects/refs (git would take the folder itself, or a parent, for the repository), object stores
+ * or linked worktrees on network paths (git would connect there, and Windows hands the share the
+ * user's credentials).
+ */
+function repoLayoutProblems(root: string): string[] {
+  const dir = join(root, '.git')
+  const out: string[] = []
+  if (!lstatOrNull(join(dir, 'HEAD'))?.isFile()) out.push('.git/HEAD')
+  if (!lstatOrNull(join(dir, 'objects'))?.isDirectory()) out.push('.git/objects')
+  if (!lstatOrNull(join(dir, 'refs'))?.isDirectory()) out.push('.git/refs')
+  const info = join(dir, 'objects', 'info')
+  if (lstatOrNull(join(info, 'alternates'))) {
+    const text = readSmall(join(info, 'alternates'))
+    const lines = (text ?? '').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'))
+    // relative entries are relative to the objects directory
+    if (text === null || lines.some((l) => networkPath(l) || networkPath(resolve(join(dir, 'objects'), l)))) out.push('.git/objects/info/alternates')
+  }
+  if (lstatOrNull(join(info, 'http-alternates'))) out.push('.git/objects/info/http-alternates')
+  let worktrees: string[] = []
+  try {
+    if (lstatOrNull(join(dir, 'worktrees'))?.isDirectory()) worktrees = readdirSync(join(dir, 'worktrees'))
+  } catch {
+    worktrees = []
+  }
+  for (const w of worktrees) {
+    const gitdir = readSmall(join(dir, 'worktrees', w, 'gitdir'))?.trim()
+    if (gitdir && networkPath(gitdir)) out.push(`.git/worktrees/${w}/gitdir`)
+  }
+  return out
 }
 
 export class UnsafeGitConfigError extends Error {
@@ -358,10 +447,11 @@ async function assertRepoSafe(root: string, init: boolean): Promise<void> {
   if (unsafe) throw new UnsafeGitConfigError(unsafe.keys)
 }
 
-async function freePath(base: string): Promise<string> {
+/** `base`, or `base-1`, `base-2`… : the first name with nothing at all there (a dangling link counts) */
+function freePath(base: string): string {
   for (let n = 0; ; n++) {
     const p = n ? `${base}-${n}` : base
-    if (!existsSync(p)) return p
+    if (!lstatOrNull(p)) return p
   }
 }
 
@@ -369,34 +459,52 @@ async function freePath(base: string): Promise<string> {
  * Rewrites the repository config with only the allowed keys of .git/config and .git/config.worktree.
  * The old files stay next to it: .git/config.doplan-backup (config.worktree.doplan-backup), `-1`, `-2`…
  * when such a backup is there already. Returns the backup of .git/config.
+ * Nothing is written through a link the folder may have planted: the new config is made in a folder
+ * of doplan's own, every file in .git is created exclusively under a name nothing has, and a .git or
+ * .git/config that is a link (or junction) is refused.
  */
 export async function resetRepoConfig(root: string): Promise<string> {
+  const cannot = () =>
+    new Error(msg('Настройки git этой папки нельзя сбросить: репозиторий устроен иначе. Работайте без версий.', 'The git config of this folder cannot be reset: the repository is set up differently. Work without versions.'))
   const dir = join(root, '.git')
-  if (!lstatSync(dir).isDirectory()) throw new Error(msg('.git в папке — это файл', '.git in the folder is a file'))
+  if (!lstatOrNull(dir)?.isDirectory()) throw cannot()
+  const configPath = join(dir, 'config')
+  const configStat = lstatOrNull(configPath)
+  const worktreeStat = lstatOrNull(join(dir, 'config.worktree'))
+  if ((configStat && !configStat.isFile()) || (worktreeStat && !worktreeStat.isFile()) || repoLayoutProblems(root).length) throw cannot()
   const { main, worktree, commondir } = await repoConfigFiles(root)
-  if (commondir || !main || !worktree) {
-    throw new Error(msg('Настройки git этой папки нельзя сбросить: репозиторий устроен иначе. Работайте без версий.', 'The git config of this folder cannot be reset: the repository is set up differently. Work without versions.'))
-  }
+  if (commondir || !main || !worktree) throw cannot()
   // config.worktree goes away, and extensions.worktreeConfig with it: what it allowed moves into config
   const kept = [...main, ...worktree].filter((e) => safeRepoEntry(e) && e.key !== 'core.repositoryformatversion' && e.key !== 'extensions.worktreeconfig')
   const version = kept.some((e) => e.key.startsWith('extensions.')) ? '1' : '0'
-  const fresh = await freePath(join(dir, 'config.doplan-new'))
-  await fsp.writeFile(fresh, '')
+  const scratchRoot = join(app.getPath('userData'), 'git-tmp')
+  await fsp.mkdir(scratchRoot, { recursive: true })
+  const scratch = await fsp.mkdtemp(join(scratchRoot, 'config-'))
+  let fresh: string | null = null
   try {
+    const draft = join(scratch, 'config')
+    await fsp.writeFile(draft, '', { flag: 'wx' })
     for (const e of [{ key: 'core.repositoryformatversion', value: version }, ...kept]) {
       // a value git does not take back is left out (the backup keeps it)
-      await runOutside(['config', '--file', fresh, '--add', e.key, e.value], { allowFail: true })
+      await runOutside(['config', '--file', draft, '--add', e.key, e.value], { allowFail: true })
     }
     // the result is checked like any repository config before it replaces the old one
-    const check = await readConfigFile(fresh)
+    const check = await readConfigFile(draft)
     if (!check || !check.every(safeRepoEntry)) throw new Error(msg('Не удалось записать настройки git', 'Could not write the git config'))
-    const backup = await freePath(join(dir, 'config.doplan-backup'))
-    await fsp.copyFile(join(dir, 'config'), backup)
-    if (existsSync(join(dir, 'config.worktree'))) await fsp.rename(join(dir, 'config.worktree'), await freePath(join(dir, 'config.worktree.doplan-backup')))
-    await fsp.rename(fresh, join(dir, 'config'))
+    const text = await fsp.readFile(draft)
+    fresh = freePath(join(dir, 'config.doplan-new'))
+    await fsp.writeFile(fresh, text, { flag: 'wx' })
+    const backup = freePath(join(dir, 'config.doplan-backup'))
+    if (configStat) await fsp.copyFile(configPath, backup, fsConstants.COPYFILE_EXCL)
+    else await fsp.writeFile(backup, '', { flag: 'wx' })
+    if (worktreeStat) await fsp.rename(join(dir, 'config.worktree'), freePath(join(dir, 'config.worktree.doplan-backup')))
+    // rename replaces the entry .git/config itself (checked above to be a plain file, or none)
+    await fsp.rename(fresh, configPath)
+    fresh = null
     return backup
   } finally {
-    await fsp.rm(fresh, { force: true })
+    if (fresh) await fsp.rm(fresh, { force: true }).catch(() => {})
+    await fsp.rm(scratch, { recursive: true, force: true }).catch(() => {})
     configChecks.delete(pathKey(root))
   }
 }
@@ -462,7 +570,7 @@ async function userConfigFiles(): Promise<Set<string>> {
  */
 export async function filterOffArgs(root: string): Promise<string[]> {
   // only reads the config (nothing runs), so it lists the drivers of any repository, safe or not
-  const r = await spawnGit(root, ['config', '--show-origin', '-z', '--get-regexp', '^filter\.'], { allowFail: true })
+  const r = await spawnGit(root, [...repoArgs(root), 'config', '--show-origin', '-z', '--get-regexp', '^filter\.'], { allowFail: true, env: ceilingEnv(root) })
   // exit 1 only means "no such keys"
   if (r.code !== 0 && r.code !== 1) throw new GitError(msg('Не удалось прочитать настройки git репозитория', 'Could not read the repository git config'), -1, '')
   // the last value of a key wins, as in git
@@ -498,8 +606,34 @@ async function identityArgs(root: string): Promise<string[]> {
   return out
 }
 
+/** the first `.git` (file or folder) below the top level of the folder, as a relative path; links are not followed */
+async function nestedRepository(root: string): Promise<string | null> {
+  const stack = ['']
+  let seen = 0
+  while (stack.length) {
+    const rel = stack.pop()!
+    let entries: Dirent[]
+    try {
+      entries = await fsp.readdir(rel ? join(root, rel) : root, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const e of entries) {
+      const path = rel ? `${rel}/${e.name}` : e.name
+      if (e.name.toLowerCase() === '.git') {
+        if (rel) return path
+        continue
+      }
+      if (e.isDirectory()) stack.push(path)
+      if (++seen > 200_000) return null
+    }
+  }
+  return null
+}
+
 export async function gitInit(root: string): Promise<void> {
-  await run(root, ['init', '--quiet'])
+  // --template= : no template directory of the user's (init.templateDir), whose config or hooks would come along
+  await run(root, ['init', '--quiet', '--template='])
   // a fresh repository: name the unborn branch `main` regardless of the user's init.defaultBranch
   await run(root, ['symbolic-ref', 'HEAD', 'refs/heads/main'], { allowFail: true })
 }
@@ -510,6 +644,16 @@ export async function gitInit(root: string): Promise<void> {
  */
 export async function gitCommit(root: string, message: string, paths?: string[]): Promise<string | null> {
   const subject = message.trim() || msg('Сохранение', 'Save')
+  // `git add` looks into every nested repository it meets, and a nested .git can send it to a network share
+  const nested = await nestedRepository(root)
+  if (nested) {
+    throw new Error(
+      msg(
+        `В папке проекта есть вложенный репозиторий git (${nested}). doplan не сохраняет версии, пока он там: удалите или перенесите его.`,
+        `The project folder has a nested git repository (${nested}). doplan saves no versions while it is there: delete or move it.`,
+      ),
+    )
+  }
   const config = await filterOffArgs(root)
   if (paths?.length) await run(root, ['add', '--', ...paths], { config })
   else await run(root, ['add', '-A'], { config })

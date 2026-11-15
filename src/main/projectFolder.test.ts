@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
@@ -80,11 +80,12 @@ describe('folder trust', { timeout: 30_000 }, async () => {
   const git = await findGit()
   const gitIn = (dir: string, ...args: string[]) => execFileSync(git!, args, { cwd: dir, encoding: 'utf8' })
 
-  it('a folder without .git has no repository yet; a .git that came with the folder is untrusted', async () => {
+  it('a received folder without .git is unknown; a .git that came with the folder is untrusted', async () => {
     const plain = folder('plain', { 'plan.json': '{}', 'manifest.json': MANIFEST })
-    expect(await folderTrust(plain)).toEqual({ git: 'none', folder: false })
+    expect(await folderTrust(plain)).toEqual({ git: 'unknown', folder: false })
     const foreign = folder('foreign', { 'plan.json': '{}', 'manifest.json': MANIFEST, '.git/HEAD': 'ref: refs/heads/main\n' })
-    expect(await folderTrust(foreign)).toEqual({ git: 'untrusted', folder: false })
+    // (a .git with HEAD only is no complete repository either: unsafeGit lists what is missing)
+    expect(await folderTrust(foreign)).toMatchObject({ git: 'untrusted', folder: false })
     await expect(commitFolder(foreign, 'x')).rejects.toThrow()
   })
 
@@ -105,6 +106,7 @@ describe('folder trust', { timeout: 30_000 }, async () => {
     // a hook planted later (e.g. by a copied folder or a tool) must not run on save
     const marker = join(base, 'hook-ran')
     const hook = join(res.root, '.git', 'hooks', 'post-commit')
+    mkdirSync(join(res.root, '.git', 'hooks'), { recursive: true })
     writeFileSync(hook, `#!/bin/sh\necho ran > "${marker.replace(/\\/g, '/')}"\n`, { mode: 0o755 })
     writeFileSync(join(res.root, 'note.txt'), 'changed')
     expect(await commitFolder(res.root, 'Изменение')).toBeTruthy()
@@ -124,12 +126,24 @@ describe('folder trust', { timeout: 30_000 }, async () => {
     await expect(commitFolder(res.root, 'x')).rejects.toThrow()
   })
 
-  it.skipIf(!git)('saving a folder without .git creates a repository but does not trust the folder for the AI', async () => {
+  it.skipIf(!git)('saving a received folder without .git runs no git until the user trusts it', async () => {
     const plain = folder('plain2', { 'plan.json': '{}', 'manifest.json': MANIFEST })
-    expect(await commitFolder(plain, 'Первая')).toBeTruthy()
-    expect(await folderTrust(plain)).toEqual({ git: 'trusted', folder: false })
+    expect(await commitFolder(plain, 'Первая')).toBeNull()
+    expect(existsSync(join(plain, '.git'))).toBe(false)
+    expect(await folderTrust(plain)).toEqual({ git: 'unknown', folder: false })
     await trustFolder(plain)
+    expect(await folderTrust(plain)).toEqual({ git: 'none', folder: true })
+    expect(await commitFolder(plain, 'Первая')).toBeTruthy()
     expect(await folderTrust(plain)).toEqual({ git: 'trusted', folder: true })
+  })
+
+  it.skipIf(!git)('a folder doplan created without git gets its repository on a later save', async () => {
+    // trusted with no .git (git was missing when it was created): `trustFolder(root, false)` as the old first save did
+    const own = folder('own-nogit', { 'plan.json': '{}', 'manifest.json': MANIFEST })
+    await trustFolder(own, false)
+    expect(await folderTrust(own)).toEqual({ git: 'none', folder: false })
+    expect(await commitFolder(own, 'Первая')).toBeTruthy()
+    expect(await folderTrust(own)).toEqual({ git: 'trusted', folder: false })
   })
 
   it.skipIf(!git)('filter drivers from the repository config never run on save', async () => {
@@ -285,7 +299,8 @@ describe('folder trust', { timeout: 30_000 }, async () => {
   })
 
   it.skipIf(!git)('the user can trust a foreign repository', async () => {
-    const foreign = folder('foreign2', { 'plan.json': '{}', 'manifest.json': MANIFEST, '.git/HEAD': 'ref: refs/heads/main\n' })
+    const foreign = folder('foreign2', { 'plan.json': '{}', 'manifest.json': MANIFEST })
+    gitIn(foreign, 'init', '-q', '--template=')
     expect((await folderTrust(foreign)).git).toBe('untrusted')
     await trustFolder(foreign)
     expect(await folderTrust(foreign)).toEqual({ git: 'trusted', folder: true })
@@ -497,4 +512,250 @@ describe('repository config allowlist', { timeout: 60_000 }, async () => {
       await expect(resetFolderGitConfig(dir)).rejects.toThrow()
     }),
   )
+})
+
+// A repository is more than its config: git finds its gitdir by walking the folder (and its parents),
+// and follows alternates, linked worktrees and nested repositories it meets. doplan names the gitdir
+// itself and refuses layouts that would take git elsewhere.
+describe('repository layout', { timeout: 60_000 }, async () => {
+  const git = await findGit()
+  const lfs =
+    !!git &&
+    (() => {
+      try {
+        execFileSync(git, ['lfs', 'version'], { stdio: 'ignore' })
+        return true
+      } catch {
+        return false
+      }
+    })()
+  const canLink = (() => {
+    const probe = join(base, 'link-probe')
+    try {
+      symlinkSync(join(base, 'link-probe-target'), probe, 'file')
+      unlinkSync(probe)
+      return true
+    } catch {
+      return false
+    }
+  })()
+  const slash = (p: string) => p.replace(/\\/g, '/')
+  const plainGit = (dir: string, ...args: string[]) => execFileSync(git!, args, { cwd: dir, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 30_000 })
+
+  async function inHome(name: string, fn: (home: string) => Promise<void>, gitconfig = ''): Promise<void> {
+    const home = folder(name, { '.gitconfig': `[user]\n\tname = t\n\temail = t@example.com\n${gitconfig}` })
+    const saved = { HOME: process.env['HOME'], USERPROFILE: process.env['USERPROFILE'], XDG: process.env['XDG_CONFIG_HOME'] }
+    process.env['HOME'] = home
+    process.env['USERPROFILE'] = home
+    delete process.env['XDG_CONFIG_HOME']
+    try {
+      await fn(home)
+    } finally {
+      for (const [k, v] of [['HOME', saved.HOME], ['USERPROFILE', saved.USERPROFILE], ['XDG_CONFIG_HOME', saved.XDG]] as const) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+    }
+  }
+
+  function received(name: string, files: Record<string, string> = {}): string {
+    const dir = folder(name, { 'plan.json': '{"a":1}', 'manifest.json': MANIFEST, ...files })
+    plainGit(dir, 'init', '-q')
+    plainGit(dir, 'add', '-A')
+    plainGit(dir, 'commit', '-qm', 'one')
+    return dir
+  }
+
+  async function created(name: string): Promise<string> {
+    const parent = join(base, `created-${name}`)
+    mkdirSync(parent, { recursive: true })
+    const res = await createFolderProject(parent, name, { version: 1, meta: { name } })
+    expect(res.commit).toBeTruthy()
+    return res.root
+  }
+
+  /** a folder that looks like a bare repository itself (HEAD, objects, refs, config) next to an empty .git */
+  function bareLookalike(dir: string, config: string): void {
+    mkdirSync(join(dir, '.git'), { recursive: true })
+    mkdirSync(join(dir, 'objects'), { recursive: true })
+    mkdirSync(join(dir, 'refs', 'heads'), { recursive: true })
+    writeFileSync(join(dir, 'HEAD'), 'ref: refs/heads/main\n')
+    writeFileSync(join(dir, 'config'), config)
+  }
+
+  it.skipIf(!git)('an empty or broken .git is no repository: git never takes the folder or a parent for one', async () => {
+    const dir = folder('empty-git', { 'plan.json': '{}', 'manifest.json': MANIFEST })
+    bareLookalike(dir, '[core]\n\tbare = true\n')
+    await trustFolder(dir)
+    const trust = await folderTrust(dir)
+    expect(trust.git).toBe('trusted')
+    expect(trust.unsafeGit).toEqual({ keys: expect.arrayContaining(['.git/HEAD', '.git/objects', '.git/refs']), resettable: false })
+    expect(await commitFolder(dir, 'x')).toBeNull()
+    await expect(gitLog(dir)).rejects.toBeInstanceOf(UnsafeGitConfigError)
+    await expect(resetFolderGitConfig(dir)).rejects.toThrow()
+    expect(existsSync(join(dir, 'index'))).toBe(false)
+    expect(existsSync(join(dir, '.git', 'index'))).toBe(false)
+
+    // a project folder inside someone else's repository, with an empty .git of its own
+    const outer = received('outer-repo')
+    const inner = folder(join('outer-repo', 'inner'), { 'plan.json': '{}', 'manifest.json': MANIFEST })
+    mkdirSync(join(inner, '.git'))
+    await trustFolder(inner)
+    expect(await commitFolder(inner, 'x')).toBeNull()
+    expect(plainGit(outer, 'rev-list', '--count', 'HEAD').trim()).toBe('1')
+    expect(plainGit(outer, 'status', '--porcelain')).toContain('inner/')
+  })
+
+  it.skipIf(!lfs)('the lfs.extension of a bare-looking folder or of a parent repository never runs', () =>
+    inHome('home-bare-lfs', async () => {
+      const marker = slash(join(base, 'bare-lfs-ran'))
+      const evil = slash(join(base, 'bare-lfs-evil.sh'))
+      writeFileSync(evil, `echo "$@" >> '${marker}'\ncat\n`)
+      const ext = `[lfs "extension.foo"]\n\tclean = sh '${evil}' clean %f\n\tsmudge = sh '${evil}' smudge %f\n\tpriority = 0\n`
+      const files = { 'plan.json': '{}', 'manifest.json': MANIFEST, '.gitattributes': '*.png filter=lfs diff=lfs merge=lfs -text\n', 'a.png': 'png' }
+
+      const dir = folder('bare-lfs', files)
+      bareLookalike(dir, `[core]\n\tbare = true\n${ext}`)
+      // plain git takes the folder itself for the repository and runs the extension
+      try {
+        plainGit(dir, '--work-tree=.', 'add', 'a.png')
+      } catch {
+        /* whatever git makes of it afterwards */
+      }
+      expect(existsSync(marker)).toBe(true)
+      rmSync(marker)
+      rmSync(join(dir, 'index'), { force: true })
+      await trustFolder(dir)
+      expect(await commitFolder(dir, 'x')).toBeNull()
+      expect(existsSync(marker)).toBe(false)
+
+      // the parent is a repository with the extension; the project folder has an empty .git
+      const outer = received('outer-lfs')
+      plainGit(outer, 'config', 'lfs.extension.foo.clean', `sh '${evil}' clean %f`)
+      plainGit(outer, 'config', 'lfs.extension.foo.smudge', `sh '${evil}' smudge %f`)
+      plainGit(outer, 'config', 'lfs.extension.foo.priority', '0')
+      const inner = folder(join('outer-lfs', 'inner'), files)
+      mkdirSync(join(inner, '.git'))
+      await trustFolder(inner)
+      expect(await commitFolder(inner, 'x')).toBeNull()
+      expect(existsSync(marker)).toBe(false)
+      // without .git the trusted folder gets a repository of its own: still nothing of the parent runs
+      rmSync(join(inner, '.git'), { recursive: true })
+      await trustFolder(inner)
+      expect(await commitFolder(inner, 'x')).toBeTruthy()
+      expect(existsSync(marker)).toBe(false)
+      expect(plainGit(outer, 'rev-list', '--count', 'HEAD').trim()).toBe('1')
+    }),
+  )
+
+  it.skipIf(!lfs)('a repository set up for git-lfs keeps its version history', () =>
+    inHome('home-lfs-ok', async () => {
+      const root = await created('LFS')
+      // `git lfs track` writes lfs.repositoryformatversion = 0 into .git/config
+      plainGit(root, 'lfs', 'track', '*.bin')
+      expect(readFileSync(join(root, '.git', 'config'), 'utf8')).toMatch(/\[lfs\][\s\S]*repositoryformatversion = 0/)
+      writeFileSync(join(root, 'a.bin'), 'one')
+      expect(await commitFolder(root, 'lfs 1')).toBeTruthy()
+      writeFileSync(join(root, 'a.bin'), 'two')
+      expect(await commitFolder(root, 'lfs 2')).toBeTruthy()
+      expect((await folderTrust(root)).unsafeGit).toBeUndefined()
+      expect((await gitLog(root)).length).toBe(3)
+      expect(plainGit(root, 'lfs', 'ls-files', '--name-only').trim()).toBe('a.bin')
+
+      // what git-lfs records for a remote is allowed with its own values only
+      plainGit(root, 'config', 'lfs.https://example.com/team/plan.git/info/lfs.access', 'basic')
+      plainGit(root, 'config', 'lfs.https://example.com/team/plan.git/info/lfs.locksverify', 'false')
+      expect((await folderTrust(root)).unsafeGit).toBeUndefined()
+      plainGit(root, 'config', 'lfs.repositoryformatversion', '1')
+      expect((await folderTrust(root)).unsafeGit?.keys).toEqual(['lfs.repositoryformatversion'])
+      plainGit(root, 'config', 'lfs.repositoryformatversion', '0')
+      plainGit(root, 'config', 'lfs.https://example.com/team/plan.git/info/lfs.access', 'sh ./x.sh')
+      expect((await folderTrust(root)).unsafeGit?.keys).toEqual(['lfs.https://example.com/team/plan.git/info/lfs.access'])
+    }),
+  )
+
+  it.skipIf(!git)('a nested repository (a .git file or folder below the top) stops the commit', async () => {
+    const root = await created('Nested')
+    folder(join('created-Nested', 'Nested', 'models', 'sub'), { '.git': `gitdir: ${slash(join(base, 'elsewhere', '.git'))}\n`, 'a.txt': 'a' })
+    await expect(commitFolder(root, 'x')).rejects.toThrow(/вложенный репозиторий|nested git repository/)
+    rmSync(join(root, 'models', 'sub', '.git'))
+    mkdirSync(join(root, 'models', 'sub', '.GIT'))
+    await expect(commitFolder(root, 'x')).rejects.toThrow(/models\/sub\/\.GIT/)
+    rmSync(join(root, 'models', 'sub', '.GIT'), { recursive: true })
+    expect(await commitFolder(root, 'x')).toBeTruthy()
+  })
+
+  it.skipIf(!git)('object stores and linked worktrees on another machine make the repository unsafe', async () => {
+    const root = await created('Network')
+    const info = join(root, '.git', 'objects', 'info')
+    mkdirSync(info, { recursive: true })
+    const alternates = join(info, 'alternates')
+    for (const unc of ['//192.0.2.1/share/objects', '\\\\192.0.2.1\\share\\objects', '\\\\?\\UNC\\192.0.2.1\\share\\objects']) {
+      writeFileSync(alternates, `# shared objects\n${unc}\n`)
+      expect((await folderTrust(root)).unsafeGit).toEqual({ keys: ['.git/objects/info/alternates'], resettable: false })
+      expect(await commitFolder(root, 'x')).toBeNull()
+    }
+    // a local object store is fine
+    const other = join(base, 'other-objects')
+    mkdirSync(other, { recursive: true })
+    writeFileSync(alternates, `${slash(other)}\n`)
+    expect((await folderTrust(root)).unsafeGit).toBeUndefined()
+    rmSync(alternates)
+    writeFileSync(join(info, 'http-alternates'), 'https://example.com/objects\n')
+    expect((await folderTrust(root)).unsafeGit?.keys).toEqual(['.git/objects/info/http-alternates'])
+    rmSync(join(info, 'http-alternates'))
+
+    const wt = join(root, '.git', 'worktrees', 'w1')
+    mkdirSync(wt, { recursive: true })
+    writeFileSync(join(wt, 'gitdir'), '\\\\192.0.2.1\\share\\wt\\.git\n')
+    expect((await folderTrust(root)).unsafeGit).toEqual({ keys: ['.git/worktrees/w1/gitdir'], resettable: false })
+    writeFileSync(join(wt, 'gitdir'), `${slash(join(base, 'wt', '.git'))}\n`)
+    expect((await folderTrust(root)).unsafeGit).toBeUndefined()
+  })
+
+  it.skipIf(!git || !canLink)('the reset never writes through links planted in .git', () =>
+    inHome('home-reset-link', async () => {
+      const dir = received('reset-link')
+      const outside = join(base, 'outside.config')
+      writeFileSync(outside, readFileSync(join(dir, '.git', 'config'), 'utf8') + '[foo]\n\tbar = 1\n')
+      rmSync(join(dir, '.git', 'config'))
+      symlinkSync(outside, join(dir, '.git', 'config'), 'file')
+      const before = readFileSync(outside, 'utf8')
+      await trustFolder(dir)
+      expect((await folderTrust(dir)).unsafeGit).toBeTruthy()
+      await expect(resetFolderGitConfig(dir)).rejects.toThrow()
+      expect(readFileSync(outside, 'utf8')).toBe(before)
+      expect(lstatSync(join(dir, '.git', 'config')).isSymbolicLink()).toBe(true)
+
+      // a dangling link where the backup would go is skipped, its target never created
+      const dir2 = received('reset-dangling')
+      plainGit(dir2, 'config', 'foo.bar', '1')
+      const target = join(base, 'dangling-target')
+      symlinkSync(target, join(dir2, '.git', 'config.doplan-backup'), 'file')
+      await trustFolder(dir2)
+      expect(await resetFolderGitConfig(dir2)).toBe(join(dir2, '.git', 'config.doplan-backup-1'))
+      expect(existsSync(target)).toBe(false)
+      expect((await folderTrust(dir2)).unsafeGit).toBeUndefined()
+    }),
+  )
+
+  it.skipIf(!git)("the user's init.templateDir never reaches a repository doplan creates", async () => {
+    const tpl = folder('git-template', { config: '[core]\n\tfsmonitor = sh ./evil.sh\n[foo]\n\tbar = 1\n', 'hooks/post-commit': '#!/bin/sh\nexit 0\n' })
+    await inHome(
+      'home-template',
+      async () => {
+        // plain git copies the template config
+        const plain = folder('template-plain', {})
+        plainGit(plain, 'init', '-q')
+        expect(readFileSync(join(plain, '.git', 'config'), 'utf8')).toContain('bar = 1')
+
+        const root = await created('Template')
+        expect(await folderTrust(root)).toEqual({ git: 'trusted', folder: true })
+        expect(readFileSync(join(root, '.git', 'config'), 'utf8')).not.toMatch(/\[foo\]|fsmonitor/)
+        expect(existsSync(join(root, '.git', 'hooks'))).toBe(false)
+        expect(plainGit(root, 'symbolic-ref', 'HEAD').trim()).toBe('refs/heads/main')
+      },
+      `[init]\n\ttemplateDir = ${slash(tpl)}\n`,
+    )
+  })
 })

@@ -200,7 +200,7 @@ async function afterOpen(res: Awaited<ReturnType<typeof api.project.open>>, relo
     await alertDialog(t('Не удалось открыть проект'), errorText(err))
     return
   }
-  loadDocument(doc, res.path, { kind: res.kind ?? kindOfPath(res.path), git: res.git, untrustedGit: res.untrustedGit, gitFile: res.gitFile, unsafeGit: res.unsafeGit, reload })
+  loadDocument(doc, res.path, { kind: res.kind ?? kindOfPath(res.path), git: res.git, untrustedGit: res.untrustedGit || res.untrustedFolder, gitFile: res.gitFile, unsafeGit: res.unsafeGit, reload })
   refreshRecent()
   toast(t('Проект открыт'), 'success')
   if (res.untrustedGit) await offerTrustFolder('git')
@@ -226,18 +226,23 @@ const notTrusted = new Set<string>()
  * Asks whether the user trusts the open project folder.
  * 'git': the opened folder already had a .git that doplan did not create — its config and hooks are
  * not trusted, so doplan runs no git commands there until the user says the folder is theirs.
+ * 'folder': a folder without a repository that doplan did not create — doplan creates no repository
+ * there (git would look into whatever the folder brought) until the user trusts it.
  * 'ai': before the first AI agent run in a folder doplan did not create here (or that was replaced or
  * moved): an untrusted folder is not the agent's working directory.
  */
-export async function offerTrustFolder(reason: 'git' | 'ai'): Promise<boolean> {
+export async function offerTrustFolder(reason: 'git' | 'folder' | 'ai'): Promise<boolean> {
   const root = projectStore.getState().root
   if (!root) return false
+  const name = root.split(/[\\/]/).filter(Boolean).pop() ?? root
   const choice = await choiceDialog(
     reason === 'git' ? t('В папке уже есть репозиторий git') : t('Доверять папке проекта?'),
     reason === 'git'
       ? t('Эту папку создал не doplan, и в её настройках git могут быть чужие команды. Пока вы не доверяете папке, doplan не запускает в ней git: история версий выключена, сохранение пишет только файлы, а ИИ-агент работает в отдельной папке. Доверяйте, только если папка ваша или получена из надёжного источника.')
-      : t('Папку «{name}» doplan не создавал на этом компьютере (или её заменили либо переместили). В доверенной папке ИИ-агент работает прямо в ней: следует её AGENTS.md как вашим инструкциям, читает её настройки агента (.claude, .codex, .gemini) и запускает в ней git. Иначе агент работает в отдельной папке и видит AGENTS.md только как заметки автора. Доверяйте, только если папка ваша или получена из надёжного источника.', { name: root.split(/[\\/]/).filter(Boolean).pop() ?? root }),
-    reason === 'git'
+      : reason === 'folder'
+        ? t('Папку «{name}» создал не doplan (или её заменили либо переместили). Пока вы не доверяете папке, doplan не создаёт в ней репозиторий git: история версий выключена, сохранение пишет только файлы, а ИИ-агент работает в отдельной папке. Доверяйте, только если папка ваша или получена из надёжного источника.', { name })
+        : t('Папку «{name}» doplan не создавал на этом компьютере (или её заменили либо переместили). В доверенной папке ИИ-агент работает прямо в ней: следует её AGENTS.md как вашим инструкциям, читает её настройки агента (.claude, .codex, .gemini) и запускает в ней git. Иначе агент работает в отдельной папке и видит AGENTS.md только как заметки автора. Доверяйте, только если папка ваша или получена из надёжного источника.', { name }),
+    reason !== 'ai'
       ? [
           { id: 'no', label: t('Не доверять') },
           { id: 'yes', label: t('Доверять этой папке'), variant: 'primary' },

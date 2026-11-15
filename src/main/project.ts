@@ -117,9 +117,10 @@ async function openFolderAt(root: string): Promise<ProjectOpenResult> {
   grantPath(root)
   pendingOpen = { path: root, root, staged: null, name: docName(doc) }
   const trust = await folderTrust(root)
-  // no repository yet: doplan creates one on the first save
+  // no repository yet: doplan creates one on the first save (only in a folder doplan made or the user trusted)
   const git = (trust.git === 'trusted' || trust.git === 'none') && !trust.unsafeGit && !!(await findGit())
   const res: ProjectOpenResult = { path: root, doc, kind: 'folder', git, untrustedGit: trust.git === 'untrusted', gitFile: trust.git === 'gitfile' }
+  if (trust.git === 'unknown') res.untrustedFolder = true
   if (trust.unsafeGit) res.unsafeGit = trust.unsafeGit
   return res
 }
@@ -394,7 +395,7 @@ export async function projectInfo(): Promise<ProjectInfo> {
     root,
     gitAvailable,
     repo: gitAvailable && (trust?.git === 'trusted' || trust?.git === 'untrusted'),
-    trusted: trust?.git !== 'untrusted',
+    trusted: trust?.git !== 'untrusted' && trust?.git !== 'unknown',
     gitFile: trust?.git === 'gitfile',
     folderTrusted: !!trust?.folder,
     gitVersion: gitVersion(),

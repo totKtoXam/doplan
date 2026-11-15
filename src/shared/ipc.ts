@@ -70,9 +70,17 @@ export interface ProjectOpenResult {
  * without versions.
  */
 export interface UnsafeGitConfig {
+  /** config keys outside the allowlist */
   keys: string[]
-  /** project.resetGitConfig() can make it safe */
+  /** project.resetGitConfig() can make it safe (never when `layout` is set) */
   resettable: boolean
+  /**
+   * the repository folder itself is not supported, whatever its config says: links (symlinks,
+   * junctions) or special files anywhere in .git, other object stores (alternates), a missing HEAD,
+   * objects or refs, a config file that cannot be read… Paths relative to the folder (`.git/logs`).
+   * No reset helps; the user works without versions.
+   */
+  layout?: string[]
 }
 
 export interface ProjectSaveOptions {

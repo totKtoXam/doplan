@@ -101,7 +101,8 @@ function hardeningArgs(): string[] {
     '-c', 'protocol.allow=never',
     // a folder that only looks like a bare repository is never one (doplan names the gitdir itself)
     '-c', 'safe.bareRepository=explicit',
-    // no automatic gc / maintenance: it would prune worktrees (stat paths named in .git/worktrees/*) and run more programs
+    // no automatic gc / maintenance inside other commands: gitCommit runs `gc --auto` itself (autoGc),
+    // in a repository that has just passed gitDirProblems
     '-c', 'gc.auto=0',
     '-c', 'maintenance.auto=false',
     '-c', 'core.quotepath=off',
@@ -289,13 +290,19 @@ function configRecords(out: Buffer): ConfigEntry[] {
   return recs
 }
 
-/** one config file as git parses it, without its includes and outside any repository; [] when it is missing, null when it cannot be read */
+/**
+ * One config file as git parses it, without its includes and outside any repository: [] when it is
+ * missing, null when it cannot be read or is no plain file. Looked at with lstat only: a link (to a
+ * network share, say) is never followed, not even to stat it.
+ */
 async function readConfigFile(file: string): Promise<ConfigEntry[] | null> {
+  let st
   try {
-    if (!statSync(file).isFile()) return null
-  } catch {
-    return []
+    st = lstatSync(file)
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'ENOENT' ? [] : null
   }
+  if (!st.isFile()) return null
   const r = await runOutside(['config', '--file', file, '--no-includes', '-z', '--list'], { allowFail: true })
   return r.code === 0 ? configRecords(r.out) : null
 }
@@ -303,8 +310,6 @@ async function readConfigFile(file: string): Promise<ConfigEntry[] | null> {
 interface RepoConfigFiles {
   main: ConfigEntry[] | null
   worktree: ConfigEntry[] | null
-  /** the gitdir takes its config and objects from another repository (.git/commondir) */
-  commondir: boolean
 }
 
 async function repoConfigFiles(root: string): Promise<RepoConfigFiles> {
@@ -313,28 +318,29 @@ async function repoConfigFiles(root: string): Promise<RepoConfigFiles> {
     main: await readConfigFile(join(dir, 'config')),
     // read whenever it is there: git reads it with extensions.worktreeConfig, which may come and go
     worktree: await readConfigFile(join(dir, 'config.worktree')),
-    commondir: !!lstatOrNull(join(dir, 'commondir')),
   }
 }
 
+/** the config keys outside the allowlist; a config file that cannot be read is a layout problem */
 async function checkRepoConfig(root: string): Promise<UnsafeGitConfig | null> {
-  const { main, worktree, commondir } = await repoConfigFiles(root)
+  const { main, worktree } = await repoConfigFiles(root)
+  const layout: string[] = []
+  if (!main) layout.push('.git/config')
+  if (!worktree) layout.push('.git/config.worktree')
   const keys: string[] = []
-  if (commondir) keys.push('.git/commondir')
-  if (!main) keys.push('.git/config')
-  if (!worktree) keys.push('.git/config.worktree')
   for (const e of [...(main ?? []), ...(worktree ?? [])]) if (!safeRepoEntry(e) && !keys.includes(e.key)) keys.push(e.key)
-  return keys.length ? { keys, resettable: !commondir && !!main && !!worktree } : null
+  if (layout.length) return { keys, resettable: false, layout }
+  return keys.length ? { keys, resettable: true } : null
 }
 
 const pathKey = (p: string) => (process.platform === 'win32' ? resolve(p).toLowerCase() : resolve(p))
 
-/** the config files as they are on disk now: any change means checking again */
+/** the config files as they are on disk now (lstat: links are not followed): any change means checking again */
 function configSignature(root: string): string {
-  return ['config', 'config.worktree', 'commondir']
+  return ['config', 'config.worktree']
     .map((f) => {
       try {
-        const st = statSync(join(root, '.git', f), { bigint: true })
+        const st = lstatSync(join(root, '.git', f), { bigint: true })
         return `${st.ino}:${st.size}:${st.mtimeNs}:${st.ctimeNs}`
       } catch {
         return '-'
@@ -346,23 +352,21 @@ function configSignature(root: string): string {
 const configChecks = new Map<string, { sig: string; result: UnsafeGitConfig | null }>()
 
 /**
- * The repository config of a folder (`<root>/.git` a directory) against the allowlist: null when doplan
- * may run git there. Read by doplan itself, nothing of the repository runs; cached while the files stay as they are.
+ * The repository of a folder (`<root>/.git` a directory) against doplan's rules: null when doplan may
+ * run git there. The whole of .git is walked first, every time (gitDirProblems); its config files are
+ * read only when nothing in .git is a link, so opening a folder never follows one. Read by doplan
+ * itself, nothing of the repository runs; the config check is cached while the files stay as they are.
  */
 export async function unsafeRepoConfig(root: string): Promise<UnsafeGitConfig | null> {
-  // the layout is checked every time (a few lstat calls), the config files only when they changed
-  const layout = repoLayoutProblems(root)
+  const layout = await gitDirProblems(root)
+  if (layout.length) return { keys: [], resettable: false, layout }
   const key = pathKey(root)
   const sig = configSignature(root)
   const hit = configChecks.get(key)
-  let result: UnsafeGitConfig | null
-  if (hit && hit.sig === sig) result = hit.result
-  else {
-    result = await checkRepoConfig(root)
-    configChecks.set(key, { sig, result })
-  }
-  if (!layout.length) return result
-  return { keys: [...layout, ...(result?.keys ?? [])], resettable: false }
+  if (hit && hit.sig === sig) return hit.result
+  const result = await checkRepoConfig(root)
+  configChecks.set(key, { sig, result })
+  return result
 }
 
 const lstatOrNull = (p: string) => {
@@ -387,47 +391,172 @@ function readSmall(p: string): string | null {
 /** a path that reaches another machine (Windows UNC: \\host\share, //host/share, \\?\UNC\…) */
 const networkPath = (p: string) => /^[\\/]{2}/.test(p)
 
+/** `host/share` of a UNC path (lower-case), or null */
+function shareOf(p: string): string | null {
+  const m = /^[\\/]{2}([^\\/?.][^\\/]*)[\\/]+([^\\/]+)/.exec(p)
+  return m ? `${m[1]}/${m[2]}`.toLowerCase() : null
+}
+
+/** the most entries a scan of `.git` or of the work tree looks at; at the limit it refuses (fails closed). Tests lower it. */
+export const scanLimit = { entries: 200_000 }
+
+interface WalkEnd {
+  /** stopped at the limit: nothing can be said about the rest */
+  limit: boolean
+  /** a folder that could not be listed (relative path) */
+  unreadable: string | null
+}
+
 /**
- * What in `<root>/.git` besides the config makes it no plain repository of this folder: missing
- * HEAD/objects/refs (git would take the folder itself, or a parent, for the repository), object stores
- * or linked worktrees on network paths (git would connect there, and Windows hands the share the
- * user's credentials).
+ * Walks a tree without following links (a junction or symlink is an entry, never a folder to enter;
+ * Node reports both as links). `visit` gets each entry: 'skip' does not enter a folder, 'stop' ends the walk.
  */
-function repoLayoutProblems(root: string): string[] {
+async function walkTree(base: string, visit: (rel: string, e: Dirent) => 'skip' | 'stop' | void, limit = scanLimit.entries): Promise<WalkEnd> {
+  const stack = ['']
+  let seen = 0
+  while (stack.length) {
+    const rel = stack.pop()!
+    let entries: Dirent[]
+    try {
+      entries = await fsp.readdir(rel ? join(base, rel) : base, { withFileTypes: true })
+    } catch {
+      return { limit: false, unreadable: rel || '.' }
+    }
+    for (const e of entries) {
+      if (++seen > limit) return { limit: true, unreadable: null }
+      const path = rel ? `${rel}/${e.name}` : e.name
+      const r = visit(path, e)
+      if (r === 'stop') return { limit: false, unreadable: null }
+      if (r !== 'skip' && e.isDirectory()) stack.push(path)
+    }
+  }
+  return { limit: false, unreadable: null }
+}
+
+/** a linked worktree's path as .git/worktrees/<w>/gitdir names it: a plain path on a local drive, or on the share the folder itself is on */
+function plainWorktreePath(p: string, root: string): boolean {
+  if (!p || /["\0\r\n]/.test(p)) return false
+  if (networkPath(p)) {
+    const share = shareOf(p)
+    return !!share && share === shareOf(resolve(root))
+  }
+  return process.platform === 'win32' ? /^[A-Za-z]:[\\/]/.test(p) : p.startsWith('/')
+}
+
+/** `p` is `dir` or inside it */
+const within = (p: string, dir: string) => {
+  const a = pathKey(p)
+  const b = pathKey(dir)
+  return a === b || a.startsWith(b.endsWith('\\') || b.endsWith('/') ? b : `${b}${process.platform === 'win32' ? '\\' : '/'}`)
+}
+
+/**
+ * Everything in `<root>/.git` that makes it no plain repository of this folder (one rule, fail closed):
+ * - any link (symlink, junction) or entry that is neither a file nor a folder, anywhere in .git: git
+ *   reads and writes through them (refs, logs, packed-refs, objects…), out of the folder or to another machine;
+ * - missing HEAD/objects/refs (git would take the folder itself, or a parent, for the repository);
+ * - objects/info/alternates or http-alternates (other object stores, followed recursively; doplan never makes them);
+ * - a commondir, or a linked worktree whose commondir leaves .git or whose path is not a plain local one;
+ * - more entries than scanLimit, or a folder that cannot be listed: nothing could be said about the rest.
+ * Paths are relative to the folder (`.git/logs`…).
+ */
+export async function gitDirProblems(root: string): Promise<string[]> {
   const dir = join(root, '.git')
   const out: string[] = []
-  if (!lstatOrNull(join(dir, 'HEAD'))?.isFile()) out.push('.git/HEAD')
-  if (!lstatOrNull(join(dir, 'objects'))?.isDirectory()) out.push('.git/objects')
-  if (!lstatOrNull(join(dir, 'refs'))?.isDirectory()) out.push('.git/refs')
-  const info = join(dir, 'objects', 'info')
-  if (lstatOrNull(join(info, 'alternates'))) {
-    const text = readSmall(join(info, 'alternates'))
-    const lines = (text ?? '').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'))
-    // relative entries are relative to the objects directory
-    if (text === null || lines.some((l) => networkPath(l) || networkPath(resolve(join(dir, 'objects'), l)))) out.push('.git/objects/info/alternates')
+  const add = (p: string) => {
+    if (out.length < 50 && !out.includes(p)) out.push(p)
   }
-  if (lstatOrNull(join(info, 'http-alternates'))) out.push('.git/objects/info/http-alternates')
+  const end = await walkTree(dir, (rel, e) => {
+    if (e.isSymbolicLink() || (!e.isDirectory() && !e.isFile())) add(`.git/${rel}`)
+  })
+  if (end.limit) add(msg(`.git (больше ${scanLimit.entries} файлов)`, `.git (over ${scanLimit.entries} entries)`))
+  if (end.unreadable) add(end.unreadable === '.' ? '.git' : `.git/${end.unreadable}`)
+  if (!lstatOrNull(join(dir, 'HEAD'))?.isFile()) add('.git/HEAD')
+  if (!lstatOrNull(join(dir, 'objects'))?.isDirectory()) add('.git/objects')
+  if (!lstatOrNull(join(dir, 'refs'))?.isDirectory()) add('.git/refs')
+  for (const f of ['objects/info/alternates', 'objects/info/http-alternates', 'commondir']) if (lstatOrNull(join(dir, f))) add(`.git/${f}`)
   let worktrees: string[] = []
-  try {
-    if (lstatOrNull(join(dir, 'worktrees'))?.isDirectory()) worktrees = readdirSync(join(dir, 'worktrees'))
-  } catch {
-    worktrees = []
+  if (lstatOrNull(join(dir, 'worktrees'))?.isDirectory()) {
+    try {
+      worktrees = readdirSync(join(dir, 'worktrees'))
+    } catch {
+      add('.git/worktrees')
+    }
   }
   for (const w of worktrees) {
-    const gitdir = readSmall(join(dir, 'worktrees', w, 'gitdir'))?.trim()
-    if (gitdir && networkPath(gitdir)) out.push(`.git/worktrees/${w}/gitdir`)
+    const wdir = join(dir, 'worktrees', w)
+    if (!lstatOrNull(wdir)?.isDirectory()) continue
+    const commondir = lstatOrNull(join(wdir, 'commondir')) ? readSmall(join(wdir, 'commondir'))?.trim() : ''
+    if (commondir === undefined || (commondir && !within(resolve(wdir, commondir), dir))) add(`.git/worktrees/${w}/commondir`)
+    const gitdir = lstatOrNull(join(wdir, 'gitdir')) ? readSmall(join(wdir, 'gitdir'))?.trim() : ''
+    if (gitdir === undefined || (gitdir && !plainWorktreePath(gitdir, root))) add(`.git/worktrees/${w}/gitdir`)
   }
   return out
 }
 
+/** `name` is the folder's own `.git` (case-insensitive where the file system is) */
+const isDotGit = (name: string) => (process.platform === 'linux' ? name === '.git' : name.toLowerCase() === '.git')
+
+/**
+ * What in the work tree stops `git add`, as a message for the user, or null. `git add` enters every
+ * nested repository (a `.git` file or folder below the top), and Git for Windows follows junctions:
+ * either can take git out of the folder or to another machine. So a nested `.git`, any link (symlink,
+ * junction) or special file refuses the commit, and so does a tree too large to check or a folder
+ * that cannot be listed (fail closed).
+ */
+async function workTreeProblem(root: string): Promise<string | null> {
+  let found: string | null = null
+  const end = await walkTree(root, (rel, e) => {
+    if (!rel.includes('/') && isDotGit(e.name) && e.isDirectory()) return 'skip' // the repository itself, checked by gitDirProblems
+    if (isDotGit(e.name)) {
+      found = msg(
+        `В папке проекта есть вложенный репозиторий git (${rel}). doplan не сохраняет версии, пока он там: удалите или перенесите его.`,
+        `The project folder has a nested git repository (${rel}). doplan saves no versions while it is there: delete or move it.`,
+      )
+      return 'stop'
+    }
+    if (e.isSymbolicLink()) {
+      found = msg(
+        `В папке проекта есть ссылка (символическая ссылка или точка соединения): ${rel}. git может пройти по ней за пределы папки, поэтому doplan не сохраняет версии, пока она там: замените её обычной папкой или файлом.`,
+        `The project folder has a link (a symbolic link or junction): ${rel}. git could follow it out of the folder, so doplan saves no versions while it is there: replace it with a plain folder or file.`,
+      )
+      return 'stop'
+    }
+    if (!e.isDirectory() && !e.isFile()) {
+      found = msg(`В папке проекта есть файл особого типа (${rel}). doplan не сохраняет версии, пока он там.`, `The project folder has a special file (${rel}). doplan saves no versions while it is there.`)
+      return 'stop'
+    }
+  })
+  if (found) return found
+  if (end.limit)
+    return msg(
+      `В папке проекта больше ${scanLimit.entries} файлов и папок: doplan не может её проверить и не сохраняет версии. Уберите из папки проекта лишнее.`,
+      `The project folder has more than ${scanLimit.entries} files and folders: doplan cannot check it and saves no versions. Move what does not belong to the project out of the folder.`,
+    )
+  if (end.unreadable)
+    return msg(
+      `doplan не может прочитать папку «${end.unreadable}» в папке проекта и не сохраняет версии, пока не сможет её проверить.`,
+      `doplan cannot read the folder “${end.unreadable}” in the project folder and saves no versions until it can check it.`,
+    )
+  return null
+}
+
 export class UnsafeGitConfigError extends Error {
-  constructor(readonly keys: string[]) {
-    const list = keys.slice(0, 5).join(', ') + (keys.length > 5 ? ', …' : '')
+  constructor(
+    readonly keys: string[],
+    readonly layout: string[] = [],
+  ) {
+    const list = (l: string[]) => l.slice(0, 5).join(', ') + (l.length > 5 ? ', …' : '')
     super(
-      msg(
-        `В настройках git этой папки есть параметры, через которые git может запускать программы (${list}). doplan не запускает здесь git: сбросьте настройки git папки («История версий») или работайте без версий.`,
-        `The folder's git config has settings through which git can run programs (${list}). doplan runs no git here: reset the folder's git config (Version history) or work without versions.`,
-      ),
+      layout.length
+        ? msg(
+            `В папке репозитория (.git) есть ссылки или файлы, которые doplan не поддерживает (${list(layout)}). doplan не запускает здесь git: работайте без версий.`,
+            `The repository folder (.git) has links or files doplan does not support (${list(layout)}). doplan runs no git here: work without versions.`,
+          )
+        : msg(
+            `В настройках git этой папки есть параметры, через которые git может запускать программы (${list(keys)}). doplan не запускает здесь git: сбросьте настройки git папки («История версий») или работайте без версий.`,
+            `The folder's git config has settings through which git can run programs (${list(keys)}). doplan runs no git here: reset the folder's git config (Version history) or work without versions.`,
+          ),
     )
   }
 }
@@ -444,7 +573,7 @@ async function assertRepoSafe(root: string, init: boolean): Promise<void> {
   }
   if (!isDir) throw new Error(msg('.git в папке — это файл: doplan не ведёт там историю версий', '.git in the folder is a file: doplan keeps no version history there'))
   const unsafe = await unsafeRepoConfig(root)
-  if (unsafe) throw new UnsafeGitConfigError(unsafe.keys)
+  if (unsafe) throw new UnsafeGitConfigError(unsafe.keys, unsafe.layout)
 }
 
 /** `base`, or `base-1`, `base-2`… : the first name with nothing at all there (a dangling link counts) */
@@ -471,9 +600,9 @@ export async function resetRepoConfig(root: string): Promise<string> {
   const configPath = join(dir, 'config')
   const configStat = lstatOrNull(configPath)
   const worktreeStat = lstatOrNull(join(dir, 'config.worktree'))
-  if ((configStat && !configStat.isFile()) || (worktreeStat && !worktreeStat.isFile()) || repoLayoutProblems(root).length) throw cannot()
-  const { main, worktree, commondir } = await repoConfigFiles(root)
-  if (commondir || !main || !worktree) throw cannot()
+  if ((configStat && !configStat.isFile()) || (worktreeStat && !worktreeStat.isFile()) || (await gitDirProblems(root)).length) throw cannot()
+  const { main, worktree } = await repoConfigFiles(root)
+  if (!main || !worktree) throw cannot()
   // config.worktree goes away, and extensions.worktreeConfig with it: what it allowed moves into config
   const kept = [...main, ...worktree].filter((e) => safeRepoEntry(e) && e.key !== 'core.repositoryformatversion' && e.key !== 'extensions.worktreeconfig')
   const version = kept.some((e) => e.key.startsWith('extensions.')) ? '1' : '0'
@@ -606,31 +735,6 @@ async function identityArgs(root: string): Promise<string[]> {
   return out
 }
 
-/** the first `.git` (file or folder) below the top level of the folder, as a relative path; links are not followed */
-async function nestedRepository(root: string): Promise<string | null> {
-  const stack = ['']
-  let seen = 0
-  while (stack.length) {
-    const rel = stack.pop()!
-    let entries: Dirent[]
-    try {
-      entries = await fsp.readdir(rel ? join(root, rel) : root, { withFileTypes: true })
-    } catch {
-      continue
-    }
-    for (const e of entries) {
-      const path = rel ? `${rel}/${e.name}` : e.name
-      if (e.name.toLowerCase() === '.git') {
-        if (rel) return path
-        continue
-      }
-      if (e.isDirectory()) stack.push(path)
-      if (++seen > 200_000) return null
-    }
-  }
-  return null
-}
-
 export async function gitInit(root: string): Promise<void> {
   // --template= : no template directory of the user's (init.templateDir), whose config or hooks would come along
   await run(root, ['init', '--quiet', '--template='])
@@ -644,16 +748,9 @@ export async function gitInit(root: string): Promise<void> {
  */
 export async function gitCommit(root: string, message: string, paths?: string[]): Promise<string | null> {
   const subject = message.trim() || msg('Сохранение', 'Save')
-  // `git add` looks into every nested repository it meets, and a nested .git can send it to a network share
-  const nested = await nestedRepository(root)
-  if (nested) {
-    throw new Error(
-      msg(
-        `В папке проекта есть вложенный репозиторий git (${nested}). doplan не сохраняет версии, пока он там: удалите или перенесите его.`,
-        `The project folder has a nested git repository (${nested}). doplan saves no versions while it is there: delete or move it.`,
-      ),
-    )
-  }
+  // `git add` enters nested repositories and (Git for Windows) junctions: neither may be in the work tree
+  const problem = await workTreeProblem(root)
+  if (problem) throw new Error(problem)
   const config = await filterOffArgs(root)
   if (paths?.length) await run(root, ['add', '--', ...paths], { config })
   else await run(root, ['add', '-A'], { config })
@@ -668,8 +765,35 @@ export async function gitCommit(root: string, message: string, paths?: string[])
   const args = [...id, 'commit', '--quiet', '--no-verify', '-F', '-']
   if (paths?.length) args.push('--', ...paths)
   await run(root, args, { input: `${subject}\n`, config })
-  return (await text(root, ['rev-parse', 'HEAD'])).trim()
+  const sha = (await text(root, ['rev-parse', 'HEAD'])).trim()
+  await autoGc(root)
+  return sha
 }
+
+/**
+ * Git's own automatic gc, which the commit no longer starts by itself (gc.auto=0 in hardeningArgs):
+ * run explicitly, in a repository that has just passed the checks, when git's own heuristic says it
+ * is due (more than gc.auto/256 loose objects in objects/17, or more than gc.autoPackLimit packs).
+ * Without it a repository only doplan writes would never be packed. A failure changes nothing.
+ */
+async function autoGc(root: string): Promise<void> {
+  const objects = join(root, '.git', 'objects')
+  const loose = await fsp.readdir(join(objects, '17')).catch(() => [] as string[])
+  const packs = (await fsp.readdir(join(objects, 'pack')).catch(() => [] as string[])).filter((n) => n.endsWith('.pack'))
+  if (loose.length <= Math.ceil(GC_AUTO / 256) && packs.length <= GC_AUTO_PACK_LIMIT) return
+  try {
+    await run(root, ['gc', '--auto', '--quiet'], {
+      allowFail: true,
+      config: ['-c', `gc.auto=${GC_AUTO}`, '-c', `gc.autoPackLimit=${GC_AUTO_PACK_LIMIT}`, '-c', 'gc.autoDetach=false'],
+    })
+  } catch (err) {
+    console.warn('[doplan] git gc failed', err)
+  }
+}
+
+/** git's defaults */
+const GC_AUTO = 6700
+const GC_AUTO_PACK_LIMIT = 50
 
 const FS = '\u001f'
 const RS = '\u001e'

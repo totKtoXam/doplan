@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
@@ -11,7 +11,7 @@ vi.mock('electron', () => ({
   safeStorage: { isEncryptionAvailable: () => false },
 }))
 
-const { gitCandidates, findGit, filterOffArgs, gitLog, gitShowFile, UnsafeGitConfigError } = await import('./git')
+const { gitCandidates, findGit, filterOffArgs, gitLog, gitShowFile, UnsafeGitConfigError, scanLimit } = await import('./git')
 const { commitFolder, createFolderProject, folderRootOf, folderTrust, isProjectFolder, readVersion, resetFolderGitConfig, trustFolder } = await import('./projectFolder')
 const { findOnPath } = await import('./aichat/detect')
 const { execFileSync } = await import('node:child_process')
@@ -508,7 +508,7 @@ describe('repository config allowlist', { timeout: 60_000 }, async () => {
 
       // a gitdir that takes its config from another repository cannot be reset
       writeFileSync(join(dir, '.git', 'commondir'), '../other\n')
-      expect((await folderTrust(dir)).unsafeGit).toEqual({ keys: ['.git/commondir'], resettable: false })
+      expect((await folderTrust(dir)).unsafeGit).toEqual({ keys: [], resettable: false, layout: ['.git/commondir'] })
       await expect(resetFolderGitConfig(dir)).rejects.toThrow()
     }),
   )
@@ -589,7 +589,7 @@ describe('repository layout', { timeout: 60_000 }, async () => {
     await trustFolder(dir)
     const trust = await folderTrust(dir)
     expect(trust.git).toBe('trusted')
-    expect(trust.unsafeGit).toEqual({ keys: expect.arrayContaining(['.git/HEAD', '.git/objects', '.git/refs']), resettable: false })
+    expect(trust.unsafeGit).toEqual({ keys: [], resettable: false, layout: expect.arrayContaining(['.git/HEAD', '.git/objects', '.git/refs']) })
     expect(await commitFolder(dir, 'x')).toBeNull()
     await expect(gitLog(dir)).rejects.toBeInstanceOf(UnsafeGitConfigError)
     await expect(resetFolderGitConfig(dir)).rejects.toThrow()
@@ -685,33 +685,261 @@ describe('repository layout', { timeout: 60_000 }, async () => {
     expect(await commitFolder(root, 'x')).toBeTruthy()
   })
 
-  it.skipIf(!git)('object stores and linked worktrees on another machine make the repository unsafe', async () => {
+  const layoutOf = async (root: string) => (await folderTrust(root)).unsafeGit?.layout
+
+  it.skipIf(!git)('any other object store (alternates, http-alternates) makes the repository unsupported, local or not', async () => {
     const root = await created('Network')
     const info = join(root, '.git', 'objects', 'info')
     mkdirSync(info, { recursive: true })
     const alternates = join(info, 'alternates')
-    for (const unc of ['//192.0.2.1/share/objects', '\\\\192.0.2.1\\share\\objects', '\\\\?\\UNC\\192.0.2.1\\share\\objects']) {
-      writeFileSync(alternates, `# shared objects\n${unc}\n`)
-      expect((await folderTrust(root)).unsafeGit).toEqual({ keys: ['.git/objects/info/alternates'], resettable: false })
-      expect(await commitFolder(root, 'x')).toBeNull()
-    }
-    // a local object store is fine
     const other = join(base, 'other-objects')
     mkdirSync(other, { recursive: true })
-    writeFileSync(alternates, `${slash(other)}\n`)
-    expect((await folderTrust(root)).unsafeGit).toBeUndefined()
+    writeFileSync(join(root, 'plan.json'), '{"n":0}')
+    for (const line of [
+      '//192.0.2.1/share/objects',
+      '\\\\192.0.2.1\\share\\objects',
+      '\\\\?\\UNC\\192.0.2.1\\share\\objects',
+      // quoted (git unquotes it), relative (chained through another store), and plain local
+      '"\\\\\\\\192.0.2.1\\\\share\\\\objects"',
+      '../../../other-objects',
+      slash(other),
+      '',
+    ]) {
+      writeFileSync(alternates, `# shared objects\n${line}\n`)
+      expect(await folderTrust(root)).toMatchObject({ git: 'trusted', unsafeGit: { keys: [], resettable: false, layout: ['.git/objects/info/alternates'] } })
+      expect(await commitFolder(root, 'x')).toBeNull()
+      await expect(gitLog(root)).rejects.toBeInstanceOf(UnsafeGitConfigError)
+      await expect(resetFolderGitConfig(root)).rejects.toThrow()
+    }
     rmSync(alternates)
+    expect(await layoutOf(root)).toBeUndefined()
     writeFileSync(join(info, 'http-alternates'), 'https://example.com/objects\n')
-    expect((await folderTrust(root)).unsafeGit?.keys).toEqual(['.git/objects/info/http-alternates'])
+    expect(await layoutOf(root)).toEqual(['.git/objects/info/http-alternates'])
     rmSync(join(info, 'http-alternates'))
+    writeFileSync(join(root, 'plan.json'), '{"n":1}')
+    expect(await commitFolder(root, 'x')).toBeTruthy()
+  })
 
+  it.skipIf(!git)('a linked worktree whose commondir leaves .git, or whose path is on another machine, makes the repository unsupported', async () => {
+    const root = await created('Worktrees')
     const wt = join(root, '.git', 'worktrees', 'w1')
     mkdirSync(wt, { recursive: true })
     writeFileSync(join(wt, 'gitdir'), '\\\\192.0.2.1\\share\\wt\\.git\n')
-    expect((await folderTrust(root)).unsafeGit).toEqual({ keys: ['.git/worktrees/w1/gitdir'], resettable: false })
-    writeFileSync(join(wt, 'gitdir'), `${slash(join(base, 'wt', '.git'))}\n`)
-    expect((await folderTrust(root)).unsafeGit).toBeUndefined()
+    expect(await layoutOf(root)).toEqual(['.git/worktrees/w1/gitdir'])
+    writeFileSync(join(wt, 'gitdir'), '"C:/quoted/.git"\n')
+    expect(await layoutOf(root)).toEqual(['.git/worktrees/w1/gitdir'])
+    writeFileSync(join(wt, 'gitdir'), `${join(base, 'wt', '.git')}\n`)
+    expect(await layoutOf(root)).toBeUndefined()
+    // commondir as `git worktree add` writes it is fine; one that leaves .git is not
+    writeFileSync(join(wt, 'commondir'), '../..\n')
+    expect(await layoutOf(root)).toBeUndefined()
+    writeFileSync(join(root, 'plan.json'), '{"w":0}')
+    for (const out of ['../../..', '../../../elsewhere/.git', '//192.0.2.1/share/repo.git', slash(join(base, 'elsewhere'))]) {
+      writeFileSync(join(wt, 'commondir'), `${out}\n`)
+      expect(await layoutOf(root)).toEqual(['.git/worktrees/w1/commondir'])
+      expect(await commitFolder(root, 'x')).toBeNull()
+    }
+    rmSync(join(root, '.git', 'worktrees'), { recursive: true })
+
+    // a real linked worktree made by git is a plain local path: the repository keeps working
+    const linked = join(base, 'created-Worktrees', 'linked')
+    plainGit(root, 'worktree', 'add', '-q', '-b', 'side', linked)
+    expect(await folderTrust(root)).toEqual({ git: 'trusted', folder: true })
+    writeFileSync(join(root, 'plan.json'), '{"w":1}')
+    expect(await commitFolder(root, 'с рабочей копией')).toBeTruthy()
   })
+
+  /** a junction on Windows (no privilege needed), a directory symlink elsewhere */
+  const junction = (target: string, path: string) => symlinkSync(target, path, process.platform === 'win32' ? 'junction' : 'dir')
+  const countEntries = (dir: string) => readdirSync(dir, { recursive: true }).length
+
+  it.skipIf(!git)('a junction anywhere in .git: doplan runs no git in the folder and writes nothing through it', async () => {
+    const root = await created('GitJunction')
+    const logs = join(root, '.git', 'logs')
+    const outside = join(base, 'git-junction-outside')
+    renameSync(logs, outside)
+    junction(outside, logs)
+    // plain git writes its reflog through the junction
+    const head = readFileSync(join(outside, 'HEAD'), 'utf8')
+    expect(await folderTrust(root)).toMatchObject({ git: 'trusted', unsafeGit: { keys: [], resettable: false, layout: ['.git/logs'] } })
+    writeFileSync(join(root, 'plan.json'), '{"j":1}')
+    expect(await commitFolder(root, 'x')).toBeNull()
+    await expect(gitLog(root)).rejects.toBeInstanceOf(UnsafeGitConfigError)
+    await expect(resetFolderGitConfig(root)).rejects.toThrow()
+    expect(readFileSync(join(outside, 'HEAD'), 'utf8')).toBe(head)
+    unlinkSync(logs)
+    renameSync(outside, logs)
+    expect(await layoutOf(root)).toBeUndefined()
+
+    // deeper down it counts the same, and so does the whole .git being one
+    const store = folder('git-junction-store', {})
+    junction(store, join(root, '.git', 'objects', 'ab'))
+    expect(await layoutOf(root)).toEqual(['.git/objects/ab'])
+    expect(await commitFolder(root, 'x')).toBeNull()
+    expect(readdirSync(store)).toEqual([])
+    unlinkSync(join(root, '.git', 'objects', 'ab'))
+    expect(await commitFolder(root, 'без ссылок')).toBeTruthy()
+  })
+
+  it.skipIf(!git || !canLink)('a symbolic link in .git is never followed, not even to look at the file it names', async () => {
+    const root = await created('GitSymlink')
+    // COMMIT_EDITMSG pointing outside: the commit would write its message there
+    const outside = join(base, 'git-symlink-outside.txt')
+    writeFileSync(outside, 'keep')
+    rmSync(join(root, '.git', 'COMMIT_EDITMSG'), { force: true })
+    symlinkSync(outside, join(root, '.git', 'COMMIT_EDITMSG'), 'file')
+    expect(await layoutOf(root)).toEqual(['.git/COMMIT_EDITMSG'])
+    writeFileSync(join(root, 'plan.json'), '{"s":1}')
+    expect(await commitFolder(root, 'x')).toBeNull()
+    expect(readFileSync(outside, 'utf8')).toBe('keep')
+    unlinkSync(join(root, '.git', 'COMMIT_EDITMSG'))
+
+    // .git/config naming a share on a machine that never answers: opening the folder does not wait for it
+    const config = join(root, '.git', 'config')
+    renameSync(config, `${config}.real`)
+    symlinkSync('\\\\192.0.2.7\\share\\config', config, 'file')
+    const t0 = Date.now()
+    expect(await folderTrust(root)).toMatchObject({ git: 'trusted', unsafeGit: { keys: [], resettable: false, layout: ['.git/config'] } })
+    expect(await commitFolder(root, 'x')).toBeNull()
+    await expect(resetFolderGitConfig(root)).rejects.toThrow()
+    expect(Date.now() - t0).toBeLessThan(5000)
+    unlinkSync(config)
+    renameSync(`${config}.real`, config)
+    expect(await commitFolder(root, 'без ссылок')).toBeTruthy()
+  })
+
+  it.skipIf(!git)('a junction or link in the work tree stops the commit: git add never follows it', async () => {
+    const root = await created('TreeLinks')
+    const outside = folder('tree-links-outside', { 'secret.txt': 'secret' })
+    // Git for Windows' plain `git add` follows a junction and stages what is outside the folder
+    const demo = folder('tree-links-demo', {})
+    plainGit(demo, 'init', '-q')
+    junction(outside, join(demo, 'extra'))
+    try {
+      plainGit(demo, 'add', '-A')
+    } catch {
+      /* git elsewhere refuses or adds the link itself */
+    }
+    if (process.platform === 'win32') expect(plainGit(demo, 'ls-files')).toContain('extra/secret.txt')
+
+    junction(outside, join(root, 'extra'))
+    writeFileSync(join(root, 'plan.json'), '{"t":1}')
+    await expect(commitFolder(root, 'x')).rejects.toThrow(/ссылка[^]*extra|link[^]*extra/)
+    expect(plainGit(root, 'rev-list', '--count', 'HEAD').trim()).toBe('1')
+    expect(plainGit(root, 'ls-files')).not.toContain('secret')
+    unlinkSync(join(root, 'extra'))
+    if (canLink) {
+      mkdirSync(join(root, 'deep', 'er'), { recursive: true })
+      symlinkSync(join(outside, 'secret.txt'), join(root, 'deep', 'er', 's.txt'), 'file')
+      await expect(commitFolder(root, 'x')).rejects.toThrow(/deep\/er\/s\.txt/)
+      unlinkSync(join(root, 'deep', 'er', 's.txt'))
+    }
+    expect(await commitFolder(root, 'без ссылок')).toBeTruthy()
+    expect(readFileSync(join(outside, 'secret.txt'), 'utf8')).toBe('secret')
+  })
+
+  it.skipIf(!git)('a scan that reaches its limit refuses (fails closed) instead of finding nothing', async () => {
+    const root = await created('Limit')
+    const saved = scanLimit.entries
+    try {
+      // .git over the limit: no repository doplan may use
+      scanLimit.entries = 3
+      expect(await layoutOf(root)).toEqual(expect.arrayContaining([expect.stringMatching(/^\.git \((больше|over) 3 /)]))
+      writeFileSync(join(root, 'plan.json'), '{"m":1}')
+      expect(await commitFolder(root, 'x')).toBeNull()
+
+      // .git within it, the work tree over it (a nested .git past the limit would go unseen)
+      folder(join('created-Limit', 'Limit', 'many'), Object.fromEntries(Array.from({ length: 300 }, (_, i) => [`f${i}.txt`, `${i}`])))
+      mkdirSync(join(root, 'many', 'zz', '.git'), { recursive: true })
+      scanLimit.entries = countEntries(join(root, '.git')) + 5
+      expect(await layoutOf(root)).toBeUndefined()
+      await expect(commitFolder(root, 'x')).rejects.toThrow(new RegExp(`(больше|more than) ${scanLimit.entries} `))
+      expect(plainGit(root, 'rev-list', '--count', 'HEAD').trim()).toBe('1')
+    } finally {
+      scanLimit.entries = saved
+    }
+    await expect(commitFolder(root, 'x')).rejects.toThrow(/вложенный репозиторий|nested git repository/)
+    rmSync(join(root, 'many', 'zz'), { recursive: true })
+    expect(await commitFolder(root, 'x')).toBeTruthy()
+  })
+
+  it.skipIf(!git || process.platform === 'win32' || process.getuid?.() === 0)('a folder the scan cannot list refuses (fails closed)', async () => {
+    const root = await created('Unreadable')
+    mkdirSync(join(root, 'locked'))
+    writeFileSync(join(root, 'plan.json'), '{"u":1}')
+    chmodSync(join(root, 'locked'), 0)
+    try {
+      await expect(commitFolder(root, 'x')).rejects.toThrow(/locked/)
+    } finally {
+      chmodSync(join(root, 'locked'), 0o755)
+    }
+    chmodSync(join(root, '.git', 'refs'), 0)
+    try {
+      expect(await layoutOf(root)).toEqual(expect.arrayContaining(['.git/refs']))
+    } finally {
+      chmodSync(join(root, '.git', 'refs'), 0o755)
+    }
+    expect(await commitFolder(root, 'x')).toBeTruthy()
+  })
+
+  it.skipIf(!git)('a repository only doplan writes still gets packed: doplan runs git gc --auto itself', async () => {
+    const root = await created('Gc')
+    const { createHash } = await import('node:crypto')
+    // more loose objects in objects/17 than git's gc.auto (6700) / 256: git's own sign that gc is due
+    const files: Record<string, string> = {}
+    for (let i = 0, made = 0; made < 30; i++) {
+      const text = `gc ${i}\n`
+      if (createHash('sha1').update(`blob ${Buffer.byteLength(text)}\0${text}`).digest('hex').startsWith('17')) files[`gc/${made++}.txt`] = text
+    }
+    const objects = join(root, '.git', 'objects')
+    const packs = () => (existsSync(join(objects, 'pack')) ? readdirSync(join(objects, 'pack')).filter((n) => n.endsWith('.pack')) : [])
+    expect(packs()).toEqual([])
+    // below the threshold nothing is packed
+    folder(join('created-Gc', 'Gc'), Object.fromEntries(Object.entries(files).slice(0, 10)))
+    expect(await commitFolder(root, 'десять')).toBeTruthy()
+    expect(packs()).toEqual([])
+    folder(join('created-Gc', 'Gc'), files)
+    expect(await commitFolder(root, 'тридцать')).toBeTruthy()
+    expect(packs().length).toBe(1)
+    expect(existsSync(join(objects, '17')) ? readdirSync(join(objects, '17')) : []).toEqual([])
+    expect((await gitLog(root)).length).toBe(3)
+    expect(plainGit(root, 'fsck', '--no-progress')).toBe('')
+    expect(await folderTrust(root)).toEqual({ git: 'trusted', folder: true })
+  })
+
+  it.skipIf(!lfs)("the user's own repository keeps working: a clone with git-lfs, remotes and branches", () =>
+    inHome('home-user-repo', async () => {
+      // the team's repository, cloned by the user with plain git
+      const team = received('user-repo-team', { '.gitattributes': '*.bin filter=lfs diff=lfs merge=lfs -text\n' })
+      writeFileSync(join(team, 'model.bin'), 'binary one')
+      plainGit(team, 'add', '-A')
+      plainGit(team, 'commit', '-qm', 'lfs model')
+      plainGit(team, 'branch', '-M', 'main')
+      plainGit(team, 'branch', 'feature')
+      const dir = join(base, 'user-repo-clone')
+      plainGit(base, 'clone', '-q', slash(team), dir)
+      plainGit(dir, 'checkout', '-q', '-b', 'mine', '--track', 'origin/feature')
+      expect(readFileSync(join(dir, 'model.bin'), 'utf8')).toBe('binary one')
+
+      expect((await folderTrust(dir)).git).toBe('untrusted')
+      await trustFolder(dir)
+      expect(await folderTrust(dir)).toEqual({ git: 'trusted', folder: true })
+      writeFileSync(join(dir, 'plan.json'), '{"a":2}')
+      writeFileSync(join(dir, 'model.bin'), 'binary two')
+      const sha = await commitFolder(dir, 'из doplan')
+      expect(sha).toBeTruthy()
+      expect((await gitLog(dir)).map((v) => v.message)).toEqual(['из doplan', 'lfs model', 'one'])
+      // still an lfs pointer in the commit, the branch and its upstream as they were; plain git pushes it
+      expect(plainGit(dir, 'show', 'HEAD:model.bin')).toMatch(/^version https:\/\/git-lfs/)
+      expect(plainGit(dir, 'lfs', 'ls-files', '--name-only').trim()).toBe('model.bin')
+      expect(plainGit(dir, 'rev-parse', '--abbrev-ref', 'HEAD').trim()).toBe('mine')
+      expect(plainGit(dir, 'rev-parse', '--abbrev-ref', 'mine@{upstream}').trim()).toBe('origin/feature')
+      expect(plainGit(dir, 'branch', '-a', '--format=%(refname:short)').trim().split('\n')).toEqual(expect.arrayContaining(['main', 'mine', 'origin/feature', 'origin/main']))
+      plainGit(dir, 'push', '-q', 'origin', 'mine:feature')
+      expect(plainGit(team, 'rev-parse', 'feature').trim()).toBe(sha)
+      expect(await folderTrust(dir)).toEqual({ git: 'trusted', folder: true })
+    }),
+  )
 
   it.skipIf(!git || !canLink)('the reset never writes through links planted in .git', () =>
     inHome('home-reset-link', async () => {
@@ -722,19 +950,22 @@ describe('repository layout', { timeout: 60_000 }, async () => {
       symlinkSync(outside, join(dir, '.git', 'config'), 'file')
       const before = readFileSync(outside, 'utf8')
       await trustFolder(dir)
-      expect((await folderTrust(dir)).unsafeGit).toBeTruthy()
+      expect((await folderTrust(dir)).unsafeGit).toEqual({ keys: [], resettable: false, layout: ['.git/config'] })
       await expect(resetFolderGitConfig(dir)).rejects.toThrow()
       expect(readFileSync(outside, 'utf8')).toBe(before)
       expect(lstatSync(join(dir, '.git', 'config')).isSymbolicLink()).toBe(true)
 
-      // a dangling link where the backup would go is skipped, its target never created
+      // a dangling link where the backup would go is a link in .git too: no reset, its target never created
       const dir2 = received('reset-dangling')
       plainGit(dir2, 'config', 'foo.bar', '1')
       const target = join(base, 'dangling-target')
       symlinkSync(target, join(dir2, '.git', 'config.doplan-backup'), 'file')
       await trustFolder(dir2)
-      expect(await resetFolderGitConfig(dir2)).toBe(join(dir2, '.git', 'config.doplan-backup-1'))
+      expect(await layoutOf(dir2)).toEqual(['.git/config.doplan-backup'])
+      await expect(resetFolderGitConfig(dir2)).rejects.toThrow()
       expect(existsSync(target)).toBe(false)
+      unlinkSync(join(dir2, '.git', 'config.doplan-backup'))
+      expect(await resetFolderGitConfig(dir2)).toBe(join(dir2, '.git', 'config.doplan-backup'))
       expect((await folderTrust(dir2)).unsafeGit).toBeUndefined()
     }),
   )

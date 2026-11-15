@@ -140,6 +140,8 @@ const en: Record<string, string> = {
   'рул.': 'rolls',
   упак: 'packs',
   'упак.': 'packs',
+  'уп.': 'packs',
+  'м²/л': 'm²/l',
   Единицы: 'Units',
   '{n} комн.': '{n} rooms',
   отметка: 'elevation',

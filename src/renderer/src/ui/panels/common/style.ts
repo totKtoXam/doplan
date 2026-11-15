@@ -2,11 +2,12 @@ import type { Id, Material } from '@core/types'
 import { applyStyle, findStyle, type ApplyStyleParts, type ApplyStyleReport } from '@core'
 import { docStore } from '@/store/document'
 import { uiStore } from '@/store/ui'
-import { addTranslations } from '@/i18n'
+import { addTranslations, t } from '@/i18n'
 import { tx } from './catalog'
 
 // M2: finishes v2 (layout start, waste, wall/zone patterns) and product cards
 addTranslations('en', {
+  'Стиль «{name}»': 'Style “{name}”',
   'Начало раскладки': 'Layout start',
   'сдвиг первой целой плитки от угла, мм': 'offset of the first whole tile from the corner, mm',
   'Запас на подрезку': 'Cutting waste',
@@ -149,7 +150,9 @@ export function applyStyleTo(styleId: Id, rooms: Id[] | 'all', parts?: Partial<A
   const derived = docStore.getState().derived
   const catalog = uiStore.getState().catalog
   let report: ApplyStyleReport | null = null
-  tx(`Стиль «${style.nameRu}»`, (d) => {
+  // the undo label is built in the current language: a label with the name inside cannot be translated later
+  const name = uiStore.getState().lang === 'en' ? style.name : style.nameRu
+  tx(t('Стиль «{name}»', { name }), (d) => {
     report = applyStyle(d, style, { rooms, parts, catalog, derived })
   })
   return report

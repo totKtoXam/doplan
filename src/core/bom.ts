@@ -359,15 +359,17 @@ export function computeBom(doc: Doc, catalog?: Catalog, opts: BomOptions = {}): 
   }
   const tileRow = (group: BomGroup, m: Material | undefined, id: Id, tile: { w: number; h: number; grout: number }, area: number, waste: number, cell: number): BomRow => {
     const count = Math.ceil((area * (1 + waste)) / cell)
+    // boxes and per-m² prices are quoted in tile face area, not the laying pitch (tile + grout)
+    const face = (tile.w * tile.h) / 1e6
     const pack = packOf(id, 'уп.', 'м²')
-    const alt: BomRow['alt'] = { шт: count, 'м²': round(count * cell) }
-    if (pack) alt['уп.'] = Math.ceil((count * cell) / pack)
+    const alt: BomRow['alt'] = { шт: count, 'м²': round(count * face) }
+    if (pack) alt['уп.'] = Math.ceil((count * face) / pack)
     return {
       group,
       name: `${materialName(m, id)} — плитка ${Math.round(tile.w)}×${Math.round(tile.h)} мм`,
       unit: 'шт',
       quantity: count,
-      note: `запас ${Math.round(waste * 100)}%, шов ${fmt(tile.grout, 1)} мм, ${fmt(count * cell)} м²${pack ? `, ${alt['уп.']} уп. по ${fmt(pack)} м²` : ''}`,
+      note: `запас ${Math.round(waste * 100)}%, шов ${fmt(tile.grout, 1)} мм, ${fmt(count * face)} м²${pack ? `, ${alt['уп.']} уп. по ${fmt(pack)} м²` : ''}`,
       refId: id,
       purchase: true,
       alt,
@@ -383,7 +385,7 @@ export function computeBom(doc: Doc, catalog?: Catalog, opts: BomOptions = {}): 
     const tile = tileOf(a.pattern, m)
     const planks = isPlankCategory(m) || a.pattern?.type === 'planks'
     if (planks && (m?.category === 'laminate' || m?.category === 'parquet' || !tile || a.pattern?.type === 'planks')) {
-      const waste = wasteFor(a.pattern?.type ?? 'planks', a.pattern ?? m?.pattern)
+      const waste = wasteFor((a.pattern ?? m?.pattern)?.type ?? 'planks', a.pattern ?? m?.pattern)
       const need = a.area * (1 + waste)
       const pack = packOf(a.materialId, 'уп.', 'м²') ?? packArea
       const packs = Math.ceil(need / pack)
@@ -571,11 +573,21 @@ function qtyIn(r: BomRow, unit: PriceUnit): number | undefined {
 }
 
 /**
- * Put prices on the rows: per refId and group, the purchase row is priced first (the measured row
- * only when there is no purchase row in that unit). A price without a unit goes on the purchase row
- * in its own unit, else on the measured row.
+ * The rows of one refId within one group that a price goes on: every purchase row that has a
+ * quantity in the price unit, else every measured row that has one. One material can produce
+ * several rows (e.g. the same tile in two layouts), and each of them must be priced.
+ * A price without a unit goes on the purchase rows in their own unit, else on the measured rows.
  */
-export function attachPrices(rows: BomRow[], doc: Doc, catalog?: Catalog): void {
+export function priceTargets(list: BomRow[], priceUnit?: PriceUnit): BomRow[] {
+  const buy = list.filter((r) => r.purchase)
+  const measured = list.filter((r) => !r.purchase)
+  if (!priceUnit) return buy.length ? buy : measured
+  const has = (r: BomRow) => qtyIn(r, priceUnit) !== undefined
+  return buy.some(has) ? buy.filter(has) : measured.filter(has)
+}
+
+/** rows grouped by `group|refId` (rows without a refId are left out) */
+export function rowsByRef(rows: BomRow[]): Map<string, BomRow[]> {
   const byKey = new Map<string, BomRow[]>()
   for (const r of rows) {
     if (!r.refId) continue
@@ -584,24 +596,27 @@ export function attachPrices(rows: BomRow[], doc: Doc, catalog?: Catalog): void 
     l.push(r)
     byKey.set(k, l)
   }
-  for (const list of byKey.values()) {
+  return byKey
+}
+
+/** Put prices on the rows, see priceTargets. */
+export function attachPrices(rows: BomRow[], doc: Doc, catalog?: Catalog): void {
+  for (const list of rowsByRef(rows).values()) {
     const p = productFor(doc, catalog, list[0].refId)
     if (!p) continue
-    const ordered = [...list.filter((r) => r.purchase), ...list.filter((r) => !r.purchase)]
-    const target = p.priceUnit
-      ? ordered.find((r) => qtyIn(r, p.priceUnit!) !== undefined)
-      : ordered[0]
     for (const r of list) {
       if (p.vendor) r.vendor = p.vendor
       if (p.sku) r.sku = p.sku
       if (p.url) r.url = p.url
     }
-    if (!target || p.price === undefined) continue
-    const unit = p.priceUnit ?? (target.unit as PriceUnit)
-    const q = qtyIn(target, unit) ?? target.quantity
-    target.price = p.price
-    target.priceUnit = unit
-    target.total = round(p.price * q, 2)
+    if (p.price === undefined) continue
+    for (const target of priceTargets(list, p.priceUnit)) {
+      const unit = p.priceUnit ?? (target.unit as PriceUnit)
+      const q = qtyIn(target, unit) ?? target.quantity
+      target.price = p.price
+      target.priceUnit = unit
+      target.total = round(p.price * q, 2)
+    }
   }
 }
 
@@ -664,17 +679,18 @@ const csvCell = (s: string) => (/[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` 
 const csvNum = (v: number | undefined) => (v === undefined ? '' : String(v).replace('.', ','))
 
 /** BOM rows as CSV (semicolon-separated, Excel-friendly in RU locales), with prices when present. */
-export function bomToCsv(rows: BomRow[], currency?: string): string {
+export function bomToCsv(rows: BomRow[], currency?: string, t: (s: string) => string = (s) => s): string {
   const cur = currency ? ` (${currency})` : ''
-  const lines = [`Раздел;Наименование;Ед.;Кол-во;Примечание;Цена${cur};За ед.;Сумма${cur};Поставщик;Артикул;Ссылка`]
+  const head = ['Раздел', 'Наименование', 'Ед.', 'Кол-во', 'Примечание', 'Цена', 'За ед.', 'Сумма', 'Поставщик', 'Артикул', 'Ссылка']
+  const lines = [head.map((h) => t(h) + (h === 'Цена' || h === 'Сумма' ? cur : '')).map(csvCell).join(';')]
   for (const r of rows)
     lines.push(
       [r.group, r.name, r.unit, csvNum(r.quantity), r.note ?? '', csvNum(r.price), r.priceUnit ?? '', csvNum(r.total), r.vendor ?? '', r.sku ?? '', r.url ?? '']
         .map(csvCell)
         .join(';'),
     )
-  const t = bomTotals(rows)
-  if (t.priced) lines.push(['Итого', '', '', '', '', '', '', csvNum(t.total), '', '', ''].map(csvCell).join(';'))
+  const totals = bomTotals(rows)
+  if (totals.priced) lines.push([t('Итого'), '', '', '', '', '', '', csvNum(totals.total), '', '', ''].map(csvCell).join(';'))
   return lines.join('\n')
 }
 
@@ -739,13 +755,36 @@ export interface PriceListImport {
   skipped: number[]
 }
 
-/** Read a price list CSV (`;` or `,` separated; header row with an `id` column). */
+/**
+ * Text of a CSV file: UTF-8 (with or without BOM), else Windows-1251, which is what Excel's plain
+ * «CSV (разделители)» writes on Russian-language Windows.
+ */
+export function decodeCsvBytes(bytes: ArrayBuffer | Uint8Array): string {
+  let text: string
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  } catch {
+    text = new TextDecoder('windows-1251').decode(bytes)
+  }
+  return text.replace(/^﻿/, '')
+}
+
+/** a product link that can be opened: http(s) URLs as they are, a bare «shop.kz/item» gets https:// */
+export function productUrl(s: string | undefined): string | undefined {
+  const v = s?.trim()
+  if (!v || /\s/.test(v)) return undefined
+  if (/^https?:\/\/[^/]+\.[^/]/i.test(v)) return v
+  if (/^[a-z]+:/i.test(v)) return undefined
+  return /^[\p{L}\d-]+(\.[\p{L}\d-]+)+(\/|$|\?|#|:)/u.test(v) ? `https://${v}` : undefined
+}
+
 /** today's date in the user's time zone, YYYY-MM-DD (toISOString would give the UTC date) */
 export function localDate(d = new Date()): string {
   const p = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 
+/** Read a price list CSV (`;` or `,` separated; header row with an `id` column). */
 export function parsePriceListCsv(text: string, today = localDate()): PriceListImport {
   const lines = text.replace(/^﻿/, '').split(/\r?\n/)
   const res: PriceListImport = { entries: {}, skipped: [] }
@@ -785,7 +824,8 @@ export function parsePriceListCsv(text: string, today = localDate()): PriceListI
     if (pack) p.pack = pack
     if (ci.vendor >= 0 && c[ci.vendor]) p.vendor = c[ci.vendor]
     if (ci.sku >= 0 && c[ci.sku]) p.sku = c[ci.sku]
-    if (ci.url >= 0 && c[ci.url]) p.url = c[ci.url]
+    const url = ci.url >= 0 ? productUrl(c[ci.url]) : undefined
+    if (url) p.url = url
     p.updatedAt = (ci.date >= 0 && c[ci.date]) || today
     if (p.price === undefined && !p.vendor && !p.sku && !p.url && !p.pack) continue
     res.entries[id] = p

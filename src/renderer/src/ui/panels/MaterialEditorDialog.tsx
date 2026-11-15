@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ImagePlus, Link2, Link2Off, Wallpaper, X } from 'lucide-react'
 import type { Material, MaterialCategory, PriceUnit, ProductRef } from '@core/types'
-import { localDate, newId } from '@core'
+import { localDate, newId, productUrl } from '@core'
 import { docStore } from '@/store/document'
 import { useT } from '@/i18n'
 import { Button, ColorInput, Dialog, IconButton, Input, NumberInput, Row, Select, Slider, Toggle, fmtNum } from '@/ui/kit'
@@ -65,24 +65,41 @@ const EMPTY_PRODUCT = {
 /** paint settings the editor does not show (coats) survive an edit */
 const prevPaint = (id: string | null | undefined) => (id ? lookupMaterial(id)?.paint : undefined)
 
-/** product / wallpaper / paint fields of the draft as material fields (undefined = not set) */
-function productOf(d: Draft): Pick<Material, 'product' | 'wallpaper' | 'paint'> {
-  const product: ProductRef = {}
-  if (d.vendor.trim()) product.vendor = d.vendor.trim()
-  if (d.sku.trim()) product.sku = d.sku.trim()
-  if (/^https?:\/\//i.test(d.url.trim())) product.url = d.url.trim()
-  if (d.price !== null) product.price = d.price
-  if (d.priceUnit !== 'none') product.priceUnit = d.priceUnit
-  if (d.pack !== null && d.pack > 0) product.pack = d.pack
-  const hasProduct = Object.keys(product).length > 0
-  if (hasProduct) {
-    product.source = product.url ? 'link' : 'manual'
-    product.updatedAt = localDate()
+/** product fields the editor shows; the rest of a card (note…) is kept as it was */
+const EDITED_PRODUCT_KEYS = ['vendor', 'sku', 'url', 'price', 'priceUnit', 'pack', 'source', 'updatedAt'] as const
+
+/**
+ * Product / wallpaper / paint fields of the draft as material fields (undefined = not set). Fields the
+ * editor does not show (wallpaper match, product note, a feed source when nothing changed) survive.
+ */
+function productOf(d: Draft, prev?: Material): Pick<Material, 'product' | 'wallpaper' | 'paint'> {
+  const shown: ProductRef = {}
+  if (d.vendor.trim()) shown.vendor = d.vendor.trim()
+  if (d.sku.trim()) shown.sku = d.sku.trim()
+  const url = productUrl(d.url)
+  if (url) shown.url = url
+  if (d.price !== null) shown.price = d.price
+  if (d.priceUnit !== 'none') shown.priceUnit = d.priceUnit
+  if (d.pack !== null && d.pack > 0) shown.pack = d.pack
+  const old = prev?.product
+  const kept: ProductRef = { ...(old ?? {}) }
+  for (const k of EDITED_PRODUCT_KEYS) delete kept[k]
+  const product: ProductRef = { ...kept, ...shown }
+  const changed = !old || (['vendor', 'sku', 'url', 'price', 'priceUnit', 'pack'] as const).some((k) => old[k] !== shown[k])
+  if (Object.keys(shown).length > 0 || Object.keys(kept).length > 0) {
+    product.source = changed ? (shown.url ? 'link' : 'manual') : (old?.source ?? 'manual')
+    product.updatedAt = changed ? localDate() : (old?.updatedAt ?? localDate())
   }
-  const wallpaper =
-    d.category === 'wallpaper' && d.rollW && d.rollL
-      ? { rollW: d.rollW, rollL: d.rollL, ...(d.repeat ? { repeat: d.repeat } : {}) }
-      : undefined
+  const hasProduct = Object.keys(product).length > 0
+
+  let wallpaper: Material['wallpaper']
+  if (d.category === 'wallpaper' && (d.rollW || d.rollL || d.repeat || prev?.wallpaper)) {
+    const pw = prev?.wallpaper
+    // unset roll sizes fall back to the standard 0.53 × 10.05 m roll the placeholders show
+    wallpaper = { ...(pw ?? {}), rollW: d.rollW ?? pw?.rollW ?? 530, rollL: d.rollL ?? pw?.rollL ?? 10050 }
+    if (d.repeat) wallpaper.repeat = d.repeat
+    else delete wallpaper.repeat
+  }
   const paint = d.category === 'paint' && d.coverage ? { coverage: d.coverage } : undefined
   return { product: hasProduct ? product : undefined, wallpaper, paint }
 }
@@ -255,7 +272,7 @@ export function MaterialEditorDialog({ open, onClose, materialId, onSaved }: Mat
       const name = draft.name.trim() || t('Мой материал')
       const code = draft.code.trim()
       const colorCode = draft.codeSystem !== 'none' && code ? { system: draft.codeSystem, code } : undefined
-      const extra = productOf(draft)
+      const extra = productOf(draft, editId ? lookupMaterial(editId) : undefined)
       const base: Omit<Material, 'id'> = {
         name,
         nameRu: name,
@@ -393,30 +410,30 @@ export function MaterialEditorDialog({ open, onClose, materialId, onSaved }: Mat
 
           {draft.category === 'wallpaper' && (
             <Row label={t('Рулон')} hint={t('ширина × длина рулона и раппорт рисунка, мм')}>
-              <NumberInput kind="length" unit="mm" label={t('Ш')} value={draft.rollW} min={100} max={3000} round={1} placeholder="530" onChange={(v) => patch({ rollW: v })} />
-              <NumberInput kind="length" unit="mm" label={t('Д')} value={draft.rollL} min={1000} max={50000} round={10} placeholder="10050" onChange={(v) => patch({ rollL: v })} />
-              <NumberInput kind="length" unit="mm" label={t('Р')} value={draft.repeat} min={0} max={2000} round={1} placeholder="0" onChange={(v) => patch({ repeat: v })} />
+              <NumberInput kind="length" unit="mm" label={t('Ш')} value={draft.rollW} min={100} max={3000} round={1} placeholder="530" onChange={(v) => patch({ rollW: v })} onClear={() => patch({ rollW: null })} />
+              <NumberInput kind="length" unit="mm" label={t('Д')} value={draft.rollL} min={1000} max={50000} round={10} placeholder="10050" onChange={(v) => patch({ rollL: v })} onClear={() => patch({ rollL: null })} />
+              <NumberInput kind="length" unit="mm" label={t('Р')} value={draft.repeat} min={0} max={2000} round={1} placeholder="0" onChange={(v) => patch({ repeat: v })} onClear={() => patch({ repeat: null })} />
             </Row>
           )}
           {draft.category === 'paint' && (
             <Row label={t('Расход')} hint={t('м² на литр за один слой')}>
-              <NumberInput value={draft.coverage} min={1} max={30} step={0.5} decimals={1} suffix="м²/л" placeholder="8" onChange={(v) => patch({ coverage: v })} />
+              <NumberInput value={draft.coverage} min={1} max={30} step={0.5} decimals={1} suffix={t('м²/л')} placeholder="8" onChange={(v) => patch({ coverage: v })} onClear={() => patch({ coverage: null })} />
             </Row>
           )}
 
           <div className="mt-1 text-[11px] font-semibold">{t('Товар')}</div>
           <Row label={t('Цена')} hint={t('в валюте проекта; цена в смете проекта важнее')}>
-            <NumberInput value={draft.price} min={0} step={1} decimals={2} placeholder="—" onChange={(v) => patch({ price: v })} />
+            <NumberInput value={draft.price} min={0} step={1} decimals={2} placeholder="—" onChange={(v) => patch({ price: v })} onClear={() => patch({ price: null })} aria-label={t('Цена')} />
             <Select<PriceUnit | 'none'>
               value={draft.priceUnit}
               onChange={(v) => patch({ priceUnit: v })}
-              options={[{ value: 'none', label: t('за ед. сметы') }, ...PRICE_UNITS.map((u) => ({ value: u, label: `/${u}` }))]}
+              options={[{ value: 'none', label: t('за ед. сметы') }, ...PRICE_UNITS.map((u) => ({ value: u, label: `/${t(u)}` }))]}
               className="w-28 shrink-0"
               aria-label={t('Единица цены')}
             />
           </Row>
           <Row label={t('Упаковка')} hint={t('м² в упаковке, литров в банке, штук в коробке')}>
-            <NumberInput value={draft.pack} min={0} step={0.1} decimals={2} placeholder="—" onChange={(v) => patch({ pack: v })} />
+            <NumberInput value={draft.pack} min={0} step={0.1} decimals={2} placeholder="—" onChange={(v) => patch({ pack: v })} onClear={() => patch({ pack: null })} aria-label={t('Упаковка')} />
           </Row>
           <Row label={t('Поставщик')}>
             <Input value={draft.vendor} onChange={(v) => patch({ vendor: v })} onKeyDown={(e) => e.stopPropagation()} aria-label={t('Поставщик')} />

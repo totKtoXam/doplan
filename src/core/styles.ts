@@ -556,6 +556,9 @@ function apronBands(doc: Doc, catalog: Catalog, dr: DerivedRoom): Map<string, { 
   return out
 }
 
+/** same value (plain data): used to skip assignments that would only record an empty undo step */
+const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
+
 function setOverride(overrides: Record<string, Id>, slot: string, materialId: Id, defaultId: Id): void {
   if (materialId === defaultId) delete overrides[slot]
   else overrides[slot] = materialId
@@ -599,8 +602,9 @@ export function applyStyle(doc: Doc, style: StylePreset, opts: ApplyStyleOptions
       const floorId = wet ? F.floorWet : HALL_ROOMS.includes(room.type) ? (F.floorHall ?? F.floorDry) : F.floorDry
       const fm = findMaterial(doc, catalog, floorId)
       room.floor.materialId = floorId
-      if (fm?.pattern) room.floor.pattern = { ...fm.pattern }
-      else delete room.floor.pattern
+      if (fm?.pattern) {
+        if (!same(room.floor.pattern, fm.pattern)) room.floor.pattern = { ...fm.pattern }
+      } else delete room.floor.pattern
       delete room.floor.tint
       room.ceiling.materialId = F.ceiling
       delete room.ceiling.tint
@@ -613,6 +617,9 @@ export function applyStyle(doc: Doc, style: StylePreset, opts: ApplyStyleOptions
         room.skirtingMaterialId = F.skirting
       }
 
+    }
+
+    if (parts.finishes || parts.accent) {
       const aprons = KITCHEN_ROOMS.includes(room.type) ? apronBands(doc, catalog, dr) : new Map<string, { from: number; to: number }>()
       let accent: Face | undefined
       if (parts.accent && F.wallAccent && ACCENT_ROOMS.includes(room.type)) {
@@ -622,16 +629,27 @@ export function applyStyle(doc: Doc, style: StylePreset, opts: ApplyStyleOptions
           if (!accent || f.length > accent.length + 1 || (Math.abs(f.length - accent.length) <= 1 && f.wallId < accent.wallId)) accent = f
         }
       }
+      const accentKey = accent ? faceKey(accent.wallId, accent.side) : undefined
       for (const f of faces) {
         const side = doc.walls[f.wallId][f.side]
         const k = faceKey(f.wallId, f.side)
-        side.materialId = wet ? F.wallWet : accent && faceKey(accent.wallId, accent.side) === k ? F.wallAccent! : F.wallMain
-        if (wet) delete side.zones
-        const band = aprons.get(k)
-        if (band) {
-          const keep = (side.zones ?? []).filter((z) => z.to <= band.from || z.from >= band.to)
-          const zones: FinishZone[] = [...keep, { from: band.from, to: band.to, materialId: F.apron }]
-          side.zones = zones.sort((a, b) => a.from - b.from)
+        const isAccent = k === accentKey
+        // with finishes off only the accent face is dressed
+        if (!parts.finishes && !isAccent) continue
+        const materialId = wet ? F.wallWet : isAccent ? F.wallAccent! : F.wallMain
+        if (side.materialId !== materialId) {
+          side.materialId = materialId
+          // an old layout must not be laid with the new material: the material's own pattern applies
+          delete side.pattern
+        }
+        if (parts.finishes) {
+          if (wet) delete side.zones
+          const band = aprons.get(k)
+          if (band) {
+            const keep = (side.zones ?? []).filter((z) => z.to <= band.from || z.from >= band.to)
+            const zones: FinishZone[] = [...keep, { from: band.from, to: band.to, materialId: F.apron }].sort((a, b) => a.from - b.from)
+            if (!same(side.zones, zones)) side.zones = zones
+          }
         }
         report.faces++
       }
@@ -668,8 +686,9 @@ export function applyStyle(doc: Doc, style: StylePreset, opts: ApplyStyleOptions
           changed = true
         }
         if (!changed) continue
-        if (Object.keys(overrides).length) it.overrides = overrides
-        else delete it.overrides
+        if (Object.keys(overrides).length) {
+          if (!same(it.overrides, overrides)) it.overrides = overrides
+        } else delete it.overrides
         report.items++
       }
     }
@@ -683,10 +702,10 @@ export function applyStyle(doc: Doc, style: StylePreset, opts: ApplyStyleOptions
       }
     }
 
-    room.design = { ...room.design, styleId: style.id }
+    if (room.design?.styleId !== style.id) room.design = { ...room.design, styleId: style.id }
   }
 
   report.openings = touchedOpenings.size
-  if (opts.rooms === 'all') doc.design = { ...doc.design, styleId: style.id }
+  if (opts.rooms === 'all' && doc.design?.styleId !== style.id) doc.design = { ...doc.design, styleId: style.id }
   return report
 }

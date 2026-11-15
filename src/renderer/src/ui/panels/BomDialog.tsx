@@ -1,7 +1,22 @@
 import { useMemo, useState } from 'react'
 import { ExternalLink, FileDown, FileSpreadsheet, FileUp } from 'lucide-react'
 import type { BomRow, Catalog } from '@core'
-import { bomToCsv, bomTotals, computeBom, CURRENCIES, currencySymbol, formatMoney, localDate, mergeCatalog, parsePriceListCsv, priceListToCsv } from '@core'
+import {
+  bomToCsv,
+  bomTotals,
+  computeBom,
+  CURRENCIES,
+  currencySymbol,
+  decodeCsvBytes,
+  formatMoney,
+  localDate,
+  mergeCatalog,
+  parsePriceListCsv,
+  priceListToCsv,
+  priceTargets,
+  productFor,
+  rowsByRef,
+} from '@core'
 import type { PriceUnit, ProductRef } from '@core/types'
 import { useDoc } from '@/store/document'
 import { useUi } from '@/store/ui'
@@ -30,6 +45,17 @@ addTranslations('en', {
   'Загружено цен': 'Prices imported',
   'пропущено строк': 'lines skipped',
   'Количества с запасом на подрезку; проверьте перед закупкой.': 'Quantities include cutting waste; check before ordering.',
+  // estimate table and CSV header
+  'Наименование': 'Name',
+  'Количество': 'Quantity',
+  'Ед.': 'Unit',
+  'Примечание': 'Note',
+  'Раздел': 'Section',
+  'Кол-во': 'Quantity',
+  'За ед.': 'Per unit',
+  'Поставщик': 'Vendor',
+  'Артикул': 'SKU',
+  'Ссылка': 'Link',
 })
 
 export interface DialogPropsBase {
@@ -43,20 +69,16 @@ const asPriceUnit = (u: string | undefined): PriceUnit | undefined => PRICE_UNIT
 const safeName = (s: string) => s.replace(/[\\/:*?"<>|]+/g, '_')
 
 /**
- * Which row of each priceable thing (refId within a group) carries the price input: the row that
- * already has a price, else the purchase row, else the first row.
+ * Which rows of each priceable thing (refId within a group) carry the price input: the rows the price
+ * goes on (one material can make several purchase rows, e.g. one tile in two layouts).
  */
-function priceRows(rows: BomRow[]): Set<BomRow> {
+function priceRows(rows: BomRow[], unitOf: (refId: string) => PriceUnit | undefined): Set<BomRow> {
   const out = new Set<BomRow>()
-  const by = new Map<string, BomRow[]>()
-  for (const r of rows) {
-    if (!r.refId) continue
-    const k = `${r.group}|${r.refId}`
-    const l = by.get(k) ?? []
-    l.push(r)
-    by.set(k, l)
+  for (const l of rowsByRef(rows).values()) {
+    const priced = l.filter((r) => r.price !== undefined)
+    const targets = priced.length ? priced : priceTargets(l, unitOf(l[0].refId!))
+    for (const r of targets.length ? targets : [l[0]]) out.add(r)
   }
-  for (const l of by.values()) out.add(l.find((r) => r.price !== undefined) ?? l.find((r) => r.purchase) ?? l[0])
   return out
 }
 
@@ -81,7 +103,9 @@ export function BomDialog({ open, onClose }: DialogPropsBase) {
     }
   }, [open, doc, catalog])
 
-  const editable = useMemo(() => priceRows(rows), [rows])
+  /** price unit set on the price list entry or the material card, even before a price is typed */
+  const unitOf = (refId: string) => productFor(doc, cat, refId)?.priceUnit
+  const editable = useMemo(() => priceRows(rows, (id) => productFor(doc, cat, id)?.priceUnit), [rows, doc, cat])
   const totals = useMemo(() => bomTotals(rows), [rows])
   const money = (v: number) => formatMoney(v, currency, locale)
 
@@ -106,13 +130,29 @@ export function BomDialog({ open, onClose }: DialogPropsBase) {
         const design = (d.design ??= {})
         const list = (design.priceList ??= {})
         const prev = list[refId]
-        const unit = prev?.priceUnit ?? r.priceUnit ?? asPriceUnit(r.unit)
+        const unit = prev?.priceUnit ?? unitOf(refId) ?? r.priceUnit ?? asPriceUnit(r.unit)
         const next: ProductRef = { ...(prev ?? {}), price: v, source: 'manual', updatedAt: localDate() }
         if (unit) next.priceUnit = unit
         list[refId] = next
       },
       `bom.price.${refId}.${g}`,
     )
+  }
+
+  /** erase the price (the project's own and the project material card's); vendor, link etc. stay */
+  const clearPrice = (r: BomRow) => {
+    if (!r.refId) return
+    const refId = r.refId
+    tx('Цена позиции', (d) => {
+      const list = d.design?.priceList
+      const own = list?.[refId]
+      if (list && own) {
+        delete own.price
+        if (!Object.keys(own).some((k) => k !== 'source' && k !== 'updatedAt' && k !== 'priceUnit')) delete list[refId]
+      }
+      const card = d.materials[refId]?.product
+      if (card) delete card.price
+    })
   }
 
   const setCurrency = (c: string) =>
@@ -124,7 +164,7 @@ export function BomDialog({ open, onClose }: DialogPropsBase) {
 
   const exportCsv = async () => {
     const name = `${safeName(doc.meta.name || 'doplan')} — ${t('смета')}.csv`
-    const path = await window.doplan.files.saveText(name, [{ name: 'CSV', extensions: ['csv'] }], `﻿${bomToCsv(rows, currency).replace(/\n/g, '\r\n')}\r\n`)
+    const path = await window.doplan.files.saveText(name, [{ name: 'CSV', extensions: ['csv'] }], `﻿${bomToCsv(rows, currency, t).replace(/\n/g, '\r\n')}\r\n`)
     if (path) setStatus(path)
   }
 
@@ -138,7 +178,8 @@ export function BomDialog({ open, onClose }: DialogPropsBase) {
     try {
       const [f] = await window.doplan.files.pick([{ name: 'CSV', extensions: ['csv', 'txt'] }], false)
       if (!f) return
-      const res = parsePriceListCsv(await window.doplan.files.readText(f.path))
+      // UTF-8 or Excel's plain «CSV (разделители)» in Windows-1251
+      const res = parsePriceListCsv(decodeCsvBytes(await window.doplan.files.read(f.path)))
       const n = Object.keys(res.entries).length
       if (n > 0)
         tx('Импорт прайс-листа', (d) => {
@@ -259,10 +300,11 @@ export function BomDialog({ open, onClose }: DialogPropsBase) {
                           step={1}
                           decimals={2}
                           placeholder="—"
-                          suffix={r.priceUnit && r.priceUnit !== r.unit ? `/${r.priceUnit}` : ''}
-                          title={r.priceUnit ? `${t('Цена за')} ${r.priceUnit}` : undefined}
+                          suffix={r.priceUnit && r.priceUnit !== r.unit ? `/${t(r.priceUnit)}` : ''}
+                          title={r.priceUnit ? `${t('Цена за')} ${t(r.priceUnit)}` : undefined}
                           aria-label={`${t('Цена')}: ${r.name}`}
                           onChange={(v, gst) => setPrice(r, v, gst)}
+                          onClear={() => clearPrice(r)}
                         />
                       ) : null}
                     </td>

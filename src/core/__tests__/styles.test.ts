@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { enablePatches, produceWithPatches } from 'immer'
 import { compilePlanSpecDetailed, parsePlanSpec } from '../planspec'
 import { BUILTIN_MATERIALS } from '../defaults'
 import { BUILTIN_STYLES, applyStyle, findStyle, styleMaterialIds, stylePalette } from '../styles'
@@ -153,5 +154,36 @@ describe('applyStyle', () => {
     expect(back.design).toEqual({ styleId: style.id })
     expect(back.rooms[roomIds.living].design).toEqual({ styleId: style.id })
     expect(back.materials.mat_custom.colorCode).toEqual({ system: 'NCS', code: 'S 1020-Y' })
+  })
+
+  it('a second apply makes no changes at all (an empty undo step)', () => {
+    enablePatches()
+    const { doc } = build()
+    applyStyle(doc, style, { rooms: 'all' })
+    const [, patches] = produceWithPatches(doc, (d) => {
+      applyStyle(d, style, { rooms: 'all' })
+    })
+    expect(patches).toEqual([])
+  })
+
+  it('a new wall material drops the old wall layout', () => {
+    const { doc } = build()
+    for (const w of Object.values(doc.walls))
+      for (const s of [w.left, w.right]) s.pattern = { type: 'grid', tileW: 300, tileH: 300, grout: 2, groutColor: '#fff', rotation: 0 }
+    applyStyle(doc, style, { rooms: 'all' })
+    for (const w of Object.values(doc.walls))
+      for (const s of [w.left, w.right]) if (s.materialId === style.finishes.wallMain) expect(s.pattern).toBeUndefined()
+  })
+
+  it('accent wall alone, with finishes off, dresses only the accent face', () => {
+    const { doc, roomIds } = build()
+    const before = JSON.parse(JSON.stringify(doc)) as Doc
+    applyStyle(doc, style, { rooms: [roomIds.living], parts: { finishes: false, accent: true, openings: false, furniture: false, lights: false } })
+    const changed = Object.values(doc.walls).flatMap((w) =>
+      (['left', 'right'] as const).filter((k) => JSON.stringify(w[k]) !== JSON.stringify(before.walls[w.id][k])).map((k) => w[k]),
+    )
+    expect(changed).toHaveLength(1)
+    expect(changed[0].materialId).toBe(style.finishes.wallAccent)
+    expect(doc.rooms[roomIds.living].floor).toEqual(before.rooms[roomIds.living].floor)
   })
 })

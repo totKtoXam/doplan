@@ -5,11 +5,13 @@ import {
   bomToCsv,
   bomTotals,
   computeBom,
+  decodeCsvBytes,
   formatMoney,
   localDate,
   parsePriceListCsv,
   priceListToCsv,
   productFor,
+  productUrl,
   wallpaperStrip,
   wasteFor,
   type BomRow,
@@ -231,5 +233,81 @@ describe('estimate: file format', () => {
     const lw = back.walls[wall.id].left
     expect(lw.pattern?.offsetX).toBe(10)
     expect(lw.zones?.[0]).toMatchObject({ label: 'Фартук', pattern: { type: 'grid' } })
+  })
+})
+
+describe('estimate: review fixes', () => {
+  it('one material in two wall layouts: both purchase rows are priced and counted in the total', () => {
+    const { doc } = build()
+    for (const w of Object.values(doc.walls))
+      for (const s of [w.left, w.right]) {
+        s.materialId = TILE.id
+        s.pattern = { ...GRID, tileW: 300, tileH: 75, type: 'brick' }
+        s.zones = [{ from: 0, to: 1200, materialId: TILE.id, pattern: { ...GRID, tileW: 200, tileH: 100 } }]
+      }
+    doc.design = { priceList: { [TILE.id]: { price: 4000, priceUnit: 'м²' } } }
+    const rows = computeBom(doc)
+    const buy = rows.filter((r) => r.group === 'Стены' && r.refId === TILE.id && r.purchase)
+    expect(buy).toHaveLength(2)
+    for (const r of buy) expect(r.total).toBeCloseTo(4000 * r.alt!['м²']!, 2)
+    expect(bomTotals(rows).byGroup['Стены']).toBeCloseTo(buy[0].total! + buy[1].total!, 2)
+  })
+
+  it('tile m² and boxes use the tile face, the count uses the laying pitch', () => {
+    const { doc } = withFloorTile({ ...GRID, tileW: 100, tileH: 100, grout: 2 })
+    doc.design = { priceList: { [TILE.id]: { price: 1000, priceUnit: 'м²', pack: 1 } } }
+    const tile = floorTileRow(computeBom(doc))
+    // 12 m² × 1.1 / (0.102 × 0.102) tiles, each 0.01 m² of face
+    expect(tile.quantity).toBe(Math.ceil((12 * 1.1) / (0.102 * 0.102)))
+    expect(tile.alt!['м²']).toBeCloseTo(tile.quantity * 0.01, 2)
+    expect(tile.alt!['уп.']).toBe(Math.ceil(tile.quantity * 0.01))
+  })
+
+  it('plank waste falls back to the layout stored on the material', () => {
+    const { doc, roomId } = build()
+    doc.materials.m_lam = {
+      id: 'm_lam',
+      name: 'Ламинат ёлка',
+      category: 'laminate',
+      color: '#a87',
+      roughness: 0.6,
+      metalness: 0,
+      pattern: { type: 'chevron', tileW: 600, tileH: 100, grout: 0, groutColor: '#000', rotation: 0 },
+    }
+    const floor = { ...doc.rooms[roomId].floor, materialId: 'm_lam' }
+    delete floor.pattern
+    doc.rooms[roomId].floor = floor
+    const packs = computeBom(doc).find((r) => r.group === 'Полы' && r.unit === 'уп.')!
+    expect(packs.note).toContain('запасом 20%')
+  })
+
+  it('price list CSV in Windows-1251 is decoded, UTF-8 BOM is dropped', () => {
+    // "id;цена" in cp1251
+    const cp = new Uint8Array([0x69, 0x64, 0x3b, 0xf6, 0xe5, 0xed, 0xe0])
+    expect(decodeCsvBytes(cp)).toBe('id;цена')
+    const utf = new TextEncoder().encode('\uFEFFid;цена')
+    expect(decodeCsvBytes(utf)).toBe('id;цена')
+  })
+
+  it('product links: http(s) kept, bare domains get https, other schemes rejected', () => {
+    expect(productUrl('https://shop.kz/item?id=1')).toBe('https://shop.kz/item?id=1')
+    expect(productUrl(' shop.kz/item ')).toBe('https://shop.kz/item')
+    expect(productUrl('javascript:alert(1)')).toBeUndefined()
+    expect(productUrl('file:///C:/x')).toBeUndefined()
+    expect(productUrl('просто текст')).toBeUndefined()
+    expect(parsePriceListCsv('id;price;url\nm_a;10;javascript:alert(1)\nm_b;5;shop.kz/b').entries).toMatchObject({
+      m_a: { price: 10 },
+      m_b: { url: 'https://shop.kz/b' },
+    })
+    expect(parsePriceListCsv('id;price;url\nm_a;10;javascript:alert(1)').entries.m_a.url).toBeUndefined()
+  })
+
+  it('estimate CSV header and total line go through the translator', () => {
+    const { doc } = withFloorTile(GRID)
+    doc.design = { currency: 'EUR', priceList: { [TILE.id]: { price: 2.5 } } }
+    const tr = (s: string) => ({ Цена: 'Price', Итого: 'Total' })[s] ?? s
+    const csv = bomToCsv(computeBom(doc), 'EUR', tr)
+    expect(csv.split('\n')[0]).toContain('Price (EUR)')
+    expect(csv).toMatch(/\nTotal;/)
   })
 })

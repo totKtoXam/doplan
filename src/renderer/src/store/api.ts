@@ -7,6 +7,9 @@ import type { AppSettings, DoplanApi, FileFilter, MenuCommand } from '@shared/ip
 import { DEFAULT_AI_SETTINGS } from '@shared/aiChat'
 import { releasePageUrl } from '@shared/updater'
 
+/** version shown by the web build (no Electron); keep in step with package.json */
+const WEB_VERSION = '0.7.1-web'
+
 const SETTINGS_KEY = 'doplan.settings'
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -95,7 +98,7 @@ function createFallbackApi(): DoplanApi {
   const noopUnsub = () => () => {}
   return {
     platform: 'browser',
-    version: '0.6.0-web',
+    version: WEB_VERSION,
     project: {
       async open(path?: string) {
         let file: File | undefined = path ? pickedFiles.get(path) : undefined
@@ -241,10 +244,10 @@ function createFallbackApi(): DoplanApi {
     // ── end ai-chat block ──
     updates: {
       async get() {
-        return { mode: 'disabled', current: '0.5.0-web', status: { kind: 'idle' } }
+        return { mode: 'disabled', current: WEB_VERSION, status: { kind: 'idle' } }
       },
       async check() {
-        return { mode: 'disabled', current: '0.5.0-web', status: { kind: 'idle' } }
+        return { mode: 'disabled', current: WEB_VERSION, status: { kind: 'idle' } }
       },
       async install() {},
       async openReleasePage(version?: string) {

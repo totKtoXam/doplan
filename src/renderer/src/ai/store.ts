@@ -213,6 +213,17 @@ export function initAi(): void {
   sync()
   addProjectHook({
     saved: async (saveAs) => {
+      // a claim of the opened file answers first: a save made before it (Ctrl+S right after opening a
+      // copy) must not hand the original's chat folder to the copy
+      while (claiming) await claiming
+      const c = copyClaim
+      const s = docStore.getState()
+      // the save started before the claim answered and wrote the old id: the copy keeps its new one
+      // (and stays changed until it is saved with it)
+      if (!saveAs && c && s.loadId === c.loadId && s.filePath === c.path && s.doc.meta.id === c.from) {
+        s.setDocId(c.to)
+        set({ projectPath: `id:${c.to}` })
+      }
       // the first save of a new document takes its chats along, even through Save As
       const wasUnsaved = unsavedDoc
       unsavedDoc = false
@@ -301,6 +312,10 @@ let settingsRev = 0
 
 /** a move of the chats in progress: a new turn waits for it (it would start in the wrong place) */
 let moving: Promise<void> | null = null
+/** the claim of the file just opened, until its answer is applied: the 'saved' hook waits for it */
+let claiming: Promise<void> | null = null
+/** the opened file turned out to be a copy: its id `from` became `to` (for the load `loadId` of `path`) */
+let copyClaim: { loadId: number; path: string; from: string; to: string } | null = null
 
 /**
  * The open document was saved: its chats follow when its reference changed (moved; copied without
@@ -369,6 +384,7 @@ async function setProject(gone: string | null): Promise<void> {
   if (gone && !get().legacy) dropCurrent()
   else leaveChat()
   let ref = docRef()
+  copyClaim = null
   // switched at once: whatever is saved from now on lands in the new project
   set({ projectPath: ref, legacy: false, chats: [], chat: emptyChat(get().settings.provider), chips: [], images: [], status: '' })
   if (gone && gone !== ref) void queueWrite(() => api.aiChat.dropChats(gone)).catch(() => {})
@@ -382,13 +398,24 @@ async function setProject(gone: string | null): Promise<void> {
     const job = queueWrite(() => api.aiChat.claimDocument(opened, filePath)).catch(() => opened)
     const wait = job.then(() => {})
     moving = wait
-    const claimed = await job
-    if (moving === wait) moving = null
-    if (get().projectPath !== opened || docStore.getState().loadId !== loadId) return
-    if (claimed !== opened && claimed.startsWith('id:')) {
-      docStore.getState().setDocId(claimed.slice(3))
-      ref = claimed
-      set({ projectPath: ref })
+    let applied!: () => void
+    const claim = new Promise<void>((r) => (applied = r))
+    claiming = claim
+    try {
+      const claimed = await job
+      if (moving === wait) moving = null
+      const s = docStore.getState()
+      // not after another file was opened, nor after a Save As gave the document an id of its own
+      if (get().projectPath !== opened || s.loadId !== loadId || s.filePath !== filePath || `id:${s.doc.meta.id}` !== opened) return
+      if (claimed !== opened && claimed.startsWith('id:')) {
+        copyClaim = { loadId, path: filePath, from: opened.slice(3), to: claimed.slice(3) }
+        s.setDocId(claimed.slice(3))
+        ref = claimed
+        set({ projectPath: ref })
+      }
+    } finally {
+      if (claiming === claim) claiming = null
+      applied()
     }
   }
   const rev = settingsRev

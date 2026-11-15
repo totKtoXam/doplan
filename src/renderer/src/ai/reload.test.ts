@@ -99,6 +99,9 @@ describe('AI chat across reloads of the same project', () => {
     fake.claims.set('id:origXXXX|C:/p/F', 'id:copyYYYY')
     await openProject('C:/p/F', { skipConfirm: true })
     await settle()
+    // the copy's own id is a change until saved (viewing a version would ask about it first): saved
+    expect(docStore.getState().dirty).toBe(true)
+    docStore.getState().markSaved('C:/p/F', 'copyYYYY')
 
     const chatId = busyChat('r2')
     expect(await viewVersion(version)).toBe(true)

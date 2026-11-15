@@ -21,6 +21,7 @@ import {
   canSupport,
   clampItemSize,
   findSupport,
+  layerIndex,
   minItemSize,
   mountForElevation,
   planResizeTargets,
@@ -336,6 +337,11 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
         ref = { kind: ud.ref.kind, id: ud.ref.id }
         owner = o
       }
+    }
+    // locked (layers panel) objects block the ray but are not touchable on the canvas
+    if (ref && !layerIndex(docStore.getState().doc).pickable(ref.kind, ref.id)) {
+      ref = null
+      owner = hit.object
     }
     if (slot === undefined && hit.face && Array.isArray((hit.object as THREE.Mesh).material)) {
       const mats = (hit.object as THREE.Mesh).material as THREE.Material[]

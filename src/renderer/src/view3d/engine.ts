@@ -22,6 +22,7 @@ import type {
   ProceduralFactory,
   StillOptions,
 } from '@/contracts'
+import { visibleDoc, visiblePlan } from '@core/layers'
 import { docStore } from '@/store/document'
 import { uiStore } from '@/store/ui'
 import { Architecture } from './build/architecture'
@@ -314,9 +315,11 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     lastSyncChanged = false
     const ds = docStore.getState()
     const ui = uiStore.getState()
-    const doc = ds.doc
+    // the scene is built from what the layers panel shows (hidden objects are left out)
+    const doc = visibleDoc(ds.doc)
     const levelId = activeLevel(doc)
-    const plan = ds.derived[levelId]
+    const fullPlan = ds.derived[levelId]
+    const plan = fullPlan && visiblePlan(ds.doc, fullPlan)
 
     if (doc.render.quality && doc.render.quality !== lastDocQuality) {
       lastDocQuality = doc.render.quality

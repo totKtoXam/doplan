@@ -10,6 +10,7 @@ import {
   minItemSize,
   moveNode,
   moveOpening,
+  pickableRefs,
   planResizeTargets,
   resizedParams,
   resizeFromFace,
@@ -288,7 +289,8 @@ export function createSelectTool(ctx: EditorCtx): Tool {
     }
 
     // group move of everything movable in the selection
-    const sel = ui().selection.filter((r) => MOVABLE.has(r.kind))
+    // hidden / locked objects selected in the layers panel stay put
+    const sel = pickableRefs(d, ui().selection).filter((r) => MOVABLE.has(r.kind))
     const nodes = new Map<Id, Vec2>()
     const points: { ref: EntityRef; x: number; y: number }[] = []
     const dims: { id: Id; a: Vec2; b: Vec2 }[] = []
@@ -726,7 +728,7 @@ export function createSelectTool(ctx: EditorCtx): Tool {
   }
 
   function nudge(dx: number, dy: number, step: number): boolean {
-    const sel = ui().selection
+    const sel = pickableRefs(store().doc, ui().selection)
     if (!sel.length) return false
     store().transact(
       t('Сдвиг'),
@@ -999,7 +1001,7 @@ export function createSelectTool(ctx: EditorCtx): Tool {
             }
           }
         }
-        ui().select([...seen].map((id) => ({ kind: 'wall' as const, id })))
+        ui().select(pickableRefs(d, [...seen].map((id) => ({ kind: 'wall' as const, id }))))
       }
     },
 

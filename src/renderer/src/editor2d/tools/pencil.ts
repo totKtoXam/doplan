@@ -37,7 +37,7 @@ function badgeAnchor(m: Pick<Annotation, 'points' | 'shape'>): Vec2 {
 
 /** all marks of the active level (called by the editor every frame, above the plan) */
 export function drawMarks(ctx: EditorCtx, p: Painter): void {
-  const all = ctx.doc().annotations
+  const all = ctx.view().doc.annotations
   if (!all) return
   const lv = ctx.levelId()
   const pal = p.pal
@@ -57,7 +57,7 @@ export function drawMarks(ctx: EditorCtx, p: Painter): void {
 
 /** context-menu items for a mark under the pointer, or null */
 export function markMenuItems(ctx: EditorCtx, plan: Vec2): ContextMenuItem[] | null {
-  const m = markAt(ctx.doc(), ctx.levelId(), plan, ctx.mm(8))
+  const m = markAt(ctx.view().doc, ctx.levelId(), plan, ctx.mm(8))
   if (!m) return null
   marksStore.getState().select(m.id)
   const lv = ctx.levelId()
@@ -97,7 +97,7 @@ export function createPencilTool(ctx: EditorCtx): Tool {
     },
     pointerMove(e) {
       if (!pts || !start) {
-        const m = markAt(ctx.doc(), ctx.levelId(), e.plan, ctx.mm(6))
+        const m = markAt(ctx.view().doc, ctx.levelId(), e.plan, ctx.mm(6))
         ctx.setCursor(m ? 'pointer' : 'crosshair')
         return
       }
@@ -113,7 +113,7 @@ export function createPencilTool(ctx: EditorCtx): Tool {
       if (!drawn || !from) return
       if (extent(drawn) < ctx.mm(6)) {
         // a click: select the mark under the pointer
-        const m = markAt(ctx.doc(), ctx.levelId(), e.plan, ctx.mm(8))
+        const m = markAt(ctx.view().doc, ctx.levelId(), e.plan, ctx.mm(8))
         marksStore.getState().select(m?.id ?? null)
         ctx.requestRender()
         return

@@ -70,8 +70,7 @@ export class RoomsLayer {
   }
 
   update(ctx: EditorCtx): void {
-    const doc = ctx.doc()
-    const derived = ctx.derived()
+    const { doc, derived } = ctx.view()
     const ui = ctx.ui()
     const pal = ctx.palette()
     this.pattern.visible = this.minSpacing * ctx.camera.scale >= 7

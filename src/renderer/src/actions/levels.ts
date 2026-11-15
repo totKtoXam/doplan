@@ -1,4 +1,4 @@
-import { newId } from '@core'
+import { newId, remapAccentFace } from '@core'
 import type { Doc, Id, Level } from '@core/types'
 import { t } from '@/i18n'
 import { docStore } from '@/store/document'
@@ -38,6 +38,7 @@ export function copyLevelInto(src: Doc, srcLevel: Id, draft: Doc, dstLevel: Id, 
     if (r.levelId !== srcLevel) continue
     const id = newId('r')
     draft.rooms[id] = structuredClone({ ...r, id, levelId: dstLevel, anchor: { x: r.anchor.x + dx, y: r.anchor.y + dy } })
+    remapAccentFace(draft.rooms[id], wallMap)
   }
   for (const it of Object.values(src.items)) {
     if (it.levelId !== srcLevel) continue

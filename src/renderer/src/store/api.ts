@@ -8,7 +8,7 @@ import { DEFAULT_AI_SETTINGS } from '@shared/aiChat'
 import { releasePageUrl } from '@shared/updater'
 
 /** version shown by the web build (no Electron); keep in step with package.json */
-const WEB_VERSION = '0.11.0-web'
+const WEB_VERSION = '0.11.1-web'
 
 const SETTINGS_KEY = 'doplan.settings'
 
@@ -161,7 +161,7 @@ function createFallbackApi(): DoplanApi {
         throw new Error('Папки проектов доступны только в настольном приложении')
       },
       async info() {
-        return { root: null, gitAvailable: false, repo: false, trusted: true, gitFile: false, folderTrusted: false, gitVersion: '' }
+        return { root: null, gitAvailable: false, repo: false, trusted: true, gitFile: false, folderTrusted: false, gitVersion: '', unsafeGit: null }
       },
       async defaultLocation() {
         return ''
@@ -187,6 +187,9 @@ function createFallbackApi(): DoplanApi {
       },
       async trustFolder() {
         return false
+      },
+      async resetGitConfig(): Promise<string> {
+        throw new Error('Папки проектов доступны только в настольном приложении')
       },
       async history() {
         return []

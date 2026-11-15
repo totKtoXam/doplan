@@ -1,6 +1,6 @@
 import { createEmptyDoc, newProjectId, parseDoc } from '@core'
 import type { Doc } from '@core/types'
-import type { ProjectVersion } from '@shared/ipc'
+import type { ProjectInfo, ProjectVersion, UnsafeGitConfig } from '@shared/ipc'
 import { buildCommitMessage } from '@shared/projectFormat'
 import type { DocReload } from '@/contracts'
 import { t } from '@/i18n'
@@ -25,7 +25,7 @@ function kindOfPath(path: string | null): ProjectKind | null {
 export function loadDocument(
   doc: Doc,
   filePath: string | null,
-  project?: { kind?: ProjectKind | null; git?: boolean; untrustedGit?: boolean; gitFile?: boolean; reload?: DocReload },
+  project?: { kind?: ProjectKind | null; git?: boolean; untrustedGit?: boolean; gitFile?: boolean; unsafeGit?: UnsafeGitConfig | null; reload?: DocReload },
 ): void {
   docStore.getState().load(doc, filePath, project?.reload ?? null)
   const d = docStore.getState().doc
@@ -46,6 +46,7 @@ export function loadDocument(
     git: root ? !!project?.git : false,
     untrustedGit: root ? !!project?.untrustedGit : false,
     gitFile: root ? !!project?.gitFile : false,
+    unsafeGit: root ? (project?.unsafeGit ?? null) : null,
     commitMarker: historyPosition(),
     viewing: null,
   })
@@ -165,7 +166,7 @@ export async function createProjectFolder(mode: 'new' | 'saveAs', name: string, 
       const id = saveId(doc, docStore.getState().filePath, fork)
       const res = await api.project.create(withId(doc, id), clean, parent)
       docStore.getState().markSaved(res.path, id)
-      projectStore.setState({ root: res.path, kind: 'folder', git: !!res.git, untrustedGit: false, gitFile: false, commitMarker: historyPosition(), viewing: null })
+      projectStore.setState({ root: res.path, kind: 'folder', git: !!res.git, untrustedGit: false, gitFile: false, unsafeGit: null, commitMarker: historyPosition(), viewing: null })
       void api.project.clearRecovery().catch(() => {})
       // the chats follow the document (a Save As copy gets its own); awaited like any save
       await runProjectHooks('saved', fork)
@@ -205,10 +206,12 @@ async function afterOpen(res: Awaited<ReturnType<typeof api.project.open>>, relo
   // reload or a version view, is still this one)
   if (reload && otherProjectLoaded(loadId, res.path)) reload = null
   if (reload) doc = keepId(doc)
-  loadDocument(doc, res.path, { kind: res.kind ?? kindOfPath(res.path), git: res.git, untrustedGit: res.untrustedGit, gitFile: res.gitFile, reload })
+  loadDocument(doc, res.path, { kind: res.kind ?? kindOfPath(res.path), git: res.git, untrustedGit: res.untrustedGit || res.untrustedFolder, gitFile: res.gitFile, unsafeGit: res.unsafeGit, reload })
   refreshRecent()
   toast(t('Проект открыт'), 'success')
   if (res.untrustedGit) await offerTrustFolder('git')
+  // a trusted folder whose git config has unknown keys: reset it or work without versions (asked once per session)
+  else if (res.unsafeGit && !reload) await offerResetGitConfig()
   if (res.kind === 'zip' && api.platform !== 'browser') {
     const choice = await choiceDialog(
       t('Проект в одном файле .doplan'),
@@ -229,18 +232,23 @@ const notTrusted = new Set<string>()
  * Asks whether the user trusts the open project folder.
  * 'git': the opened folder already had a .git that doplan did not create — its config and hooks are
  * not trusted, so doplan runs no git commands there until the user says the folder is theirs.
+ * 'folder': a folder without a repository that doplan did not create — doplan creates no repository
+ * there (git would look into whatever the folder brought) until the user trusts it.
  * 'ai': before the first AI agent run in a folder doplan did not create here (or that was replaced or
  * moved): an untrusted folder is not the agent's working directory.
  */
-export async function offerTrustFolder(reason: 'git' | 'ai'): Promise<boolean> {
+export async function offerTrustFolder(reason: 'git' | 'folder' | 'ai'): Promise<boolean> {
   const root = projectStore.getState().root
   if (!root) return false
+  const name = root.split(/[\\/]/).filter(Boolean).pop() ?? root
   const choice = await choiceDialog(
     reason === 'git' ? t('В папке уже есть репозиторий git') : t('Доверять папке проекта?'),
     reason === 'git'
       ? t('Эту папку создал не doplan, и в её настройках git могут быть чужие команды. Пока вы не доверяете папке, doplan не запускает в ней git: история версий выключена, сохранение пишет только файлы, а ИИ-агент работает в отдельной папке. Доверяйте, только если папка ваша или получена из надёжного источника.')
-      : t('Папку «{name}» doplan не создавал на этом компьютере (или её заменили либо переместили). В доверенной папке ИИ-агент работает прямо в ней: следует её AGENTS.md как вашим инструкциям, читает её настройки агента (.claude, .codex, .gemini) и запускает в ней git. Иначе агент работает в отдельной папке и видит AGENTS.md только как заметки автора. Доверяйте, только если папка ваша или получена из надёжного источника.', { name: root.split(/[\\/]/).filter(Boolean).pop() ?? root }),
-    reason === 'git'
+      : reason === 'folder'
+        ? t('Папку «{name}» создал не doplan (или её заменили либо переместили). Пока вы не доверяете папке, doplan не создаёт в ней репозиторий git: история версий выключена, сохранение пишет только файлы, а ИИ-агент работает в отдельной папке. Доверяйте, только если папка ваша или получена из надёжного источника.', { name })
+        : t('Папку «{name}» doplan не создавал на этом компьютере (или её заменили либо переместили). В доверенной папке ИИ-агент работает прямо в ней: следует её AGENTS.md как вашим инструкциям, читает её настройки агента (.claude, .codex, .gemini) и запускает в ней git. Иначе агент работает в отдельной папке и видит AGENTS.md только как заметки автора. Доверяйте, только если папка ваша или получена из надёжного источника.', { name }),
+    reason !== 'ai'
       ? [
           { id: 'no', label: t('Не доверять') },
           { id: 'yes', label: t('Доверять этой папке'), variant: 'primary' },
@@ -257,11 +265,68 @@ export async function offerTrustFolder(reason: 'git' | 'ai'): Promise<boolean> {
     const ok = await api.project.trustFolder()
     if (!ok) return false
     notTrusted.delete(root.toLowerCase())
-    const info = await api.project.info()
-    projectStore.setState((s) => ({ git: info.gitAvailable && info.trusted && !info.gitFile, untrustedGit: !info.trusted, historyRev: s.historyRev + 1 }))
+    applyGitInfo(await api.project.info())
+    if (projectStore.getState().unsafeGit) await offerResetGitConfig()
     return true
   } catch (err) {
     await alertDialog(t('Не удалось доверить папку'), errorText(err))
+    return false
+  }
+}
+
+/** the git state of the open folder as main sees it now */
+function applyGitInfo(info: ProjectInfo): void {
+  projectStore.setState((s) => ({
+    git: info.gitAvailable && info.trusted && !info.gitFile && !info.unsafeGit,
+    untrustedGit: !info.trusted,
+    unsafeGit: info.unsafeGit,
+    historyRev: s.historyRev + 1,
+  }))
+}
+
+/** folders (lower-cased) whose user chose to work without versions in this session */
+const withoutVersions = new Set<string>()
+
+/**
+ * The open (trusted) folder's git config has keys outside doplan's allowlist: git could run programs
+ * named there, so doplan runs no git at all. The user resets the config to the allowed keys (a backup
+ * stays in .git) or works without versions. `ask`: false when the user already chose to reset (the
+ * history dialog's button), true to ask first; a folder whose user chose to work without versions is
+ * not asked again in this session.
+ */
+export async function offerResetGitConfig(ask = true): Promise<boolean> {
+  const { root, unsafeGit } = projectStore.getState()
+  if (!root || !unsafeGit) return false
+  if (ask) {
+    if (withoutVersions.has(root.toLowerCase())) return false
+    const keys = unsafeGit.keys.slice(0, 8).join(', ') + (unsafeGit.keys.length > 8 ? ', …' : '')
+    const text = t('В настройках git этой папки есть параметры, через которые git или его дополнения могут запускать программы: {keys}. Пока они там, doplan не запускает в папке git: история версий выключена, сохранение пишет только файлы.', { keys })
+    if (!unsafeGit.resettable) {
+      await alertDialog(t('Небезопасные настройки git'), `${text} ${t('Этот репозиторий устроен иначе, и doplan не может сбросить его настройки: работайте без версий или исправьте .git/config сами.')}`)
+      withoutVersions.add(root.toLowerCase())
+      return false
+    }
+    const choice = await choiceDialog(
+      t('Небезопасные настройки git'),
+      `${text} ${t('Сброс оставит в .git/config только простые параметры (имя автора, адрес удалённого репозитория, ветки); прежний файл сохранится как .git/config.doplan-backup.')}`,
+      [
+        { id: 'no', label: t('Работать без версий') },
+        { id: 'reset', label: t('Сбросить настройки git'), variant: 'primary' },
+      ],
+    )
+    if (choice !== 'reset') {
+      withoutVersions.add(root.toLowerCase())
+      return false
+    }
+  }
+  try {
+    const backup = await api.project.resetGitConfig()
+    withoutVersions.delete(root.toLowerCase())
+    applyGitInfo(await api.project.info())
+    toast(t('Настройки git сброшены, прежние сохранены в {file}', { file: backup.split(/[\\/]/).slice(-2).join('/') }), 'success')
+    return true
+  } catch (err) {
+    await alertDialog(t('Не удалось сбросить настройки git'), errorText(err))
     return false
   }
 }
@@ -393,7 +458,7 @@ async function saveFileLegacy(target: string | null): Promise<boolean> {
     const res = await api.project.save(withId(doc, id), target)
     if (!res) return false
     docStore.getState().markSaved(res.path, id)
-    projectStore.setState({ root: null, kind: kindOfPath(res.path), git: false, untrustedGit: false, gitFile: false, commitMarker: historyPosition(), viewing: null })
+    projectStore.setState({ root: null, kind: kindOfPath(res.path), git: false, untrustedGit: false, gitFile: false, unsafeGit: null, commitMarker: historyPosition(), viewing: null })
     // awaited: a save from the close dialog is followed by the window closing
     await runProjectHooks('saved', saveAs)
     void api.project.clearRecovery().catch(() => {})
@@ -458,8 +523,8 @@ export async function viewVersion(v: ProjectVersion): Promise<boolean> {
   // an old version is the same project: it keeps the project's id (and so its AI chats), even one
   // written before documents had an id
   doc = keepId(doc)
-  const { git, untrustedGit, gitFile } = projectStore.getState()
-  loadDocument(doc, root, { kind: 'folder', git, untrustedGit, gitFile, reload: 'version' })
+  const { git, untrustedGit, gitFile, unsafeGit } = projectStore.getState()
+  loadDocument(doc, root, { kind: 'folder', git, untrustedGit, gitFile, unsafeGit, reload: 'version' })
   projectStore.setState({ viewing: v, dialog: null })
   toast(t('Открыта версия от {date}', { date: versionDate(v) }), 'info')
   return true
@@ -588,13 +653,15 @@ export async function offerRecovery(): Promise<boolean> {
   let git = false
   let untrustedGit = false
   let gitFile = false
+  let unsafeGit: UnsafeGitConfig | null = null
   if (isFolder) {
     const info = await api.project.info().catch(() => null)
-    git = !!info && info.gitAvailable && info.trusted && !info.gitFile
+    git = !!info && info.gitAvailable && info.trusted && !info.gitFile && !info.unsafeGit
     untrustedGit = !!info && !info.trusted
     gitFile = !!info?.gitFile
+    unsafeGit = info?.unsafeGit ?? null
   }
-  loadDocument(doc, isFolder || kindOfPath(snap.path) !== 'folder' ? snap.path : null, { kind: isFolder ? 'folder' : undefined, git, untrustedGit, gitFile })
+  loadDocument(doc, isFolder || kindOfPath(snap.path) !== 'folder' ? snap.path : null, { kind: isFolder ? 'folder' : undefined, git, untrustedGit, gitFile, unsafeGit })
   docStore.getState().setDirty(true)
   toast(t('Проект восстановлен'), 'success')
   return true

@@ -25,6 +25,7 @@ import {
   readInstructions,
   readVersion,
   referencedAssets,
+  resetFolderGitConfig,
   rememberPlanOnDisk,
   setProjectRoot,
   trustFolder,
@@ -116,9 +117,12 @@ async function openFolderAt(root: string): Promise<ProjectOpenResult> {
   grantPath(root)
   pendingOpen = { path: root, root, staged: null, name: docName(doc) }
   const trust = await folderTrust(root)
-  // no repository yet: doplan creates one on the first save
-  const git = (trust.git === 'trusted' || trust.git === 'none') && !!(await findGit())
-  return { path: root, doc, kind: 'folder', git, untrustedGit: trust.git === 'untrusted', gitFile: trust.git === 'gitfile' }
+  // no repository yet: doplan creates one on the first save (only in a folder doplan made or the user trusted)
+  const git = (trust.git === 'trusted' || trust.git === 'none') && !trust.unsafeGit && !!(await findGit())
+  const res: ProjectOpenResult = { path: root, doc, kind: 'folder', git, untrustedGit: trust.git === 'untrusted', gitFile: trust.git === 'gitfile' }
+  if (trust.git === 'unknown') res.untrustedFolder = true
+  if (trust.unsafeGit) res.unsafeGit = trust.unsafeGit
+  return res
 }
 
 export async function openProject(pathArg?: unknown): Promise<ProjectOpenResult | null> {
@@ -391,10 +395,11 @@ export async function projectInfo(): Promise<ProjectInfo> {
     root,
     gitAvailable,
     repo: gitAvailable && (trust?.git === 'trusted' || trust?.git === 'untrusted'),
-    trusted: trust?.git !== 'untrusted',
+    trusted: trust?.git !== 'untrusted' && trust?.git !== 'unknown',
     gitFile: trust?.git === 'gitfile',
     folderTrusted: !!trust?.folder,
     gitVersion: gitVersion(),
+    unsafeGit: trust?.unsafeGit ?? null,
   }
 }
 
@@ -412,6 +417,11 @@ export async function trustProjectFolder(): Promise<boolean> {
   return true
 }
 
+/** the user resets the open folder's git config to the allowed keys (see ProjectInfo.unsafeGit) */
+export async function resetProjectGitConfig(): Promise<string> {
+  return resetFolderGitConfig(requireRoot())
+}
+
 export async function projectInstructions(): Promise<string | null> {
   const root = getProjectRoot()
   return root ? readInstructions(root) : null
@@ -425,7 +435,9 @@ export async function setProjectInstructions(text: unknown): Promise<string | nu
 
 export async function projectHistory(): Promise<ProjectVersion[]> {
   const root = getProjectRoot()
-  if (!root || !(await findGit()) || (await folderTrust(root)).git !== 'trusted') return []
+  if (!root || !(await findGit())) return []
+  const trust = await folderTrust(root)
+  if (trust.git !== 'trusted' || trust.unsafeGit) return []
   return gitLog(root)
 }
 

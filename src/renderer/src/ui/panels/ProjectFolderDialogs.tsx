@@ -14,6 +14,7 @@ import {
   restoreVersion,
   viewVersion,
   createProjectFolder,
+  offerResetGitConfig,
   offerTrustFolder,
 } from '@/actions/project'
 import { useT } from '@/i18n'
@@ -237,6 +238,55 @@ function HistoryDialog() {
               {t('Доверять этой папке…')}
             </Button>
           </div>
+        </div>
+      ) : info && !info.repo && !info.trusted ? (
+        <div className="flex flex-col gap-2 text-[12px] leading-relaxed">
+          {error && <div className="text-[11px] text-[#ff8589]">{error}</div>}
+          <div>
+            {t('Эту папку создал не doplan (или её заменили либо переместили). Пока вы не доверяете папке, doplan не создаёт в ней репозиторий git: история версий выключена, сохранение пишет только файлы.')}
+          </div>
+          <div>
+            <Button
+              variant="primary"
+              onClick={() =>
+                run(async () => {
+                  if (await offerTrustFolder('folder')) projectStore.setState({ dialog: 'history' })
+                })
+              }
+            >
+              {t('Доверять этой папке…')}
+            </Button>
+          </div>
+        </div>
+      ) : info && info.unsafeGit ? (
+        <div className="flex flex-col gap-2 text-[12px] leading-relaxed">
+          {error && <div className="text-[11px] text-[#ff8589]">{error}</div>}
+          <div>
+            {t('В настройках git этой папки есть параметры, через которые git или его дополнения могут запускать программы: {keys}. Пока они там, doplan не запускает в папке git: история версий выключена, сохранение пишет только файлы.', {
+              keys: info.unsafeGit.keys.slice(0, 8).join(', ') + (info.unsafeGit.keys.length > 8 ? ', …' : ''),
+            })}
+          </div>
+          {info.unsafeGit.resettable ? (
+            <>
+              <div className="text-[var(--muted)]">
+                {t('Сброс оставит в .git/config только простые параметры (имя автора, адрес удалённого репозитория, ветки); прежний файл сохранится как .git/config.doplan-backup.')}
+              </div>
+              <div>
+                <Button
+                  variant="primary"
+                  onClick={() =>
+                    run(async () => {
+                      if (await offerResetGitConfig(false)) projectStore.setState({ dialog: 'history' })
+                    })
+                  }
+                >
+                  {t('Сбросить настройки git')}
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div className="text-[var(--muted)]">{t('Этот репозиторий устроен иначе, и doplan не может сбросить его настройки: работайте без версий или исправьте .git/config сами.')}</div>
+          )}
         </div>
       ) : (
         <div className="flex flex-col gap-2">
@@ -496,6 +546,7 @@ export function ProjectFolderSection() {
   const git = useProject((s) => s.git)
   const untrustedGit = useProject((s) => s.untrustedGit)
   const gitFile = useProject((s) => s.gitFile)
+  const unsafeGit = useProject((s) => s.unsafeGit)
   const filePath = useDoc((s) => s.filePath)
   if (api.platform === 'browser') return null
   return (
@@ -509,6 +560,8 @@ export function ProjectFolderSection() {
             <div className="text-[11px] text-[var(--muted)]">{t('История версий выключена: папке не доверяют')}</div>
           ) : gitFile ? (
             <div className="text-[11px] text-[var(--muted)]">{t('Папка входит в другой репозиторий git — история версий doplan выключена')}</div>
+          ) : unsafeGit ? (
+            <div className="text-[11px] text-[var(--muted)]">{t('История версий выключена: небезопасные настройки git в папке')}</div>
           ) : (
             !git && <div className="text-[11px] text-[var(--muted)]">{t('Git не найден — история версий недоступна')}</div>
           )}

@@ -59,6 +59,7 @@ export type MenuCommand =
   | 'zoomFit'
   | 'settings'
   | 'checkUpdates'
+  | 'installUpdate'
   | 'about'
 
 export interface DoplanApi {

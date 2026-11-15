@@ -41,9 +41,28 @@ let checking: Promise<void> | null = null
 /** quitAndInstall is under way; an 'error' now means the installer did not start */
 let installing = false
 
+const listeners = new Set<(s: UpdateState) => void>()
+
 function setStatus(status: UpdateStatus): void {
   state = { ...state, status }
   sendToRenderer(CH.evUpdateState, state)
+  for (const l of listeners) {
+    try {
+      l(state)
+    } catch (err) {
+      log.error(err)
+    }
+  }
+}
+
+export function getUpdateState(): UpdateState {
+  return state
+}
+
+/** main-side subscribers (the Help menu enables «Перезапустить и установить» from this) */
+export function onUpdateState(cb: (s: UpdateState) => void): () => void {
+  listeners.add(cb)
+  return () => listeners.delete(cb)
 }
 
 function infoFields(info: UpdateInfo): { version: string; notes: string; releaseUrl: string } {
@@ -126,7 +145,7 @@ function install(): void {
   up.quitAndInstall(true, true)
 }
 
-async function openReleasePage(version: unknown): Promise<void> {
+export async function openReleasePage(version: unknown): Promise<void> {
   const v = typeof version === 'string' && /^v?\d+\.\d+\.\d+[\w.+-]*$/.test(version) ? version : undefined
   await shell.openExternal(releasePageUrl(v))
 }

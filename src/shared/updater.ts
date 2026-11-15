@@ -133,6 +133,20 @@ export function noticeFor(state: UpdateState, dismissed: string | null): UpdateS
   return s
 }
 
+/** what the Help menu offers next to «Проверить обновления…» */
+export type UpdateMenuAction =
+  | { kind: 'install'; enabled: boolean; version?: string }
+  | { kind: 'download-page'; enabled: boolean; version?: string }
+
+export function updateMenuAction(state: UpdateState): UpdateMenuAction {
+  const s = state.status
+  if (state.mode === 'portable') {
+    const v = s.kind === 'available' ? s.version : undefined
+    return v ? { kind: 'download-page', enabled: true, version: v } : { kind: 'download-page', enabled: false }
+  }
+  return state.mode === 'auto' && s.kind === 'downloaded' ? { kind: 'install', enabled: true, version: s.version } : { kind: 'install', enabled: false }
+}
+
 /** the status after electron-updater reports an error while in `prev` */
 export function errorStatus(prev: UpdateStatus, err: unknown): UpdateStatus {
   const version = prev.kind === 'available' || prev.kind === 'progress' || prev.kind === 'downloaded' ? prev.version : undefined

@@ -9,8 +9,8 @@ import { t } from '@/i18n'
 import { api, isElectron } from '@/store/api'
 import { dialogStore } from '@/store/dialogs'
 import { docStore } from '@/store/document'
-import { notifyStore, alertDialog, choiceDialog } from '@/store/notify'
-import { checkForUpdatesManually, initUpdates } from '@/store/updates'
+import { notifyStore, alertDialog } from '@/store/notify'
+import { checkForUpdatesManually, initUpdates, installUpdate } from '@/store/updates'
 import { uiStore } from '@/store/ui'
 import type { ToolId } from '@/contracts'
 import { shortcutKey } from './keys'
@@ -29,7 +29,7 @@ function isEditable(target: EventTarget | null): boolean {
 
 function anyDialogOpen(): boolean {
   const d = dialogStore.getState()
-  return d.bom || d.importModel || d.materialEditor || d.settings || d.photoPlan || d.render || notifyStore.getState().modals.length > 0
+  return d.bom || d.importModel || d.materialEditor || d.settings || d.photoPlan || d.render || d.about || notifyStore.getState().modals.length > 0
 }
 
 const TOOL_KEYS = new Map<string, ToolId>()
@@ -200,22 +200,13 @@ function onMenu(cmd: MenuCommand): void {
     case 'checkUpdates':
       void checkForUpdatesManually()
       break
+    case 'installUpdate':
+      void installUpdate()
+      break
     case 'about':
-      void showAbout()
+      dialogStore.getState().open('about')
       break
   }
-}
-
-async function showAbout(): Promise<void> {
-  const choice = await choiceDialog(
-    'doplan',
-    `${t('Планировки, фотореалистичное 3D и дизайн интерьера')}\n${t('Версия')} ${api.version} · ${api.platform}\n\n${t('Материалы и модели: Poly Haven, ambientCG, Kenney, Quaternius (CC0) и другие — см. лицензии в папке программы.')}`,
-    [
-      { id: 'updates', label: 'Проверить обновления' },
-      { id: 'ok', label: 'OK', variant: 'primary' },
-    ],
-  )
-  if (choice === 'updates') await checkForUpdatesManually()
 }
 
 async function onOpenFile(path: string): Promise<void> {

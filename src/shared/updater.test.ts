@@ -11,6 +11,7 @@ import {
   releaseNotesText,
   releasePageUrl,
   statusVersion,
+  updateMenuAction,
   type UpdateState,
   type UpdateStatus,
 } from './updater'
@@ -111,6 +112,14 @@ describe('status logic', () => {
     expect(noticeFor(state(available, 'portable'), null)).toBe(available)
     expect(noticeFor(state(available, 'disabled'), null)).toBeNull()
     expect(noticeFor(state({ kind: 'checking' }), null)).toBeNull()
+  })
+
+  it('Help menu: install only when downloaded, portable gets the download page', () => {
+    expect(updateMenuAction(state(downloaded))).toEqual({ kind: 'install', enabled: true, version: '0.6.0' })
+    expect(updateMenuAction(state(available))).toEqual({ kind: 'install', enabled: false })
+    expect(updateMenuAction(state({ kind: 'idle' }, 'disabled'))).toEqual({ kind: 'install', enabled: false })
+    expect(updateMenuAction(state(available, 'portable'))).toEqual({ kind: 'download-page', enabled: true, version: '0.6.0' })
+    expect(updateMenuAction(state({ kind: 'not-available', version: '0.5.0' }, 'portable'))).toEqual({ kind: 'download-page', enabled: false })
   })
 
   it('clamps progress', () => {

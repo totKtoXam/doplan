@@ -26,6 +26,15 @@ addTranslations('en', {
   Повторить: 'Retry',
   'Проверить обновления': 'Check for updates',
   'Проверить обновления…': 'Check for updates…',
+  'О программе doplan': 'About doplan',
+  Обновления: 'Updates',
+  'Проверяются автоматически при запуске и раз в 6 часов': 'Checked automatically at startup and every 6 hours',
+  'У вас последняя версия': 'You have the latest version',
+  'Доступна версия {v}, скачивается…': 'Version {v} is available, downloading…',
+  'Доступна версия {v}, скачивается {p}%': 'Version {v} is available, downloading {p}%',
+  'Версия {v} скачана и готова к установке': 'Version {v} is downloaded and ready to install',
+  'doplan {v} — о программе и обновления': 'doplan {v} — about and updates',
+  'Доступно обновление {v}': 'Update {v} available',
   'Проверка обновлений…': 'Checking for updates…',
   'У вас последняя версия ({v})': 'You have the latest version ({v})',
   'Нет связи с сервером обновлений': 'No connection to the update server',
@@ -82,25 +91,35 @@ export function dismissNotice(): void {
   if (s.kind === 'downloaded' || s.kind === 'progress') toast(t('Обновление установится при выходе из программы'), 'info', 5000)
 }
 
-/** «Проверить обновления»: always answers with a toast or by (re)opening the notice */
-export async function checkForUpdatesManually(): Promise<void> {
+/**
+ * «Проверить обновления»: checks right away (no waiting for the 6 h timer); in the installed build a
+ * found version starts downloading at once. Answers with a toast or by (re)opening the notice;
+ * `inline` (the About dialog shows the status itself) skips both.
+ */
+export async function checkForUpdatesManually(opts?: { inline?: boolean }): Promise<void> {
+  const inline = !!opts?.inline
   if (updatesStore.getState().manual) return
-  const { mode } = updatesStore.getState().state
-  if (mode === 'disabled') {
-    toast(t('Обновления работают только в установленной версии программы'), 'info', 5000)
+  const cur = updatesStore.getState().state
+  if (cur.mode === 'disabled') {
+    if (!inline) toast(t('Обновления работают только в установленной версии программы'), 'info', 5000)
     return
   }
-  updatesStore.setState({ manual: true, dismissed: null })
-  toast(t('Проверка обновлений…'), 'info', 2000)
+  updatesStore.setState(inline ? { manual: true } : { manual: true, dismissed: null })
+  if (!inline) toast(t('Проверка обновлений…'), 'info', 2000)
   let next: UpdateState
   try {
     next = await api.updates.check()
   } catch (err) {
-    updatesStore.setState({ manual: false })
-    toast(t('Не удалось проверить обновления: {m}', { m: err instanceof Error ? err.message : String(err) }), 'error', 6000)
+    const message = err instanceof Error ? err.message : String(err)
+    if (inline) updatesStore.setState({ manual: false, state: { ...cur, status: { kind: 'error', offline: false, message } } })
+    else {
+      updatesStore.setState({ manual: false })
+      toast(t('Не удалось проверить обновления: {m}', { m: message }), 'error', 6000)
+    }
     return
   }
   updatesStore.setState({ manual: false, state: next })
+  if (inline) return
   const s = next.status
   if (s.kind === 'not-available' || s.kind === 'idle') toast(t('У вас последняя версия ({v})', { v: next.current }), 'success', 4000)
   else if (s.kind === 'error' && !s.version) {

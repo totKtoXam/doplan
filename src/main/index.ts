@@ -18,7 +18,8 @@ import { registerIpc } from './ipc'
 import { registerAiChat, shutdownAiChat } from './aichat'
 // ── end ai-chat block ──
 import { getSettings, onSettingsChanged } from './settings'
-import { initUpdater } from './updater'
+import { getUpdateState, initUpdater, onUpdateState, openReleasePage } from './updater'
+import { updateMenuAction } from '../shared/updater'
 import { closeWasConfirmed, createMainWindow, getMainWindow, isTrustedUrl, requestOpenFile } from './window'
 
 // ───────────── pre-ready ─────────────
@@ -60,11 +61,20 @@ function openFromArgv(argv: string[], cwd?: string): void {
   requestOpenFile(file)
 }
 
+let menuArgs: { lang: 'ru' | 'en'; recent: { path: string; name: string }[] } | null = null
+
 function rebuildMenu(lang: 'ru' | 'en', recent: { path: string; name: string }[]): void {
-  buildMenu(lang, recent, (p) => {
-    grantPath(p)
-    requestOpenFile(p)
-  })
+  menuArgs = { lang, recent }
+  buildMenu(
+    lang,
+    recent,
+    (p) => {
+      grantPath(p)
+      requestOpenFile(p)
+    },
+    updateMenuAction(getUpdateState()),
+    (v) => void openReleasePage(v),
+  )
 }
 
 function hardenSessions(): void {
@@ -115,6 +125,14 @@ if (!gotLock) {
     const s = await getSettings()
     rebuildMenu(s.lang, s.recent)
     onSettingsChanged((next) => rebuildMenu(next.lang, next.recent))
+    // progress events are frequent: rebuild only when the Help menu's update item changes
+    let menuKey = JSON.stringify(updateMenuAction(getUpdateState()))
+    onUpdateState((st) => {
+      const key = JSON.stringify(updateMenuAction(st))
+      if (key === menuKey || !menuArgs) return
+      menuKey = key
+      rebuildMenu(menuArgs.lang, menuArgs.recent)
+    })
 
     createMainWindow()
     openFromArgv(process.argv)

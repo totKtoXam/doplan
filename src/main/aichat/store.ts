@@ -163,7 +163,8 @@ const OWN_ID_RE = /^[A-Za-z0-9_-]{6,64}$/
  * one. The chat folder remembers the file it belongs to: the same path, or that file no longer exists
  * (renamed / moved) → the document is the file itself and keeps its chats. Another file still there →
  * this one is a copy: it gets an id of its own (the same one on every open, until it is saved with it),
- * and the chats are copied without agent sessions, as on Save As. Resolves the reference to use.
+ * and the chats are copied without agent sessions, as on Save As. A path once known as a copy stays a
+ * copy. The renderer marks the copy as changed, so its new id reaches the file. Resolves the reference to use.
  */
 export async function claimDocument(ref: string, path: string): Promise<string> {
   const d = DOC_ID_RE.exec(ref)
@@ -173,15 +174,18 @@ export async function claimDocument(ref: string, path: string): Promise<string> 
   const saved = await readJson<{ path?: unknown } | null>(join(dir, SAVED_FILE), null)
   const owner = typeof saved?.path === 'string' ? resolve(saved.path) : null
   if (owner && owner.toLowerCase() === full.toLowerCase()) return ref
-  if (!owner || !(await exists(owner))) {
+  const copies = await readJson<Record<string, unknown>>(copiesFile(), {})
+  const key = `${d[1]}|${full.toLowerCase()}`
+  const mapped = copies && typeof copies === 'object' ? copies[key] : undefined
+  const known = typeof mapped === 'string' && OWN_ID_RE.test(mapped) ? mapped : undefined
+  // a path that was once a copy stays one when the original is renamed or deleted later:
+  // it never takes over the original's id, chats and agent sessions
+  if (!known && (!owner || !(await exists(owner)))) {
     await ensureDir(dir)
     await atomicWrite(join(dir, SAVED_FILE), JSON.stringify({ path: full }))
     return ref
   }
-  const copies = await readJson<Record<string, unknown>>(copiesFile(), {})
-  const key = `${d[1]}|${full.toLowerCase()}`
-  const known = copies && typeof copies === 'object' ? copies[key] : undefined
-  const id = typeof known === 'string' && OWN_ID_RE.test(known) ? known : randomBytes(12).toString('base64url')
+  const id = known ?? randomBytes(12).toString('base64url')
   if (id !== known) {
     await moveChats(ref, `id:${id}`, true, full)
     await atomicWrite(copiesFile(), JSON.stringify({ ...(copies && typeof copies === 'object' ? copies : {}), [key]: id }))

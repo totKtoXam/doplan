@@ -79,6 +79,16 @@ describe('docStore dirty flag', () => {
     expect(st().dirty).toBe(false)
   })
 
+  it('a new id for an opened copy is a change until saved, so it reaches the file', () => {
+    st().markSaved('/tmp/copy.doplan')
+    st().setDocId('own-copy-id')
+    expect(st().doc.meta.id).toBe('own-copy-id')
+    expect(st().dirty).toBe(true)
+    st().markSaved('/tmp/copy.doplan', 'own-copy-id')
+    expect(st().dirty).toBe(false)
+    expect(st().doc.meta.id).toBe('own-copy-id')
+  })
+
   it('transient previews are dirty only while pending', () => {
     st().transact('move', (d) => {
       d.meta.name = 'T'

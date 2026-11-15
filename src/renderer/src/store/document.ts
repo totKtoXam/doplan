@@ -411,7 +411,10 @@ export const docStore = createStore<DocStoreState>()((set, get) => {
 
     setDocId(id) {
       const doc = get().doc
-      if (doc.meta.id !== id) set({ doc: { ...doc, meta: { ...doc.meta, id } } })
+      if (doc.meta.id === id) return
+      // the file still carries the old id: changed until saved, so the next save (or the close prompt) writes it
+      savedId = -1
+      set({ doc: { ...doc, meta: { ...doc.meta, id } }, dirty: computeDirty() })
     },
 
     setDirty(dirty) {

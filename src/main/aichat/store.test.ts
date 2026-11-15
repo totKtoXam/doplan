@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync } from 'node:fs'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
@@ -96,6 +96,25 @@ describe('chat storage follows the project', () => {
     // the same copy opened again (not yet saved with its id) finds the same chats
     expect(await claimDocument('id:copied-id-1', copy)).toBe(mine)
     expect(await claimDocument('id:copied-id-1', orig)).toBe('id:copied-id-1')
+  })
+
+  it('a known copy stays a copy after the original is renamed; the renamed original keeps its id and sessions', async () => {
+    const orig = join(root, 'home.doplan')
+    const copy = join(root, 'home - Copy.doplan')
+    const moved = join(root, 'home-old.doplan')
+    await writeFile(orig, '{}')
+    await saveChat('id:home-id-1', chat('chat-h', 'h', { claude: 'H-1' }))
+    expect(await claimDocument('id:home-id-1', orig)).toBe('id:home-id-1')
+    const mine = await claimDocument('id:home-id-1', copy)
+    await saveChat(mine, chat('chat-mine', 'mine'))
+    // the original is renamed in Explorer before the copy was saved with its own id
+    await rm(orig)
+    await writeFile(moved, '{}')
+    expect(await claimDocument('id:home-id-1', copy)).toBe(mine)
+    expect(await ids(mine)).toEqual(['chat-h', 'chat-mine'])
+    expect(await claimDocument('id:home-id-1', moved)).toBe('id:home-id-1')
+    expect((await loadChat('id:home-id-1', 'chat-h'))?.resume).toEqual({ claude: 'H-1' })
+    expect(await ids('id:home-id-1')).toEqual(['chat-h'])
   })
 
   it('a renamed or moved file (the old path is gone) keeps its chats', async () => {

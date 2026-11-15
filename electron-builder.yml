@@ -55,4 +55,10 @@ electronFuses:
   onlyLoadAppFromAsar: true
   grantFileProtocolExtraPrivileges: false
 npmRebuild: false
-publish: null
+# GitHub Releases feed for electron-updater: electron-builder writes latest.yml next to the NSIS installer
+# and app-update.yml into resources. Builds never upload on their own (`pnpm dist` passes --publish never).
+publish:
+  provider: github
+  owner: totKtoXam
+  repo: doplan
+  releaseType: release

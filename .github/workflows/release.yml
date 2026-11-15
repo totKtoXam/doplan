@@ -1,0 +1,138 @@
+# Builds the Windows installer + portable exe and publishes the GitHub release when a `vX.Y.Z` tag is pushed.
+# How to release and how to update the assets pack: docs/RELEASING.md.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      TAG: ${{ github.ref_name }}
+      # no code-signing certificate: do not let electron-builder look for one
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # release notes need the previous v* tag and the history since
+
+      # checkout may leave the pushed tag lightweight; re-fetch it so an annotated message is readable
+      - name: Fetch the tag object
+        run: git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"
+
+      - uses: pnpm/action-setup@v4 # version from package.json "packageManager"
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Electron download caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: electron-${{ runner.os }}-
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Tag matches the version
+        run: |
+          VER=$(node -p "require('./package.json').version")
+          if [ "$TAG" != "v$VER" ]; then
+            echo "::error::tag $TAG does not match package.json version $VER (expected v$VER)"
+            exit 1
+          fi
+          if ! grep -q "WEB_VERSION = '$VER-web'" src/renderer/src/store/api.ts; then
+            echo "::error::WEB_VERSION in src/renderer/src/store/api.ts is not '$VER-web'"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$TAG ($GITHUB_SHA) is not on main; push main together with the tag"
+            exit 1
+          fi
+          echo "VER=$VER" >> "$GITHUB_ENV"
+
+      # ── heavy CC0 assets (gitignored): restored from the `assets-N` release, see tools/assets/pack.json ──
+      - name: Assets pack id
+        id: pack
+        run: |
+          echo "n=$(node -p "require('./tools/assets/pack.json').pack")" >> "$GITHUB_OUTPUT"
+          echo "sha=$(node -p "require('./tools/assets/pack.json').sha256")" >> "$GITHUB_OUTPUT"
+
+      - name: Assets cache
+        id: assets-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            resources/assets/models
+            resources/assets/materials
+            resources/assets/hdris
+          key: doplan-assets-${{ steps.pack.outputs.n }}-${{ steps.pack.outputs.sha }}
+
+      - name: Download and unpack assets pack
+        if: steps.assets-cache.outputs.cache-hit != 'true'
+        env:
+          N: ${{ steps.pack.outputs.n }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "assets-$N" --repo "$GITHUB_REPOSITORY" --pattern "doplan-assets-$N.zip" --dir "$RUNNER_TEMP"
+          pnpm assets:unpack "$RUNNER_TEMP/doplan-assets-$N.zip"
+
+      - run: pnpm assets:check
+
+      # after the assets: integration tests check that bundled catalog files exist
+      - run: pnpm typecheck
+      - run: pnpm test
+
+      - name: Release notes
+        run: |
+          pnpm -s release:notes "$TAG" --repo="$GITHUB_REPOSITORY" > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+
+      - name: Build
+        run: pnpm dist
+
+      - name: Check build output
+        run: |
+          OUT="release/$VER"
+          ls -la "$OUT"
+          for f in "doplan-setup-$VER.exe" "doplan-setup-$VER.exe.blockmap" latest.yml "doplan-portable-$VER.exe"; do
+            [ -s "$OUT/$f" ] || { echo "::error::missing $OUT/$f"; exit 1; }
+          done
+          grep -q "^version: $VER\$" "$OUT/latest.yml" || { echo "::error::latest.yml is not for $VER"; cat "$OUT/latest.yml"; exit 1; }
+          grep -q "doplan-setup-$VER.exe" "$OUT/latest.yml" || { echo "::error::latest.yml does not name doplan-setup-$VER.exe"; exit 1; }
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          OUT="release/$VER"
+          FILES=("$OUT/doplan-setup-$VER.exe" "$OUT/doplan-setup-$VER.exe.blockmap" "$OUT/latest.yml" "$OUT/doplan-portable-$VER.exe")
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            # re-run, or a release prepared by hand: replace the files, keep it published
+            gh release upload "$TAG" "${FILES[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+          else
+            # "Latest" is left to GitHub (highest version), so an older hotfix tag never becomes the update target
+            gh release create "$TAG" "${FILES[@]}" --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "doplan $VER" --notes-file "$RUNNER_TEMP/notes.md"
+          fi
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url,isDraft,isPrerelease,assets \
+            --jq '"\(.url) draft=\(.isDraft) prerelease=\(.isPrerelease) assets=\([.assets[].name] | join(", "))"'

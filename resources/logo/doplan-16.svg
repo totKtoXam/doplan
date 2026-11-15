@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- 16 px variant: walls snapped to the 16 px grid (16 units per pixel, 2 px walls), plate bleeds to the edge -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5d9bff"/>
+      <stop offset="1" stop-color="#2c63d6"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="256" height="256" rx="56" fill="url(#bg)"/>
+  <path d="M144 128 H80 A64 64 0 0 0 144 192 Z" fill="#fff" fill-opacity=".55"/>
+  <g fill="#fff">
+    <rect x="176" y="32" width="32" height="192"/>
+    <rect x="48" y="96" width="32" height="128"/>
+    <rect x="48" y="192" width="160" height="32"/>
+    <rect x="144" y="96" width="64" height="32"/>
+  </g>
+</svg>

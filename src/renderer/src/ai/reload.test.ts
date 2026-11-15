@@ -91,6 +91,7 @@ const { docStore } = await import('@/store/document')
 const { projectStore } = await import('@/store/project')
 const { createProjectFolder, leaveVersion, openProject, saveProject, viewVersion } = await import('@/actions/project')
 const { aiStore, initAi, send, updateSettings } = await import('./store')
+const { openCreateDialog } = await import('@/store/project')
 
 function planWithId(id: string): unknown {
   const doc: Doc = createEmptyDoc('План')
@@ -605,4 +606,36 @@ describe('reloads of the same project that overlap', () => {
     expect(fake.calls.claim).toEqual([])
     expect(docStore.getState().doc.meta.id).toBe('dwdwdwdw')
   })
+})
+
+describe('a Save As while a reload of the project waits', () => {
+  for (const step of ['openFor', 'attachFor'] as const) {
+    it(`held in ${step === 'openFor' ? 'open' : 'attach'}: the project read again keeps its own id, never the new file's`, async () => {
+      const A = `C:/p/SA-${step}`
+      fake.files.set(A, planWithId(`saaa${step}`))
+      await openProject(A, { skipConfirm: true })
+      await settle()
+      const release = holdFor(fake.gate[step], A)
+      const reloading = openProject(A, { skipConfirm: true, reload: 'disk' })
+      await settle()
+      // Save As to a new project folder (a fork with an id of its own) while the reload waits
+      void openCreateDialog('saveAs', true)
+      expect(await createProjectFolder('saveAs', 'NewB', 'C:/q')).toBeNull()
+      await settle()
+      const newId = docStore.getState().doc.meta.id
+      expect(newId).not.toBe(`saaa${step}`)
+      expect(docStore.getState().filePath).toBe('C:/q/NewB')
+      await release()
+      await reloading
+      await settle()
+      const s = docStore.getState()
+      expect(s.filePath).toBe(A)
+      expect(s.doc.meta.id).toBe(`saaa${step}`)
+      expect(aiStore.getState().projectPath).toBe(`id:saaa${step}`)
+      fake.calls.save.length = 0
+      s.transact('edit', (d) => void (d.meta.name = 'edited'))
+      expect(await saveProject(false)).toBe(true)
+      expect(fake.calls.save).toEqual([[`saaa${step}`, A]])
+    })
+  }
 })

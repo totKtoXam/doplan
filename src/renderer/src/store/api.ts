@@ -8,7 +8,7 @@ import { DEFAULT_AI_SETTINGS } from '@shared/aiChat'
 import { releasePageUrl } from '@shared/updater'
 
 /** version shown by the web build (no Electron); keep in step with package.json */
-const WEB_VERSION = '0.7.1-web'
+const WEB_VERSION = '0.8.0-web'
 
 const SETTINGS_KEY = 'doplan.settings'
 

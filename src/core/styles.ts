@@ -577,12 +577,13 @@ function sameLine(doc: Doc, a: Id, b: Id): boolean {
   return off(wb.a) <= 1 && off(wb.b) <= 1
 }
 
-/** after walls were copied under new ids: point a room's remembered accent face at the copy (or drop it) */
+/** after walls were copied under new ids: point a room's remembered accent face at the copy (dropped when it was not copied) */
 export function remapAccentFace(room: Room, wallMap: ReadonlyMap<Id, Id>): void {
   const key = room.design?.accentFace
   if (!key || !room.design) return
   const i = key.lastIndexOf(':')
   const wallId = wallMap.get(key.slice(0, i))
+  // a room copied without that wall has no accent wall from the style any more
   if (wallId) room.design.accentFace = `${wallId}${key.slice(i)}`
   else delete room.design.accentFace
 }
@@ -637,10 +638,10 @@ export function applyStyle(doc: Doc, style: StylePreset, opts: ApplyStyleOptions
       room.ceiling.materialId = F.ceiling
       delete room.ceiling.tint
       room.ceiling.cornice = wet ? 0 : style.cornice
-      if (wet) {
-        room.skirting = 0
-        delete room.skirtingMaterialId
-      } else {
+      // a wet room has no skirting; its material is left as is (a load fills a missing one in, so
+      // deleting it would make every re-apply after a save a change)
+      if (wet) room.skirting = 0
+      else {
         room.skirting = style.skirtingHeight
         room.skirtingMaterialId = F.skirting
       }
@@ -662,17 +663,33 @@ export function applyStyle(doc: Doc, style: StylePreset, opts: ApplyStyleOptions
       // the face the style made the accent last time, if it still is a face of this room (a copied
       // room or level, or a deleted wall, leave a stale key)
       const prevFace = faces.find((f) => faceKey(f.wallId, f.side) === prevAccent)
+      const accentMat = (f: Face) => doc.walls[f.wallId][f.side].materialId === F.wallAccent
       /**
-       * A face this style made the accent before: the remembered face and its pieces after a wall
-       * split (same line, same side of the room). Without a remembered face (projects saved before
-       * the key existed, or a stale key) every accent-material face of a room that takes an accent
-       * counts, as before.
+       * Faces this style made the accent before: the remembered face and its pieces after a wall
+       * split (accent-material faces on its side, on its line, joined to it node by node; a separate
+       * wall on the same line behind a niche does not count). With no remembered face (applied
+       * without an accent, a deleted wall, or a room styled by 0.8.0, which kept none) nothing is
+       * reset: accent-material faces may be the user's own.
        */
-      const wasAccent = (f: Face): boolean => {
-        if (doc.walls[f.wallId][f.side].materialId !== F.wallAccent) return false
-        if (!prevFace) return ACCENT_ROOMS.includes(room.type)
-        return f.side === prevFace.side && sameLine(doc, f.wallId, prevFace.wallId)
+      const oldAccents = new Set<string>()
+      if (prevFace && accentMat(prevFace)) {
+        const nodes = new Set([doc.walls[prevFace.wallId].a, doc.walls[prevFace.wallId].b])
+        oldAccents.add(faceKey(prevFace.wallId, prevFace.side))
+        for (let grew = true; grew; ) {
+          grew = false
+          for (const f of faces) {
+            const k = faceKey(f.wallId, f.side)
+            const w = doc.walls[f.wallId]
+            if (oldAccents.has(k) || f.side !== prevFace.side || !accentMat(f) || !(nodes.has(w.a) || nodes.has(w.b))) continue
+            if (!sameLine(doc, f.wallId, prevFace.wallId)) continue
+            oldAccents.add(k)
+            nodes.add(w.a)
+            nodes.add(w.b)
+            grew = true
+          }
+        }
       }
+      const wasAccent = (f: Face): boolean => oldAccents.has(faceKey(f.wallId, f.side))
       /** the finish the room's other walls have (most common), for the face that stops being the accent */
       const roomFinish = (): Id => {
         const n = new Map<Id, number>()
@@ -714,12 +731,9 @@ export function applyStyle(doc: Doc, style: StylePreset, opts: ApplyStyleOptions
       }
       // with finishes on and the accent off the old accent face was given the main finish above
       const nextAccent = parts.accent ? accentKey : undefined
-      if (room.design?.accentFace !== nextAccent) {
-        const design = { ...room.design }
-        if (nextAccent) design.accentFace = nextAccent
-        else delete design.accentFace
-        room.design = design
-      }
+      if (nextAccent) {
+        if (room.design?.accentFace !== nextAccent) room.design = { ...room.design, accentFace: nextAccent }
+      } else if (room.design?.accentFace !== undefined) delete room.design.accentFace
     }
 
     if (parts.openings) {

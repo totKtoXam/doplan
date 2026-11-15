@@ -4,9 +4,9 @@ import type { Id } from './types'
 /**
  * Entity id prefixes:
  *  n node · w wall · o opening · r room · i item · l light · d dimension · t label (text) ·
- *  u underlay · c camera · m material · a asset · lv level
+ *  u underlay · c camera · m material · a asset · lv level · pm pencil mark · ly user layer
  */
-export type IdPrefix = 'n' | 'w' | 'o' | 'r' | 'i' | 'l' | 'd' | 't' | 'u' | 'c' | 'm' | 'a' | 'lv' | 'pm'
+export type IdPrefix = 'n' | 'w' | 'o' | 'r' | 'i' | 'l' | 'd' | 't' | 'u' | 'c' | 'm' | 'a' | 'lv' | 'pm' | 'ly'
 
 /** `${prefix}_${nanoid(10)}` */
 export function newId(prefix: IdPrefix): Id {

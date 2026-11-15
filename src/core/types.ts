@@ -18,6 +18,38 @@ export interface Vec2 {
   y: number
 }
 
+// ───────────────────────────── Layers (outliner) ─────────────────────────────
+
+/**
+ * Outliner state every plan object may carry (layers panel, see core/layers):
+ * own visibility / lock, a user name and the user layer the object is on.
+ * The effective state also depends on the kind's group flags (`Doc.groupFlags`) and the layer's flags.
+ */
+export interface LayerFlags {
+  /** user name shown in the layers panel (absent = generated from the object) */
+  name?: string
+  /** hidden everywhere: 2D plan, 3D, exports */
+  hidden?: boolean
+  /** not pickable on the plan / in 3D, protected from delete */
+  locked?: boolean
+  /** user layer (`Doc.layers`) the object is on; absent = no layer */
+  layerId?: Id
+}
+
+/** A flat user layer (like an AutoCAD layer / SketchUp tag): objects reference it by `layerId`. */
+export interface UserLayer {
+  id: Id
+  name: string
+  hidden?: boolean
+  locked?: boolean
+}
+
+/** visibility / lock of a whole kind of objects (all walls, all furniture…) */
+export interface GroupFlags {
+  hidden?: boolean
+  locked?: boolean
+}
+
 // ───────────────────────────── Levels ─────────────────────────────
 
 export interface Level {
@@ -92,7 +124,7 @@ export interface WallDims {
   right?: DimProvenance
 }
 
-export interface Wall {
+export interface Wall extends LayerFlags {
   id: Id
   levelId: Id
   a: Id
@@ -144,7 +176,7 @@ export const DOOR_LEAF_STYLES: readonly DoorLeafStyle[] = ['flush', 'panel', 'gl
 export type DoorSlide = 'surface' | 'pocket' | 'barn' | 'folding'
 export const DOOR_SLIDES: readonly DoorSlide[] = ['surface', 'pocket', 'barn', 'folding']
 
-export interface Opening {
+export interface Opening extends LayerFlags {
   id: Id
   wallId: Id
   kind: OpeningKind
@@ -249,7 +281,7 @@ export interface CeilingSpec extends SurfaceFinish {
  * Persistent room record. Geometry is DERIVED (see DerivedRoom in core/rooms) —
  * a record is matched to the detected face that contains `anchor`.
  */
-export interface Room {
+export interface Room extends LayerFlags {
   id: Id
   levelId: Id
   anchor: Vec2
@@ -287,7 +319,7 @@ export interface RoomDesign {
  */
 export type MountKind = 'floor' | 'wall' | 'ceiling' | 'surface' | 'free'
 
-export interface Item {
+export interface Item extends LayerFlags {
   id: Id
   levelId: Id
   assetId: Id
@@ -318,7 +350,7 @@ export interface Item {
 
 export type LightKind = 'ceiling' | 'spot' | 'pendant' | 'point' | 'strip' | 'area'
 
-export interface Light {
+export interface Light extends LayerFlags {
   id: Id
   levelId: Id
   kind: LightKind
@@ -338,7 +370,7 @@ export interface Light {
 
 // ───────────────────────────── Annotations ─────────────────────────────
 
-export interface Dimension {
+export interface Dimension extends LayerFlags {
   id: Id
   levelId: Id
   a: Vec2
@@ -347,7 +379,7 @@ export interface Dimension {
   offset: number
 }
 
-export interface Label {
+export interface Label extends LayerFlags {
   id: Id
   levelId: Id
   x: number
@@ -360,7 +392,7 @@ export interface Label {
  * «Карандаш»: a freehand mark drawn over the plan to point at a zone in the AI chat
  * («в ① ширина 180 см»). Editor-only: not exported, not shown in 3D.
  */
-export interface Annotation {
+export interface Annotation extends LayerFlags {
   id: Id
   levelId: Id
   /** badge number shown as ①, ② … */
@@ -390,6 +422,10 @@ export interface Underlay {
   locked: boolean
   widthPx: number
   heightPx: number
+  /** user name shown in the layers panel */
+  name?: string
+  /** user layer (`Doc.layers`) the image is on */
+  layerId?: Id
 }
 
 // ───────────────────────────── Catalog: materials & assets ─────────────────────────────
@@ -722,6 +758,12 @@ export interface Doc {
   source?: DocSource
   /** design layer: apartment style, currency and the user's price list */
   design?: DocDesign
+  /** flat user layers (layers panel); objects reference them by `layerId` */
+  layers?: Record<Id, UserLayer>
+  /** panel order of `layers` */
+  layerOrder?: Id[]
+  /** visibility / lock of whole kinds, keyed by the kind (`EntityRef.kind`, e.g. 'wall', 'item') */
+  groupFlags?: Record<string, GroupFlags>
 }
 
 /** Project-wide design settings. */

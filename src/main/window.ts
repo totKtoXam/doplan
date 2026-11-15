@@ -130,7 +130,8 @@ export function createMainWindow(): BrowserWindow {
   win.webContents.setWindowOpenHandler(({ url }) => {
     try {
       const u = new URL(url)
-      if (u.protocol === 'https:') void shell.openExternal(u.toString())
+      // web links only (product pages in the estimate may be plain http)
+      if (u.protocol === 'https:' || u.protocol === 'http:') void shell.openExternal(u.toString())
     } catch {
       /* ignore */
     }

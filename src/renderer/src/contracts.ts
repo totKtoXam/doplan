@@ -63,11 +63,8 @@ export interface DocState {
   newDoc(name?: string): void
   /** `id`: the Doc.meta.id the file was written with */
   markSaved(filePath: string, id?: string): void
-  /**
-   * a copy of another file was opened: it gets an id of its own. `unsaved`: the file does not carry it
-   * yet, so the document is changed until saved with it.
-   */
-  setDocId(id: string, unsaved: boolean): void
+  /** a copy of another file was opened: it gets an id of its own and is changed until saved with it */
+  setDocId(id: string): void
 }
 
 export type ToolId =

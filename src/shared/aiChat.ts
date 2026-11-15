@@ -198,10 +198,10 @@ export interface AiChatApi {
   dropChats(projectRef: string): Promise<void>
   /**
    * A saved document (`id:<id>`) was opened from `path`: the reference its chats live under. A copy of
-   * another file that is still there gets one of its own (its chats copied without agent sessions),
-   * written into the file at once. `idPending`: it could not be written; the document should be saved.
+   * another file that is still there gets one of its own (its chats copied without agent sessions);
+   * it reaches the file with the next save.
    */
-  claimDocument(ref: string, path: string): Promise<{ ref: string; idPending: boolean }>
+  claimDocument(ref: string, path: string): Promise<string>
   /** start signing the CLI in; progress arrives through onLogin */
   login(provider: AiProviderId): Promise<void>
   /** paste the code shown by the sign-in page (when the CLI asks for one) */

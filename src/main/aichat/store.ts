@@ -151,8 +151,8 @@ export async function moveChats(from: string, to: string, copy: boolean, path: s
 }
 
 /**
- * copies whose own id could not be written into the file yet: `<id>|<lower-case path>` → that id
- * (consulted only while the original is still there; dropped once the id is in the file)
+ * Copies of a file opened before their own id was saved into them: `<id>|<lower-case real path>` →
+ * `{ id, ino }`, the copy's id and its file number. 0.10.0 wrote a bare id under the plain path.
  */
 function copiesFile(): string {
   return join(app.getPath('userData'), 'ai-chats', 'copies.json')
@@ -160,8 +160,18 @@ function copiesFile(): string {
 
 const OWN_ID_RE = /^[A-Za-z0-9_-]{6,64}$/
 
-/** writes a new id into the saved file (`from` → `to`); false when it could not */
-export type WriteDocId = (path: string, from: string, to: string) => Promise<boolean>
+interface CopyEntry {
+  id: string
+  /** the file number of the copy (renaming or moving it on the same disk keeps it); none from 0.10.0 */
+  ino?: string
+}
+
+function copyEntry(v: unknown): CopyEntry | null {
+  if (typeof v === 'string') return OWN_ID_RE.test(v) ? { id: v } : null
+  if (!v || typeof v !== 'object') return null
+  const { id, ino } = v as { id?: unknown; ino?: unknown }
+  return typeof id === 'string' && OWN_ID_RE.test(id) ? { id, ...(typeof ino === 'string' && ino ? { ino } : {}) } : null
+}
 
 /** the path as the file system knows it: junctions, symlinks and mapped drives resolved */
 async function canonicalPath(p: string): Promise<string> {
@@ -173,55 +183,99 @@ async function canonicalPath(p: string): Promise<string> {
   }
 }
 
-/** two paths that reach one and the same file (a hard link, a share opened by two names) */
+/** the file's number on its disk (the same file under any name), when the file system has one */
+async function fileNumber(p: string): Promise<string | undefined> {
+  try {
+    const s = await stat(p, { bigint: true })
+    return s.ino ? s.ino.toString() : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Two paths that reach one and the same file: a hard link, or a share of a local disk (there the disk
+ * number differs, so the size and modification time must match too).
+ */
 async function sameFile(a: string, b: string): Promise<boolean> {
   try {
     const [x, y] = await Promise.all([stat(a, { bigint: true }), stat(b, { bigint: true })])
-    return x.ino !== 0n && x.ino === y.ino && x.dev === y.dev
+    if (!x.ino || x.ino !== y.ino) return false
+    return x.dev === y.dev || (x.size === y.size && x.mtimeNs === y.mtimeNs)
   } catch {
     return false
   }
 }
 
 /**
- * A saved document with an id was opened from `path`. The id travels with the file contents, so a copy
- * made outside the app (Explorer, a versioned flat-v2, a file sent back by a colleague) carries the same
- * one. The chat folder remembers the file it belongs to: the same file (by its real path or the file
- * itself), or that file no longer exists (renamed / moved) → the document is the file itself and keeps
- * its chats. Another file still there → this one is a copy: it gets an id of its own, the chats are
- * copied without agent sessions (as on Save As), and the new id is written into the copy at once, so
- * renaming or moving either file later changes nothing. `idPending`: the id could not be written (the
- * renderer then marks the document changed); until it is, the copy finds the same id again at the same
- * path while the original is still there.
+ * A saved document with an id was opened from `path`; resolves the reference its chats live under.
+ * The id travels with the file contents, so a copy made outside the app (Explorer, a versioned
+ * flat-v2, a file sent back by a colleague) carries the same one. The rules, in order:
+ * 1. The file the id's chat folder belongs to (the same real path, or the same file by another path)
+ *    → the document itself.
+ * 2. A copy opened before (found by its path, or by its file number after a rename or move) → that
+ *    copy's id. While the original is gone, a path counts only if the same file is still there.
+ * 3. The file the folder belongs to is gone (renamed / moved) → this is it: the folder follows it.
+ * 4. Otherwise it is a new copy: an id of its own, the chats copied without agent sessions (as on
+ *    Save As). Nothing is written into the file here: the renderer marks the document changed, and
+ *    the id reaches the file with the user's next save.
+ * Limits, all with the same safe outcome (the copy gets a new id with the chats copied again; chats
+ * are never deleted and never shown with another document): a copy that is renamed AND rewritten by
+ * another program (or lives on a FAT drive) before it is saved; .json projects, read-only or locked
+ * files simply stay unsaved copies (rules 2 and 4 keep finding them); a local and a network path to
+ * one file that differ in size or time; an original moved onto the path of a deleted copy while
+ * another file took the original's old place.
  */
-export async function claimDocument(ref: string, path: string, writeId?: WriteDocId): Promise<{ ref: string; idPending: boolean }> {
+export async function claimDocument(ref: string, path: string): Promise<string> {
   const d = DOC_ID_RE.exec(ref)
-  if (!d || typeof path !== 'string' || !path) return { ref, idPending: false }
+  if (!d || typeof path !== 'string' || !path) return ref
   const full = await canonicalPath(path)
   const dir = chatsDir(ref)
   const saved = await readJson<{ path?: unknown } | null>(join(dir, SAVED_FILE), null)
   const owner = typeof saved?.path === 'string' ? await canonicalPath(saved.path) : null
-  if (owner && owner.toLowerCase() === full.toLowerCase()) return { ref, idPending: false }
-  if (!owner || !(await exists(owner))) {
+  if (owner && owner.toLowerCase() === full.toLowerCase()) return ref
+  const ownerThere = !!owner && (await exists(owner))
+  if (owner && ownerThere && (await sameFile(owner, full))) return ref
+
+  const read = await readJson<Record<string, unknown>>(copiesFile(), {})
+  const all: Record<string, unknown> = read && typeof read === 'object' ? { ...read } : {}
+  const prefix = `${d[1]}|`
+  const key = prefix + full.toLowerCase()
+  const oldKey = prefix + resolve(path).toLowerCase()
+  const no = await fileNumber(full)
+  let found: string | null = null
+  for (const k of [key, oldKey]) {
+    const e = copyEntry(all[k])
+    // with the original gone, a different file at a copy's old path is not that copy
+    if (e && (ownerThere || !e.ino || !no || e.ino === no)) {
+      found = k
+      break
+    }
+  }
+  if (!found && no) found = Object.keys(all).find((k) => k.startsWith(prefix) && copyEntry(all[k])?.ino === no) ?? null
+  const entry = found ? copyEntry(all[found]) : null
+
+  if (!entry && !ownerThere) {
     await ensureDir(dir)
     await atomicWrite(join(dir, SAVED_FILE), JSON.stringify({ path: full }))
-    return { ref, idPending: false }
+    // an entry left at this path belonged to another file (a copy deleted since)
+    if (key in all || oldKey in all) {
+      delete all[key]
+      delete all[oldKey]
+      await atomicWrite(copiesFile(), JSON.stringify(all))
+    }
+    return ref
   }
-  if (await sameFile(owner, full)) return { ref, idPending: false }
-  const copies = await readJson<Record<string, unknown>>(copiesFile(), {})
-  const all = copies && typeof copies === 'object' ? { ...copies } : {}
-  const key = `${d[1]}|${full.toLowerCase()}`
-  const mapped = all[key]
-  const known = typeof mapped === 'string' && OWN_ID_RE.test(mapped) ? mapped : undefined
-  const id = known ?? randomBytes(12).toString('base64url')
-  if (!known || !(await exists(join(chatsDir(`id:${id}`), SAVED_FILE)))) await moveChats(ref, `id:${id}`, true, full)
-  const written = writeId ? await writeId(path, d[1], id).catch(() => false) : false
-  // the file carries its id now: nothing to remember by path (a stale entry could hand this id to
-  // another file moved here later)
-  if (written) delete all[key]
-  else all[key] = id
-  if (written ? mapped !== undefined : mapped !== id) await atomicWrite(copiesFile(), JSON.stringify(all))
-  return { ref: `id:${id}`, idPending: !written }
+
+  const id = entry?.id ?? randomBytes(12).toString('base64url')
+  if (!entry || !(await exists(join(chatsDir(`id:${id}`), SAVED_FILE)))) await moveChats(ref, `id:${id}`, true, full)
+  const before = JSON.stringify(all)
+  if (found) delete all[found]
+  delete all[oldKey]
+  all[key] = { id, ...(no ? { ino: no } : {}) }
+  const after = JSON.stringify(all)
+  if (after !== before) await atomicWrite(copiesFile(), after)
+  return `id:${id}`
 }
 
 /**

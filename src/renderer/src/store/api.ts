@@ -241,7 +241,7 @@ function createFallbackApi(): DoplanApi {
       },
       async dropChats() {},
       async claimDocument(ref) {
-        return { ref, idPending: false }
+        return ref
       },
       async login() {},
       async loginInput() {},

@@ -409,12 +409,11 @@ export const docStore = createStore<DocStoreState>()((set, get) => {
       set({ doc, filePath, dirty: computeDirty() })
     },
 
-    setDocId(id, unsaved) {
+    setDocId(id) {
       const doc = get().doc
       if (doc.meta.id === id) return
-      // unsaved: the file still carries the old id, so the document is changed until the next save
-      // (or the close prompt) writes it; otherwise the file already has it and this is not an edit
-      if (unsaved) savedId = -1
+      // the file still carries the old id: changed until saved, so the next save (or the close prompt) writes it
+      savedId = -1
       set({ doc: { ...doc, meta: { ...doc.meta, id } }, dirty: computeDirty() })
     },
 

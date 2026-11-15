@@ -79,12 +79,9 @@ describe('docStore dirty flag', () => {
     expect(st().dirty).toBe(false)
   })
 
-  it('a new id for an opened copy is a change only while the file does not carry it', () => {
+  it('a new id for an opened copy is a change until saved, so it reaches the file with the next save', () => {
     st().markSaved('/tmp/copy.doplan')
-    st().setDocId('written-id', false)
-    expect(st().doc.meta.id).toBe('written-id')
-    expect(st().dirty).toBe(false)
-    st().setDocId('own-copy-id', true)
+    st().setDocId('own-copy-id')
     expect(st().doc.meta.id).toBe('own-copy-id')
     expect(st().dirty).toBe(true)
     st().markSaved('/tmp/copy.doplan', 'own-copy-id')

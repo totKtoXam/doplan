@@ -363,15 +363,15 @@ async function setProject(gone: string | null): Promise<void> {
     // the document this claim is for: another file opened meanwhile can carry the same id (the original
     // of the copy being claimed), and must not get the copy's id
     const loadId = docStore.getState().loadId
-    const job = queueWrite(() => api.aiChat.claimDocument(opened, filePath)).catch(() => ({ ref: opened, idPending: false }))
+    const job = queueWrite(() => api.aiChat.claimDocument(opened, filePath)).catch(() => opened)
     const wait = job.then(() => {})
     moving = wait
     const claimed = await job
     if (moving === wait) moving = null
     if (get().projectPath !== opened || docStore.getState().loadId !== loadId) return
-    if (claimed.ref !== opened && claimed.ref.startsWith('id:')) {
-      docStore.getState().setDocId(claimed.ref.slice(3), claimed.idPending)
-      ref = claimed.ref
+    if (claimed !== opened && claimed.startsWith('id:')) {
+      docStore.getState().setDocId(claimed.slice(3))
+      ref = claimed
       set({ projectPath: ref })
     }
   }

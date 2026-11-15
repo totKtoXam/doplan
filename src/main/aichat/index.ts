@@ -6,7 +6,6 @@ import type { ChildProcess } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { writeDocId } from '../project'
 import { getApiKey } from '../settings'
 import type { AiChip, AiProviderId, AiProviderInfo, AiRunEvent, AiRunRequest } from '../../shared/aiChat'
 import { CH } from '../channels'
@@ -253,7 +252,7 @@ export function registerAiChat(): void {
   )
   handleIpc(CH.aiChatDrop, (p: unknown) => dropChats(typeof p === 'string' ? p : null))
   handleIpc(CH.aiChatClaim, (ref: unknown, path: unknown) =>
-    typeof ref === 'string' && typeof path === 'string' ? claimDocument(ref, path, writeDocId) : { ref: String(ref), idPending: false },
+    typeof ref === 'string' && typeof path === 'string' ? claimDocument(ref, path) : String(ref),
   )
   handleIpc(CH.aiChatLogin, async (id: unknown) => {
     const prov = (await providers(false)).find((p) => p.info.id === id)

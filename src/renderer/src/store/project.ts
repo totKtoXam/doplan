@@ -5,7 +5,7 @@
  */
 import { createStore } from 'zustand/vanilla'
 import { useStore } from 'zustand'
-import type { ProjectVersion } from '@shared/ipc'
+import type { ProjectVersion, UnsafeGitConfig } from '@shared/ipc'
 
 export type ProjectKind = 'folder' | 'zip' | 'json'
 
@@ -21,6 +21,8 @@ export interface ProjectState {
   untrustedGit: boolean
   /** .git in the folder is a file (submodule, worktree): no version history there */
   gitFile: boolean
+  /** the folder's git config has keys outside doplan's allowlist: no git runs there (see UnsafeGitConfig) */
+  unsafeGit: UnsafeGitConfig | null
   /** document history position of the last commit; labels after it make the next commit message */
   commitMarker: number
   /** an old version loaded from history (Ctrl+S restores it as a new commit) */
@@ -38,6 +40,7 @@ export const projectStore = createStore<ProjectState>()(() => ({
   git: false,
   untrustedGit: false,
   gitFile: false,
+  unsafeGit: null,
   commitMarker: 0,
   viewing: null,
   dialog: null,

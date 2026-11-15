@@ -24,7 +24,8 @@ import {
   stableStringify,
 } from '../shared/projectFormat'
 import { atomicWrite, cleanFileName, ensureDir, exists, rmrf } from './fsutil'
-import { findGit, gitCommit, gitInit, gitListDir, gitShowFile } from './git'
+import type { UnsafeGitConfig } from '../shared/ipc'
+import { findGit, gitCommit, gitInit, gitListDir, gitShowFile, resetRepoConfig, unsafeRepoConfig } from './git'
 import { paths } from './paths'
 import { msg, setTrustRecord, trustRecord } from './settings'
 
@@ -169,6 +170,11 @@ export interface FolderTrust {
    * inside it, where it reads the folder's own settings (.claude/, .codex/, .gemini/) and runs git.
    */
   folder: boolean
+  /**
+   * a repository whose own config has keys outside doplan's allowlist (git.unsafeRepoConfig): no git
+   * command runs there, trusted or not, until the user resets the config (resetFolderGitConfig)
+   */
+  unsafeGit?: UnsafeGitConfig
 }
 
 export async function folderTrust(root: string): Promise<FolderTrust> {
@@ -183,7 +189,8 @@ export async function folderTrust(root: string): Promise<FolderTrust> {
     }
   }
   const git = state === 'none' ? 'none' : state === 'gitfile' ? 'gitfile' : same ? 'trusted' : 'untrusted'
-  return { git, folder: same && rec!.folder }
+  const unsafe = state === 'repo' && (await findGit()) ? await unsafeRepoConfig(root) : null
+  return unsafe ? { git, folder: same && rec!.folder, unsafeGit: unsafe } : { git, folder: same && rec!.folder }
 }
 
 /** true when the AI agent may run inside this folder (see FolderTrust.folder) */
@@ -343,19 +350,30 @@ export async function writeFolderProject(root: string, doc: unknown): Promise<vo
 
 /**
  * git commit of the whole folder; null when git is missing, nothing changed or .git is a file (no
- * history there). Throws for an untrusted repository. A folder without a repository gets one: git init
- * creates a fresh config, so nothing from the folder runs.
+ * history there) or its git config is unsafe (FolderTrust.unsafeGit). Throws for an untrusted repository.
+ * A folder without a repository gets one: git init creates a fresh config, so nothing from the folder runs.
  */
 export async function commitFolder(root: string, message: string, onlyPaths?: string[]): Promise<string | null> {
   if (!(await findGit())) return null
   const trust = await folderTrust(root)
   if (trust.git === 'untrusted') throw untrustedError()
   if (trust.git === 'gitfile') return null
+  // the user works without versions there (or has not reset the config yet): the files are saved, nothing else
+  if (trust.unsafeGit) return null
   if (trust.git === 'none') {
     await gitInit(root)
     await trustFolder(root, trust.folder)
   }
   return gitCommit(root, message, onlyPaths)
+}
+
+/**
+ * The user resets the git config of a trusted folder to the allowed keys (the old one is kept as
+ * .git/config.doplan-backup). Returns the backup path.
+ */
+export async function resetFolderGitConfig(root: string): Promise<string> {
+  if ((await folderTrust(root)).git !== 'trusted') throw untrustedError()
+  return resetRepoConfig(root)
 }
 
 export interface CreateResult {

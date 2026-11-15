@@ -530,6 +530,18 @@ const en: Record<string, string> = {
   'Несохранённые инструкции': 'Unsaved instructions',
   'Не удалось сохранить инструкции': 'Could not save the instructions',
   'Не доверять': 'Don’t trust',
+  'Небезопасные настройки git': 'Unsafe git settings',
+  'В настройках git этой папки есть параметры, через которые git или его дополнения могут запускать программы: {keys}. Пока они там, doplan не запускает в папке git: история версий выключена, сохранение пишет только файлы.':
+    'The folder’s git config has settings through which git or its add-ons can run programs: {keys}. While they are there, doplan runs no git in the folder: the version history is off, and saving writes only the files.',
+  'Сброс оставит в .git/config только простые параметры (имя автора, адрес удалённого репозитория, ветки); прежний файл сохранится как .git/config.doplan-backup.':
+    'A reset keeps only plain settings in .git/config (author name, remote address, branches); the old file is kept as .git/config.doplan-backup.',
+  'Этот репозиторий устроен иначе, и doplan не может сбросить его настройки: работайте без версий или исправьте .git/config сами.':
+    'This repository is set up differently, and doplan cannot reset its settings: work without versions or fix .git/config yourself.',
+  'Работать без версий': 'Work without versions',
+  'Сбросить настройки git': 'Reset git settings',
+  'Настройки git сброшены, прежние сохранены в {file}': 'Git settings reset; the old ones are in {file}',
+  'Не удалось сбросить настройки git': 'Could not reset the git settings',
+  'История версий выключена: небезопасные настройки git в папке': 'Version history is off: unsafe git settings in the folder',
   'Доверять этой папке': 'Trust this folder',
   'Доверять этой папке…': 'Trust this folder…',
   Сохранение: 'Save',

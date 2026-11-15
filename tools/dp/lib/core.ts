@@ -6,11 +6,15 @@
  * Typechecking still goes through the repo tsconfig (tools/ is included).
  */
 export {
+  areaThreshold,
   buildDisplayList,
   compilePlanSpec,
+  compilePlanSpecDetailed,
   derivePlan,
   docToPlanSpec,
   drawToCanvas,
+  explainedSeverity,
+  guessAreaCoef,
   isTechnicalRoom,
   parseDoc,
   parsePlanSpec,

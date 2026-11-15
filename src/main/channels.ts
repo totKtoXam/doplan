@@ -20,6 +20,7 @@ export const CH = {
   projectExportZip: 'project:exportZip',
   projectAttach: 'project:attach',
   projectTrustFolder: 'project:trustFolder',
+  projectResetGitConfig: 'project:resetGitConfig',
   projectHistory: 'project:history',
   projectVersionDoc: 'project:versionDoc',
   projectTagVersion: 'project:tagVersion',

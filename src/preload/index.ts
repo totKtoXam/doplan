@@ -77,6 +77,7 @@ const api: DoplanApi = {
     exportZip: (doc) => invoke(CH.projectExportZip, doc),
     attach: (path) => invoke(CH.projectAttach, path),
     trustFolder: () => invoke(CH.projectTrustFolder),
+    resetGitConfig: () => invoke(CH.projectResetGitConfig),
     history: () => invoke(CH.projectHistory),
     versionDoc: (sha) => invoke(CH.projectVersionDoc, sha),
     tagVersion: (sha, label) => invoke(CH.projectTagVersion, sha, label),

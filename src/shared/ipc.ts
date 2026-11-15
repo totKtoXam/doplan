@@ -52,8 +52,27 @@ export interface ProjectOpenResult {
    * yet. No git command runs there until project.trustFolder() (git may run programs from a repo's config).
    */
   untrustedGit?: boolean
+  /**
+   * folders: no repository yet, and doplan did not create the folder (a received copy, a folder replaced
+   * at the same path). doplan creates no repository there until project.trustFolder(); saving writes the files.
+   */
+  untrustedFolder?: boolean
   /** folders: .git is a file (submodule, worktree) — doplan keeps no version history there */
   gitFile?: boolean
+  /** folders: the repository config has keys outside doplan's allowlist; no git command runs there (see UnsafeGitConfig) */
+  unsafeGit?: UnsafeGitConfig
+}
+
+/**
+ * A folder's git config (.git/config, .git/config.worktree) with keys through which git or the programs
+ * it starts (git-lfs, gpg…) could run commands: anything outside a short list of plain keys (core.filemode,
+ * user.name, remote.*.url…). doplan runs no git there until project.resetGitConfig(); or the user works
+ * without versions.
+ */
+export interface UnsafeGitConfig {
+  keys: string[]
+  /** project.resetGitConfig() can make it safe */
+  resettable: boolean
 }
 
 export interface ProjectSaveOptions {
@@ -79,7 +98,10 @@ export interface ProjectInfo {
   gitAvailable: boolean
   /** the open folder is a git repository */
   repo: boolean
-  /** false when the folder's repository is not trusted yet (history, tags and commits are off) */
+  /**
+   * false when the folder's repository is not trusted yet, or the folder has no repository and doplan did
+   * not create it (repo false): history, tags and commits are off
+   */
   trusted: boolean
   /** .git in the folder is a file (submodule, worktree): doplan keeps no version history there */
   gitFile: boolean
@@ -89,6 +111,8 @@ export interface ProjectInfo {
    */
   folderTrusted: boolean
   gitVersion: string
+  /** the repository config has keys outside the allowlist: history, tags and commits are off (see UnsafeGitConfig) */
+  unsafeGit: UnsafeGitConfig | null
 }
 
 export interface ProjectVersion {
@@ -191,6 +215,11 @@ export interface DoplanApi {
     attach(path: string | null): Promise<boolean>
     /** trusts the open project folder: the git repository that came with it (see ProjectOpenResult.untrustedGit) and the AI agent in it */
     trustFolder(): Promise<boolean>
+    /**
+     * rewrites the trusted folder's git config with only the allowed keys (UnsafeGitConfig); the old one
+     * stays as .git/config.doplan-backup. Resolves with the backup path.
+     */
+    resetGitConfig(): Promise<string>
     /** git log of the open project folder, newest first */
     history(): Promise<ProjectVersion[]>
     /** plan.json of an old version (unvalidated); its assets become available under doplan-asset://project/ */

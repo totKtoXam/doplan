@@ -530,6 +530,18 @@ const en: Record<string, string> = {
   'Несохранённые инструкции': 'Unsaved instructions',
   'Не удалось сохранить инструкции': 'Could not save the instructions',
   'Не доверять': 'Don’t trust',
+  'Небезопасные настройки git': 'Unsafe git settings',
+  'В настройках git этой папки есть параметры, через которые git или его дополнения могут запускать программы: {keys}. Пока они там, doplan не запускает в папке git: история версий выключена, сохранение пишет только файлы.':
+    'The folder’s git config has settings through which git or its add-ons can run programs: {keys}. While they are there, doplan runs no git in the folder: the version history is off, and saving writes only the files.',
+  'Сброс оставит в .git/config только простые параметры (имя автора, адрес удалённого репозитория, ветки); прежний файл сохранится как .git/config.doplan-backup.':
+    'A reset keeps only plain settings in .git/config (author name, remote address, branches); the old file is kept as .git/config.doplan-backup.',
+  'Этот репозиторий устроен иначе, и doplan не может сбросить его настройки: работайте без версий или исправьте .git/config сами.':
+    'This repository is set up differently, and doplan cannot reset its settings: work without versions or fix .git/config yourself.',
+  'Работать без версий': 'Work without versions',
+  'Сбросить настройки git': 'Reset git settings',
+  'Настройки git сброшены, прежние сохранены в {file}': 'Git settings reset; the old ones are in {file}',
+  'Не удалось сбросить настройки git': 'Could not reset the git settings',
+  'История версий выключена: небезопасные настройки git в папке': 'Version history is off: unsafe git settings in the folder',
   'Доверять этой папке': 'Trust this folder',
   'Доверять этой папке…': 'Trust this folder…',
   Сохранение: 'Save',
@@ -568,6 +580,10 @@ const en: Record<string, string> = {
   'Git не найден. История версий хранится в git — установите его и перезапустите doplan.': 'Git not found. Version history is kept in git — install it and restart doplan.',
   'Репозиторий git пришёл вместе с папкой, его создал не doplan. Пока вы не доверяете папке, doplan не запускает в ней git и история версий выключена.':
     'The git repository came with the folder; doplan did not create it. Until you trust the folder, doplan runs no git in it and version history is off.',
+  'Эту папку создал не doplan (или её заменили либо переместили). Пока вы не доверяете папке, doplan не создаёт в ней репозиторий git: история версий выключена, сохранение пишет только файлы.':
+    'doplan did not create this folder (or it was replaced or moved). Until you trust the folder, doplan creates no git repository in it: version history is off and saving writes only the files.',
+  'Папку «{name}» создал не doplan (или её заменили либо переместили). Пока вы не доверяете папке, doplan не создаёт в ней репозиторий git: история версий выключена, сохранение пишет только файлы, а ИИ-агент работает в отдельной папке. Доверяйте, только если папка ваша или получена из надёжного источника.':
+    'doplan did not create the folder “{name}” (or it was replaced or moved). Until you trust the folder, doplan creates no git repository in it: version history is off, saving writes only the files and the AI agent works in a separate folder. Trust it only if the folder is yours or comes from a reliable source.',
   'Несохранённые изменения: «{msg}» — сохраните (Ctrl+S), чтобы записать версию.': 'Unsaved changes: “{msg}” — save (Ctrl+S) to record a version.',
   '«Открыть» загружает версию для просмотра; Ctrl+S в ней восстанавливает её новой версией. История никогда не переписывается.':
     '“Open” loads a version for viewing; Ctrl+S in it restores it as a new version. The history is never rewritten.',

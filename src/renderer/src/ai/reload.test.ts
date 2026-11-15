@@ -9,7 +9,8 @@ import { DEFAULT_AI_SETTINGS } from '@shared/aiChat'
 const fake = vi.hoisted(() => {
   const files = new Map<string, unknown>()
   const claims = new Map<string, string>()
-  const calls: { claim: [string, string][]; stop: string[] } = { claim: [], stop: [] }
+  const calls: { claim: [string, string][]; stop: string[]; run: string[] } = { claim: [], stop: [], run: [] }
+  const events: { emit: (runId: string, ev: unknown) => void } = { emit: () => {} }
   const fallback = (o: Record<string, unknown>) =>
     new Proxy(o, { get: (t, k: string) => (k in t ? t[k] : async () => undefined) })
   const api = {
@@ -23,7 +24,11 @@ const fake = vi.hoisted(() => {
         return claims.get(`${ref}|${path}`) ?? ref
       },
       stop: async (runId: string) => void calls.stop.push(runId),
-      onEvent: () => () => {},
+      onEvent: (cb: (runId: string, ev: unknown) => void) => {
+        events.emit = cb
+        return () => {}
+      },
+      run: async (req: { runId: string }) => void calls.run.push(req.runId),
       onToolCall: () => () => {},
       onLogin: () => () => {},
     }),
@@ -33,7 +38,7 @@ const fake = vi.hoisted(() => {
       versionDoc: async (sha: string) => files.get(`version:${sha}`),
     }),
   }
-  return { api, files, claims, calls }
+  return { api, files, claims, calls, events }
 })
 
 vi.mock('@/store/api', () => ({ api: fake.api }))
@@ -41,7 +46,7 @@ vi.mock('@/store/api', () => ({ api: fake.api }))
 const { docStore } = await import('@/store/document')
 const { projectStore } = await import('@/store/project')
 const { leaveVersion, openProject, viewVersion } = await import('@/actions/project')
-const { aiStore, initAi } = await import('./store')
+const { aiStore, initAi, send, updateSettings } = await import('./store')
 
 function planWithId(id: string): unknown {
   const doc: Doc = createEmptyDoc('План')
@@ -50,10 +55,10 @@ function planWithId(id: string): unknown {
 
 const settle = () => new Promise((r) => setTimeout(r, 10))
 
-/** a chat with one message and a turn running in it, plus a plan-mode draft */
-function busyChat(runId: string): string {
+/** a chat with one message and a turn running in it, plus (unless `draft` is false) a plan-mode draft */
+function busyChat(runId: string, draft = true): string {
   const chat = { ...aiStore.getState().chat, id: `chat-${runId}`, messages: [{ id: 'm1', role: 'user', parts: [{ type: 'text', text: 'привет' }], at: 0 }] }
-  aiStore.setState({ chat: chat as never, running: { runId, msgId: 'm1' }, draftCount: 1 })
+  aiStore.setState({ chat: chat as never, running: { runId, msgId: 'm1' }, draftCount: draft ? 1 : 0 })
   return chat.id
 }
 
@@ -67,12 +72,13 @@ beforeAll(() => {
 beforeEach(async () => {
   fake.calls.claim.length = 0
   fake.calls.stop.length = 0
+  fake.calls.run.length = 0
   aiStore.setState({ running: null, draftCount: 0 })
   await settle()
 })
 
 describe('AI chat across reloads of the same project', () => {
-  it('an opened copy keeps its own id when its folder is read again; the turn goes on after a disk reload', async () => {
+  it('an opened copy keeps its own id when its folder is read again; a live turn goes on after a disk reload', async () => {
     // F is a copy: plan.json still holds the original's id, the claim gives it its own (in memory only)
     fake.files.set('C:/p/F', planWithId('origXXXX'))
     fake.claims.set('id:origXXXX|C:/p/F', 'id:copyYYYY')
@@ -81,16 +87,30 @@ describe('AI chat across reloads of the same project', () => {
     expect(aiStore.getState().projectPath).toBe('id:copyYYYY')
     expect(docStore.getState().doc.meta.id).toBe('copyYYYY')
 
-    const chatId = busyChat('r1')
+    const chatId = busyChat('r1', false)
     await openProject('C:/p/F', { skipConfirm: true, reload: 'disk' })
     await settle()
     expect(docStore.getState().doc.meta.id).toBe('copyYYYY')
     expect(aiStore.getState().projectPath).toBe('id:copyYYYY')
     expect(aiStore.getState().chat.id).toBe(chatId)
     expect(aiStore.getState().running?.runId).toBe('r1')
-    // the plan-mode draft was made against the plan that is gone
-    expect(aiStore.getState().draftCount).toBe(0)
     expect(fake.calls.stop).toEqual([])
+  })
+
+  it('a disk reload drops a plan-mode draft and stops the turn that was making it; the chat stays', async () => {
+    fake.files.set('C:/p/F', planWithId('origXXXX'))
+    fake.claims.set('id:origXXXX|C:/p/F', 'id:copyYYYY')
+    await openProject('C:/p/F', { skipConfirm: true })
+    await settle()
+
+    const chatId = busyChat('r6')
+    await openProject('C:/p/F', { skipConfirm: true, reload: 'disk' })
+    await settle()
+    expect(aiStore.getState().chat.id).toBe(chatId)
+    expect(aiStore.getState().chat.messages.length).toBeGreaterThan(0)
+    expect(aiStore.getState().draftCount).toBe(0)
+    expect(aiStore.getState().running).toBeNull()
+    expect(fake.calls.stop).toEqual(['r6'])
   })
 
   it('viewing a version and going back keep the chat open but stop the turn and drop the draft', async () => {
@@ -150,5 +170,26 @@ describe('AI chat across reloads of the same project', () => {
     expect(fake.calls.stop).toEqual(['r5'])
     expect(fake.calls.claim).toEqual([['id:origKKKK', 'C:/p/orig.json']])
     expect(aiStore.getState().chat.messages).toEqual([])
+  })
+
+  it('a live turn after a plan-mode turn that proposed nothing goes on after a disk reload', async () => {
+    fake.files.set('C:/p/P', planWithId('planPPPP'))
+    await openProject('C:/p/P', { skipConfirm: true })
+    await settle()
+    aiStore.setState({ providers: [{ id: 'api', available: true }] as never, chat: { ...aiStore.getState().chat, messages: [] } })
+    updateSettings({ provider: 'api', planMode: true })
+    await send('предложи план')
+    const planRun = fake.calls.run.at(-1)!
+    fake.events.emit(planRun, { type: 'done', ok: true })
+    expect(aiStore.getState().running).toBeNull()
+
+    updateSettings({ planMode: false })
+    await send('поменяй стену')
+    const liveRun = fake.calls.run.at(-1)!
+    expect(aiStore.getState().running?.runId).toBe(liveRun)
+    await openProject('C:/p/P', { skipConfirm: true, reload: 'disk' })
+    await settle()
+    expect(aiStore.getState().running?.runId).toBe(liveRun)
+    expect(fake.calls.stop).toEqual([])
   })
 })

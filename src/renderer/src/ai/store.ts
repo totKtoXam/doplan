@@ -198,10 +198,11 @@ export function initAi(): void {
     const first = lastLoad === undefined
     lastLoad = loadId
     // the same project loaded again (an old version viewed or left, plan.json reloaded after the agent
-    // changed it): the chat stays open. A plan-mode draft was made against the plan that is gone, and a
-    // turn would go on editing an old version, so those end (the turn goes on after a plain reload)
+    // changed it): the chat stays open. A plan-mode draft was made against the plan that is gone, so it
+    // ends, and with it the turn that made it (it would go on proposing changes to proposals that are
+    // gone); a turn would also go on editing an old version. A live turn goes on after a plain reload
     if (!first && reload && docRef() === get().projectPath) {
-      leaveChat(reload === 'version')
+      leaveChat(reload === 'version' || hasDraft())
       return
     }
     const gone = !first && unsavedDoc ? get().projectPath : null
@@ -344,6 +345,11 @@ async function moveProject(to: string, copy: boolean, path: string | null): Prom
   else await refreshLists()
 }
 
+/** the plan-mode draft holds proposals (an empty DraftHost left by a plan-mode turn is no draft) */
+function hasDraft(): boolean {
+  return (!!draft && !draft.empty) || get().draftCount > 0 || get().draftChanges.length > 0
+}
+
 /** leaving the current chat: a running turn stops (unless `stopTurn` is false), the plan-mode draft is
  * dropped, and the conversation is saved as it stands */
 function leaveChat(stopTurn = true): void {
@@ -412,9 +418,8 @@ export function setDockTab(tab: DockTab): void {
 
 export function updateSettings(patch: Partial<AiChatSettings>): void {
   const settings = { ...get().settings, ...patch, models: { ...get().settings.models, ...(patch.models ?? {}) } }
-  if (patch.planMode === false && draft && !draft.empty) {
-    // leaving plan mode keeps the proposal until the user applies or discards it
-  }
+  // leaving plan mode keeps a proposal until the user applies or discards it; an empty one goes
+  if (patch.planMode === false && draft?.empty) draft = null
   settingsRev++
   set({ settings })
   void api.aiChat.setSettings(get().projectPath, settings).catch(() => {})
@@ -724,7 +729,8 @@ export async function send(raw: string): Promise<void> {
   }
   const asst: AiMessage = { id: uid(), role: 'assistant', createdAt: now(), parts: [] }
   const settings = st.settings
-  if (settings.planMode && !draft) draft = new DraftHost()
+  // an empty draft left by an earlier turn was taken from the plan as it was then
+  if (settings.planMode && (!draft || draft.empty)) draft = new DraftHost()
   partIndex = new Map()
   patchChat((c) => {
     c.messages.push(userMsg, asst)
@@ -838,6 +844,8 @@ function finishTurn(ev: Extract<AiRunEvent, { type: 'done' }>, save: boolean): v
     c.updatedAt = now()
   })
   set({ running: null, status: '' })
+  // a plan-mode turn that proposed nothing leaves no draft
+  if (draft?.empty) draft = null
   if (ev.authRequired) void refreshProviders(false)
   if (save) void persist()
 }

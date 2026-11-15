@@ -1,6 +1,6 @@
 {
   "name": "doplan",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "doplan — 2D floor plans, photorealistic 3D and interior design",
   "main": "./out/main/index.js",
   "type": "module",
@@ -15,7 +15,7 @@
     "test": "vitest run",
     "dp": "tsx tools/dp/cli.ts",
     "assets:fetch": "tsx tools/assets/fetch.ts",
-    "dist": "electron-vite build && electron-builder --win"
+    "dist": "electron-vite build && electron-builder --win --publish never"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -48,6 +48,7 @@
     "earcut": "^3.2.4",
     "electron": "45.3.1",
     "electron-builder": "^26.18.0",
+    "electron-updater": "^6.8.11",
     "electron-vite": "6.0.0",
     "fflate": "^0.8.3",
     "immer": "^11.2.10",

@@ -3,7 +3,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { summarizeLevelRooms } from '@core'
 import type { Doc, EntityKind, EntityRef } from '@core/types'
 import { useT } from '@/i18n'
+import { api } from '@/store/api'
+import { dialogStore } from '@/store/dialogs'
 import { useDoc } from '@/store/document'
+import { useUpdates } from '@/store/updates'
 import { handles, onHandlesChange } from '@/store/handles'
 import { useNotify } from '@/store/notify'
 import { useUi } from '@/store/ui'
@@ -88,6 +91,25 @@ function useZoomLabel(): string {
   } catch {
     return ''
   }
+}
+
+/** app version in the right corner; a dot when an update is available or ready. Opens «О программе». */
+function VersionLabel() {
+  const t = useT()
+  const pending = useUpdates((u) => {
+    const s = u.state.status
+    return s.kind === 'available' || s.kind === 'progress' || s.kind === 'downloaded' ? s.version : null
+  })
+  return (
+    <button
+      type="button"
+      className="flex shrink-0 items-center gap-1 font-mono text-faint hover:text-text"
+      title={pending ? t('Доступно обновление {v}', { v: pending }) : t('doplan {v} — о программе и обновления', { v: api.version })}
+      onClick={() => dialogStore.getState().open('about')}
+    >
+      {pending && <span className="size-1.5 rounded-full bg-accent" />}v{api.version}
+    </button>
+  )
 }
 
 export function StatusBar() {
@@ -176,6 +198,7 @@ export function StatusBar() {
           {backend === 'webgpu' ? 'WebGPU' : backend === 'webgl2' || backend === 'webgl' ? 'WebGL 2' : backend}
         </span>
       )}
+      <VersionLabel />
     </footer>
   )
 }

@@ -1,5 +1,6 @@
 import { app, Menu, type MenuItemConstructorOptions } from 'electron'
 import type { MenuCommand } from '../shared/ipc'
+import type { UpdateMenuAction } from '../shared/updater'
 import { CH } from './channels'
 import { getMainWindow, sendToRenderer } from './window'
 
@@ -43,6 +44,11 @@ const L = {
     devtools: 'Инструменты разработчика',
     reload: 'Перезагрузить',
     help: 'Справка',
+    checkUpdates: 'Проверить обновления…',
+    installUpdate: 'Перезапустить и установить обновление',
+    installUpdateV: 'Перезапустить и установить обновление {v}',
+    downloadPage: 'Страница загрузки новой версии…',
+    downloadPageV: 'Скачать версию {v}…',
     about: 'О программе doplan',
   },
   en: {
@@ -82,6 +88,11 @@ const L = {
     devtools: 'Developer tools',
     reload: 'Reload',
     help: 'Help',
+    checkUpdates: 'Check for updates…',
+    installUpdate: 'Restart and install update',
+    installUpdateV: 'Restart and install update {v}',
+    downloadPage: 'New version download page…',
+    downloadPageV: 'Download version {v}…',
     about: 'About doplan',
   },
 } as const
@@ -95,8 +106,28 @@ function cmd(command: MenuCommand) {
  * hints (`registerAccelerator: false`) so text inputs keep their native behaviour; the renderer
  * handles those keys itself.
  */
-export function buildMenu(lang: Lang, recent: { path: string; name: string }[], onOpenRecent: (path: string) => void): void {
+export function buildMenu(
+  lang: Lang,
+  recent: { path: string; name: string }[],
+  onOpenRecent: (path: string) => void,
+  update: UpdateMenuAction,
+  onDownloadPage: (version?: string) => void,
+): void {
   const t = L[lang]
+  const withV = (s: string, v: string) => s.replace('{v}', v)
+  // «Перезапустить и установить» goes through the renderer: it settles unsaved changes first
+  const updateItem: MenuItemConstructorOptions =
+    update.kind === 'install'
+      ? {
+          label: update.version ? withV(t.installUpdateV, update.version) : t.installUpdate,
+          enabled: update.enabled,
+          click: cmd('installUpdate'),
+        }
+      : {
+          label: update.version ? withV(t.downloadPageV, update.version) : t.downloadPage,
+          enabled: update.enabled,
+          click: () => onDownloadPage(update.version),
+        }
   const hint = (label: string, accelerator: string, command: MenuCommand): MenuItemConstructorOptions => ({
     label,
     accelerator,
@@ -180,7 +211,12 @@ export function buildMenu(lang: Lang, recent: { path: string; name: string }[], 
     },
     {
       label: t.help,
-      submenu: [{ label: t.about, click: cmd('about') }],
+      submenu: [
+        { label: t.checkUpdates, click: cmd('checkUpdates') },
+        updateItem,
+        { type: 'separator' },
+        { label: t.about, click: cmd('about') },
+      ],
     },
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))

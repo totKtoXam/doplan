@@ -22,7 +22,13 @@ const fake = vi.hoisted(() => {
     save: [],
   }
   /** a claim answers only once `gate.wait` resolves; `gate.fail` makes it throw */
-  const gate: { wait: Promise<void> | null; fail: boolean; attach: Promise<void> | null } = { wait: null, fail: false, attach: null }
+  const gate: { wait: Promise<void> | null; fail: boolean; attach: Promise<void> | null; openFor: Map<string, Promise<void>>; attachFor: Map<string, Promise<void>> } = {
+    wait: null,
+    fail: false,
+    attach: null,
+    openFor: new Map(),
+    attachFor: new Map(),
+  }
   const fallback = (o: Record<string, unknown>) =>
     new Proxy(o, { get: (t, k: string) => (k in t ? t[k] : async () => undefined) })
   const api = {
@@ -53,10 +59,14 @@ const fake = vi.hoisted(() => {
     }),
     settings: fallback({ get: async () => ({}) }),
     project: fallback({
-      attach: async () => {
+      attach: async (path: string | null) => {
+        if (path && gate.attachFor.has(path)) await gate.attachFor.get(path)
         if (gate.attach) await gate.attach
       },
-      open: async (path: string) => (files.has(path) ? { path, doc: files.get(path), kind: /\.json$/.test(path) ? 'json' : 'folder', git: true } : null),
+      open: async (path: string) => {
+        if (gate.openFor.has(path)) await gate.openFor.get(path)
+        return files.has(path) ? { path, doc: files.get(path), kind: /\.json$/.test(path) ? 'json' : 'folder', git: true } : null
+      },
       versionDoc: async (sha: string) => files.get(`version:${sha}`),
       save: async (doc: { meta: { id: string } }, path: string) => {
         calls.save.push([doc.meta.id, path])
@@ -359,6 +369,25 @@ describe('the original moved outside the app loses its agent sessions, also thos
     expect(aiStore.getState().chat.resume).toBeUndefined()
   })
 
+  it("a turn whose session and 'done' both come before the claim answers does not write the session", async () => {
+    fake.files.set('C:/p/PA', planWithId('origPAPA'))
+    await openProject('C:/p/PA', { skipConfirm: true })
+    await settle()
+    const chatId = busyChat('pa1')
+    fake.records.set(`id:origPAPA|${chatId}`, { ...aiStore.getState().chat })
+    fake.files.set('C:/p/PA-moved', planWithId('origPAPA'))
+    fake.dropped.add('id:origPAPA|C:/p/PA-moved')
+    const release = holdClaims()
+    await openProject('C:/p/PA-moved', { skipConfirm: true })
+    await settle()
+    // main always ends the killed agent with 'done', right after what it still flushed
+    fake.listener.cb?.('pa1', session('LATE-A'))
+    fake.listener.cb?.('pa1', { type: 'done', ok: false, stopped: true })
+    await release()
+    await settle()
+    expect(fake.saved.filter(([, c]) => c.id === chatId && c.resume)).toEqual([])
+  })
+
   it('a turn started before the claim answers does not keep its session', async () => {
     fake.files.set('C:/p/T', planWithId('origTTTT'))
     await openProject('C:/p/T', { skipConfirm: true })
@@ -389,5 +418,82 @@ describe('the original moved outside the app loses its agent sessions, also thos
     await release()
     await settle()
     expect(fake.saved.some(([ref, c]) => ref === 'id:origUUUU' && c.id === chatId && JSON.stringify(c.resume ?? {}).includes('KEEP-1'))).toBe(true)
+  })
+})
+
+/** holds main's open or attach of one path until the returned function is called */
+function holdFor(map: Map<string, Promise<void>>, path: string): () => Promise<void> {
+  let release!: () => void
+  map.set(path, new Promise<void>((r) => (release = r)))
+  return async () => {
+    release()
+    map.delete(path)
+    await settle()
+  }
+}
+
+describe('a reload that finishes after another project was opened', () => {
+  for (const how of ['disk', 'version'] as const) {
+    for (const step of ['openFor', 'attachFor'] as const) {
+      it(`reload '${how}' held in ${step === 'openFor' ? 'open' : 'attach'}: the project read again never takes the other project's id or chat`, async () => {
+        const A = `C:/p/XA-${how}-${step}`
+        const B = `C:/p/XB-${how}-${step}.json`
+        fake.files.set(A, planWithId(`aaaa${how}${step}`))
+        fake.files.set(B, planWithId(`bbbb${how}${step}`))
+        fake.files.set('version:abc', planWithId(`aaaa${how}${step}`))
+        await openProject(A, { skipConfirm: true })
+        await settle()
+        if (how === 'version') {
+          expect(await viewVersion(version)).toBe(true)
+          await settle()
+        }
+        const release = holdFor(fake.gate[step], A)
+        const reloading = how === 'disk' ? openProject(A, { skipConfirm: true, reload: 'disk' }) : leaveVersion()
+        await settle()
+        await openProject(B, { skipConfirm: true })
+        await settle()
+        expect(aiStore.getState().projectPath).toBe(`id:bbbb${how}${step}`)
+        const chatB = busyChat(`xb-${how}-${step}`)
+        aiStore.setState({ running: null })
+        await release()
+        await reloading
+        await settle()
+        // main attached A last: A is open, as a project of its own
+        const s = docStore.getState()
+        expect(s.filePath).toBe(A)
+        expect(s.doc.meta.id).toBe(`aaaa${how}${step}`)
+        expect(aiStore.getState().projectPath).toBe(`id:aaaa${how}${step}`)
+        expect(aiStore.getState().chat.id).not.toBe(chatB)
+      })
+    }
+  }
+
+  it('a version read while another project opened is not shown over it', async () => {
+    fake.files.set('C:/p/VA', planWithId('vvvvAAAA'))
+    fake.files.set('C:/p/VB.json', planWithId('vvvvBBBB'))
+    fake.files.set('version:slow', planWithId('vvvvAAAA'))
+    await openProject('C:/p/VA', { skipConfirm: true })
+    await settle()
+    let release!: () => void
+    const held = new Promise<void>((r) => (release = r))
+    const versionDoc = fake.api.project.versionDoc
+    ;(fake.api.project as Record<string, unknown>).versionDoc = async (sha: string) => {
+      await held
+      return fake.files.get(`version:${sha}`)
+    }
+    try {
+      const viewing = viewVersion({ ...version, sha: 'slow' })
+      await settle()
+      await openProject('C:/p/VB.json', { skipConfirm: true })
+      await settle()
+      release()
+      expect(await viewing).toBe(false)
+      await settle()
+      expect(docStore.getState().filePath).toBe('C:/p/VB.json')
+      expect(docStore.getState().doc.meta.id).toBe('vvvvBBBB')
+      expect(projectStore.getState().viewing).toBeNull()
+    } finally {
+      ;(fake.api.project as Record<string, unknown>).versionDoc = versionDoc
+    }
   })
 })

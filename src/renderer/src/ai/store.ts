@@ -325,6 +325,12 @@ let claiming: Promise<void> | null = null
 let copyClaim: { path: string; from: string; to: string } | null = null
 /** the claim of the open file failed: its chats are a scratch bucket, the id's own chats are left alone */
 let claimFailed = false
+/** per chat reference: how many times its chats lost their agent sessions (a claim of a moved document).
+ * A stopped turn's session, written later, is dropped when this changed after the turn was stopped */
+const sessionDrops = new Map<string, number>()
+const dropsOf = (ref: string | null) => (ref ? (sessionDrops.get(ref) ?? 0) : 0)
+/** one per document opened: a chat loaded for the document before is not this one's, even with the same id */
+let projectGen = 0
 
 /** resolves once no claim of an opened file is pending (its answer applied) */
 async function claimSettled(): Promise<void> {
@@ -394,6 +400,7 @@ function dropCurrent(): void {
  * nothing can reach any more.
  */
 async function setProject(gone: string | null): Promise<void> {
+  projectGen++
   // a shared pre-0.6 chat is never dropped with a document: it is saved where it lives
   if (gone && !get().legacy) dropCurrent()
   else leaveChat()
@@ -414,9 +421,18 @@ async function setProject(gone: string | null): Promise<void> {
       // the chats it keeps lost their agent sessions (moved outside the app): a stopped turn of this id
       // that reports its session late must not write it back. Done in the queue, before any later write
       if (c.sessionsDropped) {
+        // also a turn whose 'done' already came: its session write may be queued behind this claim
+        sessionDrops.set(opened, dropsOf(opened) + 1)
         for (const s of stoppedRuns.values()) if (s.ref === opened) s.noSession = true
-        const r = get().running
-        if (r && chatRef() === opened) voidSessions.add(r.runId)
+        if (chatRef() === opened) {
+          const r = get().running
+          if (r) voidSessions.add(r.runId)
+          // the open chat (loaded from disk before the drop) forgets them too
+          patchChat((ch) => {
+            delete ch.resume
+            delete ch.resumeCwd
+          })
+        }
       }
       return c.ref
     }).catch((e) => {
@@ -499,9 +515,12 @@ export async function openChat(id: string, legacy = false): Promise<void> {
   }
   leaveChat()
   const path = get().projectPath
+  const gen = projectGen
   // after the save of the chat just left
   const rec = await queueWrite(() => api.aiChat.loadChat(legacy ? null : path, id))
-  if (!rec || get().projectPath !== path || get().running) return
+  // another document opened meanwhile (also one with the same id: the record, and its agent sessions,
+  // may be of the document before)
+  if (!rec || get().projectPath !== path || projectGen !== gen || get().running) return
   set({ chat: rec, legacy, showHistory: false, status: '' })
 }
 
@@ -827,7 +846,8 @@ export async function send(raw: string): Promise<void> {
 export function stop(save = true): void {
   const r = get().running
   if (!r) return
-  stoppedRuns.set(r.runId, { chatId: get().chat.id, msgId: r.msgId, ref: chatRef(), noSession: voidSessions.has(r.runId) })
+  const ref = chatRef()
+  stoppedRuns.set(r.runId, { chatId: get().chat.id, msgId: r.msgId, ref, noSession: voidSessions.has(r.runId), stoppedIn: ref, drops: dropsOf(ref) })
   void api.aiChat.stop(r.runId)
   finishTurn({ type: 'done', ok: false, stopped: true }, save)
 }
@@ -836,7 +856,19 @@ export function stop(save = true): void {
  * Turns stopped here that main is still winding down: their last usage, API history (the request and
  * the edits the model already made) and agent session id still belong to the chat record.
  */
-const stoppedRuns = new Map<string, { chatId: string; msgId: string; ref: string | null; noSession?: boolean }>()
+const stoppedRuns = new Map<string, StoppedRun>()
+interface StoppedRun {
+  chatId: string
+  msgId: string
+  /** where the chat lives now (a Save As that moved the chats moves it too) */
+  ref: string | null
+  noSession?: boolean
+  /** the reference it was stopped in, and how many session drops that reference had then */
+  stoppedIn: string | null
+  drops: number
+}
+/** the turn's agent session no longer belongs to its chat */
+const sessionGone = (s: StoppedRun) => !!s.noSession || dropsOf(s.stoppedIn) !== s.drops
 /** turns whose agent session no longer belongs to the chat (it was copied / moved away from its folder) */
 const voidSessions = new Set<string>()
 
@@ -870,7 +902,7 @@ function onStoppedRunEvent(runId: string, ev: AiRunEvent): void {
     return
   }
   if (ev.type !== 'session' && ev.type !== 'apiHistory' && ev.type !== 'usage') return
-  if (ev.type === 'session' && s.noSession) return
+  if (ev.type === 'session' && sessionGone(s)) return
   if (get().chat.id === s.chatId && chatRef() === s.ref) {
     patchChat((c) => recordEvent(c, s.msgId, ev))
     void persist()
@@ -879,7 +911,7 @@ function onStoppedRunEvent(runId: string, ev: AiRunEvent): void {
   // the user moved on to another chat: update the saved record, after the save that leaving it issued
   void queueWrite(async () => {
     // a claim queued before this write may have ended the id's sessions meanwhile
-    if (ev.type === 'session' && s.noSession) return
+    if (ev.type === 'session' && sessionGone(s)) return
     const rec = await api.aiChat.loadChat(s.ref, s.chatId)
     if (rec) await api.aiChat.saveChat(s.ref, produce(rec, (c) => recordEvent(c, s.msgId, ev)))
   }).catch((e) => console.error('[doplan] saving a stopped turn failed', e))

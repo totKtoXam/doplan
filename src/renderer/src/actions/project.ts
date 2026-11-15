@@ -181,7 +181,8 @@ export async function createProjectFolder(mode: 'new' | 'saveAs', name: string, 
   }
 }
 
-async function afterOpen(res: Awaited<ReturnType<typeof api.project.open>>, reload: DocReload = null): Promise<void> {
+/** `loadId`: of the document open when the reload began (another one loaded meanwhile: not a reload) */
+async function afterOpen(res: Awaited<ReturnType<typeof api.project.open>>, reload: DocReload = null, loadId?: number): Promise<void> {
   if (!res) return
   let doc: Doc
   try {
@@ -199,7 +200,9 @@ async function afterOpen(res: Awaited<ReturnType<typeof api.project.open>>, relo
   }
   // the same project read again keeps the id it has in memory, like viewVersion: an opened copy got its
   // own id that plan.json does not hold until the next save. Taken now, after the waits: the claim of
-  // that copy may have answered meanwhile
+  // that copy may have answered meanwhile. Another project opened during the waits: this is an open of
+  // its own, the id in memory is that other project's
+  if (reload && docStore.getState().loadId !== loadId) reload = null
   if (reload) doc = keepId(doc)
   loadDocument(doc, res.path, { kind: res.kind ?? kindOfPath(res.path), git: res.git, untrustedGit: res.untrustedGit, gitFile: res.gitFile, reload })
   refreshRecent()
@@ -287,7 +290,8 @@ export async function ensureAiFolderTrust(): Promise<boolean> {
 export async function openProject(path?: string, opts?: { skipConfirm?: boolean; reload?: DocReload }): Promise<void> {
   if (!opts?.skipConfirm && !(await confirmDiscard())) return
   try {
-    await afterOpen(await api.project.open(path), opts?.reload ?? null)
+    const loadId = docStore.getState().loadId
+    await afterOpen(await api.project.open(path), opts?.reload ?? null, loadId)
   } catch (err) {
     await alertDialog(t('Не удалось открыть проект'), errorText(err))
   }
@@ -440,6 +444,7 @@ export async function viewVersion(v: ProjectVersion): Promise<boolean> {
   const root = projectStore.getState().root
   if (!root) return false
   if (!(await confirmDiscard())) return false
+  const loadId = docStore.getState().loadId
   let doc: Doc
   try {
     doc = parseDoc(await api.project.versionDoc(v.sha))
@@ -447,6 +452,8 @@ export async function viewVersion(v: ProjectVersion): Promise<boolean> {
     await alertDialog(t('Не удалось открыть версию'), errorText(err))
     return false
   }
+  // another project was opened while the version was read: it is not a version of that one
+  if (docStore.getState().loadId !== loadId || projectStore.getState().root !== root) return false
   // an old version is the same project: it keeps the project's id (and so its AI chats), even one
   // written before documents had an id
   doc = keepId(doc)

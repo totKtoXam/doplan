@@ -465,8 +465,10 @@ export function electricHalfWidth(p: Pick<ElectricPoint, 'kind' | 'gangs' | 'ver
 /**
  * Where along a wall (`t` from node a) a point of half-size `half` fits on a face. The face ends
  * where an adjoining wall at node a or b covers it (the inner corner of a room), and the point keeps
- * `half` clear of such an end so its frame is not buried in that wall. Free ends, straight joins and
- * outer corners do not limit it (the face goes on there). A face shorter than the point: its middle.
+ * `half` clear of such an end so its frame is not buried in that wall. At an outer corner the face
+ * ends at the miter with the other wall's outer face (as computeWallGeoms draws it): past the node
+ * usually, short of it when the other wall is thinner and the bend blunt, then the point keeps clear
+ * of that end too. Free ends and straight joins do not limit it. A face shorter than the point: its middle.
  * Computed from the document alone, so `normalize` keeps every wall point inside it.
  */
 export function wallFaceRange(
@@ -499,13 +501,21 @@ export function wallFaceRange(
       // the other wall's direction away from the shared node
       const away = o.a === nodeId ? oe.u : v(-oe.u.x, -oe.u.y)
       const c1 = away.x * e.u.y - away.y * e.u.x
-      // a straight join, or a wall on the other side of this face (an outer corner): no limit
-      if (Math.abs(c1) < 0.05 || away.x * n.x + away.y * n.y <= 1e-6) continue
-      // signed distance of the face line from the other wall's axis is c0 + c1·t; its body is |…| ≤ th/2
+      // a straight join: no limit
+      if (Math.abs(c1) < 0.05) continue
+      // signed distance of the face line from the other wall's axis is c0 + c1·t; its body is |…| ≤ th/2,
+      // its faces are at ±th/2 (t1, t2 where this face line crosses them)
       const c0 = away.x * (fy - node.y) - away.y * (fx - node.x)
       const ho = o.thickness / 2
       const t1 = (-ho - c0) / c1
       const t2 = (ho - c0) / c1
+      if (away.x * n.x + away.y * n.y <= 1e-6) {
+        // the other wall is on the far side of this face (an outer corner): the face ends at the
+        // crossing with its outer face, the farther one; it only matters when that is short of the node
+        if (end === 'a') f0 = Math.max(f0, Math.min(e.len, Math.min(t1, t2)))
+        else f1 = Math.min(f1, Math.max(0, Math.max(t1, t2)))
+        continue
+      }
       if (end === 'a') f0 = Math.max(f0, Math.min(e.len, Math.max(t1, t2)))
       else f1 = Math.min(f1, Math.max(0, Math.min(t1, t2)))
     }

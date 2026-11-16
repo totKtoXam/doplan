@@ -7,6 +7,7 @@ import {
   ELECTRIC_KINDS,
   ELECTRIC_TYPES,
   addElectric,
+  alongWall,
   clampOnFace,
   electricBinding,
   electricBomRows,
@@ -15,6 +16,7 @@ import {
   electricSymbol,
   electricType,
   nearestWallFace,
+  wallFaceRange,
 } from '../electrical'
 import { computeBom } from '../bom'
 import { buildDisplayList } from '../display'
@@ -247,6 +249,36 @@ describe('review fixes', () => {
     expect(doc.electrical![out].y).toBeCloseTo(-100)
     expect(doc.electrical![out].x).toBeCloseTo(20)
     expect(clampOnFace(doc, top.id, doc.electrical![out].side!, -50, 43)).toBe(0)
+  })
+
+  it('agrees with the plan at corners with a thinner wall, stops at a short outer face', () => {
+    for (const deg of [160, 135, 90]) {
+      const doc = createEmptyDoc()
+      const L = doc.levelOrder[0]
+      const a = ((180 - deg) * Math.PI) / 180
+      addWall(doc, L, { x: 0, y: 0 }, { x: 3000, y: 0 }, { thickness: 200 })
+      addWall(doc, L, { x: 3000, y: 0 }, { x: 3000 + 2000 * Math.cos(a), y: 2000 * Math.sin(a) }, { thickness: 120 })
+      normalize(doc)
+      const wA = Object.values(doc.walls).find((w) => w.thickness === 200)!
+      const plan = derivePlan(doc, L)
+      for (const side of ['left', 'right'] as const) {
+        const seg = plan.wallGeoms[wA.id][side]
+        const ts = seg.map((q) => alongWall(doc, wA.id, q)!)
+        const r = wallFaceRange(doc, wA.id, side)!
+        expect(r.lo, `${deg}° ${side} start`).toBeCloseTo(Math.max(0, Math.min(...ts)), 0)
+        expect(r.hi, `${deg}° ${side} end`).toBeCloseTo(Math.min(r.len, Math.max(...ts)), 0)
+      }
+      // a socket pushed to the outer end of A stays on its visible face, half a frame from the end
+      const id = addElectric(doc, L, 'socket', 2995, -150)
+      normalize(doc)
+      const p = doc.electrical![id]
+      expect(p.wallId).toBe(wA.id)
+      const seg = plan.wallGeoms[wA.id][p.side!]
+      const end = Math.max(seg[0].x, seg[1].x)
+      expect(p.x + 43, `${deg}°`).toBeLessThanOrEqual(end + 0.5)
+      // short of the node only where the face is short of it
+      if (end < 3000) expect(p.x).toBeCloseTo(end - 43, 0)
+    }
   })
 
   it('moves a frame widened in place off the adjoining wall', () => {

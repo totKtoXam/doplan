@@ -146,4 +146,25 @@ describe('electrical AI tools', () => {
     expect(points()).toHaveLength(0)
     expect(describeCall('place_electric', { kind: 'socket', wallId: 'w_1' })).toContain('w_1')
   })
+
+  it('refuses a wall hidden in the layers panel', async () => {
+    const wallId = await room()
+    const put = await executeTool(host, 'place_electric', { kind: 'socket', wallId, offset: 1000 })
+    expect(put.result.ok, put.result.text).toBe(true)
+    const p = points()[0]
+    st().transact('hide', (d) => {
+      d.walls[wallId].hidden = true
+    })
+    const onHidden = await executeTool(host, 'place_electric', { kind: 'socket', wallId, offset: 2000 })
+    expect(onHidden.result.ok).toBe(false)
+    expect(onHidden.result.text).toContain('скрыта в панели слоёв')
+    expect(points()).toHaveLength(1)
+    const other = Object.keys(st().doc.walls).find((id) => id !== wallId)!
+    const moved = await executeTool(host, 'set_electric', { electricId: p.id, wallId: other, offset: 500 })
+    expect(moved.result.ok, moved.result.text).toBe(true)
+    const back = await executeTool(host, 'set_electric', { electricId: p.id, wallId, offset: 500 })
+    expect(back.result.ok).toBe(false)
+    expect(back.result.text).toContain('скрыта в панели слоёв')
+    expect(st().doc.electrical![p.id].wallId).toBe(other)
+  })
 })

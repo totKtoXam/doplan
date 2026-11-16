@@ -42,6 +42,7 @@ import {
   clampOnFace,
   electricHalfWidth,
   isMountableWall,
+  wallHidden,
 } from '@core'
 import type { Catalog, DerivedPlan, Doc, ElectricKind, ElectricPoint, EntityRef, Id, Vec2 } from '@core/types'
 import type { AiToolResult } from '@shared/aiChat'
@@ -255,6 +256,7 @@ function wallSpot(doc: Doc, plan: DerivedPlan, wallId: Id, o: { side?: 'left' | 
   const w = doc.walls[wallId]
   if (!w) throw new ToolError(`Стена ${wallId} не найдена`)
   if (!isMountableWall(w)) throw new ToolError(`Стена ${wallId} ${w.kind === 'virtual' ? 'виртуальная (разделитель зон)' : 'без толщины'}: на неё нельзя поставить точку`)
+  if (wallHidden(doc, w)) throw new ToolError(`Стена ${wallId} скрыта в панели слоёв: покажите её или выберите другую стену`)
   const probe = wallFacePoint(doc, wallId, 'left', 0)
   if (!probe) throw new ToolError(`На стену ${wallId} нельзя поставить точку (нулевая длина)`)
   const len = probe.len

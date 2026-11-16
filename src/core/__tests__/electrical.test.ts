@@ -469,6 +469,39 @@ describe('layers panel', () => {
     expect(p.y).toBeCloseTo(150)
   })
 
+  it('a point dragged off its hidden wall never lands on another hidden wall', () => {
+    const doc = createEmptyDoc()
+    const L = doc.levelOrder[0]
+    const [h] = addWall(doc, L, { x: 0, y: 0 }, { x: 4000, y: 0 }, { thickness: 200 })
+    const [h2] = addWall(doc, L, { x: 6000, y: 0 }, { x: 10000, y: 0 }, { thickness: 200 })
+    normalize(doc)
+    const id = addElectric(doc, L, 'socket', 1000, 100)
+    const p = doc.electrical![id]
+    expect(p.wallId).toBe(h)
+    setHidden(doc, [{ kind: 'wall', id: h }, { kind: 'wall', id: h2 }], true)
+    // moved with a group (marquee / arrows move only x, y)
+    p.x += 7000
+    normalize(doc)
+    expect(p.wallId).toBeUndefined()
+    expect(p.x).toBeCloseTo(8000)
+  })
+
+  it('copying walls with a point: an existing hidden wall the copy runs into is not taken', () => {
+    const doc = createEmptyDoc()
+    const L = doc.levelOrder[0]
+    const [w] = addWall(doc, L, { x: 0, y: 0 }, { x: 4000, y: 0 }, { thickness: 200 })
+    const [h] = addWall(doc, L, { x: 500, y: 500 }, { x: 4500, y: 500 }, { thickness: 200 })
+    normalize(doc)
+    const id = addElectric(doc, L, 'socket', 1000, 100)
+    expect(doc.electrical![id].wallId).toBe(w)
+    setHidden(doc, [{ kind: 'wall', id: h }], true)
+    const out = duplicateEntities(doc, [{ kind: 'wall', id: w }, { kind: 'electric', id }], 500, 500)
+    normalize(doc)
+    const copy = doc.electrical![out.find((r) => r.kind === 'electric')!.id]
+    expect(copy.wallId).not.toBe(h)
+    expect(layerIndex({ ...doc }).hidden('electric', copy.id)).toBe(false)
+  })
+
   it('stays on a hidden wall that is merged or split', () => {
     const doc = createEmptyDoc()
     const L = doc.levelOrder[0]

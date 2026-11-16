@@ -640,7 +640,7 @@ export function duplicateEntities(doc: Doc, refs: EntityRef[], dx: number, dy: n
   for (const r of refs) if (r.kind === 'wall' && doc.walls[r.id]) wallIds.add(r.id)
   const groupMap = new Map<Id, Id>()
   const seen = new Set<string>()
-  // walls the copies of the walls went to (copied points may sit on them, hidden or not)
+  // walls created as copies of the walls (copied points may sit on them, hidden or not)
   const copiedWalls = new Set<Id>()
 
   // snapshot the source walls first: inserting copies may split the originals
@@ -663,8 +663,10 @@ export function duplicateEntities(doc: Doc, refs: EntityRef[], dx: number, dy: n
       src.tpl,
     )
     for (const p of pieces) {
+      // only new walls: an existing wall the copy ran into is somebody else's (it may be hidden)
+      if (!p.created) continue
       copiedWalls.add(p.wallId)
-      if (p.created) out.push({ kind: 'wall', id: p.wallId })
+      out.push({ kind: 'wall', id: p.wallId })
     }
     for (const o of src.openings) {
       const piece =

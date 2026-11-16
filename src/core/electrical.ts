@@ -660,10 +660,12 @@ export function detachElectric(p: ElectricPoint): void {
  *  - a point whose wall was split, merged or deleted moves to the wall face it lies on (or is detached);
  *  - a point on an existing wall is put back on the face (the wall moved or changed thickness);
  *  - points of deleted levels are removed, posts are clamped.
- * `onHiddenWall`: points whose wall was hidden before the edit (`electricOnHiddenWalls`); only they may
- * be re-seated on a hidden wall (their wall split or merged), others never land on what is not seen.
+ * `onHiddenWall`: points on a hidden wall before the edit with that wall's axis (`electricOnHiddenWalls`).
+ * Only such a point may be re-seated on a hidden wall, and only on one continuing that old wall (on its
+ * axis, overlapping or touching it: the wall split or merged); a point dragged to another hidden wall,
+ * and any other point, never lands on what is not seen.
  */
-export function reattachElectrical(doc: Doc, onHiddenWall?: ReadonlySet<Id>): void {
+export function reattachElectrical(doc: Doc, onHiddenWall?: ReadonlyMap<Id, HiddenWallSeat>): void {
   const rec = doc.electrical
   if (!rec) return
   for (const id in rec) {
@@ -691,21 +693,46 @@ export function reattachElectrical(doc: Doc, onHiddenWall?: ReadonlySet<Id>): vo
     // the wall is gone or no longer under the point: the face the point sits on, if it looks the same
     // way (a split or merged wall). A face turned another way is a neighbour wall at a corner: the
     // point is detached in place rather than moved and turned onto it.
-    const hit = nearestWallFace(doc, p.levelId, p, 60, { skipHidden: !onHiddenWall?.has(id) })
+    const seat = onHiddenWall?.get(id)
+    const hit = nearestWallFace(doc, p.levelId, p, 60, { skipHidden: true, allowHidden: seat ? continuingWalls(doc, p.levelId, seat) : undefined })
     if (hit && Math.abs(((hit.rotation - p.rotation + 540) % 360) - 180) < 1) placeElectricOnWall(doc, id, hit.wallId, hit.side, clampOnFace(doc, hit.wallId, hit.side, hit.t, half))
     else detachElectric(p)
   }
   // the record stays even when empty: deleting it would turn the next edit into a whole-record patch
 }
 
-/** points sitting on a wall hidden in the layers panel (taken before an edit, for `reattachElectrical`) */
-export function electricOnHiddenWalls(doc: Doc): Set<Id> {
-  const out = new Set<Id>()
+/** axis of the hidden wall a point stood on before an edit */
+export interface HiddenWallSeat {
+  a: Vec2
+  b: Vec2
+}
+
+/** points sitting on a wall hidden in the layers panel, with its axis (taken before an edit, for `reattachElectrical`) */
+export function electricOnHiddenWalls(doc: Doc): Map<Id, HiddenWallSeat> {
+  const out = new Map<Id, HiddenWallSeat>()
   const rec = doc.electrical
   if (!rec) return out
   for (const id in rec) {
     const w = rec[id].wallId ? doc.walls[rec[id].wallId!] : undefined
-    if (w && wallHidden(doc, w)) out.add(id)
+    const a = w && doc.nodes[w.a]
+    const b = w && doc.nodes[w.b]
+    if (w && a && b && wallHidden(doc, w)) out.set(id, { a: { x: a.x, y: a.y }, b: { x: b.x, y: b.y } })
+  }
+  return out
+}
+
+/** walls continuing an old wall: on its axis (±1 mm) and overlapping or touching its segment */
+function continuingWalls(doc: Doc, levelId: Id, s: HiddenWallSeat): Set<Id> {
+  const out = new Set<Id>()
+  for (const id in doc.walls) {
+    const w = doc.walls[id]
+    const e = w.levelId === levelId ? wallEnds(doc, w) : null
+    if (!e) continue
+    const across = (q: Vec2) => Math.abs((q.x - e.a.x) * e.u.y - (q.y - e.a.y) * e.u.x)
+    if (across(s.a) > 1 || across(s.b) > 1) continue
+    const ta = (s.a.x - e.a.x) * e.u.x + (s.a.y - e.a.y) * e.u.y
+    const tb = (s.b.x - e.a.x) * e.u.x + (s.b.y - e.a.y) * e.u.y
+    if (Math.max(ta, tb) >= -1 && Math.min(ta, tb) <= e.len + 1) out.add(id)
   }
   return out
 }

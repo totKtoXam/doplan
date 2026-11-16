@@ -357,7 +357,7 @@ export interface Label {
 }
 
 /**
- * «Карандаш»: a freehand mark drawn over the plan to point at a zone in the AI chat
+ * «Пометка»: a freehand mark drawn over the plan to point at a zone in the AI chat
  * («в ① ширина 180 см»). Editor-only: not exported, not shown in 3D.
  */
 export interface Annotation {

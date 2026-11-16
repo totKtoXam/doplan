@@ -125,6 +125,7 @@ const api: DoplanApi = {
     stop: (runId) => invoke(CH.aiChatStop, runId),
     onEvent: (cb) => subscribe<[string, AiRunEvent]>(CH.evAiChatEvent, (runId, ev) => cb(runId, ev)),
     onToolCall: (cb) => subscribe<[AiToolCall]>(CH.evAiChatToolCall, (call) => cb(call)),
+    onToolCancel: (cb) => subscribe<[{ callId: string; runId: string }]>(CH.evAiChatToolCancel, (c) => cb(c)),
     toolResult: (callId, result) => ipcRenderer.send(CH.aiChatToolResult, callId, result),
     listChats: (projectPath) => invoke(CH.aiChatList, projectPath),
     loadChat: (projectPath, chatId) => invoke(CH.aiChatLoad, projectPath, chatId),

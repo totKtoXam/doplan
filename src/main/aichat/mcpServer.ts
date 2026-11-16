@@ -85,7 +85,8 @@ function buildServer(runId: string): McpServer {
         title: AI_TOOL_TITLES[name],
         description: AI_TOOL_DESCRIPTIONS[name],
         inputSchema: AI_TOOL_SHAPES[name],
-        annotations: { readOnlyHint: !mutating, destructiveHint: name === 'delete' || name === 'apply_planspec', openWorldHint: false },
+        // ask_user waits for the user: not «read-only», so Claude Code never runs two of them side by side
+        annotations: { readOnlyHint: !mutating && name !== 'ask_user', destructiveHint: name === 'delete' || name === 'apply_planspec', openWorldHint: false },
       },
       (async (args: unknown) => toMcpContent(await callDocTool(runId, name, args))) as never,
     )

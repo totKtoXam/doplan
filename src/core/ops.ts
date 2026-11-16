@@ -3,7 +3,7 @@
  * draft inside `docStore.transact`) and returns the ids it created. Writes are skipped when a value
  * does not change, so the resulting patch sets stay minimal.
  */
-import { captureElectricAnchors, duplicateElectric, reattachElectrical, restoreElectricAnchors } from './electrical'
+import { captureElectricAnchors, duplicateElectric, electricOnHiddenWalls, reattachElectrical, restoreElectricAnchors } from './electrical'
 import { DEFAULT_MATERIALS, OPENING_DEFAULTS, ROOM_TYPE_NAMES, defaultRoom, defaultWallSide } from './defaults'
 import { EPS, dist, projectOnSegment, segIntersect } from './geom'
 import { newId } from './ids'
@@ -640,6 +640,8 @@ export function duplicateEntities(doc: Doc, refs: EntityRef[], dx: number, dy: n
   for (const r of refs) if (r.kind === 'wall' && doc.walls[r.id]) wallIds.add(r.id)
   const groupMap = new Map<Id, Id>()
   const seen = new Set<string>()
+  // walls the copies of the walls went to (copied points may sit on them, hidden or not)
+  const copiedWalls = new Set<Id>()
 
   // snapshot the source walls first: inserting copies may split the originals
   const sources = [...wallIds].map((id) => {
@@ -660,7 +662,10 @@ export function duplicateEntities(doc: Doc, refs: EntityRef[], dx: number, dy: n
       { x: src.b.x + dx, y: src.b.y + dy },
       src.tpl,
     )
-    for (const p of pieces) if (p.created) out.push({ kind: 'wall', id: p.wallId })
+    for (const p of pieces) {
+      copiedWalls.add(p.wallId)
+      if (p.created) out.push({ kind: 'wall', id: p.wallId })
+    }
     for (const o of src.openings) {
       const piece =
         pieces.find((p) => p.created && o.offset >= p.from && o.offset <= p.to) ??
@@ -725,7 +730,7 @@ export function duplicateEntities(doc: Doc, refs: EntityRef[], dx: number, dy: n
         break
       }
       case 'electric': {
-        for (const id of duplicateElectric(doc, [r.id], dx, dy)) out.push({ kind: 'electric', id })
+        for (const id of duplicateElectric(doc, [r.id], dx, dy, copiedWalls)) out.push({ kind: 'electric', id })
         break
       }
       case 'dimension': {
@@ -817,6 +822,8 @@ export function applyFinishToWallSide(
  *  5. wall-mounted electrical points are put back on their faces (core/electrical).
  */
 export function normalize(doc: Doc): void {
+  // electrical points on hidden walls, before the walls are merged / split below
+  const onHiddenWall = electricOnHiddenWalls(doc)
   // ── 1. merge coincident nodes ──
   const byLevel = new Map<Id, PinnedNode[]>()
   for (const id in doc.nodes) {
@@ -1003,7 +1010,7 @@ export function normalize(doc: Doc): void {
   }
 
   // ── 5. electrical points stay on their wall faces ──
-  reattachElectrical(doc)
+  reattachElectrical(doc, onHiddenWall)
 }
 
 // ───────────────────────────── rooms ─────────────────────────────

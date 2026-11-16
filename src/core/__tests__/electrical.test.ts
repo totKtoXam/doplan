@@ -423,6 +423,52 @@ describe('layers panel', () => {
     expect(nearestWallFace(doc, L, { x: 1000, y: 100 }, 400, { skipHidden: true })?.wallId).toBe(top.id)
   })
 
+  it('a lone duplicate is not put on a hidden wall; one copied with its walls is', () => {
+    const doc = createEmptyDoc()
+    const L = doc.levelOrder[0]
+    addWall(doc, L, { x: 0, y: 0 }, { x: 4000, y: 0 }, { thickness: 200 })
+    const [side] = addWall(doc, L, { x: 1550, y: 300 }, { x: 1550, y: 2000 }, { thickness: 100 })
+    normalize(doc)
+    const id = addElectric(doc, L, 'socket', 1000, 100)
+    const base = doc.electrical![id].wallId!
+    expect(base).not.toBe(side)
+    setHidden(doc, [{ kind: 'wall', id: side }], true)
+    const [copy] = duplicateEntities(doc, [{ kind: 'electric', id }], 500, 500)
+    normalize(doc)
+    // stays on the wall of the original, shifted along it
+    expect(doc.electrical![copy.id].wallId).toBe(base)
+    // the walls group hidden: copies of walls are hidden too, the copied point still sits on its copy
+    const d2 = createEmptyDoc()
+    const L2 = d2.levelOrder[0]
+    const [w] = addWall(d2, L2, { x: 0, y: 0 }, { x: 4000, y: 0 }, { thickness: 200 })
+    normalize(d2)
+    const e = addElectric(d2, L2, 'socket', 1000, 100)
+    d2.groupFlags = { wall: { hidden: true } }
+    const out = duplicateEntities(d2, [{ kind: 'wall', id: w }, { kind: 'electric', id: e }], 0, 1000)
+    normalize(d2)
+    const wallCopy = out.find((r) => r.kind === 'wall')!.id
+    const pointCopy = out.find((r) => r.kind === 'electric')!.id
+    expect(d2.electrical![pointCopy].wallId).toBe(wallCopy)
+    expect(d2.electrical![pointCopy].y).toBeCloseTo(1100)
+  })
+
+  it('deleting a visible wall never moves its points onto a hidden one', () => {
+    const doc = createEmptyDoc()
+    const L = doc.levelOrder[0]
+    const [a] = addWall(doc, L, { x: 0, y: 0 }, { x: 4000, y: 0 }, { thickness: 200 })
+    const [b] = addWall(doc, L, { x: 0, y: 125 }, { x: 4000, y: 125 }, { thickness: 50 })
+    normalize(doc)
+    setHidden(doc, [{ kind: 'wall', id: a }], true)
+    const id = addElectric(doc, L, 'socket', 1000, 300)
+    const p = doc.electrical![id]
+    expect(p.wallId).toBe(b)
+    expect(p.y).toBeCloseTo(150)
+    removeEntities(doc, [{ kind: 'wall', id: b }])
+    normalize(doc)
+    expect(p.wallId).toBeUndefined()
+    expect(p.y).toBeCloseTo(150)
+  })
+
   it('stays on a hidden wall that is merged or split', () => {
     const doc = createEmptyDoc()
     const L = doc.levelOrder[0]

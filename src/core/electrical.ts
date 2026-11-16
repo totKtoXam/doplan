@@ -588,7 +588,8 @@ export function wallHidden(doc: Partial<Pick<Doc, 'layers' | 'groupFlags'>>, w: 
 /**
  * The wall face nearest to `p` on a level within `tol` mm of the face. `skipHidden`: walls hidden in
  * the layers panel do not count — for putting a point somewhere (the user does not see them); never
- * when re-seating a point after a wall edit (a split or merged hidden wall must keep its points). (the projection must fall
+ * when re-seating a point of a hidden wall after a wall edit (a split or merged hidden wall must keep
+ * its points). `allowHidden`: hidden walls that still count with `skipHidden`. (the projection must fall
  * on the wall). `prefer` (a wall id) wins ties so a point keeps its wall at junctions.
  */
 export function nearestWallFace(
@@ -596,12 +597,12 @@ export function nearestWallFace(
   levelId: Id,
   p: Vec2,
   tol: number,
-  opts: { prefer?: Id; exclude?: ReadonlySet<Id>; skipHidden?: boolean } = {},
+  opts: { prefer?: Id; exclude?: ReadonlySet<Id>; skipHidden?: boolean; allowHidden?: ReadonlySet<Id> } = {},
 ): WallFaceHit | null {
   let best: WallFaceHit | null = null
   for (const id in doc.walls) {
     const w = doc.walls[id]
-    if (w.levelId !== levelId || !mountable(w) || opts.exclude?.has(id) || (opts.skipHidden && wallHidden(doc, w))) continue
+    if (w.levelId !== levelId || !mountable(w) || opts.exclude?.has(id) || (opts.skipHidden && !opts.allowHidden?.has(id) && wallHidden(doc, w))) continue
     const e = wallEnds(doc, w)
     if (!e) continue
     const t = (p.x - e.a.x) * e.u.x + (p.y - e.a.y) * e.u.y
@@ -659,8 +660,10 @@ export function detachElectric(p: ElectricPoint): void {
  *  - a point whose wall was split, merged or deleted moves to the wall face it lies on (or is detached);
  *  - a point on an existing wall is put back on the face (the wall moved or changed thickness);
  *  - points of deleted levels are removed, posts are clamped.
+ * `onHiddenWall`: points whose wall was hidden before the edit (`electricOnHiddenWalls`); only they may
+ * be re-seated on a hidden wall (their wall split or merged), others never land on what is not seen.
  */
-export function reattachElectrical(doc: Doc): void {
+export function reattachElectrical(doc: Doc, onHiddenWall?: ReadonlySet<Id>): void {
   const rec = doc.electrical
   if (!rec) return
   for (const id in rec) {
@@ -688,11 +691,23 @@ export function reattachElectrical(doc: Doc): void {
     // the wall is gone or no longer under the point: the face the point sits on, if it looks the same
     // way (a split or merged wall). A face turned another way is a neighbour wall at a corner: the
     // point is detached in place rather than moved and turned onto it.
-    const hit = nearestWallFace(doc, p.levelId, p, 60)
+    const hit = nearestWallFace(doc, p.levelId, p, 60, { skipHidden: !onHiddenWall?.has(id) })
     if (hit && Math.abs(((hit.rotation - p.rotation + 540) % 360) - 180) < 1) placeElectricOnWall(doc, id, hit.wallId, hit.side, clampOnFace(doc, hit.wallId, hit.side, hit.t, half))
     else detachElectric(p)
   }
   // the record stays even when empty: deleting it would turn the next edit into a whole-record patch
+}
+
+/** points sitting on a wall hidden in the layers panel (taken before an edit, for `reattachElectrical`) */
+export function electricOnHiddenWalls(doc: Doc): Set<Id> {
+  const out = new Set<Id>()
+  const rec = doc.electrical
+  if (!rec) return out
+  for (const id in rec) {
+    const w = rec[id].wallId ? doc.walls[rec[id].wallId!] : undefined
+    if (w && wallHidden(doc, w)) out.add(id)
+  }
+  return out
 }
 
 /** wall-attached points of some walls with their distance from node `a` (taken before the walls move) */
@@ -787,8 +802,12 @@ export function addElectric(doc: Doc, levelId: Id, kind: ElectricKind, x: number
   return p.id
 }
 
-/** Copies points shifted by (dx, dy): a copy of a wall point stays on its face, shifted along it. */
-export function duplicateElectric(doc: Doc, ids: readonly Id[], dx: number, dy: number): Id[] {
+/**
+ * Copies points shifted by (dx, dy): a copy of a wall point stays on its face, shifted along it.
+ * `copiedWalls`: walls copied in the same duplication — a copy moved off its wall may sit on one of
+ * them even when it is hidden; any other hidden wall is skipped (the copy is put somewhere new).
+ */
+export function duplicateElectric(doc: Doc, ids: readonly Id[], dx: number, dy: number, copiedWalls?: ReadonlySet<Id>): Id[] {
   const out: Id[] = []
   const rec = doc.electrical
   if (!rec) return out
@@ -802,7 +821,7 @@ export function duplicateElectric(doc: Doc, ids: readonly Id[], dx: number, dy: 
       const e = w && wallEnds(doc, w)
       const across = e ? Math.abs(dx * e.u.y - dy * e.u.x) : 0
       // moved off its wall (e.g. copied together with the walls): sit on the face found there
-      const hit = e && across > 50 ? nearestWallFace(doc, c.levelId, c, 60) : null
+      const hit = e && across > 50 ? nearestWallFace(doc, c.levelId, c, 60, { skipHidden: true, allowHidden: copiedWalls }) : null
       if (hit) {
         placeElectricOnWall(doc, c.id, hit.wallId, hit.side, hit.t)
       } else if (e) {

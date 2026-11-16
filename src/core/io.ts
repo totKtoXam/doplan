@@ -9,7 +9,7 @@ import { entityKinds, kindTables } from './layers'
 import { normalize, syncRooms, type PinnedNode } from './ops'
 import { docFormatVersion } from './variants'
 import {
-  DOC_VERSION_VARIANTS,
+  DOC_VERSION_V3,
   DOOR_LEAF_STYLES,
   VARIANT_COLLECTIONS,
   type DocVariants,
@@ -815,7 +815,7 @@ export function parseDoc(json: unknown): Doc {
   }
   const version = raw.version === undefined ? 1 : num(raw.version, Number.NaN)
   if (Number.isNaN(version) || version < 1) throw new Error('Файл проекта повреждён: некорректный номер версии')
-  if (version > DOC_VERSION_VARIANTS) {
+  if (version > DOC_VERSION_V3) {
     throw new Error(`Проект создан в более новой версии doplan (формат ${version}). Обновите приложение, чтобы открыть его`)
   }
 

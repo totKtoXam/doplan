@@ -731,11 +731,17 @@ export interface DocMeta {
 
 export const DOC_VERSION = 1
 /**
- * Format of a document with two or more furnishing variants or with layers-panel data (user layers,
- * group flags, own hidden / locked / layer of objects). Older apps refuse it (instead of silently
- * dropping that data on their next save); see `docFormatVersion` in core/variants.
+ * Format of a document with two or more furnishing variants (doplan 0.12). Older apps refuse it
+ * (instead of silently dropping the inactive variants on their next save); see `docFormatVersion`
+ * in core/variants.
  */
 export const DOC_VERSION_VARIANTS = 2
+/**
+ * Format 3: data of doplan 0.13 — user layers and group flags of the layers panel, objects' own
+ * hidden / locked / layer / user name (see `usesLayers` in core/layers), then electrical points.
+ * doplan 0.12 accepts format 2 and would silently drop this data, so it must refuse the file.
+ */
+export const DOC_VERSION_V3 = 3
 
 export interface Doc {
   version: number

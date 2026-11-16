@@ -31,7 +31,7 @@ import {
   visibleDoc,
   visiblePlan,
 } from '../layers'
-import { DOC_VERSION, DOC_VERSION_VARIANTS, type Doc, type EntityRef, type Id, type LayerFlags } from '../types'
+import { DOC_VERSION, DOC_VERSION_V3, DOC_VERSION_VARIANTS, type Doc, type EntityRef, type Id, type LayerFlags } from '../types'
 
 /** one 4×3 m room with a door, a sofa and a ceiling light */
 function sample(): { doc: Doc; lv: Id; walls: Id[]; door: Id; sofa: Id; light: Id; room: Id } {
@@ -470,12 +470,12 @@ describe('layers: furnishing variants and the file format', () => {
     expect(v(produce(doc, (d) => setHidden(d, [ref('item', sofa)], true)))).toBe(DOC_VERSION)
     expect(v(produce(doc, (d) => { renameEntity(d, ref('item', sofa), 'Диван') }))).toBe(DOC_VERSION)
 
-    expect(v(produce(doc, (d) => setHidden(d, [ref('wall', walls[0])], true)))).toBe(DOC_VERSION_VARIANTS)
-    expect(v(produce(doc, (d) => setLocked(d, [ref('light', light)], true)))).toBe(DOC_VERSION_VARIANTS)
-    expect(v(produce(doc, (d) => { renameEntity(d, ref('opening', door), 'Вход') }))).toBe(DOC_VERSION_VARIANTS)
-    expect(v(produce(doc, (d) => setGroupFlag(d, 'item', 'locked', true)))).toBe(DOC_VERSION_VARIANTS)
-    expect(v(produce(doc, (d) => { addLayer(d, 'Пустой') }))).toBe(DOC_VERSION_VARIANTS)
-    expect(v(produce(doc, (d) => assignLayer(d, [ref('item', sofa)], addLayer(d, 'Мебель'))))).toBe(DOC_VERSION_VARIANTS)
+    expect(v(produce(doc, (d) => setHidden(d, [ref('wall', walls[0])], true)))).toBe(DOC_VERSION_V3)
+    expect(v(produce(doc, (d) => setLocked(d, [ref('light', light)], true)))).toBe(DOC_VERSION_V3)
+    expect(v(produce(doc, (d) => { renameEntity(d, ref('opening', door), 'Вход') }))).toBe(DOC_VERSION_V3)
+    expect(v(produce(doc, (d) => setGroupFlag(d, 'item', 'locked', true)))).toBe(DOC_VERSION_V3)
+    expect(v(produce(doc, (d) => { addLayer(d, 'Пустой') }))).toBe(DOC_VERSION_V3)
+    expect(v(produce(doc, (d) => assignLayer(d, [ref('item', sofa)], addLayer(d, 'Мебель'))))).toBe(DOC_VERSION_V3)
 
     // undoing it all returns to format 1
     const d1 = produce(doc, (d) => setGroupFlag(d, 'item', 'hidden', true))
@@ -484,16 +484,34 @@ describe('layers: furnishing variants and the file format', () => {
     expect(docFormatVersion(d2)).toBe(DOC_VERSION)
   })
 
-  it('a raised-format file reads back here; an app knowing only format 1 refuses it', () => {
+  it('a raised-format file reads back here; released apps (0.11: format 1, 0.12: format 2) refuse it', () => {
     const { doc, walls } = sample()
     const d = produce(doc, (x) => setLocked(x, [ref('wall', walls[0])], true))
     const raw = JSON.parse(serializeDoc(d))
-    expect(raw.version).toBe(DOC_VERSION_VARIANTS)
+    expect(raw.version).toBe(DOC_VERSION_V3)
     const back = parseDoc(raw)
-    expect(back.version).toBe(DOC_VERSION_VARIANTS)
+    expect(back.version).toBe(DOC_VERSION_V3)
     expect(back.walls[walls[0]].locked).toBe(true)
-    // the check of format-1 apps (doplan ≤ 0.11): `version > DOC_VERSION` → refuse
-    expect(raw.version > DOC_VERSION).toBe(true)
-    expect(() => parseDoc({ ...raw, version: DOC_VERSION_VARIANTS + 1 })).toThrow(/более новой версии doplan \(формат 3\)/)
+    // released readers refuse `version > <their max>`: 0.11 knows format 1, 0.12 knows format 2 (variants)
+    expect(raw.version).toBeGreaterThan(DOC_VERSION)
+    expect(raw.version).toBeGreaterThan(DOC_VERSION_VARIANTS)
+    expect(() => parseDoc({ ...raw, version: DOC_VERSION_V3 + 1 })).toThrow(/более новой версии doplan \(формат 4\)/)
+  })
+
+  it('layers data with several variants is format 3; several variants alone stay format 2', () => {
+    const { doc, sofa } = sample()
+    createVariant(doc, { from: 'copy' })
+    expect(JSON.parse(serializeDoc(doc)).version).toBe(DOC_VERSION_VARIANTS)
+    assignLayer(doc, [ref('item', sofa)], addLayer(doc, 'Мебель'))
+    expect(JSON.parse(serializeDoc(doc)).version).toBe(DOC_VERSION_V3)
+  })
+
+  it('«compare variants» thumbnails (includeHidden) draw items hidden by their own eye too', () => {
+    const { doc, lv, sofa } = sample()
+    const d = produce(doc, (x) => setHidden(x, [ref('item', sofa)], true))
+    const owners = (o: { includeHidden?: boolean }): boolean =>
+      buildDisplayList(d, lv, { furniture: true, ...o }).items.some((it) => it.ref?.kind === 'item' && it.ref.id === sofa)
+    expect(owners({})).toBe(false)
+    expect(owners({ includeHidden: true })).toBe(true)
   })
 })

@@ -1503,7 +1503,7 @@ export function buildDisplayList(fullDoc: Doc, levelId: Id, opts: DisplayOptions
   // furniture
   if (showFurniture) {
     const list = Object.values(doc.items)
-      .filter((it) => it.levelId === levelId && !it.hidden)
+      .filter((it) => it.levelId === levelId && (opts.includeHidden || !it.hidden))
       .sort((a, b) => (a.mount === 'floor' ? 0 : 1) - (b.mount === 'floor' ? 0 : 1) || a.elevation - b.elevation)
     for (const it of list) owned(ctx, { kind: 'item', id: it.id }, () => drawItem(ctx, it, findAsset(doc, opts.catalog, it.assetId)))
   }

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   BUILTIN_ASSETS,
   DOC_VERSION,
+  DOC_VERSION_V3,
   DOC_VERSION_VARIANTS,
   activeVariantId,
   addItem,
@@ -384,7 +385,7 @@ describe('furnishing variants: file format', () => {
 
   it('a file from a newer format is refused with a readable message', () => {
     const { doc } = apartment()
-    expect(() => parseDoc({ ...JSON.parse(serializeDoc(doc)), version: DOC_VERSION_VARIANTS + 1 })).toThrow(/более новой версии/)
+    expect(() => parseDoc({ ...JSON.parse(serializeDoc(doc)), version: DOC_VERSION_V3 + 1 })).toThrow(/более новой версии/)
   })
 
   it('a broken active id never loses a stash', () => {

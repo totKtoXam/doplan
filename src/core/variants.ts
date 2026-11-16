@@ -18,6 +18,7 @@ import { newId } from './ids'
 import { usesLayers } from './layers'
 import {
   DOC_VERSION,
+  DOC_VERSION_V3,
   DOC_VERSION_VARIANTS,
   VARIANT_COLLECTIONS,
   VARIANT_OPENING_FIELDS,
@@ -144,11 +145,12 @@ export function variantCount(doc: Doc): number {
 }
 
 /**
- * file format version the document must be written with: the extended one when it has several
- * variants or layers-panel data (see `usesLayers`), which older apps would silently drop
+ * file format version the document must be written with: the lowest one whose readers keep all its
+ * data (format 3 for layers-panel data, see `usesLayers`; format 2 for several variants)
  */
 export function docFormatVersion(doc: Doc): number {
-  return variantCount(doc) > 1 || usesLayers(doc) ? DOC_VERSION_VARIANTS : DOC_VERSION
+  if (usesLayers(doc)) return DOC_VERSION_V3
+  return variantCount(doc) > 1 ? DOC_VERSION_VARIANTS : DOC_VERSION
 }
 
 /** a free "Вариант N" name */

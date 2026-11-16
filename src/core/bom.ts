@@ -5,6 +5,7 @@
  *  - ceilings: m² per material, cornice metres
  *  - skirting: metres per material (door openings deducted), planks
  *  - openings by kind and size, items by asset, lights by kind
+ *  - electrical points by type, frames by post count, mounting boxes (cable is not counted)
  * Pure TS.
  */
 import type {
@@ -26,8 +27,9 @@ import type {
 } from './types'
 import { BUILTIN_ASSETS, BUILTIN_MATERIALS, ROOM_TYPE_NAMES } from './defaults'
 import { derivePlan } from './derive'
+import { electricBomRows } from './electrical'
 
-export type BomGroup = 'Полы' | 'Стены' | 'Потолки' | 'Плинтус' | 'Двери и окна' | 'Мебель и оборудование' | 'Освещение'
+export type BomGroup = 'Полы' | 'Стены' | 'Потолки' | 'Плинтус' | 'Двери и окна' | 'Мебель и оборудование' | 'Освещение' | 'Электрика'
 
 export interface BomRow {
   group: BomGroup
@@ -574,6 +576,7 @@ export function computeBom(doc: Doc, catalog?: Catalog, opts: BomOptions = {}): 
       rows.push({ group: 'Освещение', name: LIGHT_NAMES[kind], unit: 'шт', quantity: e.n, note: `всего ${Math.round(e.lumens)} лм`, refId: `light:${kind}` })
     }
   }
+  rows.push(...electricBomRows(doc))
   assignLots(rows)
   attachPrices(rows, doc, catalog)
   return rows

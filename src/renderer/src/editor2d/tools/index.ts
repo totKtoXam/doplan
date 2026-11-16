@@ -1,6 +1,7 @@
 import { t } from '@/i18n'
 import type { ToolId } from '@/contracts'
 import type { EditorCtx } from '../context'
+import { createElectricTool } from './electric'
 import { createDimensionTool, createLabelTool, createLightTool, createMeasureTool } from './annotate'
 import { createItemTool } from './item'
 import { createCalibrateTool, createEraseTool, createSplitTool } from './modify'
@@ -41,6 +42,7 @@ export function createTools(ctx: EditorCtx): Record<ToolId, Tool> {
     window: createOpeningTool(ctx, 'window'),
     item: createItemTool(ctx),
     light: createLightTool(ctx),
+    electric: createElectricTool(ctx),
     dimension: createDimensionTool(ctx),
     label: createLabelTool(ctx),
     measure: createMeasureTool(ctx),

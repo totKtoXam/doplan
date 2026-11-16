@@ -244,7 +244,7 @@ describe('layers: outline (panel model)', () => {
     expect(by.room.rows).toHaveLength(1)
     expect(by.underlay.rows).toHaveLength(0)
     // every built-in kind is listed in a fixed order
-    expect(groups.map((g) => g.kind)).toEqual(['wall', 'room', 'opening', 'item', 'light', 'underlay', 'annotation', 'dimension', 'label'])
+    expect(groups.map((g) => g.kind)).toEqual(['wall', 'room', 'opening', 'item', 'light', 'electric', 'underlay', 'annotation', 'dimension', 'label'])
   })
 
   it('rename sets a user name, empty resets it', () => {

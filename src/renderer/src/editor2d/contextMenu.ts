@@ -10,7 +10,7 @@ import { requestWallFrom } from './tools/wallStart'
 import { addSelectionToChat } from '@/ai/store' // ai-chat
 import { markMenuItems } from './tools/pencil' // ai-chat
 
-const DUPLICABLE = new Set(['wall', 'opening', 'item', 'light', 'label', 'dimension'])
+const DUPLICABLE = new Set(['wall', 'opening', 'item', 'light', 'electric', 'label', 'dimension'])
 
 export function buildContextMenu(ctx: EditorCtx, plan: Vec2, zoomToFit: () => void): ContextMenuItem[] {
   const ui = uiStore.getState()
@@ -38,6 +38,7 @@ export function buildContextMenu(ctx: EditorCtx, plan: Vec2, zoomToFit: () => vo
         }
         for (const id in doc.items) if (doc.items[id].levelId === levelId && !doc.items[id].hidden) refs.push({ kind: 'item', id })
         for (const id in doc.lights) if (doc.lights[id].levelId === levelId) refs.push({ kind: 'light', id })
+        for (const id in doc.electrical) if (doc.electrical[id].levelId === levelId) refs.push({ kind: 'electric', id })
         for (const id in doc.labels) if (doc.labels[id].levelId === levelId) refs.push({ kind: 'label', id })
         for (const id in doc.dimensions) if (doc.dimensions[id].levelId === levelId) refs.push({ kind: 'dimension', id })
         uiStore.getState().select(pickableRefs(doc, refs))
@@ -271,6 +272,8 @@ export function buildContextMenu(ctx: EditorCtx, plan: Vec2, zoomToFit: () => vo
               return !!now.items[r.id]
             case 'light':
               return !!now.lights[r.id]
+            case 'electric':
+              return !!now.electrical?.[r.id]
             case 'label':
               return !!now.labels[r.id]
             case 'dimension':

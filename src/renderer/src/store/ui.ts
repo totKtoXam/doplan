@@ -203,6 +203,8 @@ function entityExists(doc: ReturnType<typeof docStore.getState>['doc'], r: Entit
       return !!doc.items[r.id]
     case 'light':
       return !!doc.lights[r.id]
+    case 'electric':
+      return !!doc.electrical?.[r.id]
     case 'dimension':
       return !!doc.dimensions[r.id]
     case 'label':

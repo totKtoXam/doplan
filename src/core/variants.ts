@@ -144,12 +144,19 @@ export function variantCount(doc: Doc): number {
   return doc.variants ? doc.variants.order.length : 1
 }
 
+/** electrical points are new to formats 1–2: a 0.12 app would drop them on its next save */
+function hasElectrical(doc: Doc): boolean {
+  return !!doc.electrical && Object.keys(doc.electrical).length > 0
+}
+
 /**
  * file format version the document must be written with: the lowest one whose readers keep all its
- * data (format 3 for layers-panel data, see `usesLayers`; format 2 for several variants)
+ * data (format 3 for layers-panel data, see `usesLayers`, and for electrical points; format 2 for
+ * several variants)
  */
 export function docFormatVersion(doc: Doc): number {
-  if (usesLayers(doc)) return DOC_VERSION_V3
+  // layers-panel data or electrical points: format 3 (0.12.0 opens format 2 and would drop them on save)
+  if (usesLayers(doc) || hasElectrical(doc)) return DOC_VERSION_V3
   return variantCount(doc) > 1 ? DOC_VERSION_VARIANTS : DOC_VERSION
 }
 

@@ -368,6 +368,89 @@ export interface Light extends LayerFlags {
   size?: { w: number; d: number }
 }
 
+// ───────────────────────────── Electrical points ─────────────────────────────
+
+/**
+ * Kind of an electrical / low-voltage point. The catalog (names, plan symbols, default heights,
+ * 3D look) lives in core/electrical `ELECTRIC_TYPES`; unknown kinds in files are kept as `other`.
+ */
+export type ElectricKind =
+  // sockets
+  | 'socket'
+  | 'socketDouble'
+  | 'socketGround'
+  | 'socketIP44'
+  | 'socketLid'
+  | 'socketPower'
+  | 'socketUsbA'
+  | 'socketUsbC'
+  | 'socketUsbAC'
+  // USB modules
+  | 'usbA'
+  | 'usbC'
+  // switches
+  | 'switch1'
+  | 'switch2'
+  | 'switch3'
+  | 'switchPass'
+  | 'switchCross'
+  | 'dimmer'
+  | 'bell'
+  // low voltage
+  | 'tv'
+  | 'rj45'
+  | 'phone'
+  | 'hdmi'
+  | 'speaker'
+  // cable outlets for appliances / fixtures
+  | 'outAc'
+  | 'outLight'
+  | 'outSconce'
+  | 'outHood'
+  | 'outBoiler'
+  | 'outWasher'
+  // equipment
+  | 'junction'
+  | 'panel'
+  | 'sensorLeak'
+  | 'sensorSmoke'
+  | 'sensorMotion'
+  | 'thermostat'
+  | 'other'
+
+/** wall: on a wall face · floor: in the floor · ceiling: on the ceiling */
+export type ElectricMount = 'wall' | 'floor' | 'ceiling'
+
+/**
+ * A socket, switch, data / TV outlet, cable outlet, junction box, panel or sensor. Stored in
+ * `Doc.electrical` (optional: absent in files from before 0.12).
+ *
+ * The plan position is the truth; a wall point also remembers the wall face it sits on and is kept on
+ * that face when the wall moves or changes thickness (core/electrical `reattachElectrical`).
+ */
+export interface ElectricPoint extends LayerFlags {
+  id: Id
+  levelId: Id
+  kind: ElectricKind
+  mount: ElectricMount
+  /** plan position, mm: for a wall point, the point on the wall face (centre of the frame) */
+  x: number
+  y: number
+  /** height of the centre above the floor, mm (ceiling points: the ceiling height) */
+  elevation: number
+  /** direction the face of the device looks to on plan, degrees clockwise (wall: into the room) */
+  rotation: number
+  /** wall the point is mounted on and the face side (absent for floor / ceiling / free points) */
+  wallId?: Id
+  side?: 'left' | 'right'
+  /** devices of this kind in one frame (posts), 1–5; default 1 */
+  gangs?: number
+  /** frame of several posts laid vertically (default horizontal) */
+  vertical?: boolean
+  /** free text: what is plugged in, the circuit, notes for the electrician */
+  comment?: string
+}
+
 // ───────────────────────────── Annotations ─────────────────────────────
 
 export interface Dimension extends LayerFlags {
@@ -757,6 +840,10 @@ export interface Doc {
   rooms: Record<Id, Room>
   items: Record<Id, Item>
   lights: Record<Id, Light>
+  /** sockets, switches, low-voltage and cable outlets (see ElectricPoint). Optional in the type for
+   *  older callers, but createEmptyDoc/parseDoc always create it and it is never deleted. Shared by
+   *  all furnishing variants, like the walls (not in VARIANT_COLLECTIONS). */
+  electrical?: Record<Id, ElectricPoint>
   dimensions: Record<Id, Dimension>
   labels: Record<Id, Label>
   /** pencil marks (editor-only, see Annotation) */
@@ -851,6 +938,7 @@ export type EntityKind =
   | 'room'
   | 'item'
   | 'light'
+  | 'electric'
   | 'dimension'
   | 'label'
   | 'underlay'

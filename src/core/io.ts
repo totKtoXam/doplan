@@ -7,6 +7,7 @@ import { DEFAULT_MATERIALS, OPENING_DEFAULTS, ROOM_TYPE_NAMES, createEmptyDoc, d
 import { newId, PROJECT_ID_RE, type IdPrefix } from './ids'
 import { entityKinds, kindTables } from './layers'
 import { normalize, syncRooms, type PinnedNode } from './ops'
+import { parseElectricPoint } from './electrical'
 import { docFormatVersion } from './variants'
 import {
   DOC_VERSION_V3,
@@ -999,6 +1000,17 @@ export function parseDoc(json: unknown): Doc {
   const ctx: ReadCtx = { levels, levelOf }
   doc.items = VARIANT_READERS.items(raw.items, ctx)
   doc.lights = VARIANT_READERS.lights(raw.lights, ctx)
+
+  // ── electrical points (0.12+; absent in older files). The record always exists so that edits
+  //    patch single points (['electrical', id]), never the whole record ──
+  doc.electrical = {}
+  for (const [id, v] of entries(raw.electrical, 'e')) {
+    const levelId = levelOf(v.levelId)
+    const p = parseElectricPoint(id, v, levelId, levels[levelId].height)
+    if (!p) continue
+    readLayerFlags(v, p)
+    doc.electrical[id] = p
+  }
 
   // ── annotations ──
   for (const [id, v] of entries(raw.dimensions, 'd')) {

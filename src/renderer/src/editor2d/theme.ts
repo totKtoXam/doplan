@@ -42,6 +42,8 @@ export interface Palette {
   badgeText: number
   lightOn: number
   lightOff: number
+  /** electrical points (sockets, switches, low-voltage) */
+  electric: number
   handleFill: number
   handleStroke: number
   camera: number
@@ -88,6 +90,7 @@ export const DARK: Palette = {
   badgeText: 0xffffff,
   lightOn: 0xffd45e,
   lightOff: 0x7a8291,
+  electric: 0xff8a7a,
   handleFill: 0xffffff,
   handleStroke: 0x4c9dff,
   camera: 0xffa53c,
@@ -134,6 +137,7 @@ export const LIGHT: Palette = {
   badgeText: 0xffffff,
   lightOn: 0xe8a600,
   lightOff: 0x8a919d,
+  electric: 0xc62828,
   handleFill: 0xffffff,
   handleStroke: 0x1a73e8,
   camera: 0xe07b00,

@@ -88,6 +88,7 @@ export class HitIndex {
       doc.openings,
       doc.items,
       doc.lights,
+      doc.electrical,
       doc.labels,
       doc.dimensions,
       doc.underlays,
@@ -129,6 +130,11 @@ export class HitIndex {
       const l = doc.lights[id]
       if (l.levelId !== levelId) continue
       this.insert('light', id, { minX: l.x - 250, minY: l.y - 250, maxX: l.x + 250, maxY: l.y + 250 })
+    }
+    for (const id in doc.electrical) {
+      const e = doc.electrical[id]
+      if (e.levelId !== levelId) continue
+      this.insert('electric', id, { minX: e.x - 150, minY: e.y - 150, maxX: e.x + 150, maxY: e.y + 150 })
     }
     for (const id in doc.labels) {
       const l = doc.labels[id]
@@ -312,6 +318,14 @@ export class HitIndex {
           if (f && pointInPolygon(p, openingRect(f, tol * 0.5))) push('opening', e.id, 1, dist(f.c, p))
           break
         }
+        case 'electric': {
+          // the symbol sits on the wall face: it wins over the wall and the openings, not over nodes
+          const q = doc.electrical?.[e.id]
+          if (!q) break
+          const d = dist(q, p)
+          if (d <= Math.max(tol * 1.1, 60)) push('electric', e.id, 0.5, d)
+          break
+        }
         case 'light': {
           const l = doc.lights[e.id]
           if (!l) break
@@ -381,7 +395,7 @@ export class HitIndex {
       if (e.kind === 'node' || e.kind === 'underlay') continue
       if (!vis.pickable(e.kind, e.id)) continue
       const ref: EntityRef = { kind: e.kind, id: e.id }
-      if (bboxInside(e.box, box) && e.kind !== 'light') {
+      if (bboxInside(e.box, box) && e.kind !== 'light' && e.kind !== 'electric') {
         out.push(ref)
         continue
       }

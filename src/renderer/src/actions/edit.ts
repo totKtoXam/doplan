@@ -1,4 +1,4 @@
-import { duplicateEntities, layerIndex, newId, pickableRefs, remapAccentFace, removeEntities, unlockedRefs } from '@core'
+import { detachElectric, duplicateEntities, layerIndex, nearestWallFace, newId, pickableRefs, placeElectricOnWall, remapAccentFace, removeEntities, unlockedRefs } from '@core'
 import type { Doc, EntityRef, Id, Vec2 } from '@core/types'
 import { t } from '@/i18n'
 import { docStore } from '@/store/document'
@@ -50,6 +50,7 @@ export function selectAll(): void {
   for (const w of Object.values(doc.walls)) if (w.levelId === lv) refs.push({ kind: 'wall', id: w.id })
   for (const i of Object.values(doc.items)) if (i.levelId === lv && !i.locked && !i.hidden) refs.push({ kind: 'item', id: i.id })
   for (const l of Object.values(doc.lights)) if (l.levelId === lv) refs.push({ kind: 'light', id: l.id })
+  for (const e of Object.values(doc.electrical ?? {})) if (e.levelId === lv) refs.push({ kind: 'electric', id: e.id })
   for (const l of Object.values(doc.labels)) if (l.levelId === lv) refs.push({ kind: 'label', id: l.id })
   for (const dm of Object.values(doc.dimensions)) if (dm.levelId === lv) refs.push({ kind: 'dimension', id: dm.id })
   // what cannot be clicked on the plan (hidden / locked in the layers panel) is not selected either
@@ -100,6 +101,11 @@ export function groupRotate(deg: number): void {
       case 'light': {
         const l = doc.lights[r.id]
         if (l) pts.push({ x: l.x, y: l.y })
+        break
+      }
+      case 'electric': {
+        const e = doc.electrical?.[r.id]
+        if (e) pts.push({ x: e.x, y: e.y })
         break
       }
       case 'label': {
@@ -155,6 +161,14 @@ export function groupRotate(deg: number): void {
         l.x = p.x
         l.y = p.y
         if (l.rotation !== undefined) l.rotation = norm(l.rotation + deg)
+      } else if (r.kind === 'electric') {
+        // wall points are put back on their faces by normalize (the facing follows the wall)
+        const e = d.electrical?.[r.id]
+        if (!e) continue
+        const p = rot(e, c, cos, sin)
+        e.x = p.x
+        e.y = p.y
+        e.rotation = norm(e.rotation + deg)
       } else if (r.kind === 'label') {
         const l = d.labels[r.id]
         if (!l) continue
@@ -262,6 +276,23 @@ function pasteInto(src: Doc, refs: EntityRef[], srcLevel: Id, d: Doc, level: Id,
         out.push({ kind: 'light', id })
         break
       }
+      case 'electric': {
+        const e = src.electrical?.[r.id]
+        if (!e) break
+        const id = newId('e')
+        const wallId = e.wallId ? wallMap.get(e.wallId) : undefined
+        const copy = { ...e, id, levelId: level, x: e.x + dx, y: e.y + dy }
+        ;(d.electrical ??= {})[id] = copy
+        if (wallId) copy.wallId = wallId
+        else if (copy.mount === 'wall') {
+          // pasted without its wall: sits on the wall face found at the new place, if any
+          detachElectric(copy)
+          const hit = nearestWallFace(d, level, copy, 60, { skipHidden: true })
+          if (hit) placeElectricOnWall(d, id, hit.wallId, hit.side, hit.t)
+        }
+        out.push({ kind: 'electric', id })
+        break
+      }
       case 'label': {
         const l = src.labels[r.id]
         if (!l) break
@@ -307,8 +338,8 @@ export function paste(): void {
   // ids of walls may change during normalisation: keep only refs that survived
   const doc = currentDoc()
   const alive = created.filter((r) => {
-    const coll = { wall: doc.walls, item: doc.items, light: doc.lights, label: doc.labels, dimension: doc.dimensions, underlay: doc.underlays }[
-      r.kind as 'wall' | 'item' | 'light' | 'label' | 'dimension' | 'underlay'
+    const coll = { wall: doc.walls, item: doc.items, light: doc.lights, electric: doc.electrical, label: doc.labels, dimension: doc.dimensions, underlay: doc.underlays }[
+      r.kind as 'wall' | 'item' | 'light' | 'electric' | 'label' | 'dimension' | 'underlay'
     ]
     return !!coll?.[r.id]
   })

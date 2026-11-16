@@ -1,8 +1,8 @@
 /**
  * Plan level → DXF (AutoCAD 2007, AC1021, UTF-8) via @tarikjabiri/dxf.
  * Built from the display list (without sheet chrome), y flipped (DXF is y-up), units = mm.
- * Layers: WALLS, OPENINGS, ROOMS, DIMENSIONS, FURNITURE, TEXT; an object on a user layer (layers panel)
- * goes to a DXF layer named after that layer. Objects hidden in the layers panel are not exported.
+ * Layers: WALLS, OPENINGS, ROOMS, DIMENSIONS, FURNITURE, TEXT, ELECTRICAL; an object on a user layer
+ * (layers panel) goes to a DXF layer named after that layer. Objects hidden in the layers panel are not exported.
  * Dimensions are written as plain lines + text so every viewer shows them identically.
  */
 import {
@@ -39,6 +39,7 @@ const LAYERS: { name: string; color: number }[] = [
   { name: 'DIMENSIONS', color: 3 },
   { name: 'FURNITURE', color: 9 },
   { name: 'TEXT', color: 7 },
+  { name: 'ELECTRICAL', color: 1 },
 ]
 
 const DASHED = 'DP_DASHED'
@@ -59,6 +60,8 @@ function layerOf(it: DisplayItem): string | null {
     case 'text':
     case 'annotations':
       return 'TEXT'
+    case 'electrical':
+      return 'ELECTRICAL'
     default:
       return null
   }

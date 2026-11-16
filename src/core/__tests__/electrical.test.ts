@@ -407,7 +407,9 @@ describe('layers panel', () => {
   it('is never put on a hidden wall', () => {
     const { doc, L, top } = room()
     setHidden(doc, [{ kind: 'wall', id: top.id }], true)
-    expect(nearestWallFace(doc, L, { x: 1000, y: 100 }, 400)).toBeNull()
+    expect(nearestWallFace(doc, L, { x: 1000, y: 100 }, 400, { skipHidden: true })).toBeNull()
+    // re-seating after a wall edit still sees it (only putting a point somewhere skips hidden walls)
+    expect(nearestWallFace(doc, L, { x: 1000, y: 100 }, 400)?.wallId).toBe(top.id)
     // the given wall is hidden: as without it (no visible face near)
     const id = addElectric(doc, L, 'socket', 1000, 100, { wallId: top.id })
     expect(doc.electrical![id].wallId).toBeUndefined()
@@ -416,9 +418,41 @@ describe('layers panel', () => {
     const ly = addLayer(doc, 'Стены')
     assignLayer(doc, [{ kind: 'wall', id: top.id }], ly)
     doc.layers![ly].hidden = true
-    expect(nearestWallFace(doc, L, { x: 1000, y: 100 }, 400)).toBeNull()
+    expect(nearestWallFace(doc, L, { x: 1000, y: 100 }, 400, { skipHidden: true })).toBeNull()
     doc.layers![ly].hidden = false
-    expect(nearestWallFace(doc, L, { x: 1000, y: 100 }, 400)?.wallId).toBe(top.id)
+    expect(nearestWallFace(doc, L, { x: 1000, y: 100 }, 400, { skipHidden: true })?.wallId).toBe(top.id)
+  })
+
+  it('stays on a hidden wall that is merged or split', () => {
+    const doc = createEmptyDoc()
+    const L = doc.levelOrder[0]
+    addWall(doc, L, { x: 0, y: 0 }, { x: 4000, y: 0 }, { thickness: 200 })
+    const [part] = addWall(doc, L, { x: 2000, y: 0 }, { x: 2000, y: 2000 }, { thickness: 100 })
+    normalize(doc)
+    const halves = () => Object.values(doc.walls).filter((w) => w.id !== part)
+    expect(halves()).toHaveLength(2)
+    const id = addElectric(doc, L, 'socket', 3000, 100)
+    const p = doc.electrical![id]
+    const w2 = p.wallId!
+    expect(halves().map((w) => w.id)).toContain(w2)
+    // both halves on a hidden user layer
+    const ly = addLayer(doc, 'Существующие')
+    assignLayer(doc, halves().map((w) => ({ kind: 'wall', id: w.id })), ly)
+    doc.layers![ly].hidden = true
+    // the visible partition goes: the halves merge, one of them is deleted
+    removeEntities(doc, [{ kind: 'wall', id: part }])
+    normalize(doc)
+    const merged = Object.values(doc.walls)
+    expect(merged).toHaveLength(1)
+    expect(p.wallId).toBe(merged[0].id)
+    expect(p.side).toBeDefined()
+    expect(p.y).toBeCloseTo(100)
+    // split again (a wall joined at its middle): the point keeps a half under it
+    addWall(doc, L, { x: 2500, y: 0 }, { x: 2500, y: -2000 }, { thickness: 100 })
+    normalize(doc)
+    expect(p.wallId).toBeDefined()
+    expect(doc.walls[p.wallId!].layerId).toBe(ly)
+    expect(p.y).toBeCloseTo(100)
   })
 })
 

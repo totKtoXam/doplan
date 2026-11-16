@@ -581,25 +581,27 @@ function normDeg(a: number): number {
  * A wall hidden in the layers panel (own flag, the walls group or its user layer; walls have no
  * parent). Points are not put on it: the user does not see it.
  */
-export function wallHidden(doc: Pick<Doc, 'layers' | 'groupFlags'>, w: Wall): boolean {
+export function wallHidden(doc: Partial<Pick<Doc, 'layers' | 'groupFlags'>>, w: Wall): boolean {
   return w.hidden === true || doc.groupFlags?.wall?.hidden === true || (typeof w.layerId === 'string' && doc.layers?.[w.layerId]?.hidden === true)
 }
 
 /**
- * The wall face nearest to `p` on a level within `tol` mm of the face (walls hidden in the layers panel are skipped) (the projection must fall
+ * The wall face nearest to `p` on a level within `tol` mm of the face. `skipHidden`: walls hidden in
+ * the layers panel do not count — for putting a point somewhere (the user does not see them); never
+ * when re-seating a point after a wall edit (a split or merged hidden wall must keep its points). (the projection must fall
  * on the wall). `prefer` (a wall id) wins ties so a point keeps its wall at junctions.
  */
 export function nearestWallFace(
-  doc: Pick<Doc, 'nodes' | 'walls' | 'layers' | 'groupFlags'>,
+  doc: Pick<Doc, 'nodes' | 'walls'> & Partial<Pick<Doc, 'layers' | 'groupFlags'>>,
   levelId: Id,
   p: Vec2,
   tol: number,
-  opts: { prefer?: Id; exclude?: ReadonlySet<Id> } = {},
+  opts: { prefer?: Id; exclude?: ReadonlySet<Id>; skipHidden?: boolean } = {},
 ): WallFaceHit | null {
   let best: WallFaceHit | null = null
   for (const id in doc.walls) {
     const w = doc.walls[id]
-    if (w.levelId !== levelId || !mountable(w) || opts.exclude?.has(id) || wallHidden(doc, w)) continue
+    if (w.levelId !== levelId || !mountable(w) || opts.exclude?.has(id) || (opts.skipHidden && wallHidden(doc, w))) continue
     const e = wallEnds(doc, w)
     if (!e) continue
     const t = (p.x - e.a.x) * e.u.x + (p.y - e.a.y) * e.u.y
@@ -774,12 +776,12 @@ export function addElectric(doc: Doc, levelId: Id, kind: ElectricKind, x: number
     // a given wall counts only when a point can sit on it (else: the nearest face, as without it)
     const w = patch.wallId ? doc.walls[patch.wallId] : undefined
     if (patch.wallId && w && w.levelId === levelId && isMountableWall(w) && !wallHidden(doc, w)) {
-      const side = patch.side ?? nearestWallFace(doc, levelId, p, Infinity, { prefer: patch.wallId })?.side ?? 'left'
+      const side = patch.side ?? nearestWallFace(doc, levelId, p, Infinity, { prefer: patch.wallId, skipHidden: true })?.side ?? 'left'
       const t = clampOnFace(doc, patch.wallId, side, alongWall(doc, patch.wallId, p) ?? 0, half)
       placeElectricOnWall(doc, p.id, patch.wallId, side, t)
       return p.id
     }
-    const hit = nearestWallFace(doc, levelId, p, snap ?? 400)
+    const hit = nearestWallFace(doc, levelId, p, snap ?? 400, { skipHidden: true })
     if (hit) placeElectricOnWall(doc, p.id, hit.wallId, hit.side, clampOnFace(doc, hit.wallId, hit.side, hit.t, half))
   }
   return p.id

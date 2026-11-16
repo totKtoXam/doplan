@@ -263,7 +263,7 @@ function wallSpot(doc: Doc, plan: DerivedPlan, wallId: Id, o: { side?: 'left' | 
   const t = Math.min(len, Math.max(0, o.offset ?? proj ?? len / 2))
   let side = o.side
   if (!side && o.at) {
-    const hit = nearestWallFace(doc, w.levelId, o.at, Infinity, { prefer: wallId })
+    const hit = nearestWallFace(doc, w.levelId, o.at, Infinity, { prefer: wallId, skipHidden: true })
     if (hit && hit.wallId === wallId) side = hit.side
   }
   if (!side) {
@@ -725,7 +725,7 @@ async function run(host: ToolHost, name: AiToolName, a: Record<string, unknown>)
           x.x = args.at.x
           x.y = args.at.y
           if (x.mount === 'wall') {
-            const hit = nearestWallFace(d, x.levelId, x, 400)
+            const hit = nearestWallFace(d, x.levelId, x, 400, { skipHidden: true })
             if (hit) placeElectricOnWall(d, x.id, hit.wallId, hit.side, hit.t)
           }
         }

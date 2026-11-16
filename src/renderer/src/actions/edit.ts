@@ -287,7 +287,7 @@ function pasteInto(src: Doc, refs: EntityRef[], srcLevel: Id, d: Doc, level: Id,
         else if (copy.mount === 'wall') {
           // pasted without its wall: sits on the wall face found at the new place, if any
           detachElectric(copy)
-          const hit = nearestWallFace(d, level, copy, 60)
+          const hit = nearestWallFace(d, level, copy, 60, { skipHidden: true })
           if (hit) placeElectricOnWall(d, id, hit.wallId, hit.side, hit.t)
         }
         out.push({ kind: 'electric', id })

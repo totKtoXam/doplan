@@ -26,7 +26,7 @@ import {
   PLAN_FILE,
   stableStringify,
 } from '../shared/projectFormat'
-import { atomicWrite, cleanFileName, ensureDir, entryKind, exists, rmrf } from './fsutil'
+import { atomicWrite, cleanFileName, ensureDir, entryKind, exists, lstatNoFollow, rmrf } from './fsutil'
 import type { UnsafeGitConfig } from '../shared/ipc'
 import { findGit, gitCommit, gitInit, gitListDir, gitShowFile, resetRepoConfig, unsafeRepoConfig } from './git'
 import { paths } from './paths'
@@ -95,10 +95,10 @@ export function referencedAssets(json: string): string[] {
 
 // ───────────── files of the folder, never through links ─────────────
 
-/** what is at `p` itself (a link is not followed), or null when nothing is */
+/** what is at `p` itself (a link is not followed; any junction is one, see lstatNoFollow), or null when nothing is */
 async function entryAt(p: string): Promise<Stats | null> {
   try {
-    return await fsp.lstat(p)
+    return await lstatNoFollow(p)
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code
     if (code === 'ENOENT' || code === 'ENOTDIR') return null
@@ -270,7 +270,7 @@ export async function folderRootOf(p: string): Promise<string | null> {
 /** what `.git` in a folder is: nothing, a repository directory, or a gitdir file (submodule, worktree) */
 export async function gitState(root: string): Promise<'none' | 'repo' | 'gitfile'> {
   try {
-    return (await fsp.lstat(join(root, '.git'))).isDirectory() ? 'repo' : 'gitfile'
+    return (await lstatNoFollow(join(root, '.git'))).isDirectory() ? 'repo' : 'gitfile'
   } catch {
     return 'none'
   }

@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import fsp from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
@@ -57,6 +57,16 @@ function failingReaddir(which: RegExp, code: () => string) {
     if (which.test(String(p))) throw Object.assign(new Error(code()), { code: code() })
     return real(p, o)
   }) as never)
+}
+
+/**
+ * Windows: a junction to the volume-GUID path of `target` (\\?\Volume{…}\…), which libuv's lstat
+ * follows and reports as a plain folder. Removed with rmdirSync (unlinkSync refuses it, and a recursive
+ * rm would go through it).
+ */
+function volumeJunction(target: string, path: string): void {
+  const guid = execFileSync('mountvol', [target.slice(0, 3), '/L'], { encoding: 'utf8' }).trim()
+  execFileSync('cmd', ['/c', 'mklink', '/J', path, guid + target.slice(3)], { stdio: 'ignore' })
 }
 
 const MANIFEST = JSON.stringify({ format: 'doplan-folder', version: 1, app: 'doplan', assets: [] })
@@ -989,6 +999,62 @@ describe('repository layout', { timeout: 60_000 }, async () => {
     expect(await commitFolder(root, 'x')).toBeTruthy()
   })
 
+  it.skipIf(!git || process.platform !== 'win32')('a junction to a volume path (\\\\?\\Volume{…}), which lstat follows, is still a link: in .git, as .git and in the work tree', async () => {
+    const root = await created('VolumeJunction')
+    const lstatSays = (p: string) => lstatSync(p).isDirectory() && !lstatSync(p).isSymbolicLink()
+    // .git/refs moved out and put back as a volume junction: git would write refs and reflogs outside the folder
+    const refs = join(root, '.git', 'refs')
+    const store = join(base, 'volume-junction-refs')
+    renameSync(refs, store)
+    volumeJunction(store, refs)
+    try {
+      expect(lstatSays(refs)).toBe(true)
+      expect(await gitDirProblems(root)).toEqual(['.git/refs'])
+      writeFileSync(join(root, 'plan.json'), '{"vj":1}')
+      expect(await commitFolder(root, 'x')).toBeNull()
+    } finally {
+      rmdirSync(refs)
+    }
+    renameSync(store, refs)
+
+    // a volume junction whose target is gone: lstat finds nothing, and it still counts as a link, not as gone
+    const vanished = folder('volume-junction-vanished', {})
+    volumeJunction(vanished, join(root, '.git', 'logs', 'gone'))
+    rmSync(vanished, { recursive: true })
+    try {
+      expect(await gitDirProblems(root)).toEqual(['.git/logs/gone'])
+    } finally {
+      rmdirSync(join(root, '.git', 'logs', 'gone'))
+    }
+
+    // .git itself
+    const gitDir = join(root, '.git')
+    const gitStore = join(base, 'volume-junction-git')
+    renameSync(gitDir, gitStore)
+    volumeJunction(gitStore, gitDir)
+    try {
+      expect(await gitDirProblems(root)).toEqual(['.git'])
+      expect((await folderTrust(root)).git).toBe('gitfile')
+      expect(await commitFolder(root, 'x')).toBeNull()
+      await expect(gitLog(root)).rejects.toThrow()
+    } finally {
+      rmdirSync(gitDir)
+    }
+    renameSync(gitStore, gitDir)
+    expect(plainGit(root, 'rev-list', '--count', 'HEAD').trim()).toBe('1')
+
+    // the work tree: git add would enter it and commit files from outside the folder
+    const outside = folder('volume-junction-outside', { 'secret.txt': 'secret' })
+    volumeJunction(outside, join(root, 'docs'))
+    try {
+      await expect(commitFolder(root, 'x')).rejects.toThrow(/ссылка[^]*docs|link[^]*docs/)
+      expect(plainGit(root, 'ls-files')).not.toContain('secret')
+    } finally {
+      rmdirSync(join(root, 'docs'))
+    }
+    expect(await commitFolder(root, 'без ссылок')).toBeTruthy()
+  })
+
   it.skipIf(!git)('a repository only doplan writes still gets packed: doplan runs git gc --auto itself', async () => {
     const root = await created('Gc')
     const { createHash } = await import('node:crypto')
@@ -1195,6 +1261,27 @@ describe('project files through links', { timeout: 60_000 }, async () => {
     symlinkSync(join(outside, 'secret.png'), join(dir, 'assets', 'link2.png'), 'file')
     await writeFolderProject(dir, { version: 1, meta: { name: 'L' }, b: assetUrl('link2.png') })
     expect(readFileSync(join(dir, 'manifest.json'), 'utf8')).not.toContain('link2.png')
+  })
+
+  it.skipIf(process.platform !== 'win32')('assets/ as a junction to a volume path: nothing is read through it, and saving never writes or deletes there', async () => {
+    const { readFolderFile } = await import('./projectFolder')
+    const outside = folder('volume-assets-outside', { [HASHED]: 'theirs', 'b.png': 'b' })
+    const dir = project('volume-assets')
+    volumeJunction(outside, join(dir, 'assets'))
+    try {
+      expect(lstatSync(join(dir, 'assets')).isSymbolicLink()).toBe(false)
+      expect(await folderAssetLinks(dir)).toEqual(['assets'])
+      await loadFolderAssets(dir)
+      expect(readdirSync(paths.projectAssets)).toEqual([])
+      // a folder on the way to a file counts the same
+      await expect(readFolderFile(dir, `assets/${HASHED}`)).rejects.toThrow(/assets[^]*(ссылка|link)/)
+      writeFileSync(join(paths.projectAssets, 'c.png'), 'c')
+      await expect(writeFolderProject(dir, { version: 1, meta: { name: 'L' }, img: assetUrl('c.png') })).rejects.toThrow(/assets[^]*(ссылка|link)/)
+      expect(readdirSync(outside).sort()).toEqual([HASHED, 'b.png'].sort())
+      expect(readFileSync(join(outside, HASHED), 'utf8')).toBe('theirs')
+    } finally {
+      rmdirSync(join(dir, 'assets'))
+    }
   })
 
   it('synced assets (cloud placeholders) open and are no links; real links still are', async () => {

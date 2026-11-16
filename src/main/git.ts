@@ -14,7 +14,7 @@ import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path'
 import { app } from 'electron'
 import type { UnsafeGitConfig } from '../shared/ipc'
 import { msg } from './settings'
-import { entryKind, type EntryKind } from './fsutil'
+import { entryKind, lstatNoFollowSync, redirectsSync, type EntryKind } from './fsutil'
 
 export interface GitVersion {
   sha: string
@@ -370,9 +370,10 @@ export async function unsafeRepoConfig(root: string): Promise<UnsafeGitConfig | 
   return result
 }
 
+/** what is at `p` itself, any junction counting as a link (see lstatNoFollow), or null */
 const lstatOrNull = (p: string) => {
   try {
-    return lstatSync(p)
+    return lstatNoFollowSync(p)
   } catch {
     return null
   }
@@ -484,6 +485,8 @@ export async function gitDirProblems(root: string): Promise<string[]> {
   const add = (p: string) => {
     if (out.length < 50 && !out.includes(p)) out.push(p)
   }
+  // .git itself must be the folder it names (a junction to a volume path lstat follows is none)
+  if (redirectsSync(dir)) return ['.git']
   const end = await walkTree(dir, (rel, _name, kind) => {
     if (kind === 'link' || kind === 'other') add(`.git/${rel}`)
   })
@@ -585,7 +588,7 @@ export class UnsafeGitConfigError extends Error {
 async function assertRepoSafe(root: string, init: boolean): Promise<void> {
   let isDir: boolean
   try {
-    isDir = lstatSync(join(root, '.git')).isDirectory()
+    isDir = lstatNoFollowSync(join(root, '.git')).isDirectory()
   } catch {
     // no repository: only `git init`, which writes a fresh config; nothing may go looking for one above the folder
     if (init) return

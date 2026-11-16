@@ -8,7 +8,7 @@
  * Lines lie just above the floor of the active level. Toggle: «Размеры мебели» (settings.showItemSizes).
  */
 import * as THREE from 'three'
-import { itemClearances, itemGaps, type Vec2 } from '@core'
+import { isHidden, itemClearances, itemGaps, type Vec2 } from '@core'
 import type { DerivedPlan, Id, Item } from '@core/types'
 import { formatLen } from '@/editor2d/format'
 import { docStore } from '@/store/document'
@@ -51,12 +51,12 @@ export function createMeasure3D(container: HTMLElement, camera: THREE.Camera): M
     const ds = docStore.getState()
     const doc = ds.doc
     const sel = ui.selection.length === 1 && ui.selection[0].kind === 'item' ? doc.items[ui.selection[0].id as Id] : undefined
-    const key = [sel, doc.items, doc.walls, ds.derived, doc.settings.showItemSizes, doc.settings.units]
+    const key = [sel, doc.items, doc.walls, ds.derived, doc.settings.showItemSizes, doc.settings.units, doc.groupFlags, doc.layers]
     if (key.length === cacheKey.length && key.every((k, i) => k === cacheKey[i])) return
     cacheKey = key
     segs = []
     size = null
-    if (!sel || sel.hidden || !doc.settings.showItemSizes) return
+    if (!sel || isHidden(doc, { kind: 'item', id: sel.id }) || !doc.settings.showItemSizes) return
     const units = doc.settings.units
     const plan = (ds.derived as Record<Id, DerivedPlan>)[sel.levelId]
     const clr = plan ? itemClearances(doc, plan, sel, 8000) : []

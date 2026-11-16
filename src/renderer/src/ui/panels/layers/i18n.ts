@@ -45,4 +45,5 @@ addTranslations('en', {
   'Удалить слой': 'Delete layer',
   'Перетащите сюда объекты': 'Drag objects here',
   Слой: 'Layer',
+  'Пометка заблокирована': 'The mark is locked',
 })

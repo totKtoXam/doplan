@@ -16,6 +16,7 @@ import {
   deleteLayer,
   entityKind,
   entityKinds,
+  isHidden,
   moveLayer,
   nextLayerName,
   orderedLayers,
@@ -96,13 +97,17 @@ function selectRefs(refs: readonly Ref[], additive: boolean): void {
   }
 }
 
-function deselect(refs: readonly Ref[]): void {
-  const keys = new Set(refs.map((r) => refKey(r.kind, r.id)))
+/**
+ * drops every object that is hidden now (own flag, group, layer or parent wall) from the selection,
+ * so a later Delete never removes something the user cannot see
+ */
+function deselectHidden(): void {
+  const doc = docStore.getState().doc
   const ui = uiStore.getState()
-  const next = ui.selection.filter((r) => !keys.has(refKey(r.kind, r.id)))
+  const next = ui.selection.filter((r) => !isHidden(doc, r))
   if (next.length !== ui.selection.length) ui.select(next)
   for (const [kind, sel] of customSelections()) {
-    const ids = sel.selected().filter((id) => keys.has(refKey(kind, id)))
+    const ids = sel.selected().filter((id) => isHidden(doc, { kind, id }))
     if (ids.length) sel.select(ids, true)
   }
 }
@@ -140,6 +145,8 @@ export function LayersPanel({ className }: { className?: string }) {
   const [menu, setMenu] = useState<{ at: { x: number; y: number }; items: MenuEntry[] } | null>(null)
   const [dropKey, setDropKey] = useState<string | null>(null)
   const anchor = useRef<string | null>(null)
+  /** the row the user just clicked or reached with the arrows: the list keeps it in view */
+  const focusKey = useRef<string | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
   const kindTitle = (kind: string): string => entityKind(kind)?.title[lang] ?? kind
@@ -209,7 +216,12 @@ export function LayersPanel({ className }: { className?: string }) {
     const id = requestAnimationFrame(() => {
       const list = listRef.current
       if (!list) return
-      const el = list.querySelector<HTMLElement>('[data-selected="true"]')
+      // a selection made in the panel keeps its row in view; one made on the plan / in 3D shows the first selected row
+      const key = focusKey.current
+      focusKey.current = null
+      const el = key
+        ? [...list.querySelectorAll<HTMLElement>('[data-key]')].find((e) => e.dataset.key === key)
+        : list.querySelector<HTMLElement>('[data-selected="true"]')
       el?.scrollIntoView({ block: 'nearest' })
     })
     return () => cancelAnimationFrame(id)
@@ -231,7 +243,7 @@ export function LayersPanel({ className }: { className?: string }) {
     transact(hide ? t('Скрыть') : t('Показать'), (d) => {
       setHidden(d, refs, hide)
     })
-    if (hide) deselect(refs)
+    if (hide) deselectHidden()
   }
   const toggleLocked = (refs: Ref[], lock: boolean) => {
     transact(lock ? t('Заблокировать') : t('Разблокировать'), (d) => {
@@ -242,6 +254,8 @@ export function LayersPanel({ className }: { className?: string }) {
     transact(t('Переместить в слой'), (d) => {
       assignLayer(d, refs, layerId)
     })
+    // the target layer may be hidden
+    deselectHidden()
   }
   const moveToNew = (refs: Ref[]) => {
     let created: Id | null = null
@@ -285,6 +299,7 @@ export function LayersPanel({ className }: { className?: string }) {
 
   const onRowClick = (e: MouseEvent, row: OutlineRow) => {
     const key = rowKey(row)
+    focusKey.current = key
     if (e.shiftKey && anchor.current) {
       const a = flatRows.findIndex((r) => rowKey(r) === anchor.current)
       const b = flatRows.findIndex((r) => rowKey(r) === key)
@@ -380,7 +395,7 @@ export function LayersPanel({ className }: { className?: string }) {
         setLayerFlag(d, id, flag, value)
       })
     } else return
-    if (flag === 'hidden' && value) deselect(sectionRefs(s))
+    if (flag === 'hidden' && value) deselectHidden()
   }
 
   const onListKey = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -400,6 +415,7 @@ export function LayersPanel({ className }: { className?: string }) {
       const cur = anchor.current ? flatRows.findIndex((r) => rowKey(r) === anchor.current) : -1
       const next = Math.max(0, Math.min(flatRows.length - 1, cur + (e.key === 'ArrowDown' ? 1 : -1)))
       const row = flatRows[next]
+      focusKey.current = rowKey(row)
       selectRefs([row.ref], false)
       anchor.current = rowKey(row)
     }
@@ -547,6 +563,7 @@ export function LayersPanel({ className }: { className?: string }) {
                       key={key}
                       role="treeitem"
                       aria-selected={selected}
+                      data-key={key}
                       data-selected={selected || undefined}
                       draggable={renaming !== key}
                       onDragStart={(e) => onDragStart(e, row)}
@@ -555,6 +572,7 @@ export function LayersPanel({ className }: { className?: string }) {
                       onContextMenu={(e) => {
                         e.preventDefault()
                         if (!selected) {
+                          focusKey.current = key
                           selectRefs([row.ref], false)
                           anchor.current = key
                         }

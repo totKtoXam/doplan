@@ -1,4 +1,4 @@
-import { duplicateEntities, newId, pickableRefs, remapAccentFace, removeEntities, unlockedRefs } from '@core'
+import { duplicateEntities, layerIndex, newId, pickableRefs, remapAccentFace, removeEntities, unlockedRefs } from '@core'
 import type { Doc, EntityRef, Id, Vec2 } from '@core/types'
 import { t } from '@/i18n'
 import { docStore } from '@/store/document'
@@ -75,6 +75,7 @@ export function groupRotate(deg: number): void {
   const doc = currentDoc()
   const refs = unlockedRefs(doc, selection())
   if (!refs.length) return
+  const vis = layerIndex(doc)
   const nodeIds = new Set<Id>()
   const pts: Vec2[] = []
   for (const r of refs) {
@@ -82,8 +83,9 @@ export function groupRotate(deg: number): void {
       case 'wall': {
         const w = doc.walls[r.id]
         if (w) {
-          nodeIds.add(w.a)
-          nodeIds.add(w.b)
+          // a node shared with a locked wall stays put
+          if (!vis.locked('node', w.a)) nodeIds.add(w.a)
+          if (!vis.locked('node', w.b)) nodeIds.add(w.b)
         }
         break
       }

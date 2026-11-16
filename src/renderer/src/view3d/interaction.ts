@@ -27,6 +27,7 @@ import {
   planResizeTargets,
   pointInPolygon,
   removeEntities,
+  unlockedRefs,
   resizeFromFace,
   resizedParams,
   snapValue,
@@ -543,7 +544,7 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
     for (const id in doc.items) {
       if (exclude.has(id)) continue
       const other = doc.items[id]
-      if (other.levelId !== lid || other.hidden || other.mount === 'ceiling') continue
+      if (other.levelId !== lid || layerIndex(doc).hidden('item', id) || other.mount === 'ceiling') continue
       const oh = aabbHalf(other.size.w, other.size.d, other.rotation)
       const gapX = Math.abs(rx - other.x) - mine.hx - oh.hx
       const gapY = Math.abs(ry - other.y) - mine.hy - oh.hy
@@ -681,8 +682,13 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
     const ui = uiStore.getState()
     if (ui.selection.length !== 1 || ui.selection[0].kind !== 'item' || !selectLike(ui.tool) || shared.stillBusy) return undefined
     const it = docStore.getState().doc.items[ui.selection[0].id]
-    if (!it || it.locked || it.hidden || it.levelId !== levelId()) return undefined
+    if (!it || !editable(docStore.getState().doc, ui.selection[0]) || it.levelId !== levelId()) return undefined
     return it
+  }
+
+  /** not locked or hidden: own flag, its kind group or its user layer (layers panel) */
+  function editable(doc: Doc, ref: { kind: string; id: Id }): boolean {
+    return layerIndex(doc).pickable(ref.kind, ref.id)
   }
 
   function refreshHandles(): void {
@@ -703,7 +709,7 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
     const ui = uiStore.getState()
     const doc = docStore.getState().doc
     const only = ui.selection.length === 1 && ui.selection[0].kind === 'item' ? doc.items[ui.selection[0].id] : undefined
-    const show = !!only && !only.locked && !only.hidden && only.levelId === levelId() && ui.tool !== 'item' && !shared.stillBusy && (only.mount === 'floor' || only.mount === 'surface' || only.mount === 'free')
+    const show = !!only && editable(doc, ui.selection[0]) && only.levelId === levelId() && ui.tool !== 'item' && !shared.stillBusy && (only.mount === 'floor' || only.mount === 'surface' || only.mount === 'free')
     if (!show || !only) {
       if (gizmo.visible) {
         gizmo.visible = false
@@ -988,10 +994,9 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
     const refs: EntityRef[] = []
     for (const ref of base) {
       if (ref.kind === 'item') {
-        const it = doc.items[ref.id]
-        if (it && !it.locked) refs.push(ref)
+        if (doc.items[ref.id] && editable(doc, ref)) refs.push(ref)
       } else if (ref.kind === 'light') {
-        if (doc.lights[ref.id]) refs.push(ref)
+        if (doc.lights[ref.id] && editable(doc, ref)) refs.push(ref)
       }
     }
     // the grabbed entity always comes first
@@ -1145,7 +1150,7 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
     const out: Item[] = []
     for (const id in doc.items) {
       const o = doc.items[id]
-      if (id === selfId || o.levelId !== lid || o.hidden) continue
+      if (id === selfId || o.levelId !== lid || layerIndex(doc).hidden('item', id)) continue
       if (Math.hypot(o.x - p.x, o.y - p.y) > r + Math.hypot(o.size.w, o.size.d) / 2) continue
       out.push(o)
     }
@@ -1604,7 +1609,7 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
     }
     if (!hit?.ref) return
     const doc = docStore.getState().doc
-    const draggable = (hit.ref.kind === 'item' && !!doc.items[hit.ref.id] && !doc.items[hit.ref.id].locked) || (hit.ref.kind === 'light' && !!doc.lights[hit.ref.id])
+    const draggable = ((hit.ref.kind === 'item' && !!doc.items[hit.ref.id]) || (hit.ref.kind === 'light' && !!doc.lights[hit.ref.id])) && editable(doc, hit.ref)
     if (!draggable) return
     // keep the camera still: this press either selects or drags the object
     pending = { hit }
@@ -1681,7 +1686,7 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
     const ref = hit?.ref
     const doc = docStore.getState().doc
     if (ref && (ref.kind === 'item' || ref.kind === 'light' || ref.kind === 'opening')) {
-      const movable = (ref.kind === 'item' && !doc.items[ref.id]?.locked) || ref.kind === 'light'
+      const movable = (ref.kind === 'item' || ref.kind === 'light') && editable(doc, ref)
       setCursor(ui.tool === 'erase' ? 'pointer' : movable ? 'grab' : 'pointer')
       setHover(hit)
     } else {
@@ -1756,7 +1761,7 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
 
   function selectedMovables(): EntityRef[] {
     const doc = docStore.getState().doc
-    return uiStore.getState().selection.filter((r) => (r.kind === 'item' && !!doc.items[r.id] && !doc.items[r.id].locked) || (r.kind === 'light' && !!doc.lights[r.id]))
+    return uiStore.getState().selection.filter((r) => ((r.kind === 'item' && !!doc.items[r.id]) || (r.kind === 'light' && !!doc.lights[r.id])) && editable(doc, r))
   }
 
   function consume(e: KeyboardEvent): void {
@@ -1829,7 +1834,7 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
         consume(e)
         return
       }
-      const items = ui.selection.filter((r) => r.kind === 'item' && !!store.doc.items[r.id] && !store.doc.items[r.id].locked)
+      const items = ui.selection.filter((r) => r.kind === 'item' && !!store.doc.items[r.id] && editable(store.doc, r))
       if (items.length === 0) return
       store.transact(
         t('Повернуть объект'),
@@ -1847,9 +1852,13 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
 
     if (e.key === 'Delete' || e.key === 'Backspace') {
       if (ui.selection.length === 0) return
-      const refs = ui.selection.slice()
-      store.transact(t('Удалить'), (d) => removeEntities(d, refs))
-      ui.clearSelection()
+      // locked objects (own lock, their kind's or their layer's) are never deleted
+      const refs = unlockedRefs(store.doc, ui.selection)
+      if (refs.length === 0) toast(t('Выбранные объекты заблокированы'), 'warning')
+      else {
+        store.transact(t('Удалить'), (d) => removeEntities(d, refs))
+        ui.clearSelection()
+      }
       consume(e)
       return
     }

@@ -73,10 +73,45 @@ export function isApartmentItem(doc: Doc, item: Item, catalog?: Catalog | null):
   return findAsset(doc, catalog, item.assetId)?.category === 'structure'
 }
 
-/** does this entity of a variant collection belong to the variant (not to the shared apartment)? */
+/** does an inactive variant hold an entity with this id? */
+function heldByStash(doc: Doc, key: VariantCollection, id: Id): boolean {
+  const v = doc.variants
+  if (!v) return false
+  for (const vid of v.order) {
+    if (vid === v.activeId) continue
+    const c = (v.list[vid]?.stash?.collections as Record<string, Coll | undefined> | undefined)?.[key]
+    if (c?.[id]) return true
+  }
+  return false
+}
+
+/**
+ * Does this entity of a variant collection belong to the variant (not to the shared apartment)?
+ * Apartment items are shared, unless some variant holds its own piece under the same id: then the
+ * id is per variant (a column replaced by furniture in one variant, or the reverse).
+ */
 function ownedByVariant(doc: Doc, key: VariantCollection, entity: AnyRecord, catalog?: Catalog | null): boolean {
-  if (key === 'items') return !isApartmentItem(doc, entity as unknown as Item, catalog)
+  if (key === 'items') return !isApartmentItem(doc, entity as unknown as Item, catalog) || heldByStash(doc, key, entity.id as Id)
   return true
+}
+
+/**
+ * Call before an item's model is replaced in the active variant. A shared apartment item (column,
+ * boxing, podium) that becomes furniture changes in this variant only: every other variant keeps
+ * its own copy of the item as it is now.
+ */
+export function beforeItemAssetChange(doc: Doc, itemId: Id, nextCategory: string | undefined, catalog?: Catalog | null): void {
+  const v = doc.variants
+  const it = doc.items[itemId]
+  if (!v || !it || v.order.length < 2 || nextCategory === 'structure') return
+  if (ownedByVariant(doc, 'items', it as unknown as AnyRecord, catalog)) return
+  for (const vid of v.order) {
+    const rec = v.list[vid]
+    if (vid === v.activeId || !rec) continue
+    const stash = rec.stash ?? { collections: {}, finishes: { rooms: {}, walls: {}, openings: {} } }
+    const items = { ...(stash.collections.items ?? {}), [itemId]: clone(it) }
+    v.list[vid] = { ...rec, stash: { ...stash, collections: { ...stash.collections, items } } }
+  }
 }
 
 // ───────────────────────────── queries ─────────────────────────────
@@ -233,7 +268,12 @@ export function createVariant(doc: Doc, opts: CreateVariantOptions, catalog?: Ca
   const name = opts.name?.trim() || nextVariantName(doc)
   const src = opts.source && opts.source !== v.activeId ? v.list[opts.source]?.stash : undefined
   const stash = src ? clone(src) : captureVariant(doc, catalog)
-  if (opts.from === 'empty') stash.collections = {}
+  if (opts.from === 'empty') {
+    // apartment items held per variant (see ownedByVariant) stay; furniture and lights go
+    const items: Coll = {}
+    for (const [iid, it] of Object.entries(stash.collections.items ?? {})) if (isApartmentItem(doc, it, catalog)) items[iid] = it as unknown as AnyRecord
+    stash.collections = Object.keys(items).length ? { items: items as unknown as NonNullable<Doc['items']> } : {}
+  }
   const rec: VariantRecord = { id, name, stash }
   v.list[id] = rec
   const at = v.order.indexOf(src && opts.source ? opts.source : v.activeId)

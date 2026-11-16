@@ -10,6 +10,7 @@ import {
   addOpening,
   addRectRoom,
   addWall,
+  beforeItemAssetChange,
   computeBom,
   copyLevelInVariants,
   createEmptyDoc,
@@ -271,19 +272,54 @@ describe('furnishing variants: immer, materialize, upkeep', () => {
     expect(doc.walls[w].left).toEqual({ materialId: 'mat_green' })
   })
 
-  it("a variant's piece is kept when its id is taken by a shared item in another variant", () => {
+  it('furniture replaced by a column in one variant stays furniture in the others', () => {
     const { doc, sofaId } = apartment()
     const a = activeVariantId(doc)
     const b = createVariant(doc, { from: 'copy', activate: false })
-    // in A the sofa's model becomes a structure asset (shared with the apartment)
+    // in A the sofa's model becomes a structure asset; B still holds its sofa under that id
     doc.items[sofaId] = { ...doc.items[sofaId], assetId: column.id }
+    for (let i = 0; i < 2; i++) {
+      switchVariant(doc, b)
+      expect(Object.values(doc.items).filter((it) => it.assetId === sofa.id)).toHaveLength(1)
+      expect(doc.items[sofaId].assetId).toBe(sofa.id)
+      switchVariant(doc, a)
+      expect(doc.items[sofaId].assetId).toBe(column.id)
+      expect(Object.values(doc.items).filter((it) => it.assetId === sofa.id)).toHaveLength(0)
+    }
+  })
+
+  it('a shared column replaced by furniture in one variant stays a column in the others', () => {
+    const { doc, columnId } = apartment()
+    const a = activeVariantId(doc)
+    const b = createVariant(doc, { from: 'copy', activate: false })
+    const c = createVariant(doc, { from: 'empty', activate: false })
+    beforeItemAssetChange(doc, columnId, sofa.category)
+    doc.items[columnId] = { ...doc.items[columnId], assetId: sofa.id }
+    for (let i = 0; i < 2; i++) {
+      switchVariant(doc, b)
+      expect(doc.items[columnId].assetId).toBe(column.id)
+      switchVariant(doc, c)
+      expect(doc.items[columnId].assetId).toBe(column.id)
+      switchVariant(doc, a)
+      expect(doc.items[columnId].assetId).toBe(sofa.id)
+      expect(Object.values(doc.items).filter((it) => it.assetId === column.id)).toHaveLength(0)
+    }
+    // a column → column swap (or a variant-owned item) changes nothing in the stashes
+    const before = JSON.stringify(doc.variants)
+    beforeItemAssetChange(doc, columnId, 'structure')
+    expect(JSON.stringify(doc.variants)).toBe(before)
+  })
+
+  it('an empty variant keeps the apartment items other variants hold per variant', () => {
+    const { doc, columnId } = apartment()
+    createVariant(doc, { from: 'copy', activate: false })
+    beforeItemAssetChange(doc, columnId, sofa.category)
+    doc.items[columnId] = { ...doc.items[columnId], assetId: sofa.id }
+    const b = listVariants(doc).find((v) => !v.active)!.id
     switchVariant(doc, b)
-    const sofas = Object.values(doc.items).filter((i) => i.assetId === sofa.id)
-    expect(sofas).toHaveLength(1)
-    expect(doc.items[sofaId].assetId).toBe(column.id)
-    switchVariant(doc, a)
-    switchVariant(doc, b)
-    expect(Object.values(doc.items).filter((i) => i.assetId === sofa.id)).toHaveLength(1)
+    const e = createVariant(doc, { from: 'empty' })
+    expect(activeVariantId(doc)).toBe(e)
+    expect(doc.items[columnId]?.assetId).toBe(column.id)
   })
 
   it('copying a level keeps matching ids between identical variants', () => {

@@ -1,8 +1,9 @@
 import { useMemo, useRef, useState } from 'react'
 import { ArrowLeftRight, Box, Link2, Link2Off, Lock, LockOpen, Eye, EyeOff, Replace, RotateCcw, RotateCw, Undo2 } from 'lucide-react'
-import { resizedParams, sizedCatalogName } from '@core'
+import { beforeItemAssetChange, resizedParams, sizedCatalogName } from '@core'
 import type { Asset, Id, Item, MountKind } from '@core/types'
 import { useDoc } from '@/store/document'
+import { uiStore } from '@/store/ui'
 import { resizePrefs, useResizePrefs } from '@/store/resizePrefs'
 import { useT } from '@/i18n'
 import '@/ui/catalogI18n'
@@ -450,6 +451,8 @@ function ReplaceAsset({ item, current }: { item: Item; current: Asset | undefine
     tx('Заменить модель', (d) => {
       const x = d.items[item.id]
       if (!x) return
+      // a shared column turned into furniture: the other furnishing variants keep the column
+      beforeItemAssetChange(d, item.id, asset.category, uiStore.getState().catalog)
       x.assetId = asset.id
       x.size = { ...asset.size }
       x.mount = asset.mount

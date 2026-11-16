@@ -1,5 +1,6 @@
 /** Edit handles of the current selection (positions in plan mm, sizes in screen px). */
 import type { Id, Vec2 } from '@core/types'
+import { layerIndex, pickableRefs } from '@core/layers'
 import { handles as appHandles } from '@/store/handles'
 import type { EditorCtx } from './context'
 import { nodeRays, sectorsOf } from './angles'
@@ -49,14 +50,16 @@ export function computeHandles(ctx: EditorCtx): Handle[] {
   if (ui.tool !== 'select') return out
   const doc = ctx.doc()
   const derived = ctx.derived()
-  const sel = ui.selection
+  // no handles on objects that are hidden or locked (selected from the layers panel)
+  const sel = pickableRefs(doc, ui.selection)
+  const vis = layerIndex(doc)
 
   const walls = sel.filter((r) => r.kind === 'wall')
   const seenNodes = new Set<Id>()
   const pushNode = (id: Id): void => {
     if (seenNodes.has(id)) return
     const n = doc.nodes[id]
-    if (!n) return
+    if (!n || !vis.pickable('node', id)) return
     seenNodes.add(id)
     out.push({ type: 'node', pos: { x: n.x, y: n.y }, nodeId: id })
   }

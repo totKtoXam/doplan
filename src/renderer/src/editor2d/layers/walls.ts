@@ -65,8 +65,7 @@ export class WallsLayer {
   }
 
   update(ctx: EditorCtx): void {
-    const doc = ctx.doc()
-    const derived = ctx.derived()
+    const { doc, derived } = ctx.view()
     const pal = ctx.palette()
     const key = [derived.wallGeoms, doc.walls, doc.openings, pal]
     if (sameInputs(key, this.key)) return

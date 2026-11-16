@@ -171,6 +171,10 @@ function splitWallAtNode(doc: Doc, wall: Wall, nodeId: Id, s: number): Id {
   // the face provenance travels with both halves; each half's recorded length no longer matches,
   // so a split dimension shows as changed until it is measured again (see core/provenance)
   if (wall.dims) w2.dims = JSON.parse(JSON.stringify(wall.dims)) as NonNullable<Wall['dims']>
+  // both halves stay on the same layer with the same visibility / lock (the name stays with the first)
+  if (wall.hidden) w2.hidden = true
+  if (wall.locked) w2.locked = true
+  if (wall.layerId) w2.layerId = wall.layerId
   doc.walls[w2.id] = w2
   inheritVariantFinish(doc, 'walls', wall.id, w2.id)
   wall.b = nodeId
@@ -920,6 +924,8 @@ export function normalize(doc: Doc): void {
     const [w1, w2] = list
     if (w1 === w2) continue
     if (w1.kind !== w2.kind || w1.thickness !== w2.thickness || w1.height !== w2.height || w1.levelId !== w2.levelId) continue
+    // walls with a different layer, visibility, lock or user name stay separate
+    if (!!w1.hidden !== !!w2.hidden || !!w1.locked !== !!w2.locked || w1.layerId !== w2.layerId || w1.name !== w2.name) continue
     // orientation relative to the direction p → n → q
     const w1fwd = w1.b === nodeId
     const w2fwd = w2.a === nodeId

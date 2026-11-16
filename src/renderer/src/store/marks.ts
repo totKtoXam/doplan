@@ -4,10 +4,11 @@
  */
 import { createStore } from 'zustand/vanilla'
 import { useStore } from 'zustand'
-import { markBadge, newId, nextMarkNumber } from '@core'
+import { isHidden, isLocked, markBadge, newId, nextMarkNumber } from '@core'
 import type { Annotation, Id, Vec2 } from '@core/types'
 import { t } from '@/i18n'
 import { docStore } from './document'
+import { toast } from './notify'
 
 export type PencilShape = 'free' | 'lasso' | 'rect'
 
@@ -56,6 +57,11 @@ export function addMark(levelId: Id, shape: Annotation['shape'], points: Vec2[])
 export function deleteMark(id: Id): void {
   const m = getMark(id)
   if (!m) return
+  // locked in the layers panel: kept
+  if (isLocked(docStore.getState().doc, { kind: 'annotation', id })) {
+    toast(t('Пометка заблокирована'), 'warning')
+    return
+  }
   docStore.getState().transact(t('Удалить пометку {n}', { n: markBadge(m.n) }), (d) => {
     if (d.annotations) delete d.annotations[id]
     if (d.annotations && !Object.keys(d.annotations).length) delete d.annotations
@@ -63,15 +69,19 @@ export function deleteMark(id: Id): void {
   if (marksStore.getState().selected === id) marksStore.getState().select(null)
 }
 
-/** «Очистить пометки» on a level */
+/** «Очистить пометки» on a level: the visible, unlocked marks (layers panel) */
 export function clearMarks(levelId: Id): void {
-  const all = docStore.getState().doc.annotations
-  if (!all || !Object.values(all).some((m) => m.levelId === levelId)) return
+  const doc = docStore.getState().doc
+  const all = doc.annotations
+  const kept = (id: Id) => isLocked(doc, { kind: 'annotation', id }) || isHidden(doc, { kind: 'annotation', id })
+  const ids = Object.values(all ?? {}).filter((m) => m.levelId === levelId && !kept(m.id)).map((m) => m.id)
+  if (!ids.length) return
   docStore.getState().transact(t('Очистить пометки'), (d) => {
-    for (const id in d.annotations ?? {}) if (d.annotations![id].levelId === levelId) delete d.annotations![id]
+    for (const id of ids) if (d.annotations) delete d.annotations[id]
     if (d.annotations && !Object.keys(d.annotations).length) delete d.annotations
   })
-  marksStore.getState().select(null)
+  const sel = marksStore.getState().selected
+  if (sel && ids.includes(sel)) marksStore.getState().select(null)
 }
 
 export function marksOnLevel(levelId: Id): Annotation[] {

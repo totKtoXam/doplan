@@ -42,7 +42,7 @@ export class UnderlaysLayer {
   }
 
   update(ctx: EditorCtx): void {
-    const doc = ctx.doc()
+    const { doc } = ctx.view()
     const levelId = ctx.levelId()
     if (doc.underlays === this.lastUnderlays && levelId === this.lastLevel) return
     this.lastUnderlays = doc.underlays

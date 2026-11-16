@@ -7,7 +7,7 @@ import { addTranslations } from '@/i18n'
 const EN: Record<string, string> = {
   // ── context menu ──
   'Выделить всё': 'Select all',
-  'Показать скрытые предметы': 'Show hidden items',
+  'Показать скрытые объекты': 'Show hidden objects',
   'Отразить (петли с другой стороны)': 'Flip (hinges on the other side)',
   'Открывать в другую сторону': 'Swing to the other side',
   'Разделить стену здесь': 'Split wall here',

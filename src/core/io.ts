@@ -5,10 +5,11 @@
  */
 import { DEFAULT_MATERIALS, OPENING_DEFAULTS, ROOM_TYPE_NAMES, createEmptyDoc, defaultRenderSettings, defaultSettings } from './defaults'
 import { newId, PROJECT_ID_RE, type IdPrefix } from './ids'
+import { entityKinds, kindTables } from './layers'
 import { normalize, syncRooms, type PinnedNode } from './ops'
 import { docFormatVersion } from './variants'
 import {
-  DOC_VERSION_VARIANTS,
+  DOC_VERSION_V3,
   DOOR_LEAF_STYLES,
   VARIANT_COLLECTIONS,
   type DocVariants,
@@ -40,6 +41,9 @@ import {
   type Item,
   type Annotation,
   type Label,
+  type LayerFlags,
+  type GroupFlags,
+  type UserLayer,
   type Level,
   type Light,
   type LightKind,
@@ -564,6 +568,68 @@ export function readProduct(v: unknown): ProductRef | undefined {
 
 // ───────────────────────────── public API ─────────────────────────────
 
+/**
+ * Reads the layers-panel fields of one object record (`LayerFlags`): user name, own hidden / locked
+ * and the user layer. Kinds registered by other modules call it from their own readers, so their
+ * flags survive save / load. `name: false` when the record has its own required name; `flags: false`
+ * when it keeps visibility / lock in its own fields. Layer ids are checked later (`readLayers`).
+ */
+export function readLayerFlags(v: unknown, target: LayerFlags, opts: { name?: boolean; flags?: boolean } = {}): void {
+  if (!isObj(v)) return
+  if (opts.name !== false) {
+    const name = optStr(v.name)
+    if (name && name.trim()) target.name = name.trim().slice(0, 200)
+  }
+  if (opts.flags !== false) {
+    if (v.hidden === true) target.hidden = true
+    if (v.locked === true) target.locked = true
+  }
+  const layerId = optStr(v.layerId)
+  if (layerId) target.layerId = layerId
+}
+
+const GROUP_KEY_RE = /^[A-Za-z][A-Za-z0-9_-]{0,40}$/
+
+/** user layers, their order and per-kind group flags; drops object layer ids that point nowhere */
+function readLayers(raw: Obj, doc: Doc): void {
+  const layers: Record<Id, UserLayer> = {}
+  for (const [id, v] of entries(raw.layers, 'ly')) {
+    const l: UserLayer = { id, name: str(v.name, '').trim().slice(0, 200) || `Слой ${Object.keys(layers).length + 1}` }
+    if (v.hidden === true) l.hidden = true
+    if (v.locked === true) l.locked = true
+    layers[id] = l
+  }
+  if (Object.keys(layers).length) {
+    doc.layers = layers
+    const order: Id[] = []
+    if (Array.isArray(raw.layerOrder)) {
+      for (const id of raw.layerOrder) if (typeof id === 'string' && layers[id] && !order.includes(id)) order.push(id)
+    }
+    for (const id of Object.keys(layers)) if (!order.includes(id)) order.push(id)
+    doc.layerOrder = order
+  }
+  if (isObj(raw.groupFlags)) {
+    const groups: Record<string, GroupFlags> = {}
+    for (const [kind, v] of Object.entries(raw.groupFlags)) {
+      if (!GROUP_KEY_RE.test(kind) || !isObj(v)) continue
+      const g: GroupFlags = {}
+      if (v.hidden === true) g.hidden = true
+      if (v.locked === true) g.locked = true
+      if (Object.keys(g).length) groups[kind] = g
+    }
+    if (Object.keys(groups).length) doc.groupFlags = groups
+  }
+  // the live tables and the stashes of inactive furnishing variants (read before this)
+  for (const def of entityKinds()) {
+    for (const table of kindTables(doc, def)) {
+      for (const id in table) {
+        const o = table[id]
+        if (o.layerId !== undefined && !layers[o.layerId]) delete o.layerId
+      }
+    }
+  }
+}
+
 // ───────────── furnishing variants ─────────────
 
 interface ReadCtx {
@@ -603,6 +669,7 @@ function readItems(raw: unknown, ctx: ReadCtx): Record<Id, Item> {
     if (v.hidden === true) item.hidden = true
     const groupId = optStr(v.groupId)
     if (groupId) item.groupId = groupId
+    readLayerFlags(v, item, { name: false, flags: false })
     out[id] = item
   }
   return out
@@ -628,6 +695,7 @@ function readLights(raw: unknown, ctx: ReadCtx): Record<Id, Light> {
     const rotation = optNum(v.rotation)
     if (rotation !== undefined) light.rotation = rotation
     if (isObj(v.size)) light.size = { w: num(v.size.w, 600, 1, 100000), d: num(v.size.d, 600, 1, 100000) }
+    readLayerFlags(v, light)
     out[id] = light
   }
   return out
@@ -747,7 +815,7 @@ export function parseDoc(json: unknown): Doc {
   }
   const version = raw.version === undefined ? 1 : num(raw.version, Number.NaN)
   if (Number.isNaN(version) || version < 1) throw new Error('Файл проекта повреждён: некорректный номер версии')
-  if (version > DOC_VERSION_VARIANTS) {
+  if (version > DOC_VERSION_V3) {
     throw new Error(`Проект создан в более новой версии doplan (формат ${version}). Обновите приложение, чтобы открыть его`)
   }
 
@@ -862,6 +930,7 @@ export function parseDoc(json: unknown): Doc {
     }
     const dims = readWallDims(v.dims)
     if (dims) wall.dims = dims
+    readLayerFlags(v, wall)
     doc.walls[id] = wall
   }
 
@@ -894,6 +963,7 @@ export function parseDoc(json: unknown): Doc {
     if (typeof v.slide === 'string' && (DOOR_SLIDES as readonly string[]).includes(v.slide)) o.slide = v.slide as DoorSlide
     const curtain = readCurtain(v.curtain)
     if (curtain) o.curtain = curtain
+    readLayerFlags(v, o)
     doc.openings[id] = o
   }
 
@@ -921,6 +991,7 @@ export function parseDoc(json: unknown): Doc {
       const accentFace = optStr(v.design.accentFace)
       if (styleId || accentFace) room.design = { ...(styleId ? { styleId } : {}), ...(accentFace ? { accentFace } : {}) }
     }
+    readLayerFlags(v, room, { name: false })
     doc.rooms[id] = room
   }
 
@@ -935,12 +1006,14 @@ export function parseDoc(json: unknown): Doc {
     const b = vec2(v.b)
     if (!a || !b) continue
     const d: Dimension = { id, levelId: levelOf(v.levelId), a, b, offset: num(v.offset, 300) }
+    readLayerFlags(v, d)
     doc.dimensions[id] = d
   }
   for (const [id, v] of entries(raw.labels, 't')) {
     const p = vec2(v)
     if (!p) continue
     const l: Label = { id, levelId: levelOf(v.levelId), x: p.x, y: p.y, text: str(v.text, ''), size: num(v.size, 200, 1, 100000) }
+    readLayerFlags(v, l, { name: false })
     doc.labels[id] = l
   }
   // pencil marks: kept only while their level exists
@@ -950,6 +1023,7 @@ export function parseDoc(json: unknown): Doc {
     if (points.length < 2) continue
     const a: Annotation = { id, levelId: v.levelId, n: Math.round(num(v.n, 1, 1, 9999)), shape: v.shape === 'zone' ? 'zone' : 'stroke', points }
     if (v.done === true) a.done = true
+    readLayerFlags(v, a)
     ;(doc.annotations ??= {})[id] = a
   }
   for (const [id, v] of entries(raw.underlays, 'u')) {
@@ -969,6 +1043,7 @@ export function parseDoc(json: unknown): Doc {
       widthPx: num(v.widthPx, 0, 0),
       heightPx: num(v.heightPx, 0, 0),
     }
+    readLayerFlags(v, u, { flags: false })
     doc.underlays[id] = u
   }
   for (const [id, v] of entries(raw.cameras, 'c')) {
@@ -994,6 +1069,9 @@ export function parseDoc(json: unknown): Doc {
   // ── furnishing variants (absent in older files: one implicit variant) ──
   const variants = readVariants(raw.variants, ctx)
   if (variants) doc.variants = variants
+
+  // ── user layers & group flags (layers panel) ──
+  readLayers(raw, doc)
 
   // openings without an offset go to the middle of their wall (clamping happens in normalize)
   for (const id in doc.openings) {

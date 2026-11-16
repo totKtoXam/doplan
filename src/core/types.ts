@@ -694,6 +694,11 @@ export interface DocMeta {
 }
 
 export const DOC_VERSION = 1
+/**
+ * Format of a document with two or more furnishing variants. Older apps refuse it (instead of
+ * silently dropping the inactive variants on their next save); see `docFormatVersion` in core/variants.
+ */
+export const DOC_VERSION_VARIANTS = 2
 
 export interface Doc {
   version: number
@@ -722,6 +727,62 @@ export interface Doc {
   source?: DocSource
   /** design layer: apartment style, currency and the user's price list */
   design?: DocDesign
+  /** furnishing variants over the shared apartment (absent = one implicit variant; see core/variants) */
+  variants?: DocVariants
+}
+
+// ───────────────────────────── Furnishing variants ─────────────────────────────
+
+/**
+ * WHAT LIVES IN A VARIANT — the single list. Everything else (walls, openings, rooms, levels,
+ * dimensions, labels, underlays, cameras, settings, prices) is the shared apartment.
+ *
+ *  - `VARIANT_COLLECTIONS`: whole Doc collections owned by the variant. Items of the apartment
+ *    itself (columns, stairs, boxing — see `isApartmentItem` in core/variants) stay shared.
+ *    To put a new kind of object into variants: add its Doc key here and its reader to
+ *    `VARIANT_READERS` in core/io.ts (the compiler asks for it).
+ *  - `VARIANT_*_FIELDS`: finish fields of shared records (the geometry stays shared).
+ *  - the style applied to the apartment (`DocDesign.styleId`).
+ *
+ * The ACTIVE variant's content lives in the document itself (doc.items, doc.walls[…].left …), so
+ * every reader works unchanged; inactive variants keep theirs in `VariantRecord.stash`.
+ */
+export const VARIANT_COLLECTIONS = ['items', 'lights'] as const
+export type VariantCollection = (typeof VARIANT_COLLECTIONS)[number]
+export const VARIANT_ROOM_FIELDS = ['floor', 'ceiling', 'skirting', 'skirtingMaterialId', 'design'] as const
+export const VARIANT_WALL_FIELDS = ['left', 'right'] as const
+export const VARIANT_OPENING_FIELDS = ['frameMaterialId', 'leafMaterialId', 'style', 'curtain'] as const
+
+export type RoomVariantFinish = Partial<Pick<Room, (typeof VARIANT_ROOM_FIELDS)[number]>>
+export type WallVariantFinish = Partial<Pick<Wall, (typeof VARIANT_WALL_FIELDS)[number]>>
+export type OpeningVariantFinish = Partial<Pick<Opening, (typeof VARIANT_OPENING_FIELDS)[number]>>
+
+/** Finishes of one inactive variant, by shared record id (kept complete by pruneVariants; a missing record keeps the live finish). */
+export interface VariantFinishes {
+  rooms: Record<Id, RoomVariantFinish>
+  walls: Record<Id, WallVariantFinish>
+  openings: Record<Id, OpeningVariantFinish>
+}
+
+/** Content of an inactive variant. */
+export interface VariantStash {
+  collections: { [K in VariantCollection]?: NonNullable<Doc[K]> }
+  finishes: VariantFinishes
+  styleId?: Id
+}
+
+export interface VariantRecord {
+  id: Id
+  name: string
+  /** inactive variants only: their content (the active one's lives in the document) */
+  stash?: VariantStash
+}
+
+export interface DocVariants {
+  activeId: Id
+  /** display order */
+  order: Id[]
+  list: Record<Id, VariantRecord>
 }
 
 /** Project-wide design settings. */

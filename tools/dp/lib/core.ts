@@ -12,6 +12,7 @@ export {
   docToPlanSpec,
   drawToCanvas,
   isTechnicalRoom,
+  listVariants,
   parseDoc,
   parsePlanSpec,
   serializeDoc,

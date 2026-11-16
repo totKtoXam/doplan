@@ -662,8 +662,9 @@ export function detachElectric(p: ElectricPoint): void {
  *  - points of deleted levels are removed, posts are clamped.
  * `onHiddenWall`: points on a hidden wall before the edit with that wall's axis (`electricOnHiddenWalls`).
  * Only such a point may be re-seated on a hidden wall, and only on one continuing that old wall (on its
- * axis, overlapping or touching it: the wall split or merged); a point dragged to another hidden wall,
- * and any other point, never lands on what is not seen.
+ * axis and overlapping it: the wall merged; a split moves points to their half itself,
+ * `splitElectricOnWall`); a point dragged to another hidden wall, even one meeting it end to end, and
+ * any other point, never lands on what is not seen.
  */
 export function reattachElectrical(doc: Doc, onHiddenWall?: ReadonlyMap<Id, HiddenWallSeat>): void {
   const rec = doc.electrical
@@ -701,6 +702,21 @@ export function reattachElectrical(doc: Doc, onHiddenWall?: ReadonlyMap<Id, Hidd
   // the record stays even when empty: deleting it would turn the next edit into a whole-record patch
 }
 
+/**
+ * A wall is split at `s` mm from node `a` (called while it is still whole): its points beyond the
+ * split move to the second half `newWallId` (same direction, same faces), like openings.
+ */
+export function splitElectricOnWall(doc: Doc, wallId: Id, newWallId: Id, s: number): void {
+  const rec = doc.electrical
+  if (!rec) return
+  for (const id in rec) {
+    const p = rec[id]
+    if (p.wallId !== wallId) continue
+    const t = alongWall(doc, wallId, p)
+    if (t !== null && t > s) p.wallId = newWallId
+  }
+}
+
 /** axis of the hidden wall a point stood on before an edit */
 export interface HiddenWallSeat {
   a: Vec2
@@ -721,7 +737,7 @@ export function electricOnHiddenWalls(doc: Doc): Map<Id, HiddenWallSeat> {
   return out
 }
 
-/** walls continuing an old wall: on its axis (±1 mm) and overlapping or touching its segment */
+/** walls continuing an old wall: on its axis (±1 mm) and overlapping its segment (touching end to end is not enough) */
 function continuingWalls(doc: Doc, levelId: Id, s: HiddenWallSeat): Set<Id> {
   const out = new Set<Id>()
   for (const id in doc.walls) {
@@ -732,7 +748,7 @@ function continuingWalls(doc: Doc, levelId: Id, s: HiddenWallSeat): Set<Id> {
     if (across(s.a) > 1 || across(s.b) > 1) continue
     const ta = (s.a.x - e.a.x) * e.u.x + (s.a.y - e.a.y) * e.u.y
     const tb = (s.b.x - e.a.x) * e.u.x + (s.b.y - e.a.y) * e.u.y
-    if (Math.max(ta, tb) >= -1 && Math.min(ta, tb) <= e.len + 1) out.add(id)
+    if (Math.max(ta, tb) > 1 && Math.min(ta, tb) < e.len - 1) out.add(id)
   }
   return out
 }

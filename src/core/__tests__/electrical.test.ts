@@ -486,6 +486,26 @@ describe('layers panel', () => {
     expect(p.x).toBeCloseTo(8000)
   })
 
+  it('a point dragged to a hidden wall meeting its own end to end (a T-junction) is not put on it', () => {
+    const doc = createEmptyDoc()
+    const L = doc.levelOrder[0]
+    const [h] = addWall(doc, L, { x: 0, y: 0 }, { x: 4000, y: 0 }, { thickness: 200 })
+    const [h2] = addWall(doc, L, { x: 4000, y: 0 }, { x: 8000, y: 0 }, { thickness: 200 })
+    addWall(doc, L, { x: 4000, y: 0 }, { x: 4000, y: 2000 }, { thickness: 100 })
+    normalize(doc)
+    // the partition keeps the two walls apart
+    expect(doc.walls[h]).toBeDefined()
+    expect(doc.walls[h2]).toBeDefined()
+    const id = addElectric(doc, L, 'socket', 3000, -100)
+    const p = doc.electrical![id]
+    expect(p.wallId).toBe(h)
+    setHidden(doc, [{ kind: 'wall', id: h }, { kind: 'wall', id: h2 }], true)
+    p.x += 2000
+    normalize(doc)
+    expect(p.wallId).toBeUndefined()
+    expect(p.x).toBeCloseTo(5000)
+  })
+
   it('copying walls with a point: an existing hidden wall the copy runs into is not taken', () => {
     const doc = createEmptyDoc()
     const L = doc.levelOrder[0]

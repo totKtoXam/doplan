@@ -3,7 +3,7 @@
  * draft inside `docStore.transact`) and returns the ids it created. Writes are skipped when a value
  * does not change, so the resulting patch sets stay minimal.
  */
-import { captureElectricAnchors, duplicateElectric, electricOnHiddenWalls, reattachElectrical, restoreElectricAnchors } from './electrical'
+import { captureElectricAnchors, duplicateElectric, electricOnHiddenWalls, reattachElectrical, restoreElectricAnchors, splitElectricOnWall } from './electrical'
 import { DEFAULT_MATERIALS, OPENING_DEFAULTS, ROOM_TYPE_NAMES, defaultRoom, defaultWallSide } from './defaults'
 import { EPS, dist, projectOnSegment, segIntersect } from './geom'
 import { newId } from './ids'
@@ -178,6 +178,8 @@ function splitWallAtNode(doc: Doc, wall: Wall, nodeId: Id, s: number): Id {
   if (wall.layerId) w2.layerId = wall.layerId
   doc.walls[w2.id] = w2
   inheritVariantFinish(doc, 'walls', wall.id, w2.id)
+  // points beyond the split go with the second half (measured while the wall is still whole)
+  splitElectricOnWall(doc, wall.id, w2.id, s)
   wall.b = nodeId
   for (const id in doc.openings) {
     const o = doc.openings[id]

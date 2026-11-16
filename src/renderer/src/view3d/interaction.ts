@@ -1329,8 +1329,9 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
 
   function beginRotate(): boolean {
     if (!gizmoItem) return false
-    const item = docStore.getState().doc.items[gizmoItem]
-    if (!item) return false
+    const doc = docStore.getState().doc
+    const item = doc.items[gizmoItem]
+    if (!item || !editable(doc, { kind: 'item', id: item.id })) return false
     const p = rayPlane(gizmo.position.y, v3)
     if (!p) return false
     drag = {
@@ -1923,9 +1924,14 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
   let lastDoc = docStore.getState().doc
   const unsubDoc = docStore.subscribe((state) => {
     if (state.doc === lastDoc) return
-    const itemsChanged = state.doc.items !== lastDoc.items
+    // A group or layer lock changes only groupFlags / layers, yet the gizmo of a
+    // now-locked item must go away.
+    const changed =
+      state.doc.items !== lastDoc.items ||
+      state.doc.groupFlags !== lastDoc.groupFlags ||
+      state.doc.layers !== lastDoc.layers
     lastDoc = state.doc
-    if (itemsChanged) refreshGizmo()
+    if (changed) refreshGizmo()
   })
   const onSceneChanged = (): void => {
     index = null

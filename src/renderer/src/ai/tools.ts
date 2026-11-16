@@ -270,7 +270,7 @@ function wallSpot(doc: Doc, plan: DerivedPlan, wallId: Id, o: { side?: 'left' | 
     // the face that looks into a room
     for (const s of ['left', 'right'] as const) {
       // probed where the point would stand on that face (at a corner the axis end is inside the next wall)
-      const f = wallFacePoint(doc, wallId, s, clampOnFace(doc, plan, wallId, s, t, o.half ?? 0))
+      const f = wallFacePoint(doc, wallId, s, clampOnFace(doc, wallId, s, t, o.half ?? 0))
       if (!f) continue
       const { uy } = electricFrame(f.rotation)
       if (roomAt(plan, { x: f.point.x + uy.x * 50, y: f.point.y + uy.y * 50 }, inside)) {
@@ -281,7 +281,7 @@ function wallSpot(doc: Doc, plan: DerivedPlan, wallId: Id, o: { side?: 'left' | 
   }
   side ??= 'left'
   // the frame stays on the visible face, clear of the adjoining walls at the room corners
-  const tt = clampOnFace(doc, plan, wallId, side, t, o.half ?? 0)
+  const tt = clampOnFace(doc, wallId, side, t, o.half ?? 0)
   const f = wallFacePoint(doc, wallId, side, tt)
   if (!f) throw new ToolError(`На стену ${wallId} нельзя поставить точку`)
   return { wallId, side, t: tt, point: f.point }

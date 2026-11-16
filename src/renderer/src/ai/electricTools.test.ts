@@ -95,6 +95,20 @@ describe('electrical AI tools', () => {
     expect(Math.min(points()[0].x, 4000 - points()[0].x)).toBeCloseTo(143)
     // on the room side
     expect(points()[0].y).toBeCloseTo(100)
+    // widened in place: moved off the adjoining wall
+    const id = points()[0].id
+    const wide = await executeTool(host, 'set_electric', { electricId: id, gangs: 4 })
+    expect(wide.result.ok, wide.result.text).toBe(true)
+    expect(Math.min(points()[0].x, 4000 - points()[0].x)).toBeCloseTo(100 + 43 + 3 * 35.5)
+  })
+
+  it('keeps a socket placed by a point near the corner clear of the adjoining wall', async () => {
+    await room()
+    const put = await executeTool(host, 'place_electric', { kind: 'socket', at: { x: 20, y: 100 } })
+    expect(put.result.ok, put.result.text).toBe(true)
+    expect(points()[0].wallId).toBeTruthy()
+    expect(points()[0].x).toBeCloseTo(143)
+    expect(points()[0].y).toBeCloseTo(100)
   })
 
   it('snaps a wall kind to the nearest wall from a point, keeps a ceiling outlet free', async () => {

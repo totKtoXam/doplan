@@ -83,7 +83,7 @@ export function ElectricInspector({ id }: { id: Id }) {
           const along = alongWall(d, x.wallId, target)
           const side = x.side === 'right' ? 'right' : 'left'
           // never past the room corner into the adjoining wall
-          if (along !== null) placeElectricOnWall(d, id, x.wallId, side, clampOnFace(d, derived, x.wallId, side, along, electricHalfWidth(x)))
+          if (along !== null) placeElectricOnWall(d, id, x.wallId, side, clampOnFace(d, x.wallId, side, along, electricHalfWidth(x)))
         },
         m('bind', g),
       )
@@ -96,7 +96,7 @@ export function ElectricInspector({ id }: { id: Id }) {
   const reattach = () =>
     set('Привязать к стене', (x, d) => {
       const hit = nearestWallFace(d, x.levelId, x, 600)
-      if (hit) placeElectricOnWall(d, id, hit.wallId, hit.side, clampOnFace(d, derived, hit.wallId, hit.side, hit.t, electricHalfWidth(x)))
+      if (hit) placeElectricOnWall(d, id, hit.wallId, hit.side, clampOnFace(d, hit.wallId, hit.side, hit.t, electricHalfWidth(x)))
     })
 
   const setMount = (mt: ElectricMount) =>
@@ -107,7 +107,7 @@ export function ElectricInspector({ id }: { id: Id }) {
       else {
         if (x.elevation <= 0 || x.elevation >= (d.levels[x.levelId]?.height ?? 2700)) x.elevation = electricType(x.kind).elevation || 300
         const hit = nearestWallFace(d, x.levelId, x, 600)
-        if (hit) placeElectricOnWall(d, id, hit.wallId, hit.side, clampOnFace(d, derived, hit.wallId, hit.side, hit.t, electricHalfWidth(x)))
+        if (hit) placeElectricOnWall(d, id, hit.wallId, hit.side, clampOnFace(d, hit.wallId, hit.side, hit.t, electricHalfWidth(x)))
       }
       if (mt !== 'wall') detachElectric(x)
     })

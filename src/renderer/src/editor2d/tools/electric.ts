@@ -68,7 +68,7 @@ export function createElectricTool(ctx: EditorCtx): Tool {
       const hit = nearestWallFace(doc, levelId, e.plan, Math.max(ctx.mm(40), 300))
       if (hit) {
         // a round distance along the face (10 mm steps), not past the room corner into the adjoining wall
-        const tt = clampOnFace(doc, ctx.derived(), hit.wallId, hit.side, Math.round(hit.t / 10) * 10, electricHalfWidth(base))
+        const tt = clampOnFace(doc, hit.wallId, hit.side, Math.round(hit.t / 10) * 10, electricHalfWidth(base))
         const pt: Vec2 = wallFacePoint(doc, hit.wallId, hit.side, tt)?.point ?? hit.point
         return { point: { ...base, x: pt.x, y: pt.y, rotation: hit.rotation, wallId: hit.wallId, side: hit.side }, wallId: hit.wallId, side: hit.side }
       }

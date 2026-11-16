@@ -463,51 +463,66 @@ export function electricHalfWidth(p: Pick<ElectricPoint, 'kind' | 'gangs' | 'ver
 }
 
 /**
- * Where along a wall (`t` from node a) a point of half-size `half` fits on a face: the face
- * ends where an adjoining wall meets it (the face segment of the derived plan), and the point keeps
- * `half` clear of such an end so it is not buried in that wall. Ends that are not covered by
- * another wall (free ends, straight joins) are the wall ends. Without a plan: [0, len].
- * A face shorter than the point gives its middle.
+ * Where along a wall (`t` from node a) a point of half-size `half` fits on a face. The face ends
+ * where an adjoining wall at node a or b covers it (the inner corner of a room), and the point keeps
+ * `half` clear of such an end so its frame is not buried in that wall. Free ends, straight joins and
+ * outer corners do not limit it (the face goes on there). A face shorter than the point: its middle.
+ * Computed from the document alone, so `normalize` keeps every wall point inside it.
  */
 export function wallFaceRange(
   doc: Pick<Doc, 'nodes' | 'walls'>,
-  plan: Pick<DerivedPlan, 'wallGeoms'> | undefined,
   wallId: Id,
   side: 'left' | 'right',
   half = 0,
 ): { lo: number; hi: number; len: number } | null {
   const w = doc.walls[wallId]
   const e = w && wallEnds(doc, w)
-  if (!e) return null
-  let lo = 0
-  let hi = e.len
-  const seg = plan?.wallGeoms[wallId]?.[side]
-  if (seg) {
-    const ta = (seg[0].x - e.a.x) * e.u.x + (seg[0].y - e.a.y) * e.u.y
-    const tb = (seg[1].x - e.a.x) * e.u.x + (seg[1].y - e.a.y) * e.u.y
-    const f0 = Math.min(ta, tb)
-    const f1 = Math.max(ta, tb)
-    if (f0 > 0.5) lo = Math.min(e.len, f0 + half)
-    if (f1 < e.len - 0.5) hi = Math.max(0, f1 - half)
-    if (lo > hi) {
-      const mid = (Math.max(0, f0) + Math.min(e.len, f1)) / 2
-      lo = mid
-      hi = mid
+  if (!w || !e) return null
+  const nl = v(e.u.y, -e.u.x)
+  const n = side === 'left' ? nl : v(-nl.x, -nl.y)
+  const h = w.thickness / 2
+  // the face line: a + u·t + n·h
+  const fx = e.a.x + n.x * h
+  const fy = e.a.y + n.y * h
+  let f0 = 0
+  let f1 = e.len
+  for (const id in doc.walls) {
+    if (id === wallId) continue
+    const o = doc.walls[id]
+    if (o.levelId !== w.levelId || !mountable(o)) continue
+    for (const end of ['a', 'b'] as const) {
+      const nodeId = end === 'a' ? w.a : w.b
+      if (o.a !== nodeId && o.b !== nodeId) continue
+      const oe = wallEnds(doc, o)
+      const node = doc.nodes[nodeId]
+      if (!oe || !node) continue
+      // the other wall's direction away from the shared node
+      const away = o.a === nodeId ? oe.u : v(-oe.u.x, -oe.u.y)
+      const c1 = away.x * e.u.y - away.y * e.u.x
+      // a straight join, or a wall on the other side of this face (an outer corner): no limit
+      if (Math.abs(c1) < 0.05 || away.x * n.x + away.y * n.y <= 1e-6) continue
+      // signed distance of the face line from the other wall's axis is c0 + c1·t; its body is |…| ≤ th/2
+      const c0 = away.x * (fy - node.y) - away.y * (fx - node.x)
+      const ho = o.thickness / 2
+      const t1 = (-ho - c0) / c1
+      const t2 = (ho - c0) / c1
+      if (end === 'a') f0 = Math.max(f0, Math.min(e.len, Math.max(t1, t2)))
+      else f1 = Math.min(f1, Math.max(0, Math.min(t1, t2)))
     }
+  }
+  let lo = f0 > 0.5 ? Math.min(e.len, f0 + half) : 0
+  let hi = f1 < e.len - 0.5 ? Math.max(0, f1 - half) : e.len
+  if (lo > hi) {
+    const mid = (f0 + f1) / 2
+    lo = mid
+    hi = mid
   }
   return { lo, hi, len: e.len }
 }
 
 /** `t` clamped to the part of the face where the point fits (see wallFaceRange) */
-export function clampOnFace(
-  doc: Pick<Doc, 'nodes' | 'walls'>,
-  plan: Pick<DerivedPlan, 'wallGeoms'> | undefined,
-  wallId: Id,
-  side: 'left' | 'right',
-  t: number,
-  half = 0,
-): number {
-  const r = wallFaceRange(doc, plan, wallId, side, half)
+export function clampOnFace(doc: Pick<Doc, 'nodes' | 'walls'>, wallId: Id, side: 'left' | 'right', t: number, half = 0): number {
+  const r = wallFaceRange(doc, wallId, side, half)
   return r ? Math.min(r.hi, Math.max(r.lo, t)) : t
 }
 
@@ -624,15 +639,18 @@ export function reattachElectrical(doc: Doc): void {
     const w = doc.walls[p.wallId]
     const t = w && w.levelId === p.levelId && mountable(w) ? alongWall(doc, p.wallId, p) : null
     const len = w ? (wallEnds(doc, w)?.len ?? 0) : 0
+    const half = electricHalfWidth(p)
     if (t !== null && t >= -0.5 && t <= len + 0.5) {
-      placeElectricOnWall(doc, id, p.wallId, p.side === 'right' ? 'right' : 'left', t)
+      // kept clear of the adjoining walls (a wider frame, a moved wall, a point put near a corner)
+      const side = p.side === 'right' ? 'right' : 'left'
+      placeElectricOnWall(doc, id, p.wallId, side, clampOnFace(doc, p.wallId, side, t, half))
       continue
     }
     // the wall is gone or no longer under the point: the face the point sits on, if it looks the same
     // way (a split or merged wall). A face turned another way is a neighbour wall at a corner: the
     // point is detached in place rather than moved and turned onto it.
     const hit = nearestWallFace(doc, p.levelId, p, 60)
-    if (hit && Math.abs(((hit.rotation - p.rotation + 540) % 360) - 180) < 1) placeElectricOnWall(doc, id, hit.wallId, hit.side, hit.t)
+    if (hit && Math.abs(((hit.rotation - p.rotation + 540) % 360) - 180) < 1) placeElectricOnWall(doc, id, hit.wallId, hit.side, clampOnFace(doc, hit.wallId, hit.side, hit.t, half))
     else detachElectric(p)
   }
   // the record stays even when empty: deleting it would turn the next edit into a whole-record patch
@@ -685,8 +703,6 @@ export function restoreElectricAnchors(doc: Doc, anchors: readonly ElectricAncho
 export interface AddElectricOptions extends Partial<Omit<ElectricPoint, 'id' | 'levelId' | 'kind' | 'x' | 'y'>> {
   /** snap to the nearest wall face within this distance, mm (wall kinds; default 400) */
   snap?: number
-  /** the derived plan of the level: a wall point is kept on the visible part of its face */
-  plan?: Pick<DerivedPlan, 'wallGeoms'>
 }
 
 /**
@@ -697,7 +713,7 @@ export function addElectric(doc: Doc, levelId: Id, kind: ElectricKind, x: number
   const level = doc.levels[levelId]
   if (!level) throw new Error(`Уровень не найден: ${levelId}`)
   const ty = electricType(kind)
-  const { snap, plan, ...patch } = opts
+  const { snap, ...patch } = opts
   const mount = patch.mount ?? ty.mount
   const ceiling = level.height || doc.settings.wallHeight || 2700
   const p: ElectricPoint = {
@@ -722,12 +738,12 @@ export function addElectric(doc: Doc, levelId: Id, kind: ElectricKind, x: number
     const w = patch.wallId ? doc.walls[patch.wallId] : undefined
     if (patch.wallId && w && w.levelId === levelId && isMountableWall(w)) {
       const side = patch.side ?? nearestWallFace(doc, levelId, p, Infinity, { prefer: patch.wallId })?.side ?? 'left'
-      const t = clampOnFace(doc, plan, patch.wallId, side, alongWall(doc, patch.wallId, p) ?? 0, half)
+      const t = clampOnFace(doc, patch.wallId, side, alongWall(doc, patch.wallId, p) ?? 0, half)
       placeElectricOnWall(doc, p.id, patch.wallId, side, t)
       return p.id
     }
     const hit = nearestWallFace(doc, levelId, p, snap ?? 400)
-    if (hit) placeElectricOnWall(doc, p.id, hit.wallId, hit.side, clampOnFace(doc, plan, hit.wallId, hit.side, hit.t, half))
+    if (hit) placeElectricOnWall(doc, p.id, hit.wallId, hit.side, clampOnFace(doc, hit.wallId, hit.side, hit.t, half))
   }
   return p.id
 }

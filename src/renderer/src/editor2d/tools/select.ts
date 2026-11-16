@@ -574,7 +574,7 @@ export function createSelectTool(ctx: EditorCtx): Tool {
         if (m.base.mount === 'wall' && !e.alt) {
           const hit = nearestWallFace(d, levelId, target, Math.max(ctx.mm(40), 300), { prefer: m.base.wallId })
           if (hit) {
-            const tt = clampOnFace(d, ctx.derived(), hit.wallId, hit.side, Math.round(hit.t / 10) * 10, electricHalfWidth(d.electrical[m.id]))
+            const tt = clampOnFace(d, hit.wallId, hit.side, Math.round(hit.t / 10) * 10, electricHalfWidth(d.electrical[m.id]))
             transient(t('Перемещение'), (dr) => placeElectricOnWall(dr, m.id, hit.wallId, hit.side, tt))
             break
           }

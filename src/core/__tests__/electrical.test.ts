@@ -222,9 +222,9 @@ describe('review fixes', () => {
 
   it('keeps a frame on the visible face, clear of the adjoining wall at the room corner', () => {
     const { doc, L, top } = room()
-    const plan = derivePlan(doc, L)
     for (const x of [0, 20, 60]) {
-      const id = addElectric(doc, L, 'socket', x, 100, { plan })
+      // no plan needed: the face range comes from the walls at the corner
+      const id = addElectric(doc, L, 'socket', x, 100)
       normalize(doc)
       const p = doc.electrical![id]
       expect(p.wallId).toBe(top.id)
@@ -235,10 +235,32 @@ describe('review fixes', () => {
       expect(Math.min(b.fromA, b.fromB)).toBeCloseTo(43)
     }
     // a 3-post frame keeps 43 + 2 × 35.5 from the far corner
-    const wide = addElectric(doc, L, 'socketDouble', 3990, 100, { plan, gangs: 3 })
+    const wide = addElectric(doc, L, 'socketDouble', 3990, 100, { gangs: 3 })
     expect(doc.electrical![wide].x).toBeCloseTo(3900 - 114)
-    // without a plan only the wall ends limit it
-    expect(clampOnFace(doc, undefined, top.id, 'right', -50, 43)).toBe(0)
+    // the face range agrees with the derived plan's face segment
+    const p = doc.electrical![wide]
+    const seg = derivePlan(doc, L).wallGeoms[top.id][p.side!]
+    expect(Math.max(seg[0].x, seg[1].x)).toBeCloseTo(3900)
+    // the outer face is not limited at the outer corner
+    const out = addElectric(doc, L, 'socket', 20, -150)
+    normalize(doc)
+    expect(doc.electrical![out].y).toBeCloseTo(-100)
+    expect(doc.electrical![out].x).toBeCloseTo(20)
+    expect(clampOnFace(doc, top.id, doc.electrical![out].side!, -50, 43)).toBe(0)
+  })
+
+  it('moves a frame widened in place off the adjoining wall', () => {
+    const { doc, L } = room()
+    const id = addElectric(doc, L, 'socketDouble', 0, 100)
+    normalize(doc)
+    expect(doc.electrical![id].x).toBeCloseTo(143)
+    doc.electrical![id].gangs = 4
+    normalize(doc)
+    expect(doc.electrical![id].x).toBeCloseTo(100 + 43 + 3 * 35.5)
+    doc.electrical![id].vertical = true
+    normalize(doc)
+    // a vertical frame is narrow again; the point stays where it is (still clear)
+    expect(doc.electrical![id].x).toBeCloseTo(100 + 43 + 3 * 35.5)
   })
 })
 

@@ -241,6 +241,8 @@ export function BomDialog({ open, onClose }: DialogPropsBase) {
       onClose={onClose}
       title={t('Ведомость материалов и смета')}
       width="max-w-5xl"
+      resizeKey="dialog.bom"
+      resizeLabel={t('Размер окна')}
       footer={
         <>
           {status && <span className="mr-auto truncate text-[10px] text-[var(--muted)]">{status}</span>}

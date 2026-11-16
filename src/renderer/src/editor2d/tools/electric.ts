@@ -3,7 +3,7 @@
  * stick to the nearest wall face (facing the room) and show their distances to the room corners;
  * Alt places a point freely. The kind, posts and height come from the «Электрика» panel.
  */
-import { ELECTRIC_KINDS, addElectric, electricBinding, electricType, nearestWallFace } from '@core'
+import { ELECTRIC_KINDS, addElectric, clampOnFace, electricBinding, electricHalfWidth, electricType, nearestWallFace, wallFacePoint } from '@core'
 import type { ElectricKind, ElectricPoint, Vec2 } from '@core/types'
 import { t } from '@/i18n'
 import { docStore } from '@/store/document'
@@ -67,13 +67,9 @@ export function createElectricTool(ctx: EditorCtx): Tool {
     if (ty.mount === 'wall' && !e.alt) {
       const hit = nearestWallFace(doc, levelId, e.plan, Math.max(ctx.mm(40), 300))
       if (hit) {
-        // a round distance along the face: 10 mm steps
-        const w = doc.walls[hit.wallId]
-        const a = doc.nodes[w.a]
-        const b = doc.nodes[w.b]
-        const len = Math.hypot(b.x - a.x, b.y - a.y) || 1
-        const k = Math.min(len, Math.max(0, Math.round(hit.t / 10) * 10)) - hit.t
-        const pt: Vec2 = { x: hit.point.x + ((b.x - a.x) / len) * k, y: hit.point.y + ((b.y - a.y) / len) * k }
+        // a round distance along the face (10 mm steps), not past the room corner into the adjoining wall
+        const tt = clampOnFace(doc, ctx.derived(), hit.wallId, hit.side, Math.round(hit.t / 10) * 10, electricHalfWidth(base))
+        const pt: Vec2 = wallFacePoint(doc, hit.wallId, hit.side, tt)?.point ?? hit.point
         return { point: { ...base, x: pt.x, y: pt.y, rotation: hit.rotation, wallId: hit.wallId, side: hit.side }, wallId: hit.wallId, side: hit.side }
       }
     }

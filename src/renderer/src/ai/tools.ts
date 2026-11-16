@@ -39,6 +39,9 @@ import {
   nearestWallFace,
   placeElectricOnWall,
   wallFacePoint,
+  clampOnFace,
+  electricHalfWidth,
+  isMountableWall,
 } from '@core'
 import type { Catalog, DerivedPlan, Doc, ElectricKind, ElectricPoint, EntityRef, Id, Vec2 } from '@core/types'
 import type { AiToolResult } from '@shared/aiChat'
@@ -121,7 +124,6 @@ function clearLevel(d: Doc, levelId: Id): void {
   }
   if (d.electrical) {
     for (const id of Object.keys(d.electrical)) if (d.electrical[id].levelId === levelId) delete d.electrical[id]
-    if (Object.keys(d.electrical).length === 0) delete d.electrical
   }
 }
 
@@ -249,11 +251,12 @@ interface WallSpot {
  * Where on a wall a point goes: `offset` from node a, or the projection of `at` (else of `from`,
  * else the middle); the side is the given one, the one `at` lies on, or the face looking into a room.
  */
-function wallSpot(doc: Doc, plan: DerivedPlan, wallId: Id, o: { side?: 'left' | 'right'; offset?: number; at?: Vec2; from?: Vec2 }): WallSpot {
+function wallSpot(doc: Doc, plan: DerivedPlan, wallId: Id, o: { side?: 'left' | 'right'; offset?: number; at?: Vec2; from?: Vec2; half?: number }): WallSpot {
   const w = doc.walls[wallId]
   if (!w) throw new ToolError(`Стена ${wallId} не найдена`)
+  if (!isMountableWall(w)) throw new ToolError(`Стена ${wallId} ${w.kind === 'virtual' ? 'виртуальная (разделитель зон)' : 'без толщины'}: на неё нельзя поставить точку`)
   const probe = wallFacePoint(doc, wallId, 'left', 0)
-  if (!probe) throw new ToolError(`На стену ${wallId} нельзя поставить точку (нулевая длина или виртуальная стена)`)
+  if (!probe) throw new ToolError(`На стену ${wallId} нельзя поставить точку (нулевая длина)`)
   const len = probe.len
   if (o.offset !== undefined && o.offset > len + 0.5) throw new ToolError(`offset ${r0(o.offset)} больше длины стены ${wallId} (${r0(len)} мм)`)
   const proj = o.at ? alongWall(doc, wallId, o.at) : o.from ? alongWall(doc, wallId, o.from) : null
@@ -266,7 +269,8 @@ function wallSpot(doc: Doc, plan: DerivedPlan, wallId: Id, o: { side?: 'left' | 
   if (!side) {
     // the face that looks into a room
     for (const s of ['left', 'right'] as const) {
-      const f = wallFacePoint(doc, wallId, s, t)
+      // probed where the point would stand on that face (at a corner the axis end is inside the next wall)
+      const f = wallFacePoint(doc, wallId, s, clampOnFace(doc, plan, wallId, s, t, o.half ?? 0))
       if (!f) continue
       const { uy } = electricFrame(f.rotation)
       if (roomAt(plan, { x: f.point.x + uy.x * 50, y: f.point.y + uy.y * 50 }, inside)) {
@@ -276,9 +280,11 @@ function wallSpot(doc: Doc, plan: DerivedPlan, wallId: Id, o: { side?: 'left' | 
     }
   }
   side ??= 'left'
-  const f = wallFacePoint(doc, wallId, side, t)
+  // the frame stays on the visible face, clear of the adjoining walls at the room corners
+  const tt = clampOnFace(doc, plan, wallId, side, t, o.half ?? 0)
+  const f = wallFacePoint(doc, wallId, side, tt)
   if (!f) throw new ToolError(`На стену ${wallId} нельзя поставить точку`)
-  return { wallId, side, t, point: f.point }
+  return { wallId, side, t: tt, point: f.point }
 }
 
 /** one point for the agent: kind, height, wall, distances to the corners */
@@ -616,7 +622,7 @@ async function run(host: ToolHost, name: AiToolName, a: Record<string, unknown>)
         const w = doc.walls[args.wallId]
         if (!w) throw new ToolError(`Стена ${args.wallId} не найдена`)
         lv = w.levelId
-        spot = wallSpot(doc, host.derived(lv), args.wallId, { side: args.side, offset: args.offset, at: args.at })
+        spot = wallSpot(doc, host.derived(lv), args.wallId, { side: args.side, offset: args.offset, at: args.at, half: electricHalfWidth({ kind, gangs: args.gangs, vertical: args.vertical }) })
       } else if (args.offset !== undefined || args.side) throw new ToolError('offset и side задаются вместе с wallId')
       if (!spot && !args.at) throw new ToolError('Укажи wallId (с offset или at) или точку at')
       if (args.gangs !== undefined && args.gangs > 1 && !ty.framed) throw new ToolError(`У «${ty.ru}» нет рамки: gangs не задаётся`)
@@ -665,7 +671,7 @@ async function run(host: ToolHost, name: AiToolName, a: Record<string, unknown>)
         const w = doc.walls[wid]
         if (!w) throw new ToolError(`Стена ${wid} не найдена`)
         if (w.levelId !== p.levelId) throw new ToolError(`Стена ${wid} на другом уровне`)
-        spot = wallSpot(doc, host.derived(p.levelId), wid, { side: args.side ?? (wid === p.wallId ? p.side : undefined), offset: args.offset, at: args.at, from: p })
+        spot = wallSpot(doc, host.derived(p.levelId), wid, { side: args.side ?? (wid === p.wallId ? p.side : undefined), offset: args.offset, at: args.at, from: p, half: electricHalfWidth({ kind: nextKind, gangs: args.gangs ?? p.gangs, vertical: args.vertical ?? p.vertical }) })
       }
       const ch: string[] = []
       if (args.kind && args.kind !== p.kind) ch.push(t('тип {kind}', { kind: en() ? nextTy.en : nextTy.ru }))

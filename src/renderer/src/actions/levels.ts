@@ -99,7 +99,6 @@ export function removeLevelFromDraft(d: Doc, levelId: Id): void {
   }
   if (d.electrical) {
     for (const [id, e] of Object.entries(d.electrical)) if (e.levelId === levelId) delete d.electrical[id]
-    if (!Object.keys(d.electrical).length) delete d.electrical
   }
   removeLevelMarks(d, levelId)
   delete d.levels[levelId]

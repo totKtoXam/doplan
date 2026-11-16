@@ -77,13 +77,24 @@ describe('electrical AI tools', () => {
 
     const del = await executeTool(host, 'delete', { ids: [p.id] })
     expect(del.result.ok, del.result.text).toBe(true)
-    expect(st().doc.electrical).toBeUndefined()
+    expect(points()).toHaveLength(0)
+    expect(st().doc.electrical).toEqual({})
 
     // every call was one undo step
     st().undo()
     expect(points()).toHaveLength(1)
     st().undo()
     expect(st().doc.electrical![p.id].kind).toBe('socketDouble')
+  })
+
+  it('keeps a socket at offset 0 clear of the adjoining wall', async () => {
+    const wallId = await room()
+    const put = await executeTool(host, 'place_electric', { kind: 'socket', wallId, offset: 0 })
+    expect(put.result.ok, put.result.text).toBe(true)
+    // the inner face starts at x = 100, half the frame is 43
+    expect(Math.min(points()[0].x, 4000 - points()[0].x)).toBeCloseTo(143)
+    // on the room side
+    expect(points()[0].y).toBeCloseTo(100)
   })
 
   it('snaps a wall kind to the nearest wall from a point, keeps a ceiling outlet free', async () => {
@@ -108,6 +119,13 @@ describe('electrical AI tools', () => {
     expect((await executeTool(host, 'place_electric', { kind: 'socket', wallId: 'w_none', offset: 10 })).result.ok).toBe(false)
     expect((await executeTool(host, 'place_electric', { kind: 'socket', wallId: Object.keys(st().doc.walls)[0], offset: 99999 })).result.ok).toBe(false)
     expect((await executeTool(host, 'place_electric', { kind: 'toaster', at: { x: 0, y: 0 } })).result.ok).toBe(false)
+    // a virtual zone separator has no faces
+    const v = await executeTool(host, 'add_wall', { from: { x: 1000, y: 1000 }, to: { x: 3000, y: 1000 }, kind: 'virtual' })
+    expect(v.result.ok, v.result.text).toBe(true)
+    const vid = Object.values(st().doc.walls).find((w) => w.kind === 'virtual')!.id
+    const onVirtual = await executeTool(host, 'place_electric', { kind: 'socket', wallId: vid, offset: 500 })
+    expect(onVirtual.result.ok).toBe(false)
+    expect(onVirtual.result.text).toContain('виртуальная')
     expect(points()).toHaveLength(0)
     expect(describeCall('place_electric', { kind: 'socket', wallId: 'w_1' })).toContain('w_1')
   })

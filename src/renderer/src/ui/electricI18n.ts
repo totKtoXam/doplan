@@ -62,4 +62,13 @@ addTranslations('en', {
   горизонтально: 'horizontal',
   комментарий: 'comment',
   'на {wall}, offset {t}': 'on {wall}, offset {t}',
+  // status bar: one / several selected
+  электроточка: 'electrical point',
+  электроточек: 'electrical points',
+  // catalog notes (core ELECTRIC_TYPES[].note)
+  '16 А': '16 A',
+  '16 А, без заземления': '16 A, no ground',
+  '16 А, с заземлением': '16 A, grounded',
+  '16 А, с заземлением и шторками': '16 A, grounded, with shutters',
+  '32 А': '32 A',
 })

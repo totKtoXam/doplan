@@ -1,11 +1,13 @@
+import { enablePatches, produceWithPatches } from 'immer'
 import { describe, expect, it } from 'vitest'
 import { createEmptyDoc } from '../defaults'
 import { parseDoc, serializeDoc } from '../io'
-import { addRectRoom, duplicateEntities, moveNodes, moveWall, normalize, removeEntities, splitWall } from '../ops'
+import { addRectRoom, addWall, duplicateEntities, moveNodes, moveWall, normalize, removeEntities, splitWall } from '../ops'
 import {
   ELECTRIC_KINDS,
   ELECTRIC_TYPES,
   addElectric,
+  clampOnFace,
   electricBinding,
   electricBomRows,
   electricLabelLines,
@@ -156,7 +158,7 @@ describe('placing on walls', () => {
     expect(c.y).toBeCloseTo(100)
     removeEntities(doc, [{ kind: 'electric', id }, { kind: 'electric', id: copy.id }])
     normalize(doc)
-    expect(doc.electrical).toBeUndefined()
+    expect(doc.electrical).toEqual({})
   })
 
   it('ties a wall point to the room corners', () => {
@@ -171,6 +173,75 @@ describe('placing on walls', () => {
   })
 })
 
+describe('review fixes', () => {
+  it('patches single points, never the whole record (a stale AI draft keeps the user points)', () => {
+    enablePatches()
+    const { doc, L } = room()
+    expect(doc.electrical).toEqual({})
+    const [one, added] = produceWithPatches(doc, (d) => {
+      addElectric(d, L, 'socket', 1000, 60)
+      normalize(d)
+    })
+    const ofRecord = (ps: typeof added) => ps.filter((p) => p.path[0] === 'electrical')
+    expect(ofRecord(added).length).toBeGreaterThan(0)
+    for (const p of ofRecord(added)) expect(p.path.length).toBeGreaterThanOrEqual(2)
+    const id = Object.keys(one.electrical!)[0]
+    const [none, removed] = produceWithPatches(one, (d) => {
+      removeEntities(d, [{ kind: 'electric', id }])
+      normalize(d)
+    })
+    expect(none.electrical).toEqual({})
+    expect(ofRecord(removed).length).toBeGreaterThan(0)
+    for (const p of ofRecord(removed)) expect(p.path.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('does not put a point on a virtual wall', () => {
+    const { doc, L } = room()
+    const [vid] = addWall(doc, L, { x: 1000, y: 1000 }, { x: 3000, y: 1000 }, { kind: 'virtual' })
+    normalize(doc)
+    expect(doc.walls[vid].kind).toBe('virtual')
+    const id = addElectric(doc, L, 'socket', 2000, 1100, { wallId: vid, side: 'right' })
+    normalize(doc)
+    expect(doc.electrical![id].wallId).toBeUndefined()
+    expect(nearestWallFace(doc, L, { x: 2000, y: 1100 }, 400)).toBeNull()
+  })
+
+  it('detaches a corner point in place when its wall is deleted, without turning it onto the side wall', () => {
+    const { doc, L, top } = room()
+    const id = addElectric(doc, L, 'socket', 150, 60)
+    expect(doc.electrical![id].wallId).toBe(top.id)
+    expect(doc.electrical![id].rotation).toBeCloseTo(90)
+    removeEntities(doc, [{ kind: 'wall', id: top.id }])
+    normalize(doc)
+    const p = doc.electrical![id]
+    expect(p.wallId).toBeUndefined()
+    expect(p.x).toBeCloseTo(150)
+    expect(p.y).toBeCloseTo(100)
+    expect(p.rotation).toBeCloseTo(90)
+  })
+
+  it('keeps a frame on the visible face, clear of the adjoining wall at the room corner', () => {
+    const { doc, L, top } = room()
+    const plan = derivePlan(doc, L)
+    for (const x of [0, 20, 60]) {
+      const id = addElectric(doc, L, 'socket', x, 100, { plan })
+      normalize(doc)
+      const p = doc.electrical![id]
+      expect(p.wallId).toBe(top.id)
+      // the inner face starts at x = 100; half the frame is 43
+      expect(p.x).toBeCloseTo(143)
+      const b = electricBinding(doc, derivePlan(doc, L), p)!
+      expect(b.room).toBe(true)
+      expect(Math.min(b.fromA, b.fromB)).toBeCloseTo(43)
+    }
+    // a 3-post frame keeps 43 + 2 × 35.5 from the far corner
+    const wide = addElectric(doc, L, 'socketDouble', 3990, 100, { plan, gangs: 3 })
+    expect(doc.electrical![wide].x).toBeCloseTo(3900 - 114)
+    // without a plan only the wall ends limit it
+    expect(clampOnFace(doc, undefined, top.id, 'right', -50, 43)).toBe(0)
+  })
+})
+
 describe('files', () => {
   it('round-trips points and reads old files without them', () => {
     const { doc, L } = room()
@@ -180,7 +251,7 @@ describe('files', () => {
 
     const old = JSON.parse(serializeDoc(doc))
     delete old.electrical
-    expect(parseDoc(old).electrical).toBeUndefined()
+    expect(parseDoc(old).electrical).toEqual({})
   })
 
   it('sanitises broken records', () => {
@@ -189,13 +260,13 @@ describe('files', () => {
     raw.electrical = {
       e_a: { levelId: L, kind: 'laser', x: 500, y: 1500, gangs: 9 },
       e_b: { levelId: L, kind: 'socket', x: 'oops', y: 1 },
-      e_c: { levelId: L, kind: 'socket', x: 1200, y: 100, gangs: 9, wallId: 'w_missing', side: 'right', mount: 'wall' },
+      e_c: { levelId: L, kind: 'socket', x: 1200, y: 100, rotation: 90, gangs: 9, wallId: 'w_missing', side: 'right', mount: 'wall' },
     }
     const d = parseDoc(raw)
     expect(d.electrical!.e_a.kind).toBe('other')
     expect(d.electrical!.e_b).toBeUndefined()
     expect(d.electrical!.e_c.gangs).toBe(5)
-    // the missing wall is replaced by the face the point sits on
+    // the missing wall is replaced by the face the point sits on (and looks the same way)
     expect(d.electrical!.e_c.wallId).toBeDefined()
     expect(d.walls[d.electrical!.e_c.wallId!]).toBeDefined()
   })

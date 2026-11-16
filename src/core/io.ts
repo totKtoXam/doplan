@@ -820,11 +820,13 @@ export function parseDoc(json: unknown): Doc {
     doc.lights[id] = light
   }
 
-  // ── electrical points (0.12+; absent in older files) ──
+  // ── electrical points (0.12+; absent in older files). The record always exists so that edits
+  //    patch single points (['electrical', id]), never the whole record ──
+  doc.electrical = {}
   for (const [id, v] of entries(raw.electrical, 'e')) {
     const levelId = levelOf(v.levelId)
     const p = parseElectricPoint(id, v, levelId, levels[levelId].height)
-    if (p) (doc.electrical ??= {})[id] = p
+    if (p) doc.electrical[id] = p
   }
 
   // ── annotations ──

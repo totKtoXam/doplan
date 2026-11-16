@@ -792,7 +792,8 @@ export interface Doc {
   rooms: Record<Id, Room>
   items: Record<Id, Item>
   lights: Record<Id, Light>
-  /** sockets, switches, low-voltage and cable outlets (absent = none; see ElectricPoint) */
+  /** sockets, switches, low-voltage and cable outlets (see ElectricPoint). Optional in the type for
+   *  older callers, but createEmptyDoc/parseDoc always create it and it is never deleted. */
   electrical?: Record<Id, ElectricPoint>
   dimensions: Record<Id, Dimension>
   labels: Record<Id, Label>

@@ -5,9 +5,11 @@ import {
   ELECTRIC_TYPES,
   MAX_GANGS,
   alongWall,
+  clampOnFace,
   detachElectric,
   electricBinding,
   electricGangs,
+  electricHalfWidth,
   electricName,
   electricType,
   nearestWallFace,
@@ -79,7 +81,9 @@ export function ElectricInspector({ id }: { id: Id }) {
           const tt = Math.min(len, Math.max(0, v))
           const target = { x: a.x + u.x * tt, y: a.y + u.y * tt }
           const along = alongWall(d, x.wallId, target)
-          if (along !== null) placeElectricOnWall(d, id, x.wallId, x.side === 'right' ? 'right' : 'left', along)
+          const side = x.side === 'right' ? 'right' : 'left'
+          // never past the room corner into the adjoining wall
+          if (along !== null) placeElectricOnWall(d, id, x.wallId, side, clampOnFace(d, derived, x.wallId, side, along, electricHalfWidth(x)))
         },
         m('bind', g),
       )
@@ -92,7 +96,7 @@ export function ElectricInspector({ id }: { id: Id }) {
   const reattach = () =>
     set('Привязать к стене', (x, d) => {
       const hit = nearestWallFace(d, x.levelId, x, 600)
-      if (hit) placeElectricOnWall(d, id, hit.wallId, hit.side, hit.t)
+      if (hit) placeElectricOnWall(d, id, hit.wallId, hit.side, clampOnFace(d, derived, hit.wallId, hit.side, hit.t, electricHalfWidth(x)))
     })
 
   const setMount = (mt: ElectricMount) =>
@@ -103,7 +107,7 @@ export function ElectricInspector({ id }: { id: Id }) {
       else {
         if (x.elevation <= 0 || x.elevation >= (d.levels[x.levelId]?.height ?? 2700)) x.elevation = electricType(x.kind).elevation || 300
         const hit = nearestWallFace(d, x.levelId, x, 600)
-        if (hit) placeElectricOnWall(d, id, hit.wallId, hit.side, hit.t)
+        if (hit) placeElectricOnWall(d, id, hit.wallId, hit.side, clampOnFace(d, derived, hit.wallId, hit.side, hit.t, electricHalfWidth(x)))
       }
       if (mt !== 'wall') detachElectric(x)
     })
@@ -113,7 +117,7 @@ export function ElectricInspector({ id }: { id: Id }) {
       <InspectorHeader
         icon={<ElectricIcon kind={p.kind} gangs={p.gangs} vertical={p.vertical} mount={p.mount} className="size-4" />}
         title={electricName(p, lang)}
-        subtitle={[ty.code, p.mount === 'wall' ? `h ${Math.round(p.elevation)} мм` : p.mount === 'floor' ? t('в полу') : t('на потолке')].filter(Boolean).join(' · ')}
+        subtitle={[ty.code, p.mount === 'wall' ? `h ${Math.round(p.elevation)} ${t('мм')}` : p.mount === 'floor' ? t('в полу') : t('на потолке')].filter(Boolean).join(' · ')}
       />
       <Section title={t('Электроточка')} id="insp.electric.main">
         <Row label={t('Тип')}>
@@ -196,7 +200,7 @@ export function ElectricInspector({ id }: { id: Id }) {
             }}
           />
         </Row>
-        {ty.note && <Hint>{ty.note}</Hint>}
+        {ty.note && <Hint>{t(ty.note)}</Hint>}
       </Section>
 
       <Section title={t('Положение')} id="insp.electric.pos">

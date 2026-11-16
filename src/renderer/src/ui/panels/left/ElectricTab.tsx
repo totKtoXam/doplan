@@ -82,10 +82,10 @@ export function ElectricTab() {
   }, [points])
 
   const heightOptions = useMemo(() => {
-    const opts = [{ value: 'auto', label: `${t('По типу')} — ${ty.mount === 'wall' ? `${ty.elevation} мм` : ty.mount === 'floor' ? t('пол') : t('потолок')}` }]
-    for (const h of ELECTRIC_HEIGHT_PRESETS) opts.push({ value: String(h.h), label: `${h.h} мм — ${lang === 'en' ? h.en : h.ru}` })
+    const opts = [{ value: 'auto', label: `${t('По типу')} — ${ty.mount === 'wall' ? `${ty.elevation} ${t('мм')}` : ty.mount === 'floor' ? t('пол') : t('потолок')}` }]
+    for (const h of ELECTRIC_HEIGHT_PRESETS) opts.push({ value: String(h.h), label: `${h.h} ${t('мм')} — ${lang === 'en' ? h.en : h.ru}` })
     if (ext.electricElevation !== undefined && !ELECTRIC_HEIGHT_PRESETS.some((h) => h.h === ext.electricElevation)) {
-      opts.push({ value: String(ext.electricElevation), label: `${ext.electricElevation} мм` })
+      opts.push({ value: String(ext.electricElevation), label: `${ext.electricElevation} ${t('мм')}` })
     }
     return opts
   }, [t, ty, lang, ext.electricElevation])
@@ -101,7 +101,7 @@ export function ElectricTab() {
                 icon={<ElectricIcon kind={x.kind} mount={x.mount} className="size-7 text-[var(--danger,#c62828)]" />}
                 label={name(x.kind)}
                 sub={x.mount === 'wall' ? `h ${x.elevation}` : x.mount === 'floor' ? t('пол') : t('потолок')}
-                title={`${full(x.kind)}${x.code ? ` (${x.code})` : ''}${x.note ? ` — ${x.note}` : ''}`}
+                title={`${full(x.kind)}${x.code ? ` (${x.code})` : ''}${x.note ? ` — ${t(x.note)}` : ''}`}
                 active={tool === 'electric' && kind === x.kind}
                 onClick={() => setTool({ electricKind: x.kind })}
               />

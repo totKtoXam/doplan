@@ -13,6 +13,7 @@ import { ElectricInspector } from './inspector/ElectricInspector'
 import { MultiInspector } from './inspector/MultiInspector'
 import { ProjectInspector } from './inspector/ProjectInspector'
 import { DimensionInspector, LabelInspector, NodeInspector, UnderlayInspector } from './inspector/MiscInspectors'
+import { LayersSection } from './layers/LayersSection'
 
 function exists(doc: Doc, r: EntityRef): boolean {
   switch (r.kind) {
@@ -88,7 +89,8 @@ export function RightPanel({ className }: { className?: string }) {
 
   return (
     <aside className={cn('flex h-full min-h-0 w-full flex-col bg-[var(--panel)] text-xs text-[var(--text)]', className)} aria-label={t('Свойства')}>
-      <ScrollArea className="flex-1">
+      <LayersSection />
+      <ScrollArea className="min-h-0 flex-1">
         <div key={key}>{body}</div>
       </ScrollArea>
     </aside>

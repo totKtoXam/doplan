@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest'
 import {
   BUILTIN_ASSETS,
   DOC_VERSION,
-  DOC_VERSION_VARIANTS,
   DOC_VERSION_V3,
+  DOC_VERSION_VARIANTS,
   activeVariantId,
   addItem,
   addLight,

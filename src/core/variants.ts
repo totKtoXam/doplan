@@ -15,10 +15,11 @@
 import { findAsset } from './catalog'
 import { pointInPolygon, projectOnSegment } from './geom'
 import { newId } from './ids'
+import { usesLayers } from './layers'
 import {
   DOC_VERSION,
-  DOC_VERSION_VARIANTS,
   DOC_VERSION_V3,
+  DOC_VERSION_VARIANTS,
   VARIANT_COLLECTIONS,
   VARIANT_OPENING_FIELDS,
   VARIANT_ROOM_FIELDS,
@@ -143,10 +144,19 @@ export function variantCount(doc: Doc): number {
   return doc.variants ? doc.variants.order.length : 1
 }
 
-/** file format version the document must be written with */
+/** electrical points are new to formats 1–2: a 0.12 app would drop them on its next save */
+function hasElectrical(doc: Doc): boolean {
+  return !!doc.electrical && Object.keys(doc.electrical).length > 0
+}
+
+/**
+ * file format version the document must be written with: the lowest one whose readers keep all its
+ * data (format 3 for layers-panel data, see `usesLayers`, and for electrical points; format 2 for
+ * several variants)
+ */
 export function docFormatVersion(doc: Doc): number {
-  // electrical points: format 3 (0.12.0 opens format 2 and would drop them on save)
-  if (doc.electrical && Object.keys(doc.electrical).length > 0) return DOC_VERSION_V3
+  // layers-panel data or electrical points: format 3 (0.12.0 opens format 2 and would drop them on save)
+  if (usesLayers(doc) || hasElectrical(doc)) return DOC_VERSION_V3
   return variantCount(doc) > 1 ? DOC_VERSION_VARIANTS : DOC_VERSION
 }
 
@@ -249,7 +259,8 @@ export function ensureVariants(doc: Doc): DocVariants {
   return doc.variants
 }
 
-function syncVersion(doc: Doc): void {
+/** keeps `doc.version` equal to `docFormatVersion` (the store calls it after every edit) */
+export function syncFormatVersion(doc: Doc): void {
   const v = docFormatVersion(doc)
   if (doc.version !== v) doc.version = v
 }
@@ -281,7 +292,7 @@ export function createVariant(doc: Doc, opts: CreateVariantOptions, catalog?: Ca
   v.list[id] = rec
   const at = v.order.indexOf(src && opts.source ? opts.source : v.activeId)
   v.order.splice(at < 0 ? v.order.length : at + 1, 0, id)
-  syncVersion(doc)
+  syncFormatVersion(doc)
   if (opts.activate !== false) switchVariant(doc, id, catalog)
   return id
 }
@@ -327,7 +338,7 @@ export function deleteVariant(doc: Doc, id: Id, catalog?: Catalog | null): boole
   }
   delete v.list[id]
   v.order.splice(v.order.indexOf(id), 1)
-  syncVersion(doc)
+  syncFormatVersion(doc)
   return true
 }
 

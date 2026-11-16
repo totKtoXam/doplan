@@ -3,6 +3,7 @@
  * document changes). Tolerances are passed in mm (callers convert from screen px).
  */
 import type { DerivedPlan, DerivedRoom, Doc, EntityKind, EntityRef, Id, PlanNode, Vec2, WallGeom } from '@core/types'
+import { layerIndex } from '@core/layers'
 import {
   type BBox,
   bboxContainsPoint,
@@ -251,6 +252,8 @@ export class HitIndex {
     for (const e of this.query({ minX: p.x - r, minY: p.y - r, maxX: p.x + r, maxY: p.y + r })) {
       if (e.kind !== 'wall') continue
       if (opts?.exclude?.has(e.id)) continue
+      // nothing is placed on a wall hidden in the layers panel
+      if (layerIndex(doc).hidden('wall', e.id)) continue
       const g = derived.wallGeoms[e.id]
       const w = doc.walls[e.id]
       if (!g || !w) continue
@@ -286,13 +289,15 @@ export class HitIndex {
     return best
   }
 
-  /** all entities under p, best first */
+  /** all entities under p, best first (objects hidden or locked in the layers panel are never hit) */
   hitAll(p: Vec2, tol: number, filter?: (ref: EntityRef) => boolean): EntityRef[] {
     const doc = this.env.doc()
     const derived = this.env.derived()
+    const vis = layerIndex(doc)
     const r = Math.max(tol, 260)
     const scored: Scored[] = []
     const push = (kind: EntityKind, id: Id, prio: number, metric: number): void => {
+      if (!vis.pickable(kind, id)) return
       const ref = { kind, id }
       if (filter && !filter(ref)) return
       scored.push({ ref, prio, metric })
@@ -384,9 +389,11 @@ export class HitIndex {
   inRect(box: BBox, crossing: boolean): EntityRef[] {
     const doc = this.env.doc()
     const derived = this.env.derived()
+    const vis = layerIndex(doc)
     const out: EntityRef[] = []
     for (const e of this.query(box)) {
       if (e.kind === 'node' || e.kind === 'underlay') continue
+      if (!vis.pickable(e.kind, e.id)) continue
       const ref: EntityRef = { kind: e.kind, id: e.id }
       if (bboxInside(e.box, box) && e.kind !== 'light' && e.kind !== 'electric') {
         out.push(ref)

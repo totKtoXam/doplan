@@ -15,6 +15,8 @@ import {
   clampOnFace,
   electricHalfWidth,
   detachElectric,
+  layerIndex,
+  pickableRefs,
   planResizeTargets,
   resizedParams,
   resizeFromFace,
@@ -140,6 +142,9 @@ export function createSelectTool(ctx: EditorCtx): Tool {
     const na = w && d.nodes[w.a]
     const nb = w && d.nodes[w.b]
     if (!w || !na || !nb || dist(na, nb) < 1) return null
+    // an end shared with a locked wall (layers panel) stays put, so the wall cannot be dragged
+    const vis = layerIndex(d)
+    if (vis.locked('node', w.a) || vis.locked('node', w.b)) return null
     const u = norm(sub(nb, na))
     return {
       type: 'wallMid',
@@ -304,15 +309,18 @@ export function createSelectTool(ctx: EditorCtx): Tool {
     }
 
     // group move of everything movable in the selection
-    const sel = ui().selection.filter((r) => MOVABLE.has(r.kind))
+    // hidden / locked objects selected in the layers panel stay put
+    const sel = pickableRefs(d, ui().selection).filter((r) => MOVABLE.has(r.kind))
     const nodes = new Map<Id, Vec2>()
     const points: { ref: EntityRef; x: number; y: number }[] = []
     const dims: { id: Id; a: Vec2; b: Vec2 }[] = []
     let primary: Vec2 | null = null
     let hitMovable = false
+    // a node shared with a locked wall stays put
+    const vis = layerIndex(d)
     const addNode = (id: Id): void => {
       const n = d.nodes[id]
-      if (n && !nodes.has(id)) nodes.set(id, { x: n.x, y: n.y })
+      if (n && !nodes.has(id) && !vis.locked('node', id)) nodes.set(id, { x: n.x, y: n.y })
     }
     for (const r of sel) {
       const isHit = r.kind === hit.kind && r.id === hit.id
@@ -324,7 +332,7 @@ export function createSelectTool(ctx: EditorCtx): Tool {
           addNode(w.b)
           if (isHit) {
             hitMovable = true
-            primary = nodes.get(w.a) ?? null
+            primary = nodes.get(w.a) ?? nodes.get(w.b) ?? null
           }
           break
         }
@@ -784,8 +792,10 @@ export function createSelectTool(ctx: EditorCtx): Tool {
   }
 
   function nudge(dx: number, dy: number, step: number): boolean {
-    const sel = ui().selection
+    const sel = pickableRefs(store().doc, ui().selection)
     if (!sel.length) return false
+    // a node shared with a locked wall stays put
+    const vis = layerIndex(store().doc)
     store().transact(
       t('Сдвиг'),
       (dr) => {
@@ -795,8 +805,8 @@ export function createSelectTool(ctx: EditorCtx): Tool {
             case 'wall': {
               const w = dr.walls[r.id]
               if (w) {
-                nodes.add(w.a)
-                nodes.add(w.b)
+                if (!vis.locked('node', w.a)) nodes.add(w.a)
+                if (!vis.locked('node', w.b)) nodes.add(w.b)
               }
               break
             }
@@ -1066,7 +1076,7 @@ export function createSelectTool(ctx: EditorCtx): Tool {
             }
           }
         }
-        ui().select([...seen].map((id) => ({ kind: 'wall' as const, id })))
+        ui().select(pickableRefs(d, [...seen].map((id) => ({ kind: 'wall' as const, id }))))
       }
     },
 

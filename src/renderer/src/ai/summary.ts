@@ -99,7 +99,7 @@ export function describePlan(doc: Doc, plan: DerivedPlan, levelId: Id, lk: Looku
     const active = variants.find((v) => v.active)
     lines.push(
       `Вариант обстановки «${active?.name ?? '?'}» (активный; всего вариантов: ${variants.length} — ${variants.map((v) => `«${v.name}»`).join(', ')}). ` +
-        'Предметы, свет и отделка ниже — этого варианта; стены, проёмы и помещения общие для всех вариантов.',
+        'Предметы, свет и отделка ниже — этого варианта; стены, проёмы, помещения и электрика общие для всех вариантов.',
     )
   }
   lines.push('Единицы: мм; x вправо, y вниз; углы по часовой.')

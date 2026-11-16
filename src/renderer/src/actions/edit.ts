@@ -1,4 +1,4 @@
-import { detachElectric, duplicateEntities, nearestWallFace, newId, placeElectricOnWall, remapAccentFace, removeEntities } from '@core'
+import { detachElectric, duplicateEntities, layerIndex, nearestWallFace, newId, pickableRefs, placeElectricOnWall, remapAccentFace, removeEntities, unlockedRefs } from '@core'
 import type { Doc, EntityRef, Id, Vec2 } from '@core/types'
 import { t } from '@/i18n'
 import { docStore } from '@/store/document'
@@ -23,7 +23,8 @@ export function deleteSelection(): void {
   const refs = selection()
   if (!refs.length) return
   const doc = currentDoc()
-  const deletable = refs.filter((r) => !(r.kind === 'item' && doc.items[r.id]?.locked) && !(r.kind === 'underlay' && doc.underlays[r.id]?.locked))
+  // locked objects (own lock, their kind's or their layer's) are never deleted
+  const deletable = unlockedRefs(doc, refs)
   if (!deletable.length) {
     toast(t('Выбранные объекты заблокированы'), 'warning')
     return
@@ -52,7 +53,8 @@ export function selectAll(): void {
   for (const e of Object.values(doc.electrical ?? {})) if (e.levelId === lv) refs.push({ kind: 'electric', id: e.id })
   for (const l of Object.values(doc.labels)) if (l.levelId === lv) refs.push({ kind: 'label', id: l.id })
   for (const dm of Object.values(doc.dimensions)) if (dm.levelId === lv) refs.push({ kind: 'dimension', id: dm.id })
-  uiStore.getState().select(refs)
+  // what cannot be clicked on the plan (hidden / locked in the layers panel) is not selected either
+  uiStore.getState().select(pickableRefs(doc, refs))
 }
 
 export function zoomFit(): void {
@@ -71,9 +73,10 @@ function rot(p: Vec2, c: Vec2, cos: number, sin: number): Vec2 {
 
 /** Rotates the selection by `deg` (clockwise on the plan) around its common centre. */
 export function groupRotate(deg: number): void {
-  const refs = selection()
-  if (!refs.length) return
   const doc = currentDoc()
+  const refs = unlockedRefs(doc, selection())
+  if (!refs.length) return
+  const vis = layerIndex(doc)
   const nodeIds = new Set<Id>()
   const pts: Vec2[] = []
   for (const r of refs) {
@@ -81,8 +84,9 @@ export function groupRotate(deg: number): void {
       case 'wall': {
         const w = doc.walls[r.id]
         if (w) {
-          nodeIds.add(w.a)
-          nodeIds.add(w.b)
+          // a node shared with a locked wall stays put
+          if (!vis.locked('node', w.a)) nodeIds.add(w.a)
+          if (!vis.locked('node', w.b)) nodeIds.add(w.b)
         }
         break
       }

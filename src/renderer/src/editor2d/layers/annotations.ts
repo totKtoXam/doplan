@@ -82,8 +82,7 @@ export class AnnotationsLayer {
   private gaps: ItemGap[] = []
 
   draw(ctx: EditorCtx, p: Painter): void {
-    const doc = ctx.doc()
-    const derived = ctx.derived()
+    const { doc, derived } = ctx.view()
     const ui = ctx.ui()
     const pal = p.pal
     const cam = ctx.camera

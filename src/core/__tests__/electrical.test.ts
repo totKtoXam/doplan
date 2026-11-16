@@ -23,6 +23,8 @@ import { buildDisplayList } from '../display'
 import { derivePlan } from '../derive'
 import { toDxf } from '../export/dxf'
 import { DOC_VERSION, DOC_VERSION_V3, type Doc, type Id, type Wall } from '../types'
+import { addLayer, assignLayer, entityKind, layerIndex, setHidden, setLocked, visibleDoc } from '../layers'
+import { syncFormatVersion } from '../variants'
 
 /** a 4000 × 3000 room (wall centrelines), walls 200 thick */
 function room(): { doc: Doc; L: Id; top: Wall } {
@@ -313,7 +315,8 @@ describe('files', () => {
     expect(JSON.parse(serializeDoc(doc)).version).toBe(DOC_VERSION)
     const id = addElectric(doc, L, 'socket', 1000, 60)
     normalize(doc)
-    // the live document follows too (the app saves it as is)
+    syncFormatVersion(doc)
+    // the live document follows too (the store syncs it after every edit; the app saves it as is)
     expect(doc.version).toBe(DOC_VERSION_V3)
     const text = serializeDoc(doc)
     expect(JSON.parse(text).version).toBeGreaterThan(2)
@@ -324,6 +327,7 @@ describe('files', () => {
     expect(back.electrical![id]).toBeDefined()
     removeEntities(doc, [{ kind: 'electric', id }])
     normalize(doc)
+    syncFormatVersion(doc)
     expect(doc.version).toBe(DOC_VERSION)
     expect(JSON.parse(serializeDoc(doc)).version).toBe(DOC_VERSION)
     expect(() => parseDoc({ ...JSON.parse(text), version: 4 })).toThrow(/новой версии/)
@@ -344,6 +348,77 @@ describe('files', () => {
     // the missing wall is replaced by the face the point sits on (and looks the same way)
     expect(d.electrical!.e_c.wallId).toBeDefined()
     expect(d.walls[d.electrical!.e_c.wallId!]).toBeDefined()
+  })
+})
+
+describe('layers panel', () => {
+  it('is a kind of its own: named after the type, child of its wall', () => {
+    const { doc, L, top } = room()
+    const id = addElectric(doc, L, 'socket', 1000, 60, { gangs: 2 })
+    const def = entityKind('electric')!
+    expect(def.docKey).toBe('electrical')
+    const p = doc.electrical![id]
+    expect(def.name(p, { doc, lang: 'ru' })).toBe('Розетка одинарная ×2')
+    expect(def.parent!(p, doc)).toEqual({ kind: 'wall', id: top.id })
+    def.rename!(p, '  Холодильник ')
+    expect(def.name(p, { doc, lang: 'ru' })).toBe('Холодильник')
+    def.rename!(p, '')
+    expect(p.name).toBeUndefined()
+  })
+
+  it('keeps name, hidden, locked and the layer through a file', () => {
+    const { doc, L } = room()
+    const a = addElectric(doc, L, 'socket', 1000, 60)
+    const b = addElectric(doc, L, 'switch1', 300, 60)
+    const ly = addLayer(doc, 'Розетки')
+    assignLayer(doc, [{ kind: 'electric', id: a }], ly)
+    doc.electrical![a].name = 'Чайник'
+    setHidden(doc, [{ kind: 'electric', id: a }], true)
+    setLocked(doc, [{ kind: 'electric', id: b }], true)
+    const back = parseDoc(serializeDoc(doc))
+    expect(back.version).toBe(DOC_VERSION_V3)
+    expect(back.electrical![a]).toMatchObject({ name: 'Чайник', hidden: true, layerId: ly })
+    expect(back.electrical![b].locked).toBe(true)
+    const idx = layerIndex(back)
+    expect(idx.hidden('electric', a)).toBe(true)
+    expect(idx.pickable('electric', b)).toBe(false)
+    // a broken layer id is dropped
+    const raw = JSON.parse(serializeDoc(doc))
+    raw.electrical[a].layerId = 'ly_missing'
+    expect(parseDoc(raw).electrical![a].layerId).toBeUndefined()
+  })
+
+  it('a point hides and locks with its wall and is left out of drawings', () => {
+    const { doc, L, top } = room()
+    const id = addElectric(doc, L, 'socket', 1000, 60)
+    setHidden(doc, [{ kind: 'wall', id: top.id }], true)
+    const v = { ...doc }
+    expect(layerIndex(v).hidden('electric', id)).toBe(true)
+    expect(visibleDoc(v).electrical![id]).toBeUndefined()
+    expect(buildDisplayList(v, L).items.some((i) => i.layer === 'electrical')).toBe(false)
+    expect(toDxf(v, L)).not.toContain('h=300')
+    setHidden(doc, [{ kind: 'wall', id: top.id }], false)
+    setLocked(doc, [{ kind: 'wall', id: top.id }], true)
+    const w = { ...doc }
+    expect(layerIndex(w).hidden('electric', id)).toBe(false)
+    expect(layerIndex(w).pickable('electric', id)).toBe(false)
+  })
+
+  it('is never put on a hidden wall', () => {
+    const { doc, L, top } = room()
+    setHidden(doc, [{ kind: 'wall', id: top.id }], true)
+    expect(nearestWallFace(doc, L, { x: 1000, y: 100 }, 400)).toBeNull()
+    // the given wall is hidden: as without it (no visible face near)
+    const id = addElectric(doc, L, 'socket', 1000, 100, { wallId: top.id })
+    expect(doc.electrical![id].wallId).toBeUndefined()
+    // a hidden walls group or user layer counts too
+    setHidden(doc, [{ kind: 'wall', id: top.id }], false)
+    const ly = addLayer(doc, 'Стены')
+    assignLayer(doc, [{ kind: 'wall', id: top.id }], ly)
+    doc.layers![ly].hidden = true
+    expect(nearestWallFace(doc, L, { x: 1000, y: 100 }, 400)).toBeNull()
+    doc.layers![ly].hidden = false
+    expect(nearestWallFace(doc, L, { x: 1000, y: 100 }, 400)?.wallId).toBe(top.id)
   })
 })
 

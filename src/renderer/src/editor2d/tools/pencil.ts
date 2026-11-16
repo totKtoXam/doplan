@@ -5,7 +5,7 @@
  * A click selects a mark, Delete removes it. Marks are stored in doc.annotations (undoable) and drawn
  * by drawMarks on every frame.
  */
-import { markAt, markBadge } from '@core'
+import { layerIndex, markAt, markBadge } from '@core'
 import type { Annotation, Vec2 } from '@core/types'
 import { addMarkToChat } from '@/ai/store'
 import { t } from '@/i18n'
@@ -15,7 +15,14 @@ import { dist } from '../geom'
 import type { Painter } from '../painter'
 import type { Tool } from './types'
 
-const rectPts =(a: Vec2, b: Vec2): Vec2[] => [a, { x: b.x, y: a.y }, b, { x: a.x, y: b.y }]
+/** the mark under the pointer; hidden or locked (layers panel) marks cannot be picked */
+function markHit(ctx: EditorCtx, plan: Vec2, radius: number): Annotation | null {
+  const doc = ctx.view().doc
+  const m = markAt(doc, ctx.levelId(), plan, radius)
+  return m && layerIndex(doc).pickable('annotation', m.id) ? m : null
+}
+
+const rectPts = (a: Vec2, b: Vec2): Vec2[] => [a, { x: b.x, y: a.y }, b, { x: a.x, y: b.y }]
 
 function extent(pts: readonly Vec2[]): number {
   let minX = Infinity
@@ -39,7 +46,7 @@ function badgeAnchor(m: Pick<Annotation, 'points' | 'shape'>): Vec2 {
 
 /** all marks of the active level (called by the editor every frame, above the plan) */
 export function drawMarks(ctx: EditorCtx, p: Painter): void {
-  const all = ctx.doc().annotations
+  const all = ctx.view().doc.annotations
   if (!all) return
   const lv = ctx.levelId()
   const pal = p.pal
@@ -59,7 +66,7 @@ export function drawMarks(ctx: EditorCtx, p: Painter): void {
 
 /** context-menu items for a mark under the pointer, or null */
 export function markMenuItems(ctx: EditorCtx, plan: Vec2): ContextMenuItem[] | null {
-  const m = markAt(ctx.doc(), ctx.levelId(), plan, ctx.mm(8))
+  const m = markHit(ctx, plan, ctx.mm(8))
   if (!m) return null
   marksStore.getState().select(m.id)
   const lv = ctx.levelId()
@@ -96,7 +103,7 @@ export function createPencilTool(ctx: EditorCtx): Tool {
     },
     pointerMove(e) {
       if (!pts || !start) {
-        const m = markAt(ctx.doc(), ctx.levelId(), e.plan, ctx.mm(6))
+        const m = markHit(ctx, e.plan, ctx.mm(6))
         ctx.setCursor(m ? 'pointer' : 'crosshair')
         return
       }
@@ -112,7 +119,7 @@ export function createPencilTool(ctx: EditorCtx): Tool {
       if (!drawn || !from) return
       if (extent(drawn) < ctx.mm(6)) {
         // a click: select the mark under the pointer
-        const m = markAt(ctx.doc(), ctx.levelId(), e.plan, ctx.mm(8))
+        const m = markHit(ctx, e.plan, ctx.mm(8))
         marksStore.getState().select(m?.id ?? null)
         ctx.requestRender()
         return

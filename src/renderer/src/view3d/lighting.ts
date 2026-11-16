@@ -19,7 +19,7 @@ import * as THREE from 'three'
 import { RectAreaLightNode } from 'three/webgpu'
 import { RectAreaLightTexturesLib } from 'three/addons/lights/RectAreaLightTexturesLib.js'
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js'
-import { pointInPolygon, toWorld } from '@core'
+import { pointInPolygon, toWorld, visibleDoc, visiblePlan } from '@core'
 import type { DerivedPlan, Doc, Id, Light, Opening, RenderSettings, Wall, WallGeom } from '@core/types'
 import type { EngineContext, LightingRig } from '@/contracts'
 import { docStore } from '@/store/document'
@@ -925,12 +925,13 @@ export function createLighting(ctx: EngineContext): LightingRig {
   function sync(): void {
     if (disposed) return
     const state = docStore.getState()
-    const doc = state.doc
+    const doc = visibleDoc(state.doc)
     const r = doc.render
     const q = currentQuality(ctx)
     const ui = uiStore.getState()
     const levelId = doc.levels[ui.activeLevelId] ? ui.activeLevelId : doc.levelOrder[0]
-    const plan = state.derived[levelId]
+    const fullPlan = state.derived[levelId]
+    const plan = fullPlan && visiblePlan(state.doc, fullPlan)
 
     let changed = applyToneMapping(r)
     applyShadowType(q)
@@ -988,6 +989,8 @@ export function createLighting(ctx: EngineContext): LightingRig {
       a.nodes !== b.nodes ||
       a.rooms !== b.rooms ||
       a.levels !== b.levels ||
+      a.groupFlags !== b.groupFlags ||
+      a.layers !== b.layers ||
       state.derived !== last.derived
     last = state
     if (relevant) requestSync()

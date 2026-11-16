@@ -14,6 +14,7 @@ import type { Asset, Catalog, DerivedPlan, Doc, ElectricPoint, EntityRef, Id, It
 import { BUILTIN_ASSETS, ROOM_TYPE_NAMES } from './defaults'
 import { derivePlan } from './derive'
 import { electricBinding, electricLabelLines, electricPointSymbol, electricToPlan } from './electrical'
+import { visibleDoc, visiblePlan } from './layers'
 
 // ───────────────────────────── types ─────────────────────────────
 
@@ -147,6 +148,8 @@ export interface DisplayOptions {
   catalog?: Catalog
   /** precomputed derived plan of this level (skips derivePlan) */
   derived?: DerivedPlan
+  /** draw objects hidden in the layers panel too; default false (hidden objects are not exported) */
+  includeHidden?: boolean
 }
 
 interface DisplayTheme {
@@ -356,6 +359,15 @@ type Ctx = {
   lang: 'ru' | 'en'
   units: 'mm' | 'cm' | 'm'
   items: DisplayItem[]
+  /** every room of the level, hidden ones included (the total area does not change when a room is hidden) */
+  allRooms?: DerivedPlan['rooms']
+}
+
+/** draws one object and tags the pieces it pushed without a ref with the object's ref (DXF user layers) */
+function owned(ctx: Ctx, ref: EntityRef, draw: () => void): void {
+  const start = ctx.items.length
+  draw()
+  for (let i = start; i < ctx.items.length; i++) if (!ctx.items[i].ref) ctx.items[i].ref = ref
 }
 
 /** dimension between a and b, dimension line offset by `off` along the left normal (dy, -dx) of a→b */
@@ -1484,7 +1496,7 @@ function drawSheet(ctx: Ctx, opts: DisplayOptions, content: DisplayBounds): void
     items.push({ t: 'line', layer: 'sheet', role: 'titleblock', a: V(x0, y0 + rowH * 2.2), b: V(x1, y0 + rowH * 2.2), stroke: thinPen })
     const colX = x0 + W * 0.55
     items.push({ t: 'line', layer: 'sheet', role: 'titleblock', a: V(colX, y0 + rowH * 1.4), b: V(colX, y0 + H), stroke: thinPen })
-    const total = ctx.plan.rooms.reduce((s, r) => {
+    const total = (ctx.allRooms ?? ctx.plan.rooms).reduce((s, r) => {
       const rec = doc.rooms[r.roomId]
       const k = rec?.type === 'balcony' ? 0.3 : rec?.type === 'loggia' ? 0.5 : 1
       return s + r.area * k
@@ -1502,13 +1514,16 @@ function drawSheet(ctx: Ctx, opts: DisplayOptions, content: DisplayBounds): void
 }
 
 /** Build the display list of one level. */
-export function buildDisplayList(doc: Doc, levelId: Id, opts: DisplayOptions = {}): DisplayList {
+export function buildDisplayList(fullDoc: Doc, levelId: Id, opts: DisplayOptions = {}): DisplayList {
   const S = opts.scale && opts.scale > 0 ? opts.scale : 100
   const themeName: DisplayThemeName = opts.theme ?? 'light'
   const th = DISPLAY_THEMES[themeName]
   const lang = opts.lang ?? 'ru'
-  const plan = opts.derived ?? derivePlan(doc, levelId)
-  const ctx: Ctx = { doc, plan, S, th, lang, units: doc.settings?.units ?? 'mm', items: [] }
+  // rooms are detected on the full document; objects hidden in the layers panel are not drawn
+  const fullPlan = opts.derived ?? derivePlan(fullDoc, levelId)
+  const doc = opts.includeHidden ? fullDoc : visibleDoc(fullDoc)
+  const plan = opts.includeHidden ? fullPlan : visiblePlan(fullDoc, fullPlan)
+  const ctx: Ctx = { doc, plan, S, th, lang, units: doc.settings?.units ?? 'mm', items: [], allRooms: fullPlan.rooms }
   const showDims = opts.dimensions ?? doc.settings?.showDimensions ?? true
   const showAreas = opts.areas ?? doc.settings?.showAreas ?? true
   const showFurniture = opts.furniture ?? doc.settings?.showFurniture2d ?? true
@@ -1555,13 +1570,15 @@ export function buildDisplayList(doc: Doc, levelId: Id, opts: DisplayOptions = {
   // furniture
   if (showFurniture) {
     const list = Object.values(doc.items)
-      .filter((it) => it.levelId === levelId && !it.hidden)
+      .filter((it) => it.levelId === levelId && (opts.includeHidden || !it.hidden))
       .sort((a, b) => (a.mount === 'floor' ? 0 : 1) - (b.mount === 'floor' ? 0 : 1) || a.elevation - b.elevation)
-    for (const it of list) drawItem(ctx, it, findAsset(doc, opts.catalog, it.assetId))
+    for (const it of list) owned(ctx, { kind: 'item', id: it.id }, () => drawItem(ctx, it, findAsset(doc, opts.catalog, it.assetId)))
   }
   drawWalls(ctx, levelWalls, openingsByWall)
   drawOpenings(ctx, levelWalls, openingsByWall)
-  if (opts.lights !== false) for (const l of Object.values(doc.lights)) if (l.levelId === levelId) drawLight(ctx, l)
+  if (opts.lights !== false) {
+    for (const l of Object.values(doc.lights)) if (l.levelId === levelId) owned(ctx, { kind: 'light', id: l.id }, () => drawLight(ctx, l))
+  }
   if (opts.electrical !== false && doc.electrical) {
     for (const p of Object.values(doc.electrical)) if (p.levelId === levelId) drawElectric(ctx, p, opts)
   }
@@ -1589,7 +1606,8 @@ export function buildDisplayList(doc: Doc, levelId: Id, opts: DisplayOptions = {
   if (opts.manualDimensions !== false) {
     for (const dm of Object.values(doc.dimensions)) {
       if (dm.levelId !== levelId) continue
-      pushDim(ctx, dm.a, dm.b, dm.offset, 'dim-manual', { ref: { kind: 'dimension', id: dm.id } })
+      const ref: EntityRef = { kind: 'dimension', id: dm.id }
+      owned(ctx, ref, () => pushDim(ctx, dm.a, dm.b, dm.offset, 'dim-manual', { ref }))
     }
   }
   const content = boundsOf(ctx.items)

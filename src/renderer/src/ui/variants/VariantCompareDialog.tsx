@@ -76,6 +76,8 @@ function buildCards(doc: Doc, derived: Record<Id, DerivedPlan>, levelId: Id, cat
       theme: 'light',
       lang,
       derived: derived[levelId],
+      // whole layouts are compared: objects hidden in the layers panel (a working state of the plan) count too
+      includeHidden: true,
     })
     const { svg } = toSvg(dl, { scale: 100, marginMm: 5 })
     let total: number | null = null

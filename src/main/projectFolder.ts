@@ -7,7 +7,10 @@
  * referenced files back and drops unreferenced content-addressed ones.
  */
 import { createHash } from 'node:crypto'
-import { promises as fsp } from 'node:fs'
+import { constants as fsc, createWriteStream, promises as fsp } from 'node:fs'
+import type { BigIntStats, Stats } from 'node:fs'
+import type { FileHandle } from 'node:fs/promises'
+import { pipeline } from 'node:stream/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { app } from 'electron'
 import {
@@ -23,7 +26,7 @@ import {
   PLAN_FILE,
   stableStringify,
 } from '../shared/projectFormat'
-import { atomicWrite, cleanFileName, ensureDir, exists, rmrf } from './fsutil'
+import { atomicWrite, cleanFileName, ensureDir, entryKind, exists, lstatNoFollow, rmrf } from './fsutil'
 import type { UnsafeGitConfig } from '../shared/ipc'
 import { findGit, gitCommit, gitInit, gitListDir, gitShowFile, resetRepoConfig, unsafeRepoConfig } from './git'
 import { paths } from './paths'
@@ -90,6 +93,138 @@ export function referencedAssets(json: string): string[] {
   return [...out]
 }
 
+// ───────────── files of the folder, never through links ─────────────
+
+/** what is at `p` itself (a link is not followed; any junction is one, see lstatNoFollow), or null when nothing is */
+async function entryAt(p: string): Promise<Stats | null> {
+  try {
+    return await lstatNoFollow(p)
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === 'ENOENT' || code === 'ENOTDIR') return null
+    throw err
+  }
+}
+
+/** something is at `p` (a link counts and is not followed) */
+const present = async (p: string) => !!(await entryAt(p).catch(() => true))
+
+export function folderLinkError(rel: string): Error {
+  return new Error(
+    msg(
+      `«${rel}» в папке проекта — ссылка (символическая ссылка или точка соединения) или не обычный файл. doplan не открывает файлы проекта по ссылкам: замените её обычным файлом или папкой.`,
+      `“${rel}” in the project folder is a link (a symbolic link or junction) or not a plain file. doplan does not open project files through links: replace it with a plain file or folder.`,
+    ),
+  )
+}
+
+/**
+ * Opens `rel` (slash-separated, inside the folder) for reading without following links: every folder on
+ * the way below `root` and the file itself must be plain (lstat), so a symlink or junction (to another
+ * folder, to another machine) is never opened, not even stat'ed through. The handle must then be the
+ * file lstat saw (and O_NOFOLLOW where the OS has it). null when nothing is there; throws for a link.
+ * The folder itself (`root`) is the user's choice and may be reached through links.
+ */
+async function openFolderFile(root: string, rel: string): Promise<{ fh: FileHandle; size: number } | null> {
+  const parts = rel.split('/')
+  let p = root
+  for (let i = 0; i < parts.length; i++) {
+    p = join(p, parts[i])
+    const st = await entryAt(p)
+    if (!st) return null
+    if (i < parts.length - 1 ? !st.isDirectory() : !st.isFile()) throw folderLinkError(parts.slice(0, i + 1).join('/'))
+  }
+  const seen = await fsp.lstat(p, { bigint: true })
+  const fh = await fsp.open(p, fsc.O_RDONLY | (fsc.O_NOFOLLOW ?? 0))
+  let now: BigIntStats
+  try {
+    now = await fh.stat({ bigint: true })
+    // (lstat on Windows reports dev 0: the device is compared only where both have one)
+    if (now.ino !== seen.ino || (now.dev && seen.dev && now.dev !== seen.dev) || !now.isFile()) throw folderLinkError(rel)
+  } catch (err) {
+    await fh.close()
+    throw err
+  }
+  return { fh, size: Number(now.size) }
+}
+
+/** a project file the user picked (.doplan, .json, plan.json) that is a link or no plain file */
+export function linkedFileError(path: string): Error {
+  const name = basename(path)
+  return new Error(
+    msg(
+      `«${name}» — ссылка (символическая ссылка или точка соединения) или не обычный файл. doplan не открывает проекты по ссылкам: откройте сам файл.`,
+      `“${name}” is a link (a symbolic link or junction) or not a plain file. doplan does not open projects through links: open the file itself.`,
+    ),
+  )
+}
+
+/** `p` itself is a link (lstat, nothing followed) */
+export async function isLinkAt(p: string): Promise<boolean> {
+  return !!(await entryAt(p).catch(() => null))?.isSymbolicLink()
+}
+
+/**
+ * Reads a project file the user picked only as the plain file lstat shows (the folders above it are
+ * the user's choice): a link is refused before anything opens or stats through it, and the handle must
+ * be the file lstat saw (see openFolderFile).
+ */
+export async function readPickedFile(path: string, maxBytes: number, tooLarge: () => Error): Promise<Buffer> {
+  const st = await fsp.lstat(path)
+  if (!st.isFile()) throw linkedFileError(path)
+  if (st.size > maxBytes) throw tooLarge()
+  const f = await openFolderFile(dirname(path), basename(path))
+  if (!f) throw new Error(msg(`Файл не найден: ${basename(path)}`, `File not found: ${basename(path)}`))
+  try {
+    if (f.size > maxBytes) throw tooLarge()
+    return await f.fh.readFile()
+  } finally {
+    await f.fh.close()
+  }
+}
+
+/** a file of the folder read without following links (see openFolderFile); null when missing */
+export async function readFolderFile(root: string, rel: string, maxBytes = Infinity): Promise<Buffer | null> {
+  const f = await openFolderFile(root, rel)
+  if (!f) return null
+  try {
+    if (f.size > maxBytes) throw new Error(msg(`Файл ${rel} слишком большой`, `${rel} is too large`))
+    return await f.fh.readFile()
+  } finally {
+    await f.fh.close()
+  }
+}
+
+/**
+ * The asset files of the folder's assets/ (names that fit ASSET_NAME_RE), split into plain files and
+ * links or no plain files. Kinds come from lstat (entryKind): a cloud placeholder (OneDrive, Dropbox)
+ * is the plain file it stands for, not a link. null when assets/ is missing or no plain folder.
+ */
+async function assetEntries(root: string): Promise<{ files: string[]; links: string[] } | null> {
+  const dir = join(root, ASSETS_DIR)
+  const st = await entryAt(dir).catch(() => null)
+  if (!st?.isDirectory()) return null
+  const out = { files: [] as string[], links: [] as string[] }
+  for (const e of await fsp.readdir(dir, { withFileTypes: true }).catch(() => [])) {
+    if (!ASSET_NAME_RE.test(e.name)) continue
+    const kind = await entryKind(join(dir, e.name), e).catch(() => 'other' as const)
+    if (kind === 'file') out.files.push(e.name)
+    else if (kind) out.links.push(e.name)
+  }
+  return out
+}
+
+/**
+ * The entries of the folder's assets/ that are links or no plain files (or assets/ itself when it is
+ * one): opening skips them, saving refuses an assets/ that is a link.
+ */
+export async function folderAssetLinks(root: string): Promise<string[]> {
+  const st = await entryAt(join(root, ASSETS_DIR)).catch(() => null)
+  if (!st) return []
+  if (!st.isDirectory()) return [ASSETS_DIR]
+  return ((await assetEntries(root))?.links ?? []).map((n) => `${ASSETS_DIR}/${n}`)
+}
+
 // ───────────── detection ─────────────
 
 /**
@@ -97,10 +232,11 @@ export function referencedAssets(json: string): string[] {
  * 'doplan-folder'. A stray plan.json (Downloads, a web app with its own manifest.json) is not a project.
  */
 export async function isProjectFolder(dir: string): Promise<boolean> {
-  if (!(await exists(join(dir, PLAN_FILE)))) return false
+  // plan.json may be anything here (readFolderPlan says what is wrong with it); the manifest is read without links
+  if (!(await present(join(dir, PLAN_FILE)))) return false
   try {
-    const raw = await fsp.readFile(join(dir, MANIFEST_FILE))
-    if (raw.length > 4 * 1024 * 1024) return false
+    const raw = await readFolderFile(dir, MANIFEST_FILE, 4 * 1024 * 1024)
+    if (!raw) return false
     const m = parseJsonText(new Uint8Array(raw)) as Partial<FolderManifest> | null
     return !!m && typeof m === 'object' && m.format === 'doplan-folder'
   } catch {
@@ -114,13 +250,17 @@ export async function isProjectFolder(dir: string): Promise<boolean> {
  * (a .doplan archive, a PlanSpec .json, a plan.json that is not inside a project folder…).
  */
 export async function folderRootOf(p: string): Promise<string | null> {
-  let st: import('node:fs').Stats
+  let st: Stats | null
   try {
-    st = await fsp.stat(p)
+    st = await entryAt(p)
   } catch {
     return null
   }
-  const dir = st.isDirectory() ? p : basename(p).toLowerCase() === PLAN_FILE ? dirname(p) : null
+  if (!st) return null
+  // a plan.json is never followed (openProject refuses one that is a link, readFolderPlan too); a folder the user picked may be a link
+  const isPlan = basename(p).toLowerCase() === PLAN_FILE
+  if (!isPlan && st.isSymbolicLink()) st = await fsp.stat(p).catch(() => null)
+  const dir = st?.isDirectory() ? p : isPlan ? dirname(p) : null
   if (!dir) return null
   return (await isProjectFolder(dir)) ? resolve(dir) : null
 }
@@ -130,7 +270,7 @@ export async function folderRootOf(p: string): Promise<string | null> {
 /** what `.git` in a folder is: nothing, a repository directory, or a gitdir file (submodule, worktree) */
 export async function gitState(root: string): Promise<'none' | 'repo' | 'gitfile'> {
   try {
-    return (await fsp.lstat(join(root, '.git'))).isDirectory() ? 'repo' : 'gitfile'
+    return (await lstatNoFollow(join(root, '.git'))).isDirectory() ? 'repo' : 'gitfile'
   } catch {
     return 'none'
   }
@@ -230,11 +370,12 @@ export async function isDirectory(p: string): Promise<boolean> {
  * by loadFolderAssets once the renderer has accepted the document.
  */
 export async function readFolderPlan(root: string): Promise<unknown> {
-  const planPath = join(root, PLAN_FILE)
-  const bytes = new Uint8Array(await fsp.readFile(planPath))
-  const manifestPath = join(root, MANIFEST_FILE)
-  if (await exists(manifestPath)) {
-    const m = parseJsonText(new Uint8Array(await fsp.readFile(manifestPath))) as Partial<FolderManifest> | null
+  const plan = await readFolderFile(root, PLAN_FILE)
+  if (!plan) throw new Error(msg('В папке проекта нет plan.json', 'The project folder has no plan.json'))
+  const bytes = new Uint8Array(plan)
+  const manifest = await readFolderFile(root, MANIFEST_FILE, 4 * 1024 * 1024)
+  if (manifest) {
+    const m = parseJsonText(new Uint8Array(manifest)) as Partial<FolderManifest> | null
     if (m && typeof m.formatVersion === 'number' && m.formatVersion > FOLDER_FORMAT_VERSION) {
       throw new Error(msg('Проект создан более новой версией doplan. Обновите приложение.', 'The project was made by a newer doplan. Please update the app.'))
     }
@@ -244,23 +385,23 @@ export async function readFolderPlan(root: string): Promise<unknown> {
   return doc
 }
 
-/** replaces the open-project asset directory with the folder's assets/ */
+/**
+ * Replaces the open-project asset directory with the folder's assets/. Links (an assets/ that is one,
+ * or a file in it) are skipped, never followed: see folderAssetLinks.
+ */
 export async function loadFolderAssets(root: string): Promise<void> {
   await rmrf(paths.projectAssets)
   await ensureDir(paths.projectAssets)
-  const assetsDir = join(root, ASSETS_DIR)
-  let names: string[] = []
-  try {
-    names = await fsp.readdir(assetsDir)
-  } catch {
-    /* no assets */
-  }
-  for (const name of names) {
-    if (!ASSET_NAME_RE.test(name)) continue
-    const from = join(assetsDir, name)
+  // each file is opened without links (openFolderFile), whatever the listing said
+  for (const name of (await assetEntries(root))?.files ?? []) {
     try {
-      if (!(await fsp.stat(from)).isFile()) continue
-      await fsp.copyFile(from, join(paths.projectAssets, name))
+      const f = await openFolderFile(root, `${ASSETS_DIR}/${name}`)
+      if (!f) continue
+      try {
+        await pipeline(f.fh.createReadStream({ autoClose: false }), createWriteStream(join(paths.projectAssets, name)))
+      } finally {
+        await f.fh.close()
+      }
     } catch (err) {
       console.warn('[doplan] asset copy failed', name, err)
     }
@@ -270,7 +411,9 @@ export async function loadFolderAssets(root: string): Promise<void> {
 /** remembers the on-disk plan.json as "seen" (e.g. after restoring a recovery snapshot of this folder) */
 export async function rememberPlanOnDisk(root: string): Promise<void> {
   try {
-    knownPlanHash.set(key(root), sha256(new Uint8Array(await fsp.readFile(join(root, PLAN_FILE)))))
+    const plan = await readFolderFile(root, PLAN_FILE)
+    if (plan) knownPlanHash.set(key(root), sha256(new Uint8Array(plan)))
+    else knownPlanHash.delete(key(root))
   } catch {
     knownPlanHash.delete(key(root))
   }
@@ -281,7 +424,8 @@ export async function planChangedOnDisk(root: string): Promise<boolean> {
   const known = knownPlanHash.get(key(root))
   if (!known) return false
   try {
-    return sha256(new Uint8Array(await fsp.readFile(join(root, PLAN_FILE)))) !== known
+    const plan = await readFolderFile(root, PLAN_FILE)
+    return !!plan && sha256(new Uint8Array(plan)) !== known
   } catch {
     return false
   }
@@ -290,7 +434,8 @@ export async function planChangedOnDisk(root: string): Promise<boolean> {
 // ───────────── write ─────────────
 
 async function writeIfMissing(file: string, content: string): Promise<void> {
-  if (!(await exists(file))) await atomicWrite(file, content)
+  // a link there is the user's: left alone, and never written through
+  if (!(await present(file))) await atomicWrite(file, content)
 }
 
 async function writeScaffold(root: string, name: string): Promise<void> {
@@ -305,6 +450,9 @@ export async function writeFolderProject(root: string, doc: unknown): Promise<vo
   const plan = stableStringify(doc)
   const compact = JSON.stringify(doc)
   await ensureDir(root)
+  // writing into, or cleaning, an assets/ that is a link would change files outside the folder
+  const assetsEntry = await entryAt(join(root, ASSETS_DIR))
+  if (assetsEntry && !assetsEntry.isDirectory()) throw folderLinkError(ASSETS_DIR)
   await writeScaffold(root, docName(doc) ?? basename(root))
 
   // assets: copy what the document references, drop content-addressed files it no longer uses
@@ -320,12 +468,14 @@ export async function writeFolderProject(root: string, doc: unknown): Promise<vo
       data = await fsp.readFile(src)
     } catch {
       try {
-        data = await fsp.readFile(dst) // already in the folder (e.g. added by hand)
+        data = await readFolderFile(root, `${ASSETS_DIR}/${name}`) // already in the folder (e.g. added by hand)
+        if (!data) continue
       } catch {
         continue // missing asset: the document still opens, the reference just 404s
       }
     }
-    if (!(await exists(dst))) await atomicWrite(dst, data)
+    // a link in its place is replaced by the file (rename replaces the link itself, never its target)
+    if (!(await entryAt(dst))?.isFile()) await atomicWrite(dst, data)
     manifestAssets.push({ path: `${ASSETS_DIR}/${name}`, size: data.length, sha256: sha256(data) })
   }
   try {
@@ -440,7 +590,7 @@ async function createFolderProjectAt(root: string, name: string, doc: unknown, n
 
 export async function readInstructions(root: string): Promise<string> {
   try {
-    let text = await fsp.readFile(join(root, AGENTS_FILE), 'utf8')
+    let text = (await readFolderFile(root, AGENTS_FILE, 4 * 1024 * 1024))?.toString('utf8') ?? ''
     if (text.charCodeAt(0) === 0xfeff) text = text.slice(1)
     return text
   } catch {

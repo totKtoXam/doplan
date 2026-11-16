@@ -535,8 +535,12 @@ const en: Record<string, string> = {
     'The folder’s git config has settings through which git or its add-ons can run programs: {keys}. While they are there, doplan runs no git in the folder: the version history is off, and saving writes only the files.',
   'Сброс оставит в .git/config только простые параметры (имя автора, адрес удалённого репозитория, ветки); прежний файл сохранится как .git/config.doplan-backup.':
     'A reset keeps only plain settings in .git/config (author name, remote address, branches); the old file is kept as .git/config.doplan-backup.',
-  'Этот репозиторий устроен иначе, и doplan не может сбросить его настройки: работайте без версий или исправьте .git/config сами.':
-    'This repository is set up differently, and doplan cannot reset its settings: work without versions or fix .git/config yourself.',
+  'Репозиторий не поддерживается': 'Repository not supported',
+  'Не открыты файлы-ссылки (символические ссылки или точки соединения): {files}. doplan не читает файлы проекта по ссылкам: замените их обычными файлами.':
+    'Links (symbolic links or junctions) were not opened: {files}. doplan does not read project files through links: replace them with plain files.',
+  'В папке репозитория (.git) есть ссылки или файлы, которые doplan не поддерживает: {paths}. doplan не запускает в ней git: история версий выключена, сохранение пишет только файлы. Сброс настроек git этого не исправит; историей такой папки управляйте в своём git-клиенте.':
+    'The repository folder (.git) has links or files doplan does not support: {paths}. doplan runs no git in it: the version history is off, and saving writes only the files. Resetting the git settings does not change this; manage the history of such a folder in your own git client.',
+  'История версий выключена: репозиторий с неподдерживаемыми ссылками или файлами': 'Version history is off: the repository has unsupported links or files',
   'Работать без версий': 'Work without versions',
   'Сбросить настройки git': 'Reset git settings',
   'Настройки git сброшены, прежние сохранены в {file}': 'Git settings reset; the old ones are in {file}',

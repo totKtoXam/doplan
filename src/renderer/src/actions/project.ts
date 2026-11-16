@@ -209,6 +209,8 @@ async function afterOpen(res: Awaited<ReturnType<typeof api.project.open>>, relo
   loadDocument(doc, res.path, { kind: res.kind ?? kindOfPath(res.path), git: res.git, untrustedGit: res.untrustedGit || res.untrustedFolder, gitFile: res.gitFile, unsafeGit: res.unsafeGit, reload })
   refreshRecent()
   toast(t('Проект открыт'), 'success')
+  if (res.linkedAssets?.length)
+    toast(t('Не открыты файлы-ссылки (символические ссылки или точки соединения): {files}. doplan не читает файлы проекта по ссылкам: замените их обычными файлами.', { files: shortList(res.linkedAssets) }), 'warning', 9000)
   if (res.untrustedGit) await offerTrustFolder('git')
   // a trusted folder whose git config has unknown keys: reset it or work without versions (asked once per session)
   else if (res.unsafeGit && !reload) await offerResetGitConfig()
@@ -284,6 +286,25 @@ function applyGitInfo(info: ProjectInfo): void {
   }))
 }
 
+const shortList = (l: string[]) => l.slice(0, 8).join(', ') + (l.length > 8 ? ', …' : '')
+
+/**
+ * What the user is told about a repository doplan runs no git in: unsupported links or files in .git
+ * (no reset helps, nothing to edit in .git/config), or config keys outside the allowlist.
+ */
+export function unsafeGitNotice(u: UnsafeGitConfig): { title: string; text: string } {
+  if (u.layout?.length) {
+    return {
+      title: t('Репозиторий не поддерживается'),
+      text: t('В папке репозитория (.git) есть ссылки или файлы, которые doplan не поддерживает: {paths}. doplan не запускает в ней git: история версий выключена, сохранение пишет только файлы. Сброс настроек git этого не исправит; историей такой папки управляйте в своём git-клиенте.', { paths: shortList(u.layout) }),
+    }
+  }
+  return {
+    title: t('Небезопасные настройки git'),
+    text: t('В настройках git этой папки есть параметры, через которые git или его дополнения могут запускать программы: {keys}. Пока они там, doplan не запускает в папке git: история версий выключена, сохранение пишет только файлы.', { keys: shortList(u.keys) }),
+  }
+}
+
 /** folders (lower-cased) whose user chose to work without versions in this session */
 const withoutVersions = new Set<string>()
 
@@ -299,15 +320,15 @@ export async function offerResetGitConfig(ask = true): Promise<boolean> {
   if (!root || !unsafeGit) return false
   if (ask) {
     if (withoutVersions.has(root.toLowerCase())) return false
-    const keys = unsafeGit.keys.slice(0, 8).join(', ') + (unsafeGit.keys.length > 8 ? ', …' : '')
-    const text = t('В настройках git этой папки есть параметры, через которые git или его дополнения могут запускать программы: {keys}. Пока они там, doplan не запускает в папке git: история версий выключена, сохранение пишет только файлы.', { keys })
+    const notice = unsafeGitNotice(unsafeGit)
     if (!unsafeGit.resettable) {
-      await alertDialog(t('Небезопасные настройки git'), `${text} ${t('Этот репозиторий устроен иначе, и doplan не может сбросить его настройки: работайте без версий или исправьте .git/config сами.')}`)
+      await alertDialog(notice.title, notice.text)
       withoutVersions.add(root.toLowerCase())
       return false
     }
+    const text = notice.text
     const choice = await choiceDialog(
-      t('Небезопасные настройки git'),
+      notice.title,
       `${text} ${t('Сброс оставит в .git/config только простые параметры (имя автора, адрес удалённого репозитория, ветки); прежний файл сохранится как .git/config.doplan-backup.')}`,
       [
         { id: 'no', label: t('Работать без версий') },

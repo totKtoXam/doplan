@@ -35,20 +35,29 @@ interface Card {
   style?: string
   onlyHere: number
   moved: number
+  missing: number
 }
 
 const svgUrl = (svg: string) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
 
-/** items of `mine` that the reference variant does not have / has elsewhere (same id = same piece) */
-function diff(mine: Record<Id, Item>, ref: Record<Id, Item>): { onlyHere: number; moved: number } {
+/**
+ * Items of `mine` that the reference variant does not have / has elsewhere, and reference items
+ * `mine` lacks (same id = same piece).
+ */
+function diff(mine: Record<Id, Item>, ref: Record<Id, Item>): { onlyHere: number; moved: number; missing: number } {
   let onlyHere = 0
   let moved = 0
+  let missing = 0
+  for (const o of Object.values(ref)) {
+    const it = mine[o.id]
+    if (!it || it.assetId !== o.assetId) missing++
+  }
   for (const it of Object.values(mine)) {
     const o = ref[it.id]
     if (!o || o.assetId !== it.assetId) onlyHere++
     else if (Math.hypot(o.x - it.x, o.y - it.y) > 1 || Math.abs(o.rotation - it.rotation) > 0.1 || o.size.w !== it.size.w || o.size.d !== it.size.d) moved++
   }
-  return { onlyHere, moved }
+  return { onlyHere, moved, missing }
 }
 
 function buildCards(doc: Doc, derived: Record<Id, DerivedPlan>, levelId: Id, cat: Catalog, lang: 'ru' | 'en'): Card[] {
@@ -87,7 +96,7 @@ function buildCards(doc: Doc, derived: Record<Id, DerivedPlan>, levelId: Id, cat
       total,
       stray: strayEntities(doc, derived, v.id, cat).length,
       style: style ? (lang === 'en' ? style.name : style.nameRu) : undefined,
-      ...(v.active ? { onlyHere: 0, moved: 0 } : diff(items, refItems)),
+      ...(v.active ? { onlyHere: 0, moved: 0, missing: 0 } : diff(items, refItems)),
     }
   })
 }
@@ -114,10 +123,10 @@ export function VariantCompareDialog({ open, onClose }: { open: boolean; onClose
 
   const exportMenu = (id: Id): MenuEntry[] => [
     { type: 'header', label: t('Экспорт плана') },
-    { label: 'PNG', onSelect: () => void actions.exportPlan('png', id) },
-    { label: 'SVG', onSelect: () => void actions.exportPlan('svg', id) },
-    { label: 'PDF', onSelect: () => void actions.exportPlan('pdf', id) },
-    { label: 'DXF (AutoCAD)', onSelect: () => void actions.exportPlan('dxf', id) },
+    { label: 'PNG', onSelect: () => void actions.exportPlan('png', id, levelId) },
+    { label: 'SVG', onSelect: () => void actions.exportPlan('svg', id, levelId) },
+    { label: 'PDF', onSelect: () => void actions.exportPlan('pdf', id, levelId) },
+    { label: 'DXF (AutoCAD)', onSelect: () => void actions.exportPlan('dxf', id, levelId) },
   ]
 
   return (
@@ -128,7 +137,7 @@ export function VariantCompareDialog({ open, onClose }: { open: boolean; onClose
       width="max-w-6xl"
       footer={
         <>
-          <span className="mr-auto text-[10px] text-[var(--muted)]">{t('Планы активного этажа; предметы и стоимость — по смете каждого варианта.')}</span>
+          <span className="mr-auto text-[10px] text-[var(--muted)]">{t('Планы выбранного этажа; предметы и стоимость — по смете каждого варианта.')}</span>
           <Button variant="ghost" onClick={onClose}>
             {t('Закрыть')}
           </Button>
@@ -199,11 +208,17 @@ export function VariantCompareDialog({ open, onClose }: { open: boolean; onClose
                     <dd className="truncate">{c.style}</dd>
                   </>
                 )}
-                {!c.v.active && (c.onlyHere > 0 || c.moved > 0) && (
+                {!c.v.active && (c.onlyHere > 0 || c.moved > 0 || c.missing > 0) && (
                   <>
                     <dt className="text-[var(--muted)]">{t('Отличия')}</dt>
                     <dd>
-                      {[c.onlyHere ? t('только здесь: {n}', { n: c.onlyHere }) : '', c.moved ? t('переставлено: {n}', { n: c.moved }) : ''].filter(Boolean).join(', ')}
+                      {[
+                        c.onlyHere ? t('только здесь: {n}', { n: c.onlyHere }) : '',
+                        c.missing ? t('нет здесь: {n}', { n: c.missing }) : '',
+                        c.moved ? t('переставлено: {n}', { n: c.moved }) : '',
+                      ]
+                        .filter(Boolean)
+                        .join(', ')}
                     </dd>
                   </>
                 )}

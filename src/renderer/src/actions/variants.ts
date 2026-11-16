@@ -25,8 +25,9 @@ import '@/ui/variants/i18n'
 
 const catalog = () => uiStore.getState().catalog
 
+/** display name: the stored default "Вариант 1" is a translation key */
 function variantName(id: Id): string {
-  return listVariants(currentDoc()).find((v) => v.id === id)?.name ?? ''
+  return t(listVariants(currentDoc()).find((v) => v.id === id)?.name ?? '')
 }
 
 /** selection points at entities of the variant being left: drop it before the swap */
@@ -34,16 +35,21 @@ function clearSelection(): void {
   if (uiStore.getState().selection.length) uiStore.getState().set({ selection: [] })
 }
 
-/** new variant after the active one: a copy of it, or without furniture and lights; it becomes active */
-export async function createVariant(from: 'copy' | 'empty'): Promise<Id | null> {
+/**
+ * New variant: a copy of `source` (default: the active one), or without furniture and lights. It is
+ * placed after the source / active one and becomes active. Cancelling the name prompt changes nothing.
+ */
+export async function createVariant(from: 'copy' | 'empty', source?: Id): Promise<Id | null> {
   const doc = currentDoc()
-  const suggested = from === 'copy' ? `${listVariants(doc).find((v) => v.active)?.name ?? ''} (${t('копия')})` : t(nextVariantName(doc))
+  const srcId = from === 'copy' && source && doc.variants?.list[source] ? source : activeVariantId(doc)
+  const fallback = nextVariantName(doc, t('Вариант'))
+  const suggested = from === 'copy' ? `${variantName(srcId)} (${t('копия')})` : fallback
   const name = await promptDialog(t('Название варианта'), suggested.trim())
   if (name === null) return null
   let id: Id | null = null
   clearSelection()
   docStore.getState().transact(from === 'copy' ? t('Копия варианта') : t('Новый вариант'), (d) => {
-    id = coreCreate(d, { from, name: name.trim() || undefined }, catalog())
+    id = coreCreate(d, { from, name: name.trim() || fallback, source: srcId }, catalog())
   })
   return id
 }
@@ -64,7 +70,7 @@ export function cycleVariant(dir: -1 | 1): void {
   const i = list.findIndex((v) => v.active)
   const next = list[(i + dir + list.length) % list.length]
   switchVariant(next.id)
-  toast(t('Вариант: {name}', { name: next.name }), 'info', 1500)
+  toast(t('Вариант: {name}', { name: t(next.name) }), 'info', 1500)
 }
 
 export async function renameVariant(id: Id): Promise<void> {

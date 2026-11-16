@@ -48,20 +48,24 @@ export function VariantTabs() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [variants, items, lights, derived, catalog])
 
-  // a geometry edit (the derived plan changed) that pushed furniture out of the rooms: say so
+  // a geometry edit (the derived plan changed) that pushed furniture out of the rooms: say so.
+  // Drag previews (transient) are skipped and compared against the last committed state, so one
+  // gesture gives at most one toast; variants that just appeared (copy, undo of a delete) are not "grown".
+  const transient = useDoc((s) => s.transientActive)
   const prev = useRef<{ loadId: number; derived: unknown; counts: Map<Id, number> } | null>(null)
   useEffect(() => {
+    if (transient) return
     const p = prev.current
     prev.current = { loadId, derived, counts: stray }
     if (!p || p.loadId !== loadId || p.derived === derived) return
-    const grown = variants.filter((v) => (stray.get(v.id) ?? 0) > (p.counts.get(v.id) ?? 0))
+    const grown = variants.filter((v) => p.counts.has(v.id) && (stray.get(v.id) ?? 0) > (p.counts.get(v.id) ?? 0))
     if (!grown.length) return
     const list = grown.map((v) => `${t(v.name)} — ${stray.get(v.id)}`).join(', ')
     toast(t('После правки стен вне помещений оказались предметы: {list}', { list }), 'warning', 8000, {
       label: t('Показать'),
       run: () => actions.selectStray(grown[0].id),
     })
-  }, [stray, derived, loadId, variants, t])
+  }, [stray, derived, loadId, variants, transient, t])
 
   const upMenu = (el: HTMLElement, entries: MenuEntry[]) => {
     const r = el.getBoundingClientRect()
@@ -79,13 +83,7 @@ export function VariantTabs() {
       {
         label: t('Дублировать вариант'),
         icon: Copy,
-        onSelect: () => {
-          if (variants[idx]?.active) void actions.createVariant('copy')
-          else {
-            actions.switchVariant(id)
-            void actions.createVariant('copy')
-          }
-        },
+        onSelect: () => void actions.createVariant('copy', id),
       },
       { label: t('Выделить предметы вне помещений'), icon: TriangleAlert, disabled: n === 0, onSelect: () => actions.selectStray(id) },
       { type: 'separator' },

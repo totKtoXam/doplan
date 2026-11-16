@@ -45,14 +45,18 @@ export function copyLevelInto(src: Doc, srcLevel: Id, draft: Doc, dstLevel: Id, 
     draft.rooms[id] = structuredClone({ ...r, id, levelId: dstLevel, anchor: { x: r.anchor.x + dx, y: r.anchor.y + dy } })
     remapAccentFace(draft.rooms[id], wallMap)
   }
+  const itemMap = new Map<Id, Id>()
+  const lightMap = new Map<Id, Id>()
   for (const it of Object.values(src.items)) {
     if (it.levelId !== srcLevel) continue
     const id = newId('i')
+    itemMap.set(it.id, id)
     draft.items[id] = structuredClone({ ...it, id, levelId: dstLevel, x: it.x + dx, y: it.y + dy, groupId: undefined })
   }
   for (const l of Object.values(src.lights)) {
     if (l.levelId !== srcLevel) continue
     const id = newId('l')
+    lightMap.set(l.id, id)
     draft.lights[id] = structuredClone({ ...l, id, levelId: dstLevel, x: l.x + dx, y: l.y + dy })
   }
   for (const dm of Object.values(src.dimensions)) {
@@ -74,7 +78,7 @@ export function copyLevelInto(src: Doc, srcLevel: Id, draft: Doc, dstLevel: Id, 
     for (const m of Object.values(src.materials)) if (!draft.materials[m.id]) draft.materials[m.id] = structuredClone(m)
     for (const a of Object.values(src.assets)) if (!draft.assets[a.id]) draft.assets[a.id] = structuredClone(a)
   }
-  return { walls: wallMap, rooms: roomMap, openings: openingMap }
+  return { walls: wallMap, rooms: roomMap, openings: openingMap, items: itemMap, lights: lightMap }
 }
 
 /** Removes a level and everything on it (draft mutation). */

@@ -9,6 +9,7 @@ import {
   addLight,
   addOpening,
   addRectRoom,
+  addWall,
   computeBom,
   copyLevelInVariants,
   createEmptyDoc,
@@ -249,6 +250,69 @@ describe('furnishing variants: immer, materialize, upkeep', () => {
     // nothing is deleted
     switchVariant(doc, a)
     expect(variantCollection(doc, b, 'items')[sofaId].x).toBe(3800)
+  })
+
+  it('a wall drawn after the variants exist keeps its own finish in each variant', () => {
+    const { doc, level } = apartment()
+    const a = activeVariantId(doc)
+    const b = createVariant(doc, { from: 'copy', activate: false })
+    const c = createVariant(doc, { from: 'copy', activate: false })
+    const [w] = addWall(doc, level, { x: 2000, y: 0 }, { x: 2000, y: 3000 })
+    normalize(doc)
+    syncRooms(doc)
+    const initial = doc.walls[w].left
+    switchVariant(doc, b)
+    doc.walls[w] = { ...doc.walls[w], left: { materialId: 'mat_green' } }
+    switchVariant(doc, c)
+    expect(doc.walls[w].left).toEqual(initial)
+    switchVariant(doc, a)
+    expect(doc.walls[w].left).toEqual(initial)
+    switchVariant(doc, b)
+    expect(doc.walls[w].left).toEqual({ materialId: 'mat_green' })
+  })
+
+  it("a variant's piece is kept when its id is taken by a shared item in another variant", () => {
+    const { doc, sofaId } = apartment()
+    const a = activeVariantId(doc)
+    const b = createVariant(doc, { from: 'copy', activate: false })
+    // in A the sofa's model becomes a structure asset (shared with the apartment)
+    doc.items[sofaId] = { ...doc.items[sofaId], assetId: column.id }
+    switchVariant(doc, b)
+    const sofas = Object.values(doc.items).filter((i) => i.assetId === sofa.id)
+    expect(sofas).toHaveLength(1)
+    expect(doc.items[sofaId].assetId).toBe(column.id)
+    switchVariant(doc, a)
+    switchVariant(doc, b)
+    expect(Object.values(doc.items).filter((i) => i.assetId === sofa.id)).toHaveLength(1)
+  })
+
+  it('copying a level keeps matching ids between identical variants', () => {
+    const { doc, level, sofaId, lightId } = apartment()
+    const a = activeVariantId(doc)
+    createVariant(doc, { from: 'copy' })
+    const maps = {
+      walls: new Map<Id, Id>(),
+      rooms: new Map<Id, Id>(),
+      openings: new Map<Id, Id>(),
+      items: new Map([[sofaId, 'i_sofa_copy']]),
+      lights: new Map([[lightId, 'l_light_copy']]),
+    }
+    copyLevelInVariants(doc, level, 'lv_new', maps)
+    expect(variantCollection(doc, a, 'items').i_sofa_copy?.levelId).toBe('lv_new')
+    expect(variantCollection(doc, a, 'lights').l_light_copy?.levelId).toBe('lv_new')
+  })
+
+  it('a copy can be made from an inactive variant without switching to it', () => {
+    const { doc, sofaId } = apartment()
+    const a = activeVariantId(doc)
+    const b = createVariant(doc, { from: 'copy' })
+    doc.items[sofaId] = { ...doc.items[sofaId], x: 3000 }
+    switchVariant(doc, a)
+    const c = createVariant(doc, { from: 'copy', source: b, activate: false })
+    expect(activeVariantId(doc)).toBe(a)
+    expect(doc.variants!.order).toEqual([a, b, c])
+    expect(variantCollection(doc, c, 'items')[sofaId].x).toBe(3000)
+    expect(doc.items[sofaId].x).toBe(2000)
   })
 })
 

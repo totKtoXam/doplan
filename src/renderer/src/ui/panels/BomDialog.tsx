@@ -103,7 +103,7 @@ export function BomDialog({ open, onClose }: DialogPropsBase) {
   const variants = useMemo(() => listVariants(doc), [doc])
   const [picked, setPicked] = useState<string | null>(null)
   const variantId = variants.find((v) => v.id === picked)?.id ?? variants.find((v) => v.active)!.id
-  const variantName = variants.find((v) => v.id === variantId)?.name ?? ''
+  const variantName = t(variants.find((v) => v.id === variantId)?.name ?? '')
 
   const { rows, cat, error, view } = useMemo(() => {
     if (!open) return { rows: [] as BomRow[], cat: undefined as Catalog | undefined, error: '', view: doc }
@@ -276,7 +276,7 @@ export function BomDialog({ open, onClose }: DialogPropsBase) {
               {t('Вариант обстановки')}
               <Select
                 value={variantId}
-                options={variants.map((v) => ({ value: v.id, label: v.name }))}
+                options={variants.map((v) => ({ value: v.id, label: t(v.name) }))}
                 onChange={setPicked}
                 aria-label={t('Вариант обстановки')}
                 className="w-44"

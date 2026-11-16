@@ -3,6 +3,7 @@ import { addTranslations } from '@/i18n'
 /** English for the furnishing-variant UI and actions (Russian is the key). */
 addTranslations('en', {
   'Вариант 1': 'Variant 1',
+  Вариант: 'Variant',
   'Варианты обстановки': 'Furnishing variants',
   'Варианты обстановки: мебель, свет, отделка и стиль. Стены, проёмы и помещения общие.':
     'Furnishing variants: furniture, lights, finishes and style. Walls, openings and rooms are shared.',
@@ -43,10 +44,11 @@ addTranslations('en', {
   'Стоимость по смете': 'Estimate total',
   'нет цен': 'no prices',
   'Экспорт плана': 'Export plan',
-  'Планы активного этажа; предметы и стоимость — по смете каждого варианта.':
+  'Планы выбранного этажа; предметы и стоимость — по смете каждого варианта.':
     'Plans of the chosen level; items and totals come from the estimate of each variant.',
   Стиль: 'Style',
   Отличия: 'Differences',
   'только здесь: {n}': 'only here: {n}',
   'переставлено: {n}': 'moved: {n}',
+  'нет здесь: {n}': 'missing here: {n}',
 })

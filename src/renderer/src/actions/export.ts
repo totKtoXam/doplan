@@ -20,13 +20,13 @@ function variantDoc(variantId?: Id): Doc {
 function variantSuffix(doc: Doc, sep: string, forFile = true): string {
   const list = listVariants(doc)
   if (list.length < 2) return ''
-  const name = list.find((v) => v.active)?.name ?? ''
+  // stored default names are Russian keys ("Вариант 1"): show them in the UI language
+  const name = t(list.find((v) => v.active)?.name ?? '')
   if (!name) return ''
   return `${sep}${forFile ? name.replace(/[<>:"/\\|?*]+/g, '_') : name}`
 }
 
-function planSvg(doc: Doc = currentDoc()): { svg: string; widthMm: number; heightMm: number } {
-  const levelId = activeLevel()
+function planSvg(doc: Doc = currentDoc(), levelId: Id = activeLevel()): { svg: string; widthMm: number; heightMm: number } {
   const dl = buildDisplayList(doc, levelId, {
     dimensions: doc.settings.showDimensions,
     areas: doc.settings.showAreas,
@@ -69,34 +69,39 @@ async function svgToPng(svg: string, widthMm: number, heightMm: number, pxPerPap
   }
 }
 
-/** Exports the plan of the active level, as the given furnishing variant (default: the active one). */
-export async function exportPlan(fmt: PlanFormat, variantId?: Id): Promise<void> {
+/**
+ * Exports the plan of a level (default: the active one), as the given furnishing variant
+ * (default: the active one).
+ */
+export async function exportPlan(fmt: PlanFormat, variantId?: Id, levelId?: Id): Promise<void> {
   const doc = variantDoc(variantId)
-  const base = `${projectBaseName()}${levelSuffix()}${variantSuffix(doc, ' - ')}`
+  const level = levelId && doc.levels[levelId] ? levelId : activeLevel()
+  const base = `${projectBaseName()}${levelSuffix(level)}${variantSuffix(doc, ' - ')}`
   try {
     let saved: string | null = null
     switch (fmt) {
       case 'svg': {
-        const { svg } = planSvg(doc)
+        const { svg } = planSvg(doc, level)
         saved = await api.files.saveText(`${base}.svg`, [{ name: 'SVG', extensions: ['svg'] }], svg)
         break
       }
       case 'pdf': {
-        const { svg, widthMm, heightMm } = planSvg(doc)
+        const { svg, widthMm, heightMm } = planSvg(doc, level)
         saved = await api.files.exportPdf(svg, { widthMm, heightMm, defaultName: `${base}.pdf` })
         break
       }
       case 'dxf': {
-        const dxf = toDxf(doc, activeLevel())
+        const dxf = toDxf(doc, level)
         saved = await api.files.saveText(`${base}.dxf`, [{ name: 'DXF', extensions: ['dxf'] }], dxf)
         break
       }
       case 'png': {
         let blob: Blob
-        if (handles.editor2d && (!variantId || variantId === activeVariantId(currentDoc()))) {
+        // the editor's snapshot only shows the live variant on the editor's level
+        if (handles.editor2d && (!variantId || variantId === activeVariantId(currentDoc())) && level === activeLevel()) {
           blob = await handles.editor2d.snapshotPng(200)
         } else {
-          const { svg, widthMm, heightMm } = planSvg(doc)
+          const { svg, widthMm, heightMm } = planSvg(doc, level)
           blob = await svgToPng(svg, widthMm, heightMm)
         }
         saved = await api.files.saveBinary(`${base}.png`, [{ name: 'PNG', extensions: ['png'] }], await blob.arrayBuffer())

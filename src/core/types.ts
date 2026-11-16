@@ -757,7 +757,7 @@ export type RoomVariantFinish = Partial<Pick<Room, (typeof VARIANT_ROOM_FIELDS)[
 export type WallVariantFinish = Partial<Pick<Wall, (typeof VARIANT_WALL_FIELDS)[number]>>
 export type OpeningVariantFinish = Partial<Pick<Opening, (typeof VARIANT_OPENING_FIELDS)[number]>>
 
-/** Finishes of one inactive variant, by shared record id (a missing record keeps the live finish). */
+/** Finishes of one inactive variant, by shared record id (kept complete by pruneVariants; a missing record keeps the live finish). */
 export interface VariantFinishes {
   rooms: Record<Id, RoomVariantFinish>
   walls: Record<Id, WallVariantFinish>

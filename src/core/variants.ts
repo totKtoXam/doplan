@@ -145,12 +145,7 @@ export function captureVariant(doc: Doc, catalog?: Catalog | null): VariantStash
   for (const coll of FINISH_COLLECTIONS) {
     const src = collOf(doc, coll) ?? {}
     const dst = finishes[coll] as Record<Id, AnyRecord>
-    for (const id in src) {
-      const rec = src[id]
-      const f: AnyRecord = {}
-      for (const field of FINISH_FIELDS[coll]) if (rec[field] !== undefined) f[field] = clone(rec[field])
-      dst[id] = f
-    }
+    for (const id in src) dst[id] = finishOf(coll, src[id])
   }
   const stash: VariantStash = { collections, finishes }
   if (doc.design?.styleId) stash.styleId = doc.design.styleId
@@ -168,7 +163,16 @@ function applyVariant(doc: Doc, stash: VariantStash, catalog?: Catalog | null): 
       continue
     }
     for (const id of Object.keys(live)) if (ownedByVariant(doc, key, live[id], catalog)) delete live[id]
-    for (const id in incoming) if (!live[id]) live[id] = clone(incoming[id])
+    for (const id in incoming) {
+      if (!live[id]) {
+        live[id] = clone(incoming[id])
+        continue
+      }
+      // the id is taken by a shared record (e.g. its model became a structure asset in another
+      // variant): keep this variant's piece under a fresh id instead of dropping it
+      const nid = newId(key === 'items' ? 'i' : 'l')
+      live[nid] = { ...clone(incoming[id]), id: nid }
+    }
   }
   for (const coll of FINISH_COLLECTIONS) {
     const live = d[coll]
@@ -177,6 +181,9 @@ function applyVariant(doc: Doc, stash: VariantStash, catalog?: Catalog | null): 
     for (const id in over) {
       const rec = live[id]
       if (!rec) continue
+      let same = true
+      for (const field of FINISH_FIELDS[coll]) if (JSON.stringify(rec[field]) !== JSON.stringify(over[id][field])) same = false
+      if (same) continue
       const next: AnyRecord = { ...rec }
       for (const field of FINISH_FIELDS[coll]) {
         if (over[id][field] !== undefined) next[field] = clone(over[id][field])
@@ -215,6 +222,8 @@ export interface CreateVariantOptions {
   from: 'copy' | 'empty'
   /** make it the active variant (default true) */
   activate?: boolean
+  /** with `copy`: the variant to copy (default: the active one); the new one is placed after it */
+  source?: Id
 }
 
 /** adds a variant (after the active one); returns its id */
@@ -222,11 +231,12 @@ export function createVariant(doc: Doc, opts: CreateVariantOptions, catalog?: Ca
   const v = ensureVariants(doc)
   const id = newId('v')
   const name = opts.name?.trim() || nextVariantName(doc)
-  const stash = captureVariant(doc, catalog)
+  const src = opts.source && opts.source !== v.activeId ? v.list[opts.source]?.stash : undefined
+  const stash = src ? clone(src) : captureVariant(doc, catalog)
   if (opts.from === 'empty') stash.collections = {}
   const rec: VariantRecord = { id, name, stash }
   v.list[id] = rec
-  const at = v.order.indexOf(v.activeId)
+  const at = v.order.indexOf(src && opts.source ? opts.source : v.activeId)
   v.order.splice(at < 0 ? v.order.length : at + 1, 0, id)
   syncVersion(doc)
   if (opts.activate !== false) switchVariant(doc, id, catalog)
@@ -312,9 +322,21 @@ export function materializeVariant(doc: Doc, id: Id, catalog?: Catalog | null): 
 
 // ───────────────────────────── upkeep after geometry edits ─────────────────────────────
 
+/** deep copy of the finish fields of a shared record */
+function finishOf(coll: FinishCollection, rec: AnyRecord): AnyRecord {
+  const f: AnyRecord = {}
+  for (const field of FINISH_FIELDS[coll]) if (rec[field] !== undefined) f[field] = clone(rec[field])
+  return f
+}
+
 /**
- * Drops what inactive variants hold for things that no longer exist: finishes of deleted rooms /
- * walls / openings, items and lights of deleted levels. Writes only when something is stale.
+ * Keeps inactive variants in step with the shared geometry (runs at the end of every syncRooms):
+ *  - drops what they hold for things that no longer exist: finishes of deleted rooms / walls /
+ *    openings, items and lights of deleted levels;
+ *  - gives every room / wall / opening they have no entry for its current (creation-time) finish,
+ *    so a new wall painted later in one variant does not carry that paint into the others.
+ *    Entries written earlier in the same edit (wall split, level copy) are kept.
+ * Writes only when something is stale or missing.
  */
 export function pruneVariants(doc: Doc): void {
   const v = doc.variants
@@ -327,6 +349,7 @@ export function pruneVariants(doc: Doc): void {
       const live = collOf(doc, coll) ?? {}
       if (!over) continue
       for (const id of Object.keys(over)) if (!live[id]) delete over[id]
+      for (const id in live) if (!over[id]) over[id] = finishOf(coll, live[id])
     }
     for (const key of VARIANT_COLLECTIONS) {
       const c = (stash.collections as Record<string, Coll | undefined>)[key]
@@ -347,7 +370,7 @@ export function inheritVariantFinish(doc: Doc, coll: FinishCollection, fromId: I
   if (!v) return
   for (const vid of v.order) {
     const over = v.list[vid]?.stash?.finishes[coll] as Record<Id, unknown> | undefined
-    if (over?.[fromId] && !over[toId]) over[toId] = clone(over[fromId])
+    if (over?.[fromId]) over[toId] = clone(over[fromId])
   }
 }
 
@@ -355,6 +378,9 @@ export interface LevelCopyMaps {
   walls: ReadonlyMap<Id, Id>
   rooms: ReadonlyMap<Id, Id>
   openings: ReadonlyMap<Id, Id>
+  /** old → new ids the live copy gave to items / lights; a variant's piece with the same id reuses it */
+  items?: ReadonlyMap<Id, Id>
+  lights?: ReadonlyMap<Id, Id>
 }
 
 /**
@@ -370,9 +396,11 @@ export function copyLevelInVariants(doc: Doc, srcLevel: Id, dstLevel: Id, maps: 
     for (const key of VARIANT_COLLECTIONS) {
       const c = (stash.collections as Record<string, Coll | undefined>)[key]
       if (!c) continue
+      const idMap = (maps as unknown as Record<string, ReadonlyMap<Id, Id> | undefined>)[key]
       for (const e of Object.values(c)) {
         if (e.levelId !== srcLevel) continue
-        const id = newId(key === 'items' ? 'i' : 'l')
+        const reuse = idMap?.get(e.id as Id)
+        const id = reuse && !c[reuse] ? reuse : newId(key === 'items' ? 'i' : 'l')
         const copy = clone(e)
         copy.id = id
         copy.levelId = dstLevel

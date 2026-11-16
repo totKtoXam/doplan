@@ -75,10 +75,13 @@ describe('electrical AI tools', () => {
     const bad = await executeTool(host, 'set_electric', { electricId: p.id, kind: 'junction', gangs: 3 })
     expect(bad.result.ok).toBe(false)
 
+    // the document in the app already carries format 3: a save writes it as is
+    expect(st().doc.version).toBe(3)
     const del = await executeTool(host, 'delete', { ids: [p.id] })
     expect(del.result.ok, del.result.text).toBe(true)
     expect(points()).toHaveLength(0)
     expect(st().doc.electrical).toEqual({})
+    expect(st().doc.version).toBe(1)
 
     // every call was one undo step
     st().undo()

@@ -4,6 +4,7 @@
  * does not change, so the resulting patch sets stay minimal.
  */
 import { captureElectricAnchors, duplicateElectric, reattachElectrical, restoreElectricAnchors } from './electrical'
+import { docFormatVersion } from './variants'
 import { DEFAULT_MATERIALS, OPENING_DEFAULTS, ROOM_TYPE_NAMES, defaultRoom, defaultWallSide } from './defaults'
 import { EPS, dist, projectOnSegment, segIntersect } from './geom'
 import { newId } from './ids'
@@ -998,6 +999,11 @@ export function normalize(doc: Doc): void {
 
   // ── 5. electrical points stay on their wall faces ──
   reattachElectrical(doc)
+
+  // ── 6. the format version follows the content (the first socket makes it 3, the last one gone: back),
+  //    so a save writes what an older app must refuse instead of dropping data ──
+  const v = docFormatVersion(doc)
+  if (doc.version !== v) doc.version = v
 }
 
 // ───────────────────────────── rooms ─────────────────────────────

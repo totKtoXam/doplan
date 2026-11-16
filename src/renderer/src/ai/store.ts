@@ -120,7 +120,7 @@ const set = (p: Partial<AiState>) => aiStore.setState(p)
 let draft: DraftHost | null = null
 const approvals = new Map<string, (yes: boolean) => void>()
 /** open ask_user calls: resolved with the answer, or null (declined / the turn ended) */
-const questions = new Map<string, (a: { answers: AiQuestionAnswer[]; note?: string } | null) => void>()
+const questions = new Map<string, (a: AskResult) => void>()
 /** provider part id → index in the assistant message parts (current run) */
 let partIndex = new Map<string, number>()
 
@@ -194,6 +194,8 @@ export function initAi(): void {
   api.aiChat.onToolCall((call) => void onToolCall(call))
   // main stopped waiting (nobody answered within the hour): the card goes, the agent has its result
   api.aiChat.onToolCancel(({ callId }) => {
+    // still in line behind the open card: it is never shown
+    queuedAsks.delete(callId)
     questions.get(callId)?.(null)
     approvals.get(callId)?.(false)
   })
@@ -1111,6 +1113,33 @@ async function askUser(call: AiToolCall): Promise<void> {
     return
   }
   const qs: AiQuestion[] = parsed.args.questions
+  // one card at a time: a call that comes while another is open waits for it
+  let release!: () => void
+  const prev = askQueue
+  askQueue = new Promise<void>((r) => (release = r))
+  queuedAsks.add(call.callId)
+  try {
+    await prev
+    // main gave up on it while it waited (it already has its result)
+    if (!queuedAsks.delete(call.callId)) return
+    if (get().running?.runId !== call.runId) {
+      api.aiChat.toolResult(call.callId, { ok: false, text: 'Запуск остановлен' })
+      return
+    }
+    await showQuestion(call, qs)
+  } finally {
+    queuedAsks.delete(call.callId)
+    release()
+  }
+}
+
+/** ask_user calls in line behind the open card (Claude Code may run two calls of one message at once) */
+let askQueue: Promise<void> = Promise.resolve()
+const queuedAsks = new Set<string>()
+
+type AskResult = { answers: AiQuestionAnswer[]; note?: string; chips?: AiChip[]; image?: PendingImage } | null
+
+async function showQuestion(call: AiToolCall, qs: AiQuestion[]): Promise<void> {
   const setPart = (fn: (p: Extract<AiPart, { type: 'question' }>) => void) =>
     patchRunMsg((m) => {
       const i = partIndex.get(call.callId)
@@ -1120,7 +1149,7 @@ async function askUser(call: AiToolCall): Promise<void> {
   patchRunMsg((m) => pushPart(m, call.callId, { type: 'question', id: call.callId, questions: qs, status: 'pending' }))
   set({ asking: { callId: call.callId, runId: call.runId, questions: qs, draft: qs.map(() => ({ picked: [] })) }, status: '' })
   void persist()
-  const res = await new Promise<{ answers: AiQuestionAnswer[]; note?: string } | null>((r) => questions.set(call.callId, r))
+  const res = await new Promise<AskResult>((r) => questions.set(call.callId, r))
   questions.delete(call.callId)
   if (get().asking?.callId === call.callId) set({ asking: null })
   // the turn ended meanwhile (Stop, another chat or project): the answer belongs to no turn now
@@ -1142,7 +1171,14 @@ async function askUser(call: AiToolCall): Promise<void> {
       p.answers = res.answers
       if (res.note) p.note = res.note
     })
-    api.aiChat.toolResult(call.callId, { ok: true, text: formatAnswers(qs, res.answers, res.note) })
+    // what was attached in the chat box goes with the answer: the chips as context, the picture as the result's image
+    const ctx = res.chips?.length ? `\n\nПользователь приложил к ответу:\n${res.chips.map((c) => `- ${c.kind} ${c.id}: ${c.summary}`.slice(0, 6000)).join('\n')}` : ''
+    const pic = res.image ? '\n\nК ответу приложено изображение (ниже).' : ''
+    api.aiChat.toolResult(call.callId, {
+      ok: true,
+      text: formatAnswers(qs, res.answers, res.note) + ctx + pic,
+      ...(res.image ? { image: { mime: res.image.mime === 'image/png' ? 'image/png' : 'image/jpeg', data: res.image.data } } : {}),
+    })
   }
   void persist()
 }
@@ -1178,15 +1214,26 @@ export function answerQuestion(note?: string | null): void {
   const res = a && questions.get(a.callId)
   if (!a || !res) return
   if (note === null) return res(null)
+  // chips and a picture in the chat box are part of the answer (a tool result carries one picture:
+  // the others stay in the box for the next message, and the user is told so)
+  const { chips, images } = get()
+  const image = images.find((im) => im.mime === 'image/jpeg' || im.mime === 'image/png')
+  set({
+    chips: [],
+    images: image ? images.filter((im) => im !== image) : images,
+    status: images.length > (image ? 1 : 0) ? t('К ответу приложено одно изображение, остальные остались в поле ввода') : get().status,
+  })
   res({
     answers: a.draft.map((d) => ({ picked: d.picked, ...(d.other?.trim() ? { other: d.other.trim() } : {}) })),
     ...(note?.trim() ? { note: note.trim() } : {}),
+    ...(chips.length ? { chips } : {}),
+    ...(image ? { image } : {}),
   })
 }
 
-/** something to send: an option picked, a «Другое» text or a note */
-export function hasAnswer(a: AiState['asking'], note = ''): boolean {
-  return !!note.trim() || !!a?.draft.some((d) => d.picked.length || d.other?.trim())
+/** something to send: an option picked, a «Другое» text, a note, or chips / a picture in the chat box */
+export function hasAnswer(a: AiState['asking'], note = '', attached = false): boolean {
+  return attached || !!note.trim() || !!a?.draft.some((d) => d.picked.length || d.other?.trim())
 }
 
 export function answerApproval(callId: string, yes: boolean): void {

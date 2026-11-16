@@ -223,6 +223,75 @@ describe('ask_user', () => {
     expect(aiStore.getState().running?.runId).toBe('r8')
   })
 
+  it('two calls at once (parallel tool calls): one card at a time, each answer goes to its own call', async () => {
+    busy('r11')
+    ask('r11', 'c11a')
+    ask('r11', 'c11b', { questions: [{ question: 'Размер ниши?', options: [{ label: '60 см' }, { label: '80 см' }] }] })
+    await settle()
+    expect(aiStore.getState().asking?.callId).toBe('c11a')
+    pickAnswer(0, 'Кухня')
+    answerQuestion()
+    await settle()
+    expect(resultOf('c11a')[0].text).toContain('Ответ: Кухня')
+    // the second card comes up only now
+    expect(aiStore.getState().asking?.callId).toBe('c11b')
+    expect(resultOf('c11b')).toEqual([])
+    pickAnswer(0, '80 см')
+    answerQuestion()
+    await settle()
+    expect(resultOf('c11b')[0].text).toContain('Ответ: 80 см')
+    expect(aiStore.getState().asking).toBeNull()
+  })
+
+  it('Stop with a call waiting in line ends both; a queued call main gave up on is never shown', async () => {
+    busy('r12')
+    ask('r12', 'c12a')
+    ask('r12', 'c12b')
+    await settle()
+    stop()
+    await settle()
+    expect(resultOf('c12a')).toEqual([{ ok: false, text: 'Запуск остановлен' }])
+    expect(resultOf('c12b')).toEqual([{ ok: false, text: 'Запуск остановлен' }])
+    expect(aiStore.getState().asking).toBeNull()
+
+    busy('r13')
+    ask('r13', 'c13a')
+    ask('r13', 'c13b')
+    await settle()
+    fake.cb.cancel?.({ callId: 'c13b', runId: 'r13' })
+    answerQuestion(null)
+    await settle()
+    expect(aiStore.getState().asking).toBeNull()
+    expect(resultOf('c13b')).toEqual([])
+  })
+
+  it('chips and a picture in the chat box go with the answer; the box is emptied', async () => {
+    busy('r14')
+    ask('r14', 'c14')
+    await settle()
+    aiStore.setState({
+      chips: [{ kind: 'annotation', id: 'pm_1', label: 'Пометка ①', summary: 'стена кухни 3000 мм' }],
+      images: [
+        { mime: 'image/jpeg', data: 'AAAA', name: 'рулетка.jpg', url: '' },
+        { mime: 'image/jpeg', data: 'BBBB', name: 'второе.jpg', url: '' },
+      ],
+    })
+    // nothing picked, nothing typed: the attachments alone are an answer
+    expect(hasAnswer(aiStore.getState().asking, '', true)).toBe(true)
+    await send('см. фото')
+    await settle()
+    const [r] = resultOf('c14')
+    expect(r.ok).toBe(true)
+    expect(r.text).toContain('Пользователь ответил в чате своими словами: см. фото')
+    expect(r.text).toContain('annotation pm_1: стена кухни 3000 мм')
+    expect((r as { image?: unknown }).image).toEqual({ mime: 'image/jpeg', data: 'AAAA' })
+    expect(aiStore.getState().chips).toEqual([])
+    // one picture per answer: the other one waits for the next message, and the user is told
+    expect(aiStore.getState().images.map((i) => i.name)).toEqual(['второе.jpg'])
+    expect(aiStore.getState().status).toContain('одно изображение')
+    aiStore.setState({ images: [], status: '' })
+  })
+
   it('a call of a turn that is not running, or with bad arguments, shows no card', async () => {
     ask('gone', 'c9')
     await settle()

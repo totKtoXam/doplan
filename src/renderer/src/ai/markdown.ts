@@ -13,7 +13,8 @@ export type MdBlock =
   | { type: 'table'; head: string[]; align: MdAlign[]; rows: string[][] }
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})\s*([^`\s]*)[^`]*$/
-const HEADING = /^ {0,3}(#{1,6})\s+(.+?)\s*#*\s*$/
+// a closing run of # counts only after a space: «## Язык C#» keeps its #
+const HEADING = /^ {0,3}(#{1,6})\s+(.+?)(?:\s+#+)?\s*$/
 const DELIM_CELL = /^\s*:?-+:?\s*$/
 
 /** cells of a table row: outer pipes dropped, `\|` kept as a pipe */

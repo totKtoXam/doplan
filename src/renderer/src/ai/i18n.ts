@@ -55,6 +55,7 @@ addTranslations('en', {
   отвечено: 'answered',
   'без ответа': 'not answered',
   'Ответ своими словами…': 'Your answer in your own words…',
+  'К ответу приложено одно изображение, остальные остались в поле ввода': 'One image went with the answer; the others stay in the input box',
   'Запуск…': 'Starting…',
   'Провайдер недоступен': 'Provider unavailable',
   'Не удалось открыть чаты проекта: показан пустой чат': 'Could not open the project chats: an empty chat is shown',

@@ -280,8 +280,9 @@ function ApprovalCard({ part }: { part: ToolPart }) {
  */
 function QuestionCard() {
   const asking = useAi((s) => s.asking)
+  const attached = useAi((s) => s.chips.length > 0 || s.images.length > 0)
   if (!asking) return null
-  const ready = hasAnswer(asking)
+  const ready = hasAnswer(asking, '', attached)
   return (
     <div data-ai-question className="mx-2 mb-1.5 rounded-xl border border-accent/50 bg-[color-mix(in_srgb,var(--accent)_6%,var(--panel))] px-2.5 py-2 text-[11.5px] shadow-sm">
       <div className="mb-1.5 flex items-center gap-1.5 font-medium">
@@ -337,7 +338,7 @@ function QuestionCard() {
                   className="rounded-lg border border-border bg-input px-2 py-1 outline-none placeholder:text-faint focus:border-accent"
                   onChange={(e) => setAnswerOther(qi, e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.nativeEvent.isComposing && hasAnswer(asking)) {
+                    if (e.key === 'Enter' && !e.nativeEvent.isComposing && ready) {
                       e.preventDefault()
                       answerQuestion()
                     }
@@ -1134,7 +1135,7 @@ function Composer() {
   const slash = text.startsWith('/') && !text.includes('\n') ? QUICK_ACTIONS.filter((q) => text.trim() === '/' || [quickCmd(q), q.cmd].some((c) => c.toLowerCase().startsWith(text.trim().toLowerCase()))) : []
   // a question is open: what is sent answers it (the text, the options picked on the card)
   const answering = !!asking
-  const canSend = answering ? hasAnswer(asking, text) : !running && (!!text.trim() || images.length > 0)
+  const canSend = answering ? hasAnswer(asking, text, chips.length > 0 || images.length > 0) : !running && (!!text.trim() || images.length > 0)
 
   const submit = () => {
     if (!canSend) return

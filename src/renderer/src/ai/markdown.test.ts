@@ -54,5 +54,8 @@ describe('chat markdown blocks', () => {
       { type: 'text', text: '- кухня 12 м²\n- спальня' },
     ])
     expect(parseMarkdown('#хэштег')).toEqual([{ type: 'text', text: '#хэштег' }])
+    // a closing run of # only after a space
+    expect(parseMarkdown('## Язык C#')).toEqual([{ type: 'heading', level: 2, text: 'Язык C#' }])
+    expect(parseMarkdown('### F# и C# ##')).toEqual([{ type: 'heading', level: 3, text: 'F# и C#' }])
   })
 })

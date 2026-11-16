@@ -4,6 +4,7 @@ import { BUILTIN_ASSETS, createEmptyDoc } from '../defaults'
 import { addItem, addLight, addOpening, addRectRoom, normalize, splitWall, syncRooms } from '../ops'
 import { derivePlan } from '../derive'
 import { parseDoc, readLayerFlags, serializeDoc } from '../io'
+import { activeVariantId, createVariant, docFormatVersion, switchVariant } from '../variants'
 import { buildDisplayList } from '../display'
 import { toDxf } from '../export/dxf'
 import {
@@ -30,7 +31,7 @@ import {
   visibleDoc,
   visiblePlan,
 } from '../layers'
-import type { Doc, EntityRef, Id, LayerFlags } from '../types'
+import { DOC_VERSION, DOC_VERSION_VARIANTS, type Doc, type EntityRef, type Id, type LayerFlags } from '../types'
 
 /** one 4×3 m room with a door, a sofa and a ceiling light */
 function sample(): { doc: Doc; lv: Id; walls: Id[]; door: Id; sofa: Id; light: Id; room: Id } {
@@ -410,5 +411,89 @@ describe('layers: wall graph edits keep the flags', () => {
     normalize(doc)
     expect(doc.walls[half.id]).toBeDefined()
     expect(doc.walls[top.id]).toBeDefined()
+  })
+})
+
+describe('layers: furnishing variants and the file format', () => {
+  it('flags and layers of an inactive variant survive save / load and switching', () => {
+    const { doc, sofa, light } = sample()
+    const a = activeVariantId(doc)
+    const layerId = addLayer(doc, 'Мебель')
+    assignLayer(doc, [ref('item', sofa), ref('light', light)], layerId)
+    setLocked(doc, [ref('item', sofa)], true)
+    setHidden(doc, [ref('light', light)], true)
+    renameEntity(doc, ref('light', light), 'Люстра')
+    // variant B: a copy without the flags; A goes to its stash
+    createVariant(doc, { from: 'copy', name: 'Б' })
+    setLocked(doc, [ref('item', sofa)], false)
+    setHidden(doc, [ref('light', light)], false)
+    assignLayer(doc, [ref('item', sofa), ref('light', light)], null)
+
+    const back = parseDoc(serializeDoc(doc))
+    const stash = back.variants!.list[a].stash!.collections
+    expect(stash.items![sofa]).toMatchObject({ locked: true, layerId })
+    expect(stash.lights![light]).toMatchObject({ hidden: true, layerId, name: 'Люстра' })
+    expect(back.items[sofa].locked).toBeUndefined()
+    expect(back.lights[light].layerId).toBeUndefined()
+
+    switchVariant(back, a)
+    expect(isLocked(back, ref('item', sofa))).toBe(true)
+    expect(isHidden(back, ref('light', light))).toBe(true)
+    expect(back.items[sofa].layerId).toBe(layerId)
+  })
+
+  it('layer ids of stashed objects pointing nowhere are dropped on read and by deleteLayer', () => {
+    const { doc, sofa } = sample()
+    const a = activeVariantId(doc)
+    const keep = addLayer(doc, 'Остаётся')
+    const gone = addLayer(doc, 'Удаляется')
+    assignLayer(doc, [ref('item', sofa)], keep)
+    createVariant(doc, { from: 'copy' })
+    const raw = JSON.parse(serializeDoc(doc))
+    raw.variants.list[a].stash.collections.items[sofa].layerId = 'ly_missing'
+    expect(parseDoc(raw).variants!.list[a].stash!.collections.items![sofa].layerId).toBeUndefined()
+
+    assignLayer(doc, [ref('item', sofa)], gone) // live copy in B
+    doc.variants!.list[a].stash!.collections.items![sofa].layerId = gone
+    deleteLayer(doc, gone)
+    expect(doc.items[sofa].layerId).toBeUndefined()
+    expect(doc.variants!.list[a].stash!.collections.items![sofa].layerId).toBeUndefined()
+    expect(keep in doc.layers!).toBe(true)
+  })
+
+  it('plain files stay format 1; layers-panel data raises the format', () => {
+    const v = (d: Doc): number => JSON.parse(serializeDoc(d)).version
+    const { doc, sofa, walls, light, door } = sample()
+    expect(v(doc)).toBe(DOC_VERSION)
+    // item lock / hide and item names were in format 1 already
+    expect(v(produce(doc, (d) => setLocked(d, [ref('item', sofa)], true)))).toBe(DOC_VERSION)
+    expect(v(produce(doc, (d) => setHidden(d, [ref('item', sofa)], true)))).toBe(DOC_VERSION)
+    expect(v(produce(doc, (d) => { renameEntity(d, ref('item', sofa), 'Диван') }))).toBe(DOC_VERSION)
+
+    expect(v(produce(doc, (d) => setHidden(d, [ref('wall', walls[0])], true)))).toBe(DOC_VERSION_VARIANTS)
+    expect(v(produce(doc, (d) => setLocked(d, [ref('light', light)], true)))).toBe(DOC_VERSION_VARIANTS)
+    expect(v(produce(doc, (d) => { renameEntity(d, ref('opening', door), 'Вход') }))).toBe(DOC_VERSION_VARIANTS)
+    expect(v(produce(doc, (d) => setGroupFlag(d, 'item', 'locked', true)))).toBe(DOC_VERSION_VARIANTS)
+    expect(v(produce(doc, (d) => { addLayer(d, 'Пустой') }))).toBe(DOC_VERSION_VARIANTS)
+    expect(v(produce(doc, (d) => assignLayer(d, [ref('item', sofa)], addLayer(d, 'Мебель'))))).toBe(DOC_VERSION_VARIANTS)
+
+    // undoing it all returns to format 1
+    const d1 = produce(doc, (d) => setGroupFlag(d, 'item', 'hidden', true))
+    const d2 = produce(d1, (d) => setGroupFlag(d, 'item', 'hidden', false))
+    expect(v(d2)).toBe(DOC_VERSION)
+    expect(docFormatVersion(d2)).toBe(DOC_VERSION)
+  })
+
+  it('a raised-format file reads back here; an app knowing only format 1 refuses it', () => {
+    const { doc, walls } = sample()
+    const d = produce(doc, (x) => setLocked(x, [ref('wall', walls[0])], true))
+    const raw = JSON.parse(serializeDoc(d))
+    expect(raw.version).toBe(DOC_VERSION_VARIANTS)
+    const back = parseDoc(raw)
+    expect(back.version).toBe(DOC_VERSION_VARIANTS)
+    expect(back.walls[walls[0]].locked).toBe(true)
+    // the check of format-1 apps (doplan ≤ 0.11): `version > DOC_VERSION` → refuse
+    expect(raw.version > DOC_VERSION).toBe(true)
+    expect(() => parseDoc({ ...raw, version: DOC_VERSION_VARIANTS + 1 })).toThrow(/более новой версии doplan \(формат 3\)/)
   })
 })

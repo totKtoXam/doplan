@@ -6,7 +6,7 @@ import { setHandle } from '@/store/handles'
 import type { Editor2DHandle } from '@/contracts'
 import { TextBtn } from './primitives'
 import { MeasureChecklist, SurveyPanel } from '@/ui/panels/SurveyPanel'
-import { PencilPanel } from '@/ui/panels/PencilPanel' // ai-chat
+import { MarksPanel } from '@/ui/panels/MarksPanel' // ai-chat
 
 /** Mounts the PixiJS plan editor into a div and keeps it sized. */
 export function Viewport2D({ hidden }: { hidden?: boolean }) {
@@ -68,7 +68,7 @@ export function Viewport2D({ hidden }: { hidden?: boolean }) {
       {!loading && !error && (
         <>
           <SurveyPanel />
-          <PencilPanel />
+          <MarksPanel />
           <MeasureChecklist />
         </>
       )}

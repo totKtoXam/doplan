@@ -215,6 +215,8 @@ export function PhotoPlanDialog({ open, onClose }: DialogPropsBase) {
       onClose={onClose}
       title={t('План по фото')}
       width="max-w-4xl"
+      resizeKey="dialog.photoPlan"
+      resizeLabel={t('Размер окна')}
       modalLock={busy !== null}
       footer={
         <>

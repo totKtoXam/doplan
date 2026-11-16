@@ -8,6 +8,7 @@ import { copySelection, cutSelection, deleteSelection, duplicateSelection, group
 import { ensureEngine, exportGlb, exportPlan, renderStill, snapshot3d } from './export'
 import { addUnderlayFromData, handleDroppedFiles, importModelFiles, importPlanSpec, importUnderlay, planFromPhoto } from './import'
 import { addLevel, deleteLevel, moveLevel, renameLevel, toggleLevelVisible } from './levels'
+import { createVariant, cycleVariant, deleteVariant, moveVariant, renameVariant, selectStray, switchVariant } from './variants'
 import { autosaveNow, confirmDiscard, handleCloseRequest, loadDocument, newProject, newSampleProject, offerRecovery, openProject, saveProject } from './project'
 import { exportDoplan, openHistory, openInstructions, openProjectFolder } from './project'
 
@@ -58,6 +59,17 @@ export const actions = {
   deleteLevel,
   moveLevel,
   toggleLevelVisible,
+  // furnishing variants
+  createVariant,
+  switchVariant,
+  cycleVariant,
+  renameVariant,
+  moveVariant,
+  deleteVariant,
+  selectStray,
+  openVariantCompare() {
+    dialogStore.getState().open('variants')
+  },
   // view
   setMode(mode: ViewMode) {
     uiStore.getState().setMode(mode)

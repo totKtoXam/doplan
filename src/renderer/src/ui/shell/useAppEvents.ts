@@ -30,7 +30,7 @@ function isEditable(target: EventTarget | null): boolean {
 
 function anyDialogOpen(): boolean {
   const d = dialogStore.getState()
-  return d.bom || d.importModel || d.materialEditor || d.settings || d.photoPlan || d.render || d.about || notifyStore.getState().modals.length > 0 || projectStore.getState().dialog !== null
+  return d.bom || d.importModel || d.materialEditor || d.settings || d.photoPlan || d.render || d.about || d.variants || notifyStore.getState().modals.length > 0 || projectStore.getState().dialog !== null
 }
 
 const TOOL_KEYS = new Map<string, ToolId>()
@@ -83,6 +83,13 @@ function onKeyDown(e: KeyboardEvent): void {
         break
       case '0':
         actions.zoomFit()
+        break
+      // furnishing variants: next / previous (like tabs)
+      case 'pagedown':
+        actions.cycleVariant(1)
+        break
+      case 'pageup':
+        actions.cycleVariant(-1)
         break
       default:
         handled = false

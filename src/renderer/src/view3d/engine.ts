@@ -24,6 +24,7 @@ import type {
 } from '@/contracts'
 import { visibleDoc, visiblePlan } from '@core/layers'
 import { docStore } from '@/store/document'
+import { isLiveResizing, onLiveResizeEnd } from '@/store/liveResize'
 import { uiStore } from '@/store/ui'
 import { Architecture } from './build/architecture'
 import { createControls } from './controls'
@@ -476,10 +477,35 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     // keep ticking until the idle refinement happened
     if (lowRes && !moving) dirtyFrames = Math.max(dirtyFrames, 1)
   }
+  let liveTimer = 0
   function resize(): void {
     if (destroyed) return
-    applySize(targetDpr(false))
+    if (isLiveResizing()) {
+      // a panel border is being dragged: reallocating every target each frame halves the frame
+      // rate, so the canvas stretches with CSS in between and is resized a few times a second at the
+      // moving resolution; the drag's end resizes it in full (onLiveResizeEnd below)
+      if (!liveTimer) {
+        liveTimer = window.setTimeout(() => {
+          liveTimer = 0
+          if (!isLiveResizing()) return
+          lastMoveAt = performance.now()
+          resizeTo(targetDpr(true))
+        }, 120)
+      }
+      return
+    }
+    resizeTo(targetDpr(false))
+  }
+  function resizeTo(dpr: number): void {
+    if (destroyed) return
+    const w0 = canvas.width
+    const h0 = canvas.height
+    applySize(dpr)
     invalidate()
+    // a new canvas size clears it; ResizeObserver callbacks run after this frame's animation
+    // callbacks, so without drawing now the cleared canvas would reach the screen (flicker while
+    // a panel border is dragged)
+    if (running && (canvas.width !== w0 || canvas.height !== h0)) tick()
   }
 
   // ── frame loop ──
@@ -696,6 +722,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     })
   })
   observer.observe(container)
+  const offLiveResize = onLiveResizeEnd(() => resize())
   const onVisibility = (): void => {
     if (document.hidden) {
       // keep long path-trace jobs running in the background
@@ -782,6 +809,8 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       measure.dispose()
       observer.disconnect()
       if (resizeRaf) cancelAnimationFrame(resizeRaf)
+      if (liveTimer) clearTimeout(liveTimer)
+      offLiveResize()
       if (collectTimer) clearTimeout(collectTimer)
       document.removeEventListener('visibilitychange', onVisibility)
       dprQuery?.removeEventListener('change', onDprChange)

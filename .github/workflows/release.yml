@@ -99,7 +99,19 @@ jobs:
 
       # after the assets: integration tests check that bundled catalog files exist
       - run: pnpm typecheck
+
+      # the project-folder tests commit with the machine's git identity, which a fresh runner lacks
+      - name: Git identity for tests
+        run: |
+          git config --global user.name "doplan CI"
+          git config --global user.email "ci@doplan.invalid"
+
+      # os.tmpdir() on the runner is an 8.3 short path (C:\Users\RUNNER~1\...) while git reports the long one,
+      # so `includeIf "gitdir:..."` never matches; runner.temp is a plain long path
       - run: pnpm test
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
 
       - name: Release notes
         run: |

@@ -5,6 +5,7 @@ import { newId } from '@core'
 import { useDoc } from '@/store/document'
 import { uiStore, useUi } from '@/store/ui'
 import { handles } from '@/store/handles'
+import { usePanelSize } from '@/store/layout'
 import { useT } from '@/i18n'
 import {
   Button,
@@ -46,8 +47,9 @@ export interface RenderPanelProps {
 export function RenderPanel({ open, onClose }: RenderPanelProps) {
   const t = useT()
   const [busy, setBusy] = useState(false)
+  const renderSize = usePanelSize('render')
   return (
-    <Dialog open={open} onClose={onClose} title={t('Рендер и освещение')} drawer modalLock={busy}>
+    <Dialog open={open} onClose={onClose} title={t('Рендер и освещение')} drawer drawerSize={{ ...renderSize, label: t('Ширина панели') }} modalLock={busy}>
       <div className="-m-4 flex flex-col">
         <EngineStatus />
         <QualitySection />

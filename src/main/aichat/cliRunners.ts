@@ -26,7 +26,8 @@ export interface RunCtx {
   track: (child: ChildProcess) => void
 }
 
-const TOOL_TIMEOUT_MS = String(15 * 60 * 1000)
+/** the CLIs' own MCP call limit: above the longest wait in the app (a question to the user, an hour) */
+const TOOL_TIMEOUT_MS = String(65 * 60 * 1000)
 
 function tail(s: string, add: string, max = 4000): string {
   const t = s + add

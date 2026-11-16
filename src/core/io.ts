@@ -5,11 +5,18 @@
  */
 import { DEFAULT_MATERIALS, OPENING_DEFAULTS, ROOM_TYPE_NAMES, createEmptyDoc, defaultRenderSettings, defaultSettings } from './defaults'
 import { newId, PROJECT_ID_RE, type IdPrefix } from './ids'
-import { entityKinds, kindTable } from './layers'
+import { entityKinds, kindTables } from './layers'
 import { normalize, syncRooms, type PinnedNode } from './ops'
+import { docFormatVersion } from './variants'
 import {
-  DOC_VERSION,
+  DOC_VERSION_VARIANTS,
   DOOR_LEAF_STYLES,
+  VARIANT_COLLECTIONS,
+  type DocVariants,
+  type VariantCollection,
+  type VariantFinishes,
+  type VariantRecord,
+  type VariantStash,
   DOOR_SLIDES,
   type DoorLeafStyle,
   type DoorSlide,
@@ -612,19 +619,176 @@ function readLayers(raw: Obj, doc: Doc): void {
     }
     if (Object.keys(groups).length) doc.groupFlags = groups
   }
+  // the live tables and the stashes of inactive furnishing variants (read before this)
   for (const def of entityKinds()) {
-    const table = kindTable(doc, def)
-    if (!table) continue
-    for (const id in table) {
-      const o = table[id]
-      if (o.layerId !== undefined && !layers[o.layerId]) delete o.layerId
+    for (const table of kindTables(doc, def)) {
+      for (const id in table) {
+        const o = table[id]
+        if (o.layerId !== undefined && !layers[o.layerId]) delete o.layerId
+      }
     }
   }
 }
 
+// ───────────── furnishing variants ─────────────
+
+interface ReadCtx {
+  levels: Record<Id, Level>
+  levelOf(v: unknown): Id
+}
+
+function readItems(raw: unknown, ctx: ReadCtx): Record<Id, Item> {
+  const out: Record<Id, Item> = {}
+  for (const [id, v] of entries(raw, 'i')) {
+    const assetId = optStr(v.assetId)
+    const p = vec2(v)
+    if (!assetId || !p) continue
+    const item: Item = {
+      id,
+      levelId: ctx.levelOf(v.levelId),
+      assetId,
+      x: p.x,
+      y: p.y,
+      elevation: num(v.elevation, 0, -100000, 100000),
+      rotation: num(v.rotation, 0),
+      size: readSize(v.size, { w: 500, d: 500, h: 500 }),
+      mount: readMount(v.mount),
+    }
+    // a floor item lifted off the floor (files older than the free mount) hangs in the air
+    if (item.mount === 'floor' && item.elevation > 0.5) item.mount = 'free'
+    const name = optStr(v.name)
+    if (name) item.name = name
+    if (v.mirrored === true) item.mirrored = true
+    const overrides = stringRecord(v.overrides)
+    if (overrides) item.overrides = overrides
+    const tint = optColor(v.tint)
+    if (tint) item.tint = tint
+    const params = paramRecord(v.params)
+    if (params) item.params = params
+    if (v.locked === true) item.locked = true
+    if (v.hidden === true) item.hidden = true
+    const groupId = optStr(v.groupId)
+    if (groupId) item.groupId = groupId
+    readLayerFlags(v, item, { name: false, flags: false })
+    out[id] = item
+  }
+  return out
+}
+
+function readLights(raw: unknown, ctx: ReadCtx): Record<Id, Light> {
+  const out: Record<Id, Light> = {}
+  for (const [id, v] of entries(raw, 'l')) {
+    const p = vec2(v)
+    if (!p) continue
+    const levelId = ctx.levelOf(v.levelId)
+    const light: Light = {
+      id,
+      levelId,
+      kind: oneOf(v.kind, LIGHT_KINDS, 'ceiling'),
+      x: p.x,
+      y: p.y,
+      elevation: num(v.elevation, ctx.levels[levelId].height - 60, 0, 100000),
+      temperature: num(v.temperature, 3000, 1000, 20000),
+      lumens: num(v.lumens, 1500, 0, 1e6),
+      on: bool(v.on, true),
+    }
+    const rotation = optNum(v.rotation)
+    if (rotation !== undefined) light.rotation = rotation
+    if (isObj(v.size)) light.size = { w: num(v.size.w, 600, 1, 100000), d: num(v.size.d, 600, 1, 100000) }
+    readLayerFlags(v, light)
+    out[id] = light
+  }
+  return out
+}
+
+/**
+ * Reader of every variant collection (types.ts VARIANT_COLLECTIONS): used for the live document
+ * and for the stashes of inactive variants alike.
+ */
+const VARIANT_READERS: { [K in VariantCollection]: (raw: unknown, ctx: ReadCtx) => NonNullable<Doc[K]> } = {
+  items: readItems,
+  lights: readLights,
+}
+
+function readRoomFinish(v: Obj): VariantFinishes['rooms'][Id] {
+  const f: VariantFinishes['rooms'][Id] = {}
+  if (isObj(v.floor)) f.floor = readFinish(v.floor, DEFAULT_MATERIALS.floor)
+  if (isObj(v.ceiling)) f.ceiling = readCeiling(v.ceiling)
+  const sk = optNum(v.skirting, 0, 1000)
+  if (sk !== undefined) f.skirting = sk
+  const skm = optStr(v.skirtingMaterialId)
+  if (skm) f.skirtingMaterialId = skm
+  if (isObj(v.design)) {
+    const styleId = optStr(v.design.styleId)
+    const accentFace = optStr(v.design.accentFace)
+    if (styleId || accentFace) f.design = { ...(styleId ? { styleId } : {}), ...(accentFace ? { accentFace } : {}) }
+  }
+  return f
+}
+
+function readOpeningFinish(v: Obj): VariantFinishes['openings'][Id] {
+  const f: VariantFinishes['openings'][Id] = {}
+  const frame = optStr(v.frameMaterialId)
+  if (frame) f.frameMaterialId = frame
+  const leaf = optStr(v.leafMaterialId)
+  if (leaf) f.leafMaterialId = leaf
+  if (typeof v.style === 'string' && (DOOR_LEAF_STYLES as readonly string[]).includes(v.style)) f.style = v.style as DoorLeafStyle
+  const curtain = readCurtain(v.curtain)
+  if (curtain) f.curtain = curtain
+  return f
+}
+
+function readStash(v: unknown, ctx: ReadCtx): VariantStash {
+  const raw = isObj(v) ? v : {}
+  const rc = isObj(raw.collections) ? raw.collections : {}
+  const collections: VariantStash['collections'] = {}
+  for (const key of VARIANT_COLLECTIONS) {
+    if (rc[key] === undefined) continue
+    ;(collections as Record<string, unknown>)[key] = VARIANT_READERS[key](rc[key], ctx)
+  }
+  const rf = isObj(raw.finishes) ? raw.finishes : {}
+  const finishes: VariantFinishes = { rooms: {}, walls: {}, openings: {} }
+  if (isObj(rf.rooms)) for (const [id, f] of Object.entries(rf.rooms)) if (isObj(f)) finishes.rooms[id] = readRoomFinish(f)
+  if (isObj(rf.walls)) {
+    for (const [id, f] of Object.entries(rf.walls)) {
+      if (!isObj(f)) continue
+      finishes.walls[id] = { ...(isObj(f.left) ? { left: readSide(f.left) } : {}), ...(isObj(f.right) ? { right: readSide(f.right) } : {}) }
+    }
+  }
+  if (isObj(rf.openings)) for (const [id, f] of Object.entries(rf.openings)) if (isObj(f)) finishes.openings[id] = readOpeningFinish(f)
+  const stash: VariantStash = { collections, finishes }
+  const styleId = optStr(raw.styleId)
+  if (styleId) stash.styleId = styleId
+  return stash
+}
+
+/**
+ * `doc.variants`. The document's own items / lights / finishes belong to the active variant; a
+ * missing or unknown active id gets a record of its own, so no stash is ever lost.
+ */
+function readVariants(v: unknown, ctx: ReadCtx): DocVariants | undefined {
+  if (!isObj(v)) return undefined
+  const list: Record<Id, VariantRecord> = {}
+  for (const [id, r] of entries(v.list, 'v')) {
+    list[id] = { id, name: str(r.name, `Вариант ${Object.keys(list).length + 1}`), stash: readStash(r.stash, ctx) }
+  }
+  const order: Id[] = []
+  if (Array.isArray(v.order)) for (const id of v.order) if (typeof id === 'string' && list[id] && !order.includes(id)) order.push(id)
+  for (const id of Object.keys(list)) if (!order.includes(id)) order.push(id)
+  let activeId = typeof v.activeId === 'string' && list[v.activeId] ? v.activeId : ''
+  if (!activeId) {
+    activeId = newId('v')
+    list[activeId] = { id: activeId, name: `Вариант ${order.length + 1}` }
+    order.unshift(activeId)
+  }
+  // the active variant's content is the document itself
+  list[activeId] = { id: activeId, name: list[activeId].name }
+  return { activeId, order, list }
+}
+
 /** JSON text of the document (current schema version). */
 export function serializeDoc(doc: Doc): string {
-  return JSON.stringify({ ...doc, version: DOC_VERSION })
+  return JSON.stringify({ ...doc, version: docFormatVersion(doc) })
 }
 
 /**
@@ -649,9 +813,9 @@ export function parseDoc(json: unknown): Doc {
   if (typeof meta.app === 'string' && meta.app !== 'doplan') {
     throw new Error(`Файл создан другим приложением («${meta.app}») и не может быть открыт`)
   }
-  const version = raw.version === undefined ? DOC_VERSION : num(raw.version, Number.NaN)
+  const version = raw.version === undefined ? 1 : num(raw.version, Number.NaN)
   if (Number.isNaN(version) || version < 1) throw new Error('Файл проекта повреждён: некорректный номер версии')
-  if (version > DOC_VERSION) {
+  if (version > DOC_VERSION_VARIANTS) {
     throw new Error(`Проект создан в более новой версии doplan (формат ${version}). Обновите приложение, чтобы открыть его`)
   }
 
@@ -831,63 +995,10 @@ export function parseDoc(json: unknown): Doc {
     doc.rooms[id] = room
   }
 
-  // ── items ──
-  for (const [id, v] of entries(raw.items, 'i')) {
-    const assetId = optStr(v.assetId)
-    const p = vec2(v)
-    if (!assetId || !p) continue
-    const item: Item = {
-      id,
-      levelId: levelOf(v.levelId),
-      assetId,
-      x: p.x,
-      y: p.y,
-      elevation: num(v.elevation, 0, -100000, 100000),
-      rotation: num(v.rotation, 0),
-      size: readSize(v.size, { w: 500, d: 500, h: 500 }),
-      mount: readMount(v.mount),
-    }
-    // a floor item lifted off the floor (files older than the free mount) hangs in the air
-    if (item.mount === 'floor' && item.elevation > 0.5) item.mount = 'free'
-    const name = optStr(v.name)
-    if (name) item.name = name
-    if (v.mirrored === true) item.mirrored = true
-    const overrides = stringRecord(v.overrides)
-    if (overrides) item.overrides = overrides
-    const tint = optColor(v.tint)
-    if (tint) item.tint = tint
-    const params = paramRecord(v.params)
-    if (params) item.params = params
-    if (v.locked === true) item.locked = true
-    if (v.hidden === true) item.hidden = true
-    const groupId = optStr(v.groupId)
-    if (groupId) item.groupId = groupId
-    readLayerFlags(v, item, { name: false, flags: false })
-    doc.items[id] = item
-  }
-
-  // ── lights ──
-  for (const [id, v] of entries(raw.lights, 'l')) {
-    const p = vec2(v)
-    if (!p) continue
-    const levelId = levelOf(v.levelId)
-    const light: Light = {
-      id,
-      levelId,
-      kind: oneOf(v.kind, LIGHT_KINDS, 'ceiling'),
-      x: p.x,
-      y: p.y,
-      elevation: num(v.elevation, levels[levelId].height - 60, 0, 100000),
-      temperature: num(v.temperature, 3000, 1000, 20000),
-      lumens: num(v.lumens, 1500, 0, 1e6),
-      on: bool(v.on, true),
-    }
-    const rotation = optNum(v.rotation)
-    if (rotation !== undefined) light.rotation = rotation
-    if (isObj(v.size)) light.size = { w: num(v.size.w, 600, 1, 100000), d: num(v.size.d, 600, 1, 100000) }
-    readLayerFlags(v, light)
-    doc.lights[id] = light
-  }
+  // ── items & lights (the active furnishing variant) ──
+  const ctx: ReadCtx = { levels, levelOf }
+  doc.items = VARIANT_READERS.items(raw.items, ctx)
+  doc.lights = VARIANT_READERS.lights(raw.lights, ctx)
 
   // ── annotations ──
   for (const [id, v] of entries(raw.dimensions, 'd')) {
@@ -955,6 +1066,10 @@ export function parseDoc(json: unknown): Doc {
   const design = readDesign(raw.design)
   if (design) doc.design = design
 
+  // ── furnishing variants (absent in older files: one implicit variant) ──
+  const variants = readVariants(raw.variants, ctx)
+  if (variants) doc.variants = variants
+
   // ── user layers & group flags (layers panel) ──
   readLayers(raw, doc)
 
@@ -971,5 +1086,6 @@ export function parseDoc(json: unknown): Doc {
 
   normalize(doc)
   syncRooms(doc)
+  doc.version = docFormatVersion(doc)
   return doc
 }

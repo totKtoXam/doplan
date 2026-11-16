@@ -120,6 +120,52 @@ export function kindTable(doc: Doc, def: EntityKindDef): Record<Id, AnyEntity> |
   return t && typeof t === 'object' ? (t as Record<Id, AnyEntity>) : undefined
 }
 
+/**
+ * Every table of a kind: the live one and, for a variant collection (items, lights), the stash of
+ * each inactive furnishing variant — flags and layer ids live there too.
+ */
+export function kindTables(doc: Doc, def: EntityKindDef): Record<Id, AnyEntity>[] {
+  const out: Record<Id, AnyEntity>[] = []
+  const live = kindTable(doc, def)
+  if (live) out.push(live)
+  const list = doc.variants?.list
+  if (list) {
+    for (const id in list) {
+      const t = (list[id].stash?.collections as Record<string, unknown> | undefined)?.[def.docKey]
+      if (t && typeof t === 'object') out.push(t as Record<Id, AnyEntity>)
+    }
+  }
+  return out
+}
+
+/** layers-panel fields the first file format already had (older apps keep them) */
+const V1_FIELDS: Record<string, readonly string[]> = { item: ['name', 'hidden', 'locked'], room: ['name'], label: ['name'] }
+
+/**
+ * Whether the document uses layers-panel data an older doplan would silently drop on its next save:
+ * user layers, group flags, or an object's own hidden / locked / layer / user name (also in the
+ * stashed furnishing variants). Such a document is written with a newer format version.
+ */
+export function usesLayers(doc: Doc): boolean {
+  if (doc.layers && Object.keys(doc.layers).length) return true
+  if (doc.layerOrder?.length) return true
+  if (doc.groupFlags && Object.values(doc.groupFlags).some((g) => g.hidden || g.locked)) return true
+  for (const def of entityKinds()) {
+    const native = V1_FIELDS[def.kind] ?? []
+    const flags = !def.isOwnHidden && !def.isOwnLocked
+    for (const table of kindTables(doc, def)) {
+      for (const id in table) {
+        const o = table[id]
+        if (o.layerId !== undefined) return true
+        if (o.name !== undefined && !native.includes('name') && def.rename === setName) return true
+        if (flags && !native.includes('hidden') && o.hidden === true) return true
+        if (flags && !native.includes('locked') && o.locked === true) return true
+      }
+    }
+  }
+  return false
+}
+
 export function entityOf(doc: Doc, ref: { kind: string; id: Id }): AnyEntity | undefined {
   const def = registry.get(ref.kind)
   return def ? kindTable(doc, def)?.[ref.id] : undefined
@@ -625,9 +671,9 @@ export function moveLayer(doc: Doc, layerId: Id, index: number): void {
 export function deleteLayer(doc: Doc, layerId: Id): void {
   if (!doc.layers?.[layerId]) return
   for (const def of entityKinds()) {
-    const table = kindTable(doc, def)
-    if (!table) continue
-    for (const id in table) if (table[id].layerId === layerId) delete table[id].layerId
+    for (const table of kindTables(doc, def)) {
+      for (const id in table) if (table[id].layerId === layerId) delete table[id].layerId
+    }
   }
   delete doc.layers[layerId]
   if (doc.layerOrder) doc.layerOrder = doc.layerOrder.filter((id) => id !== layerId)

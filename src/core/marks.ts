@@ -1,5 +1,5 @@
 /**
- * Pencil marks («Карандаш»): what a freehand stroke or a closed zone drawn over the plan points at.
+ * Plan marks («Пометить» in the chat): what a freehand stroke or a closed zone drawn over the plan points at.
  *
  * The AI chat attaches a mark with the entities it touches (walls and their clear sides, nodes,
  * openings, rooms, items) so that «в ① ширина 180 см» can be mapped onto a concrete dimension.

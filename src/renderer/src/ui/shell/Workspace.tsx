@@ -3,15 +3,12 @@ import { useT } from '@/i18n'
 import { clampRatio, SPLIT } from '@/store/layout'
 import { uiStore, useUi } from '@/store/ui'
 import { Sash } from '@/ui/kit/Sash'
+import { splitLimits } from '@/ui/kit/sashMath'
 import { Viewport2D } from './Viewport2D'
 import { Viewport3D } from './Viewport3D'
 
-/** the 2D share limits that leave each view at least SPLIT.minPx */
-function ratioLimits(total: number): { min: number; max: number } {
-  if (total <= 0) return { min: 0.1, max: 0.9 }
-  if (total <= SPLIT.minPx * 2) return { min: 0.5, max: 0.5 }
-  return { min: SPLIT.minPx / total, max: 1 - SPLIT.minPx / total }
-}
+/** the 2D share limits: each view keeps SPLIT.minPx, inside the range clampRatio stores */
+const ratioLimits = (total: number) => splitLimits(total, SPLIT.minPx)
 
 /**
  * 2D / 3D / split viewports. The 3D engine is created lazily the first time it is shown and then

@@ -54,7 +54,7 @@ export function ResizeFrame({ target, edges, grip, min, max, factor = 1, onCommi
   }
 
   const onPointerDown = (edge: BoxEdge) => (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0 || e.detail > 1) return
+    if (e.button !== 0) return
     const el = target.current
     const start = measure()
     if (!el || !start) return
@@ -63,11 +63,13 @@ export function ResizeFrame({ target, edges, grip, min, max, factor = 1, onCommi
     const saved: Saved = { width: el.style.width, height: el.style.height, maxWidth: el.style.maxWidth, maxHeight: el.style.maxHeight }
     const limit = max()
     let last = start
-    // the live size must not be capped by the box's own max-width / max-height classes
-    if (s.x) el.style.maxWidth = 'none'
-    if (s.y) el.style.maxHeight = 'none'
-    setDragging(edge)
     stopRef.current = startPointerDrag(e, CURSOR[edge], {
+      begin: () => {
+        // the live size must not be capped by the box's own max-width / max-height classes
+        if (s.x) el.style.maxWidth = 'none'
+        if (s.y) el.style.maxHeight = 'none'
+        setDragging(edge)
+      },
       move: (dx, dy) => {
         last = resizeBox(start, edge, dx, dy, min, limit, factor)
         if (s.x) el.style.width = `${last.w}px`
@@ -78,6 +80,7 @@ export function ResizeFrame({ target, edges, grip, min, max, factor = 1, onCommi
         setDragging(null)
         // the owner renders the committed size; hand the element back to it as it was
         Object.assign(el.style, saved)
+        // a click without a drag (or Escape) keeps the size as it was, automatic or remembered
         if (cancelled) return
         const out: Partial<Box> = {}
         if (s.x) out.w = last.w

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { availableMax, keyStep, resizeBox, resolveDrag, sanitizeSize } from './sashMath'
+import { availableMax, keyStep, resizeBox, resolveDrag, sanitizeSize, splitLimits } from './sashMath'
 
 const lim = { min: 200, max: 600, collapsible: true }
 
@@ -51,6 +51,17 @@ describe('sanitizeSize', () => {
     expect(sanitizeSize('420', 300, lim)).toBe(300)
     expect(sanitizeSize(Number.NaN, 300, lim)).toBe(300)
     expect(sanitizeSize(undefined, 300, lim)).toBe(300)
+  })
+})
+
+describe('splitLimits', () => {
+  it('leaves each view its minimum width', () => {
+    expect(splitLimits(1000, 200)).toEqual({ min: 0.2, max: 0.8 })
+    expect(splitLimits(400, 200)).toEqual({ min: 0.5, max: 0.5 })
+  })
+  it('never goes past the range a stored ratio is clamped to, on a wide screen too', () => {
+    expect(splitLimits(2500, 200)).toEqual({ min: 0.1, max: 0.9 })
+    expect(splitLimits(0, 200)).toEqual({ min: 0.1, max: 0.9 })
   })
 })
 

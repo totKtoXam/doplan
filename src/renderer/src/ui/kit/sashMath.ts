@@ -52,6 +52,16 @@ export function sanitizeSize(v: unknown, fallback: number, { min, max }: PanelLi
   return Math.round(Math.min(Math.max(min, max), Math.max(min, v)))
 }
 
+/**
+ * The 2D share limits of the 2D|3D split: each view keeps at least `minPx`, and the share stays
+ * inside [lo, hi], the range a stored ratio is clamped to, so the view and the store always agree.
+ */
+export function splitLimits(total: number, minPx: number, lo = 0.1, hi = 0.9): { min: number; max: number } {
+  if (total <= 0) return { min: lo, max: hi }
+  if (total <= minPx * 2) return { min: 0.5, max: 0.5 }
+  return { min: Math.max(lo, minPx / total), max: Math.min(hi, 1 - minPx / total) }
+}
+
 // ───────────── resizable boxes (floating panels, dialogs) ─────────────
 
 /** a box edge or corner that can be dragged: n / s / e / w and the four corners */

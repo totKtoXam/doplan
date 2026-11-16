@@ -49,16 +49,23 @@ function limitCursor(orientation: SashOrientation, limit: 'min' | 'max' | null |
   return towardsPlus ? 's-resize' : 'n-resize'
 }
 
+/** px the pointer must travel before a press becomes a drag (a click or double click stays one) */
+const DRAG_THRESHOLD = 3
+
 /**
  * Pointer drag shared by sashes and resize frames: window listeners, one `move` per frame with
- * the total offset since the press, Escape / pointercancel cancel. A full-window shield keeps
- * the canvases (and their pointer handlers) out of the drag and holds the cursor while the
- * pointer leaves the thin handle. Returns a function that stops the drag.
+ * the total offset since the press, Escape / pointercancel cancel.
+ *
+ * The press only becomes a drag once the pointer has moved DRAG_THRESHOLD px (`begin` is called
+ * then). A press and release without moving ends as cancelled: nothing changes, and the click and
+ * double click still land on the handle (the shield would take them otherwise). While dragging, a
+ * full-window shield keeps the canvases (and their pointer handlers) out of the drag and holds the
+ * cursor while the pointer leaves the thin handle. Returns a function that stops the drag.
  */
 export function startPointerDrag(
   e: ReactPointerEvent,
   cursor: string,
-  h: { move(dx: number, dy: number): void; end(cancelled: boolean): void },
+  h: { begin?(): void; move(dx: number, dy: number): void; end(cancelled: boolean): void },
 ): (cancelled: boolean) => void {
   // preventDefault also keeps the focus where it was: a mouse drag must not leave the line lit
   e.preventDefault()
@@ -67,19 +74,29 @@ export function startPointerDrag(
   let pending: [number, number] | null = null
   let raf = 0
   let done = false
-  const shield = document.createElement('div')
-  shield.className = 'dp-sash-shield'
-  shield.style.cursor = cursor
-  document.body.appendChild(shield)
-  document.body.classList.add('dp-sash-dragging')
-  beginLiveResize()
+  let shield: HTMLDivElement | null = null
+  const begin = () => {
+    shield = document.createElement('div')
+    shield.className = 'dp-sash-shield'
+    shield.style.cursor = cursor
+    document.body.appendChild(shield)
+    document.body.classList.add('dp-sash-dragging')
+    beginLiveResize()
+    h.begin?.()
+  }
   const flush = () => {
     raf = 0
     if (pending) h.move(pending[0], pending[1])
     pending = null
   }
   const move = (ev: PointerEvent) => {
-    pending = [ev.clientX - ox, ev.clientY - oy]
+    const dx = ev.clientX - ox
+    const dy = ev.clientY - oy
+    if (!shield) {
+      if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return
+      begin()
+    }
+    pending = [dx, dy]
     if (!raf) raf = requestAnimationFrame(flush)
   }
   const key = (ev: globalThis.KeyboardEvent) => {
@@ -91,17 +108,19 @@ export function startPointerDrag(
   const stop = (cancelled: boolean) => {
     if (done) return
     done = true
+    const dragged = shield !== null
     if (raf) cancelAnimationFrame(raf)
-    if (!cancelled && pending) h.move(pending[0], pending[1])
+    if (dragged && !cancelled && pending) h.move(pending[0], pending[1])
     window.removeEventListener('pointermove', move)
     window.removeEventListener('pointerup', up)
     window.removeEventListener('pointercancel', cancel)
     window.removeEventListener('keydown', key, true)
-    shield.remove()
+    shield?.remove()
     document.body.classList.remove('dp-sash-dragging')
-    h.end(cancelled)
+    // a press without a drag changes nothing
+    h.end(cancelled || !dragged)
     // after the final size is committed, so views redraw at it in full quality
-    requestAnimationFrame(endLiveResize)
+    if (dragged) requestAnimationFrame(endLiveResize)
   }
   const up = () => stop(false)
   const cancel = () => stop(true)
@@ -138,10 +157,10 @@ export function Sash({
   const cursor = limitCursor(orientation, limit, growSign)
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0 || e.detail > 1) return
+    if (e.button !== 0) return
     if (onDragStart?.() === false) return
-    setDragging(true)
     stopRef.current = startPointerDrag(e, CURSOR[orientation], {
+      begin: () => setDragging(true),
       move: (dx, dy) => cbs.current.onDrag(orientation === 'vertical' ? dx : dy),
       end: (cancelled) => {
         stopRef.current = null

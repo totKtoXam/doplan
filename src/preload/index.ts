@@ -9,8 +9,13 @@ import type { AiLoginEvent, AiProviderId, AiRunEvent, AiToolCall } from '../shar
 // ── end ai-chat block ──
 import type { UpdateState } from '../shared/updater'
 import { CH, VERSION_ARG } from '../main/channels'
+import { cleanIpcError } from '../shared/ipcError'
 
-const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> => ipcRenderer.invoke(channel, ...args) as Promise<T>
+/** errors from main come back with their message only, without Electron's "Error invoking remote method…" */
+const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> =>
+  (ipcRenderer.invoke(channel, ...args) as Promise<T>).catch((err: unknown) => {
+    throw cleanIpcError(err)
+  })
 
 /** main may hand back a Uint8Array/Buffer view; the contract promises a standalone ArrayBuffer */
 function asArrayBuffer(x: unknown): ArrayBuffer {
@@ -120,6 +125,7 @@ const api: DoplanApi = {
     stop: (runId) => invoke(CH.aiChatStop, runId),
     onEvent: (cb) => subscribe<[string, AiRunEvent]>(CH.evAiChatEvent, (runId, ev) => cb(runId, ev)),
     onToolCall: (cb) => subscribe<[AiToolCall]>(CH.evAiChatToolCall, (call) => cb(call)),
+    onToolCancel: (cb) => subscribe<[{ callId: string; runId: string }]>(CH.evAiChatToolCancel, (c) => cb(c)),
     toolResult: (callId, result) => ipcRenderer.send(CH.aiChatToolResult, callId, result),
     listChats: (projectPath) => invoke(CH.aiChatList, projectPath),
     loadChat: (projectPath, chatId) => invoke(CH.aiChatLoad, projectPath, chatId),

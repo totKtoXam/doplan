@@ -21,10 +21,10 @@ export function projectBaseName(): string {
   return raw.replace(/[<>:"/\|?*\u0000-\u001f]+/g, '_').trim() || 'plan'
 }
 
-export function levelSuffix(): string {
+export function levelSuffix(levelId: Id = activeLevel()): string {
   const doc = currentDoc()
   if (doc.levelOrder.length < 2) return ''
-  const name = doc.levels[activeLevel()]?.name ?? ''
+  const name = doc.levels[levelId]?.name ?? ''
   return name ? ` - ${name.replace(/[<>:"/\|?*]+/g, '_')}` : ''
 }
 

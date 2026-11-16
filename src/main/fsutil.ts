@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
-import { promises as fsp } from 'node:fs'
-import { dirname, isAbsolute, normalize, relative, resolve } from 'node:path'
+import { lstatSync, promises as fsp, realpathSync, type Stats } from 'node:fs'
+import { basename, dirname, isAbsolute, join, normalize, relative, resolve } from 'node:path'
 
 export async function ensureDir(dir: string): Promise<void> {
   await fsp.mkdir(dir, { recursive: true })
@@ -123,3 +123,81 @@ export async function rmrf(p: string): Promise<void> {
   await fsp.rm(p, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
 }
 
+
+export type EntryKind = 'file' | 'dir' | 'link' | 'other'
+
+/** a final path as realpath.native gives it, comparable: no \\?\ prefix, one case */
+const finalKey = (p: string) =>
+  p
+    .replace(/^\\\\\?\\UNC\\/i, '\\\\')
+    .replace(/^\\\\\?\\/, '')
+    .toLowerCase()
+
+/**
+ * Windows: `p`, which lstat shows as no link, still leads somewhere else than where it stands. libuv's
+ * lstat reads a junction as a link only when its target has a drive letter (\??\C:\…); one to
+ * \??\Volume{…}\ or \??\GLOBALROOT\Device\… is followed and reported as the folder it names. The final
+ * path of the entry is then not its parent's final path plus its name. A cloud placeholder keeps its
+ * own path. Anything that cannot be resolved counts as redirecting (fail closed). Always false elsewhere.
+ */
+export async function redirects(p: string): Promise<boolean> {
+  if (process.platform !== 'win32') return false
+  try {
+    const [own, parent] = await Promise.all([fsp.realpath(p), fsp.realpath(dirname(p))])
+    return finalKey(own) !== finalKey(join(parent, basename(p)))
+  } catch {
+    return true
+  }
+}
+
+/** redirects, synchronously */
+export function redirectsSync(p: string): boolean {
+  if (process.platform !== 'win32') return false
+  try {
+    return finalKey(realpathSync.native(p)) !== finalKey(join(realpathSync.native(dirname(p)), basename(p)))
+  } catch {
+    return true
+  }
+}
+
+/** lstat's answer for an entry that redirects: a link, no folder */
+function asLink(st: Stats): Stats {
+  return Object.assign(Object.create(st) as Stats, { isDirectory: () => false, isFile: () => false, isSymbolicLink: () => true })
+}
+
+/** lstat that sees every junction as a link, whatever its target (see redirects) */
+export async function lstatNoFollow(p: string): Promise<Stats> {
+  const st = await fsp.lstat(p)
+  return st.isDirectory() && (await redirects(p)) ? asLink(st) : st
+}
+
+/** lstatNoFollow, synchronously */
+export function lstatNoFollowSync(p: string): Stats {
+  const st = lstatSync(p)
+  return st.isDirectory() && redirectsSync(p) ? asLink(st) : st
+}
+
+/**
+ * What a directory entry is, never following it, or null when it is gone. A Dirent that is plainly a
+ * file or folder is taken as it is; anything else is asked of lstat: on Windows readdir reports every
+ * reparse point as a link, cloud placeholders (OneDrive, Dropbox Files On-Demand) too, while lstat
+ * reports symlinks and drive-letter junctions as links (and a placeholder as the file or folder it is).
+ * A reparse point lstat does not call a link must still stand where it is (see redirects), and one
+ * lstat cannot find is a link (a junction to a volume that is not there), not gone.
+ */
+export async function entryKind(path: string, e: { isFile(): boolean; isDirectory(): boolean; isSymbolicLink(): boolean }): Promise<EntryKind | null> {
+  if (e.isFile()) return 'file'
+  if (e.isDirectory()) return 'dir'
+  let st
+  try {
+    st = await fsp.lstat(path)
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === 'ENOENT' || code === 'ENOTDIR') return e.isSymbolicLink() ? 'link' : null
+    throw err
+  }
+  if (st.isSymbolicLink()) return 'link'
+  if (!st.isFile() && !st.isDirectory()) return 'other'
+  if (await redirects(path)) return 'link'
+  return st.isFile() ? 'file' : 'dir'
+}

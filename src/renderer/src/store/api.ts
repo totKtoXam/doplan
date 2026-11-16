@@ -8,7 +8,7 @@ import { DEFAULT_AI_SETTINGS } from '@shared/aiChat'
 import { releasePageUrl } from '@shared/updater'
 
 /** version shown by the web build (no Electron); keep in step with package.json */
-const WEB_VERSION = '0.11.6-web'
+const WEB_VERSION = '0.12.0-web'
 
 const SETTINGS_KEY = 'doplan.settings'
 
@@ -274,6 +274,7 @@ function createFallbackApi(): DoplanApi {
       async stop() {},
       onEvent: noopUnsub,
       onToolCall: noopUnsub,
+      onToolCancel: noopUnsub,
       toolResult() {},
       async listChats() {
         return []

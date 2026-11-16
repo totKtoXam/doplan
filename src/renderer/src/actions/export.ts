@@ -1,4 +1,5 @@
-import { buildDisplayList, toDxf, toSvg } from '@core'
+import { activeVariantId, buildDisplayList, listVariants, materializeVariant, toDxf, toSvg } from '@core'
+import type { Doc, Id } from '@core/types'
 import { t } from '@/i18n'
 import { api } from '@/store/api'
 import { handles, waitForEngine3D } from '@/store/handles'
@@ -9,9 +10,23 @@ import { activeLevel, currentDoc, errorText, levelSuffix, projectBaseName } from
 
 export type PlanFormat = 'png' | 'svg' | 'pdf' | 'dxf'
 
-function planSvg(): { svg: string; widthMm: number; heightMm: number } {
+/** the document as the given furnishing variant (default: the active one) */
+function variantDoc(variantId?: Id): Doc {
   const doc = currentDoc()
-  const levelId = activeLevel()
+  return variantId ? materializeVariant(doc, variantId, uiStore.getState().catalog) : doc
+}
+
+/** " — <variant>" in titles and file names when the project has several variants */
+function variantSuffix(doc: Doc, sep: string, forFile = true): string {
+  const list = listVariants(doc)
+  if (list.length < 2) return ''
+  // stored default names are Russian keys ("Вариант 1"): show them in the UI language
+  const name = t(list.find((v) => v.active)?.name ?? '')
+  if (!name) return ''
+  return `${sep}${forFile ? name.replace(/[<>:"/\\|?*]+/g, '_') : name}`
+}
+
+function planSvg(doc: Doc = currentDoc(), levelId: Id = activeLevel()): { svg: string; widthMm: number; heightMm: number } {
   const dl = buildDisplayList(doc, levelId, {
     dimensions: doc.settings.showDimensions,
     areas: doc.settings.showAreas,
@@ -22,7 +37,8 @@ function planSvg(): { svg: string; widthMm: number; heightMm: number } {
     theme: 'light',
   })
   const levelName = doc.levels[levelId]?.name
-  return toSvg(dl, { scale: 100, marginMm: 10, title: doc.levelOrder.length > 1 && levelName ? `${doc.meta.name} — ${levelName}` : doc.meta.name })
+  const title = (doc.levelOrder.length > 1 && levelName ? `${doc.meta.name} — ${levelName}` : doc.meta.name) + variantSuffix(doc, ' — ', false)
+  return toSvg(dl, { scale: 100, marginMm: 10, title })
 }
 
 /** Rasterises the plan SVG (used when the 2D editor is not mounted). */
@@ -53,32 +69,39 @@ async function svgToPng(svg: string, widthMm: number, heightMm: number, pxPerPap
   }
 }
 
-export async function exportPlan(fmt: PlanFormat): Promise<void> {
-  const base = `${projectBaseName()}${levelSuffix()}`
+/**
+ * Exports the plan of a level (default: the active one), as the given furnishing variant
+ * (default: the active one).
+ */
+export async function exportPlan(fmt: PlanFormat, variantId?: Id, levelId?: Id): Promise<void> {
+  const doc = variantDoc(variantId)
+  const level = levelId && doc.levels[levelId] ? levelId : activeLevel()
+  const base = `${projectBaseName()}${levelSuffix(level)}${variantSuffix(doc, ' - ')}`
   try {
     let saved: string | null = null
     switch (fmt) {
       case 'svg': {
-        const { svg } = planSvg()
+        const { svg } = planSvg(doc, level)
         saved = await api.files.saveText(`${base}.svg`, [{ name: 'SVG', extensions: ['svg'] }], svg)
         break
       }
       case 'pdf': {
-        const { svg, widthMm, heightMm } = planSvg()
+        const { svg, widthMm, heightMm } = planSvg(doc, level)
         saved = await api.files.exportPdf(svg, { widthMm, heightMm, defaultName: `${base}.pdf` })
         break
       }
       case 'dxf': {
-        const dxf = toDxf(currentDoc(), activeLevel())
+        const dxf = toDxf(doc, level)
         saved = await api.files.saveText(`${base}.dxf`, [{ name: 'DXF', extensions: ['dxf'] }], dxf)
         break
       }
       case 'png': {
         let blob: Blob
-        if (handles.editor2d) {
+        // the editor's snapshot only shows the live variant on the editor's level
+        if (handles.editor2d && (!variantId || variantId === activeVariantId(currentDoc())) && level === activeLevel()) {
           blob = await handles.editor2d.snapshotPng(200)
         } else {
-          const { svg, widthMm, heightMm } = planSvg()
+          const { svg, widthMm, heightMm } = planSvg(doc, level)
           blob = await svgToPng(svg, widthMm, heightMm)
         }
         saved = await api.files.saveBinary(`${base}.png`, [{ name: 'PNG', extensions: ['png'] }], await blob.arrayBuffer())

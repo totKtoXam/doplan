@@ -1,6 +1,6 @@
 /**
- * «Карандаш» (pencil marks): the drawing mode and the selected mark. The marks themselves live in
- * the document (doc.annotations, undoable); this store is view state only.
+ * «Пометить» (plan marks for the AI chat; tool id 'pencil'): the drawing shape and the selected mark.
+ * The marks themselves live in the document (doc.annotations, undoable); this store is view state only.
  */
 import { createStore } from 'zustand/vanilla'
 import { useStore } from 'zustand'
@@ -11,23 +11,21 @@ import { docStore } from './document'
 
 export type PencilShape = 'free' | 'lasso' | 'rect'
 
+/** the status-bar hint while marking (i18n key) */
+export const MARK_HINT = 'Пометить: обведите место на плане — пометка попадёт в сообщение · щелчок — выбрать, Delete — удалить, Ctrl+L — в чат'
+
 export interface MarksState {
   shape: PencilShape
   selected: Id | null
-  /** the mini «what to do here?» field next to a mark just drawn (client px) */
-  prompt: { id: Id; x: number; y: number } | null
   setShape(s: PencilShape): void
   select(id: Id | null): void
-  setPrompt(p: { id: Id; x: number; y: number } | null): void
 }
 
 export const marksStore = createStore<MarksState>()((set) => ({
   shape: 'free',
   selected: null,
-  prompt: null,
   setShape: (shape) => set({ shape }),
   select: (selected) => set({ selected }),
-  setPrompt: (prompt) => set({ prompt }),
 }))
 
 /** numbers already taken outside the document (marks drawn on chat images), so ①② never repeat */

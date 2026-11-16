@@ -2,7 +2,7 @@
  * Compact text views of the document for agents (get_plan / get_entity / selection chips).
  * Pure: works on any Doc + DerivedPlan (the real document or a plan-mode draft).
  */
-import { ROOM_TYPE_NAMES, electricName, electricPointsOf } from '@core'
+import { listVariants, ROOM_TYPE_NAMES, electricName, electricPointsOf } from '@core'
 import type { Asset, Catalog, DerivedPlan, Doc, ElectricPoint, EntityKind, EntityRef, Id, Material } from '@core/types'
 import type { AiChip } from '@shared/aiChat'
 
@@ -94,6 +94,14 @@ export function describePlan(doc: Doc, plan: DerivedPlan, levelId: Id, lk: Looku
   const lv = doc.levels[levelId]
   const others = doc.levelOrder.filter((id) => id !== levelId).map((id) => `${id} «${doc.levels[id]?.name ?? id}»`)
   lines.push(`Уровень ${levelId} «${lv?.name ?? '?'}»${levelId === opts.activeLevelId ? ' (активный)' : ''}, высота стен по умолчанию ${r0(lv?.height ?? 0)} мм.${others.length ? ` Другие уровни: ${others.join(', ')}.` : ''}`)
+  const variants = listVariants(doc)
+  if (variants.length > 1) {
+    const active = variants.find((v) => v.active)
+    lines.push(
+      `Вариант обстановки «${active?.name ?? '?'}» (активный; всего вариантов: ${variants.length} — ${variants.map((v) => `«${v.name}»`).join(', ')}). ` +
+        'Предметы, свет и отделка ниже — этого варианта; стены, проёмы и помещения общие для всех вариантов.',
+    )
+  }
   lines.push('Единицы: мм; x вправо, y вниз; углы по часовой.')
   const b = plan.bounds
   if (Number.isFinite(b.minX)) lines.push(`Габариты плана: x ${r0(b.minX)}…${r0(b.maxX)}, y ${r0(b.minY)}…${r0(b.maxY)}.`)

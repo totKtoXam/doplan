@@ -9,6 +9,7 @@ import { EPS, dist, projectOnSegment, segIntersect } from './geom'
 import { newId } from './ids'
 import { computeWallGeoms } from './joins'
 import { MIN_ROOM_AREA_M2, detectRooms, isAutoRoomId } from './rooms'
+import { inheritVariantFinish, pruneVariants } from './variants'
 import type {
   Asset,
   Doc,
@@ -172,6 +173,7 @@ function splitWallAtNode(doc: Doc, wall: Wall, nodeId: Id, s: number): Id {
   // so a split dimension shows as changed until it is measured again (see core/provenance)
   if (wall.dims) w2.dims = JSON.parse(JSON.stringify(wall.dims)) as NonNullable<Wall['dims']>
   doc.walls[w2.id] = w2
+  inheritVariantFinish(doc, 'walls', wall.id, w2.id)
   wall.b = nodeId
   for (const id in doc.openings) {
     const o = doc.openings[id]
@@ -1045,6 +1047,8 @@ export function syncRooms(doc: Doc): void {
     }
   }
   for (const id in doc.rooms) if (!keep.has(id)) delete doc.rooms[id]
+  // inactive furnishing variants forget finishes of records that are gone
+  pruneVariants(doc)
 }
 
 // ───────────────────────────── planarize (extra) ─────────────────────────────

@@ -2,7 +2,7 @@
 import { writeFileSync } from 'node:fs'
 import { basename, resolve } from 'node:path'
 import type { Args } from '../lib/args'
-import { derivePlan, docToPlanSpec, isTechnicalRoom, summarizeLevelRooms } from '../lib/core'
+import { derivePlan, docToPlanSpec, isTechnicalRoom, listVariants, summarizeLevelRooms } from '../lib/core'
 import { ensureDirFor } from '../lib/image'
 import { type CommandResult, DpError, r2 } from '../lib/output'
 import { firstLevel, readDoplan, renderDoc } from '../lib/plan'
@@ -54,6 +54,9 @@ export async function docInfo(a: Args): Promise<CommandResult> {
       }
     })
   const text = [`${basename(file)}: "${doc.meta.name}" (format ${String(manifest.format ?? '?')}, ${entries.length} entries)`]
+  // furnishing variants: items / lights above are the active one's; walls and rooms are shared
+  const variants = listVariants(doc)
+  if (variants.length > 1) text.push(`variants: ${variants.map((v) => (v.active ? `*${v.name}` : v.name)).join(', ')} (* = active; items/lights are of the active one)`)
   for (const l of levels) {
     text.push(
       `level ${l.name}: ${l.sizeM[0]}×${l.sizeM[1]} m, ${l.area.count} rooms ${l.totalArea} m², walls ${l.walls.count} (${l.walls.lengthM} m; ` +
@@ -70,7 +73,7 @@ export async function docInfo(a: Args): Promise<CommandResult> {
     const ops = Object.entries(l.openings)
     text.push(`  openings: ${ops.length ? ops.map(([k, n]) => `${k}×${n}`).join(', ') : 'none'}`)
   }
-  return { data: { ok: true, file, manifest, name: doc.meta.name, levels }, text }
+  return { data: { ok: true, file, manifest, name: doc.meta.name, levels, variants }, text }
 }
 
 export async function docRender(a: Args): Promise<CommandResult> {

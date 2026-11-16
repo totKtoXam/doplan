@@ -387,6 +387,8 @@ async function run(host: ToolHost, name: AiToolName, a: Record<string, unknown>)
       return ok(entityJson(host, (a as AiToolArgs<'get_entity'>).id))
     case 'get_planspec_schema':
       return fail('get_planspec_schema обрабатывается приложением')
+    case 'ask_user':
+      return fail('ask_user обрабатывается чатом')
     case 'list_catalog':
       return ok(catalogSearch(host, a as AiToolArgs<'list_catalog'>))
     case 'apply_measurement': {

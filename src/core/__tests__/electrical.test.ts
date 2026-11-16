@@ -22,7 +22,7 @@ import { computeBom } from '../bom'
 import { buildDisplayList } from '../display'
 import { derivePlan } from '../derive'
 import { toDxf } from '../export/dxf'
-import type { Doc, Id, Wall } from '../types'
+import { DOC_VERSION, DOC_VERSION_V3, type Doc, type Id, type Wall } from '../types'
 
 /** a 4000 × 3000 room (wall centrelines), walls 200 thick */
 function room(): { doc: Doc; L: Id; top: Wall } {
@@ -306,6 +306,23 @@ describe('files', () => {
     const old = JSON.parse(serializeDoc(doc))
     delete old.electrical
     expect(parseDoc(old).electrical).toEqual({})
+  })
+
+  it('writes a file with a socket as format 3, without points as before', () => {
+    const { doc, L } = room()
+    expect(JSON.parse(serializeDoc(doc)).version).toBe(DOC_VERSION)
+    const id = addElectric(doc, L, 'socket', 1000, 60)
+    const text = serializeDoc(doc)
+    expect(JSON.parse(text).version).toBeGreaterThan(2)
+    expect(JSON.parse(text).version).toBe(DOC_VERSION_V3)
+    // this app opens it back with the point; an app that knows only format 2 would refuse it
+    const back = parseDoc(text)
+    expect(back.version).toBe(DOC_VERSION_V3)
+    expect(back.electrical![id]).toBeDefined()
+    removeEntities(doc, [{ kind: 'electric', id }])
+    normalize(doc)
+    expect(JSON.parse(serializeDoc(doc)).version).toBe(DOC_VERSION)
+    expect(() => parseDoc({ ...JSON.parse(text), version: 4 })).toThrow(/новой версии/)
   })
 
   it('sanitises broken records', () => {

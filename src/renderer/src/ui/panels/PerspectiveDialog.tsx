@@ -285,6 +285,8 @@ export function PerspectiveDialog({ open, onClose, underlayId }: PerspectiveDial
       onClose={onClose}
       title={t('Выровнять перспективу')}
       width="max-w-4xl"
+      resizeKey="dialog.perspective"
+      resizeLabel={t('Размер окна')}
       modalLock={busy}
       footer={
         <>

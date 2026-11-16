@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { builtinCatalog, createEmptyDoc, derivePlan, roomEdgeRuns } from '@core'
 import type { Catalog } from '@core/types'
-import { parseToolArgs, toolJsonSchema } from '@shared/aiTools'
+import { formatAnswers, parseToolArgs, toolJsonSchema } from '@shared/aiTools'
 import { docStore } from '@/store/document'
 import { uiStore } from '@/store/ui'
 import './i18n'
@@ -45,6 +45,35 @@ describe('parseToolArgs', () => {
     expect(s.type).toBe('object')
     expect(s.properties.assetId).toBeTruthy()
     expect(s.required).toContain('assetId')
+  })
+})
+
+describe('ask_user', () => {
+  const q = (n: number) => ({ question: 'Как назвать?', options: Array.from({ length: n }, (_, i) => ({ label: `вариант ${i}` })) })
+
+  it('takes 1-4 questions of 2-4 options each', () => {
+    expect(parseToolArgs('ask_user', { questions: [q(2)] }).ok).toBe(true)
+    expect(parseToolArgs('ask_user', { questions: [q(4), { ...q(3), header: 'Комнаты', multiSelect: true }, q(2), q(2)] }).ok).toBe(true)
+    expect(parseToolArgs('ask_user', { questions: [] }).ok).toBe(false)
+    expect(parseToolArgs('ask_user', { questions: [q(2), q(2), q(2), q(2), q(2)] }).ok).toBe(false)
+    expect(parseToolArgs('ask_user', { questions: [q(1)] }).ok).toBe(false)
+    expect(parseToolArgs('ask_user', { questions: [q(5)] }).ok).toBe(false)
+    expect(parseToolArgs('ask_user', { questions: [{ ...q(2), extra: 1 }] }).ok).toBe(false)
+  })
+
+  it('formats the answers for the agent: options, own words, unanswered, the chat note', () => {
+    const text = formatAnswers(
+      [{ question: 'Комната 1?' }, { question: 'Розетки?' }, { question: 'Пол?' }],
+      [{ picked: ['Кухня'] }, { picked: ['Кухня', 'Спальня'], other: ' у окна ' }, { picked: [] }],
+      ' остальное сам ',
+    )
+    expect(text).toBe(
+      'Ответы пользователя:\n1. Комната 1?\n   Ответ: Кухня\n2. Розетки?\n   Ответ: Кухня; Спальня; своими словами: у окна\n3. Пол?\n   Ответ: (без ответа)\nПользователь ответил в чате своими словами: остальное сам',
+    )
+  })
+
+  it('is not executed as a document tool', async () => {
+    expect((await executeTool(host, 'ask_user', { questions: [q(2)] })).result.ok).toBe(false)
   })
 })
 

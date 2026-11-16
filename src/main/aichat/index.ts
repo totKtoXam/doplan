@@ -11,7 +11,7 @@ import { getApiKey } from '../settings'
 import type { AiChip, AiProviderId, AiProviderInfo, AiRunEvent, AiRunRequest } from '../../shared/aiChat'
 import { CH } from '../channels'
 import { handleIpc, onIpc } from '../ipc'
-import { sendToRenderer } from '../window'
+import { onRendererReload, sendToRenderer } from '../window'
 import { API_MODELS, runAnthropicApi } from './anthropicApi'
 import { abortRunCalls, closeRun, forgetRun, onToolResult } from './bridge'
 import { runClaude, runCodex, runGemini, type RunCtx } from './cliRunners'
@@ -299,6 +299,10 @@ function stopRun(runId: unknown): void {
 }
 
 export function registerAiChat(): void {
+  // a reloaded window has no turn to show nor anyone to answer its questions: the agents stop
+  onRendererReload(() => {
+    for (const id of [...runs.keys()]) stopRun(id)
+  })
   handleIpc(CH.aiChatProviders, async (refresh: unknown) => (await providers(refresh === true)).map((p) => p.info))
   handleIpc(CH.aiChatRun, (req: unknown) => startRun(req))
   handleIpc(CH.aiChatStop, (runId: unknown) => stopRun(runId))

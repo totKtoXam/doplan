@@ -1316,6 +1316,7 @@ export function createEmptyDoc(name = 'Новый проект'): Doc {
     rooms: {},
     items: {},
     lights: {},
+    electrical: {},
     dimensions: {},
     labels: {},
     underlays: {},

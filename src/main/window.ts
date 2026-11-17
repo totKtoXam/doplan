@@ -80,6 +80,12 @@ export function setWindowTitle(title: unknown, dirty: unknown): void {
   w.setDocumentEdited(!!dirty)
 }
 
+const reloadHooks: (() => void)[] = []
+/** the renderer starts (re)loading: whatever it held in memory (a running agent turn, its open question) is gone */
+export function onRendererReload(cb: () => void): void {
+  reloadHooks.push(cb)
+}
+
 export function createMainWindow(): BrowserWindow {
   allowClose = false
   rendererReady = false
@@ -120,6 +126,10 @@ export function createMainWindow(): BrowserWindow {
   })
   win.webContents.on('did-start-loading', () => {
     rendererReady = false
+  })
+  // the page itself is replaced (a reload, a crash recovery); not a frame inside it nor an in-page jump
+  win.webContents.on('did-start-navigation', (e) => {
+    if (e.isMainFrame && !e.isSameDocument) for (const cb of reloadHooks) cb()
   })
 
   // navigation lock-down

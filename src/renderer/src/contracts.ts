@@ -85,11 +85,12 @@ export type ToolId =
   | 'window'
   | 'item' // placing `placing` asset
   | 'light'
+  | 'electric' // «Электроточка»: sockets, switches, low-voltage (kind from the «Электрика» panel)
   | 'dimension'
   | 'label'
   | 'measure'
   | 'survey' // «Обмер»: replace a dimension with a tape measurement
-  | 'pencil' // «Карандаш»: freehand marks for the AI chat
+  | 'pencil' // «Пометить»: freehand marks for the AI chat (started from the chat input row)
   | 'paint' // apply `paintMaterialId` to clicked surface
   | 'eyedropper'
   | 'calibrate' // underlay scale calibration: two clicks + typed length
@@ -211,6 +212,7 @@ export interface EngineContext {
     architecture: THREE.Group // walls, floors, ceilings, openings, skirting — children carry userData.ref
     items: THREE.Group // one child per Item, userData.ref = {kind:'item', id}
     lights: THREE.Group // fixtures + THREE lights from doc.lights
+    electrical: THREE.Group // sockets, switches, outlets from doc.electrical, userData.ref = {kind:'electric', id}
     helpers: THREE.Group // gizmos, outlines — excluded from stills/path tracing/export
   }
   /** request a frame (on-demand rendering). Pass true while something animates. */

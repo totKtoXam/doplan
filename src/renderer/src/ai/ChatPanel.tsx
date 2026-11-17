@@ -11,6 +11,7 @@ import {
   ChevronDown,
   ChevronRight,
   CircleAlert,
+  CircleHelp,
   ExternalLink,
   Image as ImageIcon,
   Info,
@@ -32,19 +33,23 @@ import {
 import { type ClipboardEvent, type KeyboardEvent, type ReactNode, type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { AiChatMeta, AiChatSettings, AiMessage, AiPart, AiProviderInfo } from '@shared/aiChat'
 import { useDoc } from '@/store/document'
-import { useUi } from '@/store/ui'
+import { uiStore, useUi } from '@/store/ui'
+import { activateTool } from '@/ui/shell/ToolRail'
 import { cn, Popover } from '@/ui/kit'
 import {
   addImageFiles,
   addUnderlayImage,
   answerApproval,
+  answerQuestion,
   applyDraft,
   cancelLogin,
   consumeInsert,
   discardDraft,
   dismissLogin,
+  hasAnswer,
   newChat,
   openChat,
+  pickAnswer,
   QUICK_ACTIONS,
   quickCmd,
   refreshProviders,
@@ -54,6 +59,7 @@ import {
   replaceImage,
   send,
   sendLoginCode,
+  setAnswerOther,
   startLogin,
   stop,
   updateSettings,
@@ -61,9 +67,12 @@ import {
 } from './store'
 import { pluralKey, tAi } from './i18n'
 import { ImageMarkup } from './ImageMarkup'
+import { MarkButton } from './MarkButton'
+import { parseMarkdown } from './markdown'
 import { t } from '@/i18n'
 
 type ToolPart = Extract<AiPart, { type: 'tool' }>
+type QuestionPart = Extract<AiPart, { type: 'question' }>
 type Effort = AiChatSettings['effort']
 
 const EFFORT_LABEL: Record<string, string> = { '': 'Обычный', low: 'Низкий', medium: 'Средний', high: 'Высокий', xhigh: 'Очень высокий', max: 'Максимальный' }
@@ -108,34 +117,91 @@ function useDigitKeys(open: boolean, count: number, pick: (i: number) => void): 
 
 // ───────────── message parts ─────────────
 
-/** minimal inline markdown: `code`, **bold**; blocks keep line breaks */
+/** inline markdown: `code`, **bold** */
+function inlineMd(text: string): ReactNode[] {
+  const out: ReactNode[] = []
+  const re = /(`[^`\n]+`|\*\*[^*\n]+\*\*)/g
+  let last = 0
+  let m: RegExpExecArray | null
+  let k = 0
+  while ((m = re.exec(text))) {
+    if (m.index > last) out.push(text.slice(last, m.index))
+    const s = m[0]
+    out.push(
+      s.startsWith('`') ? (
+        <code key={k++} className="rounded bg-[color-mix(in_srgb,var(--text)_10%,transparent)] px-1 font-mono text-[11px]">
+          {s.slice(1, -1)}
+        </code>
+      ) : (
+        <strong key={k++} className="font-semibold">
+          {s.slice(2, -2)}
+        </strong>
+      ),
+    )
+    last = m.index + s.length
+  }
+  if (last < text.length) out.push(text.slice(last))
+  return out
+}
+
+const ALIGN = { left: 'text-left', center: 'text-center', right: 'text-right' } as const
+/** the table is as wide as its content (w-max): short columns hug it, long text wraps at this width */
+const CELL = 'max-w-[15rem] [overflow-wrap:break-word]'
+
+/**
+ * Message markdown: text keeps its line breaks, GFM tables and fenced code get their own boxes. Wide
+ * tables and code scroll sideways inside the message; long words and links wrap — nothing runs past
+ * the panel edge.
+ */
 function RichText({ text, className }: { text: string; className?: string }) {
-  const nodes = useMemo(() => {
-    const out: ReactNode[] = []
-    const re = /(`[^`\n]+`|\*\*[^*\n]+\*\*)/g
-    let last = 0
-    let m: RegExpExecArray | null
-    let k = 0
-    while ((m = re.exec(text))) {
-      if (m.index > last) out.push(text.slice(last, m.index))
-      const s = m[0]
-      out.push(
-        s.startsWith('`') ? (
-          <code key={k++} className="rounded bg-[color-mix(in_srgb,var(--text)_10%,transparent)] px-1 font-mono text-[11px]">
-            {s.slice(1, -1)}
-          </code>
+  const blocks = useMemo(() => parseMarkdown(text), [text])
+  return (
+    <div data-ai-text className={cn('min-w-0 text-[12.5px] leading-relaxed [overflow-wrap:anywhere] select-text', className)}>
+      {blocks.map((b, i) =>
+        b.type === 'text' ? (
+          <div key={i} className="my-1 whitespace-pre-wrap first:mt-0 last:mb-0">
+            {inlineMd(b.text)}
+          </div>
+        ) : b.type === 'heading' ? (
+          <div key={i} className={cn('mt-2 mb-1 font-semibold first:mt-0', b.level <= 2 ? 'text-[13.5px]' : 'text-[12.5px]')}>
+            {inlineMd(b.text)}
+          </div>
+        ) : b.type === 'code' ? (
+          <pre
+            key={i}
+            className="my-1.5 max-w-full overflow-x-auto rounded-md border border-border bg-[color-mix(in_srgb,var(--text)_5%,transparent)] px-2 py-1.5 font-mono text-[11px] leading-snug [overflow-wrap:normal] whitespace-pre first:mt-0 last:mb-0"
+          >
+            {b.text}
+          </pre>
         ) : (
-          <strong key={k++} className="font-semibold">
-            {s.slice(2, -2)}
-          </strong>
+          <div key={i} data-md-table className="my-1.5 max-w-full overflow-x-auto rounded-md border border-border first:mt-0 last:mb-0">
+            <table className="w-max border-collapse text-[11.5px] leading-snug">
+              <thead>
+                <tr className="bg-panel-2">
+                  {b.head.map((c, k) => (
+                    <th key={k} className={cn('border-b border-border px-2 py-1 align-bottom font-semibold', ALIGN[b.align[k] ?? 'left'])}>
+                      <div className={CELL}>{inlineMd(c)}</div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {b.rows.map((r, ri) => (
+                  <tr key={ri} className="border-b border-border last:border-b-0">
+                    {r.map((c, k) => (
+                      <td key={k} className={cn('px-2 py-0.5 align-top', ALIGN[b.align[k] ?? 'left'])}>
+                        <div className={CELL}>{inlineMd(c)}</div>
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ),
-      )
-      last = m.index + s.length
-    }
-    if (last < text.length) out.push(text.slice(last))
-    return out
-  }, [text])
-  return <div className={cn('text-[12.5px] leading-relaxed break-words whitespace-pre-wrap select-text', className)}>{nodes}</div>
+      )}
+    </div>
+  )
 }
 
 function StatusIcon({ status }: { status: ToolPart['status'] }) {
@@ -204,6 +270,129 @@ function ApprovalCard({ part }: { part: ToolPart }) {
           {t('Отклонить')}
         </button>
       </div>
+    </div>
+  )
+}
+
+/**
+ * The agent's open questions (ask_user), pinned above the input box until answered. Text typed in the
+ * box and sent is the answer too (with what is picked here).
+ */
+function QuestionCard() {
+  const asking = useAi((s) => s.asking)
+  const attached = useAi((s) => s.chips.length > 0 || s.images.length > 0)
+  if (!asking) return null
+  const ready = hasAnswer(asking, '', attached)
+  return (
+    <div data-ai-question className="mx-2 mb-1.5 rounded-xl border border-accent/50 bg-[color-mix(in_srgb,var(--accent)_6%,var(--panel))] px-2.5 py-2 text-[11.5px] shadow-sm">
+      <div className="mb-1.5 flex items-center gap-1.5 font-medium">
+        <CircleHelp size={13} className="shrink-0 text-accent" />
+        <span className="min-w-0 flex-1">{t('Агент спрашивает')}</span>
+        <button type="button" aria-label={t('Пропустить')} title={t('Не отвечать')} className="text-muted hover:text-text" onClick={() => answerQuestion(null)}>
+          <X size={12} />
+        </button>
+      </div>
+      <div className="flex max-h-[45vh] flex-col gap-2.5 overflow-y-auto pr-0.5">
+        {asking.questions.map((q, qi) => {
+          const d = asking.draft[qi]
+          return (
+            <div key={qi}>
+              <div className="mb-1 leading-snug">
+                {q.header && <span className="mr-1.5 rounded bg-panel-3 px-1.5 py-px text-[10px] text-muted">{q.header}</span>}
+                <span className="text-text">{q.question}</span>
+                {q.multiSelect && <span className="ml-1 text-[10px] text-faint">{t('(можно несколько)')}</span>}
+              </div>
+              <div className="flex flex-col gap-1">
+                {q.options.map((o) => {
+                  const on = d.picked.includes(o.label)
+                  return (
+                    <button
+                      key={o.label}
+                      type="button"
+                      aria-pressed={on}
+                      className={cn(
+                        'flex items-start gap-1.5 rounded-lg border px-2 py-1 text-left',
+                        on ? 'border-accent bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]' : 'border-border hover:bg-hover',
+                      )}
+                      onClick={() => pickAnswer(qi, o.label)}
+                    >
+                      <span
+                        className={cn(
+                          'mt-[3px] flex h-3 w-3 shrink-0 items-center justify-center border',
+                          q.multiSelect ? 'rounded-sm' : 'rounded-full',
+                          on ? 'border-accent bg-accent text-accent-fg' : 'border-border-strong',
+                        )}
+                      >
+                        {on && <Check size={9} strokeWidth={3} />}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block">{o.label}</span>
+                        {o.description && <span className="block text-[10.5px] leading-snug text-muted">{o.description}</span>}
+                      </span>
+                    </button>
+                  )
+                })}
+                <input
+                  value={d.other ?? ''}
+                  placeholder={t('Другое — своими словами')}
+                  className="rounded-lg border border-border bg-input px-2 py-1 outline-none placeholder:text-faint focus:border-accent"
+                  onChange={(e) => setAnswerOther(qi, e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.nativeEvent.isComposing && ready) {
+                      e.preventDefault()
+                      answerQuestion()
+                    }
+                    e.stopPropagation()
+                  }}
+                />
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <div className="mt-2 flex items-center gap-1.5">
+        <button
+          type="button"
+          disabled={!ready}
+          className="rounded-md bg-accent px-2.5 py-0.5 text-accent-fg hover:bg-accent-hover disabled:bg-panel-3 disabled:text-faint"
+          onClick={() => answerQuestion()}
+        >
+          {t('Ответить')}
+        </button>
+        <button type="button" className="rounded-md border border-border px-2.5 py-0.5 hover:bg-hover" onClick={() => answerQuestion(null)}>
+          {t('Пропустить')}
+        </button>
+        <span className="min-w-0 flex-1 truncate text-right text-[10px] text-faint">{t('или ответьте в поле ниже')}</span>
+      </div>
+    </div>
+  )
+}
+
+/** the questions in the message stream: what was asked and what the user answered */
+function QuestionRecord({ part }: { part: QuestionPart }) {
+  // a question still open in a stored chat (the app was closed meanwhile) was never answered
+  const open = useAi((s) => s.asking?.callId === part.id)
+  const status = part.status === 'pending' && !open ? 'cancelled' : part.status
+  return (
+    <div className="my-1.5 rounded-lg border border-border bg-panel-2 px-2.5 py-1.5 text-[11px]">
+      <div className="mb-0.5 flex items-center gap-1.5 text-muted">
+        <CircleHelp size={12} className={cn('shrink-0', status === 'pending' && 'text-accent')} />
+        <span className="min-w-0 flex-1">{t('Вопросы агента')}</span>
+        <span className="text-[10px] text-faint">{t({ pending: 'ждёт ответа', answered: 'отвечено', cancelled: 'без ответа' }[status])}</span>
+      </div>
+      <ul className="flex flex-col gap-0.5">
+        {part.questions.map((q, i) => {
+          const a = part.answers?.[i]
+          const ans = [...(a?.picked ?? []), ...(a?.other ? [a.other] : [])].join('; ')
+          return (
+            <li key={i} className="leading-snug">
+              <span className="text-muted">{q.header || q.question}</span>
+              {ans && <span className="text-text"> — {ans}</span>}
+            </li>
+          )
+        })}
+      </ul>
+      {part.note && <div className="mt-0.5 leading-snug text-text">«{part.note}»</div>}
     </div>
   )
 }
@@ -337,9 +526,11 @@ function Message({ m, live }: { m: AiMessage; live: boolean }) {
           <RichText key={i} text={b.part.text} className="my-1" />
         ) : b.part.type === 'notice' ? (
           <Notice key={i} part={b.part} />
+        ) : b.part.type === 'question' ? (
+          <QuestionRecord key={i} part={b.part} />
         ) : null,
       )}
-      {live && !lastIsText && !m.parts.some((p) => p.type === 'tool' && p.status === 'running') && (
+      {live && !lastIsText && !m.parts.some((p) => (p.type === 'tool' && p.status === 'running') || (p.type === 'question' && p.status === 'pending')) && (
         <div className="my-1 flex items-center gap-1.5 text-[11.5px] text-muted">
           <LoaderCircle size={12} className="dp-spin text-accent" /> <span className="animate-pulse">{t('Думаю…')}</span>
         </div>
@@ -908,6 +1099,7 @@ function Composer() {
   const chips = useAi((s) => s.chips)
   const images = useAi((s) => s.images)
   const running = useAi((s) => !!s.running)
+  const asking = useAi((s) => (s.running ? s.asking : null))
   const focusTick = useAi((s) => s.focusTick)
   const [text, setText] = useState('')
   const [marking, setMarking] = useState<number | null>(null)
@@ -917,7 +1109,7 @@ function Composer() {
     if (focusTick) ta.current?.focus()
   }, [focusTick])
 
-  // a note from the mini field next to a pencil mark: append it (and send right away if asked)
+  // a note from the mini field next to a mark on a chat picture: append it (and send right away if asked)
   const insert = useAi((s) => s.composeInsert)
   const textRef = useRef(text)
   textRef.current = text
@@ -941,7 +1133,9 @@ function Composer() {
   }, [text])
 
   const slash = text.startsWith('/') && !text.includes('\n') ? QUICK_ACTIONS.filter((q) => text.trim() === '/' || [quickCmd(q), q.cmd].some((c) => c.toLowerCase().startsWith(text.trim().toLowerCase()))) : []
-  const canSend = !running && (!!text.trim() || images.length > 0)
+  // a question is open: what is sent answers it (the text, the options picked on the card)
+  const answering = !!asking
+  const canSend = answering ? hasAnswer(asking, text, chips.length > 0 || images.length > 0) : !running && (!!text.trim() || images.length > 0)
 
   const submit = () => {
     if (!canSend) return
@@ -956,6 +1150,8 @@ function Composer() {
       if (slash.length === 1 && text.trim() !== slash[0].cmd) setText(slash[0].cmd + ' ')
       else submit()
     }
+    // the keyboard comes back here after each plan mark: Esc still ends marking
+    if (e.key === 'Escape' && !slash.length && uiStore.getState().tool === 'pencil') activateTool('select', t)
     e.stopPropagation() // editor shortcuts must not fire while typing
   }
 
@@ -1030,7 +1226,7 @@ function Composer() {
           data-ai-input
           value={text}
           rows={1}
-          placeholder={t('Что изменить в плане?')}
+          placeholder={answering ? t('Ответ своими словами…') : t('Что изменить в плане?')}
           className="block max-h-[200px] min-h-[38px] w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-[12.5px] leading-relaxed outline-none placeholder:text-faint"
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKey}
@@ -1038,16 +1234,17 @@ function Composer() {
         />
         <div className="flex items-center gap-1 px-1.5 pb-1.5">
           <PlusMenu onQuick={(cmd) => setText(cmd + ' ')} />
+          <MarkButton />
           <span className="min-w-0 flex-1 truncate px-1 text-[10px] text-faint">{t('«/» — команды, Ctrl+L — выделенное')}</span>
-          {running ? (
+          {running && !(answering && canSend) ? (
             <button type="button" aria-label={t('Стоп')} title={t('Остановить')} className="flex h-7 w-7 items-center justify-center rounded-lg bg-text text-panel hover:opacity-85" onClick={() => stop()}>
               <Square size={11} fill="currentColor" />
             </button>
           ) : (
             <button
               type="button"
-              aria-label={t('Отправить')}
-              title={t('Отправить (Enter)')}
+              aria-label={answering ? t('Ответить') : t('Отправить')}
+              title={answering ? t('Ответить (Enter)') : t('Отправить (Enter)')}
               className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent text-accent-fg hover:bg-accent-hover disabled:bg-panel-3 disabled:text-faint"
               disabled={!canSend}
               onClick={submit}
@@ -1121,6 +1318,7 @@ export function ChatPanel({ className }: { className?: string }) {
       {running && status && <div className="mx-3 mb-1 truncate text-[10.5px] text-faint">{tAi(status)}</div>}
       <LoginCard prov={prov} />
       <DraftBar />
+      <QuestionCard />
       <Composer />
       <div className="flex items-center gap-0.5 px-2 pt-0.5 pb-1.5">
         <ModeButton />

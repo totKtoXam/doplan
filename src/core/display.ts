@@ -10,9 +10,11 @@
  *
  * Pure TS: no DOM / Node imports.
  */
-import type { Asset, Catalog, DerivedPlan, Doc, EntityRef, Id, Item, Light, Opening, Vec2, Wall, WallGeom } from './types'
+import type { Asset, Catalog, DerivedPlan, Doc, ElectricPoint, EntityRef, Id, Item, Light, Opening, Vec2, Wall, WallGeom } from './types'
 import { BUILTIN_ASSETS, ROOM_TYPE_NAMES } from './defaults'
 import { derivePlan } from './derive'
+import { electricBinding, electricLabelLines, electricPointSymbol, electricToPlan } from './electrical'
+import { visibleDoc, visiblePlan } from './layers'
 
 // ───────────────────────────── types ─────────────────────────────
 
@@ -23,6 +25,8 @@ export type DisplayLayer =
   | 'walls'
   | 'openings'
   | 'lights'
+  /** sockets, switches, low-voltage and cable outlets (layer «Электрика») */
+  | 'electrical'
   | 'text'
   | 'dimensions'
   | 'annotations'
@@ -124,6 +128,12 @@ export interface DisplayOptions {
   lang?: 'ru' | 'en'
   /** light fixtures; default true */
   lights?: boolean
+  /** electrical points (layer «Электрика»); default true */
+  electrical?: boolean
+  /** mounting heights next to the electrical symbols; default true */
+  electricalHeights?: boolean
+  /** dimensions tying wall electrical points to the room corners; default false */
+  electricalDims?: boolean
   /** default true */
   northArrow?: boolean
   /** default true */
@@ -138,6 +148,8 @@ export interface DisplayOptions {
   catalog?: Catalog
   /** precomputed derived plan of this level (skips derivePlan) */
   derived?: DerivedPlan
+  /** draw objects hidden in the layers panel too; default false (hidden objects are not exported) */
+  includeHidden?: boolean
 }
 
 interface DisplayTheme {
@@ -154,6 +166,8 @@ interface DisplayTheme {
   furniture: string
   furnitureFill: string | null
   light: string
+  /** electrical points (layer «Электрика») */
+  electric: string
   dim: string
   text: string
   muted: string
@@ -175,6 +189,7 @@ export const DISPLAY_THEMES: Record<DisplayThemeName, DisplayTheme> = {
     furniture: '#6a6a6a',
     furnitureFill: '#ffffff',
     light: '#b7791f',
+    electric: '#b3261e',
     dim: '#333333',
     text: '#111111',
     muted: '#555555',
@@ -194,6 +209,7 @@ export const DISPLAY_THEMES: Record<DisplayThemeName, DisplayTheme> = {
     furniture: '#a8c5ee',
     furnitureFill: null,
     light: '#ffd166',
+    electric: '#ffb4a8',
     dim: '#cfe2ff',
     text: '#ffffff',
     muted: '#cfe2ff',
@@ -343,6 +359,15 @@ type Ctx = {
   lang: 'ru' | 'en'
   units: 'mm' | 'cm' | 'm'
   items: DisplayItem[]
+  /** every room of the level, hidden ones included (the total area does not change when a room is hidden) */
+  allRooms?: DerivedPlan['rooms']
+}
+
+/** draws one object and tags the pieces it pushed without a ref with the object's ref (DXF user layers) */
+function owned(ctx: Ctx, ref: EntityRef, draw: () => void): void {
+  const start = ctx.items.length
+  draw()
+  for (let i = start; i < ctx.items.length; i++) if (!ctx.items[i].ref) ctx.items[i].ref = ref
 }
 
 /** dimension between a and b, dimension line offset by `off` along the left normal (dy, -dx) of a→b */
@@ -1268,6 +1293,60 @@ function drawLight(ctx: Ctx, l: Light): void {
   }
 }
 
+/** symbol radius and text size on paper, mm: ГОСТ symbols keep their paper size at any scale */
+const ELECTRIC_R = 1.5
+const ELECTRIC_TEXT = 1.6
+
+function drawElectric(ctx: Ctx, p: ElectricPoint, opts: DisplayOptions): void {
+  const { th, items, S } = ctx
+  const ref: EntityRef = { kind: 'electric', id: p.id }
+  const R = ELECTRIC_R * S
+  const pen: DlPen = { color: th.electric, width: 0.2 }
+  const fill: DlFill = { color: th.electric }
+  const shape = electricPointSymbol(p)
+  const T = electricToPlan(p, R)
+  const layer = 'electrical' as const
+  const role = 'electric'
+  const turn = p.rotation - 90
+  for (const q of shape.prims) {
+    if (q.t === 'line') items.push({ t: 'line', layer, role, a: T(q.a), b: T(q.b), stroke: pen, ref })
+    else if (q.t === 'circle') items.push({ t: 'circle', layer, role, c: T(q.c), r: q.r * R, stroke: pen, fill: q.fill ? fill : undefined, ref })
+    else if (q.t === 'poly') items.push({ t: 'poly', layer, role, pts: q.pts.map(T), closed: q.closed, stroke: pen, fill: q.fill ? fill : undefined, ref })
+    else items.push({ t: 'arc', layer, role, c: T(q.c), r: q.r * R, a0: q.a0 + turn, a1: q.a1 + turn, stroke: pen, ref })
+  }
+  // letter code and mounting height, upright, beyond the symbol in the facing direction
+  const lines = electricLabelLines(p, { heights: opts.electricalHeights !== false })
+  if (lines.length) {
+    const size = ELECTRIC_TEXT * S
+    const step = size * 1.2
+    const wall = p.mount === 'wall'
+    const r = (p.rotation * Math.PI) / 180
+    const dir = wall ? V(Math.cos(r), Math.sin(r)) : V(0, -1)
+    const reach = (wall ? shape.box.maxY : Math.max(shape.box.maxX, shape.box.maxY)) * R + size * 0.7
+    const base = vAdd(V(p.x, p.y), vMul(dir, reach))
+    const side = Math.abs(dir.x) >= 0.5
+    const anchor: 'start' | 'middle' | 'end' = !side ? 'middle' : dir.x > 0 ? 'start' : 'end'
+    const block = (lines.length - 1) * step
+    // a vertical stack grows away from the symbol; a side stack is centred on it
+    const y0 = side ? base.y - block / 2 : dir.y > 0 ? base.y + size * 0.3 : base.y - block - size * 0.3
+    lines.forEach((text, i) =>
+      items.push({ t: 'text', layer, role: 'electric-text', p: V(base.x, y0 + i * step), text, size: i === 0 ? size : size * 0.85, rot: 0, anchor, baseline: 'middle', color: th.electric, ref }),
+    )
+  }
+  if (opts.electricalDims) {
+    const b = electricBinding(ctx.doc, ctx.plan, p)
+    if (b) {
+      const from = items.length
+      const d = vNorm(vSub(b.b, b.a))
+      const into = vDot(V(d.y, -d.x), b.n) >= 0 ? 1 : -1
+      const off = 6 * S * into
+      if (b.fromA >= 1) pushDim(ctx, b.a, b.foot, off, 'electric-dim', { ref })
+      if (b.fromB >= 1) pushDim(ctx, b.foot, b.b, off, 'electric-dim', { ref })
+      for (let i = from; i < items.length; i++) items[i].layer = 'electrical'
+    }
+  }
+}
+
 function boundsOf(items: DisplayItem[]): DisplayBounds {
   let minX = Infinity
   let minY = Infinity
@@ -1417,7 +1496,7 @@ function drawSheet(ctx: Ctx, opts: DisplayOptions, content: DisplayBounds): void
     items.push({ t: 'line', layer: 'sheet', role: 'titleblock', a: V(x0, y0 + rowH * 2.2), b: V(x1, y0 + rowH * 2.2), stroke: thinPen })
     const colX = x0 + W * 0.55
     items.push({ t: 'line', layer: 'sheet', role: 'titleblock', a: V(colX, y0 + rowH * 1.4), b: V(colX, y0 + H), stroke: thinPen })
-    const total = ctx.plan.rooms.reduce((s, r) => {
+    const total = (ctx.allRooms ?? ctx.plan.rooms).reduce((s, r) => {
       const rec = doc.rooms[r.roomId]
       const k = rec?.type === 'balcony' ? 0.3 : rec?.type === 'loggia' ? 0.5 : 1
       return s + r.area * k
@@ -1435,13 +1514,16 @@ function drawSheet(ctx: Ctx, opts: DisplayOptions, content: DisplayBounds): void
 }
 
 /** Build the display list of one level. */
-export function buildDisplayList(doc: Doc, levelId: Id, opts: DisplayOptions = {}): DisplayList {
+export function buildDisplayList(fullDoc: Doc, levelId: Id, opts: DisplayOptions = {}): DisplayList {
   const S = opts.scale && opts.scale > 0 ? opts.scale : 100
   const themeName: DisplayThemeName = opts.theme ?? 'light'
   const th = DISPLAY_THEMES[themeName]
   const lang = opts.lang ?? 'ru'
-  const plan = opts.derived ?? derivePlan(doc, levelId)
-  const ctx: Ctx = { doc, plan, S, th, lang, units: doc.settings?.units ?? 'mm', items: [] }
+  // rooms are detected on the full document; objects hidden in the layers panel are not drawn
+  const fullPlan = opts.derived ?? derivePlan(fullDoc, levelId)
+  const doc = opts.includeHidden ? fullDoc : visibleDoc(fullDoc)
+  const plan = opts.includeHidden ? fullPlan : visiblePlan(fullDoc, fullPlan)
+  const ctx: Ctx = { doc, plan, S, th, lang, units: doc.settings?.units ?? 'mm', items: [], allRooms: fullPlan.rooms }
   const showDims = opts.dimensions ?? doc.settings?.showDimensions ?? true
   const showAreas = opts.areas ?? doc.settings?.showAreas ?? true
   const showFurniture = opts.furniture ?? doc.settings?.showFurniture2d ?? true
@@ -1488,13 +1570,18 @@ export function buildDisplayList(doc: Doc, levelId: Id, opts: DisplayOptions = {
   // furniture
   if (showFurniture) {
     const list = Object.values(doc.items)
-      .filter((it) => it.levelId === levelId && !it.hidden)
+      .filter((it) => it.levelId === levelId && (opts.includeHidden || !it.hidden))
       .sort((a, b) => (a.mount === 'floor' ? 0 : 1) - (b.mount === 'floor' ? 0 : 1) || a.elevation - b.elevation)
-    for (const it of list) drawItem(ctx, it, findAsset(doc, opts.catalog, it.assetId))
+    for (const it of list) owned(ctx, { kind: 'item', id: it.id }, () => drawItem(ctx, it, findAsset(doc, opts.catalog, it.assetId)))
   }
   drawWalls(ctx, levelWalls, openingsByWall)
   drawOpenings(ctx, levelWalls, openingsByWall)
-  if (opts.lights !== false) for (const l of Object.values(doc.lights)) if (l.levelId === levelId) drawLight(ctx, l)
+  if (opts.lights !== false) {
+    for (const l of Object.values(doc.lights)) if (l.levelId === levelId) owned(ctx, { kind: 'light', id: l.id }, () => drawLight(ctx, l))
+  }
+  if (opts.electrical !== false && doc.electrical) {
+    for (const p of Object.values(doc.electrical)) if (p.levelId === levelId) drawElectric(ctx, p, opts)
+  }
   drawRoomLabels(ctx, showLabels, showAreas)
   if (showLabels) {
     for (const lb of Object.values(doc.labels)) {
@@ -1519,7 +1606,8 @@ export function buildDisplayList(doc: Doc, levelId: Id, opts: DisplayOptions = {
   if (opts.manualDimensions !== false) {
     for (const dm of Object.values(doc.dimensions)) {
       if (dm.levelId !== levelId) continue
-      pushDim(ctx, dm.a, dm.b, dm.offset, 'dim-manual', { ref: { kind: 'dimension', id: dm.id } })
+      const ref: EntityRef = { kind: 'dimension', id: dm.id }
+      owned(ctx, ref, () => pushDim(ctx, dm.a, dm.b, dm.offset, 'dim-manual', { ref }))
     }
   }
   const content = boundsOf(ctx.items)

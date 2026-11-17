@@ -140,6 +140,7 @@ export function refsOnLevel(doc: Doc, levelId: Id): EntityRef[] {
   add('room', doc.rooms)
   add('item', doc.items)
   add('light', doc.lights)
+  add('electric', doc.electrical ?? {})
   add('dimension', doc.dimensions)
   add('label', doc.labels)
   add('underlay', doc.underlays)

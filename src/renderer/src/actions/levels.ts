@@ -1,4 +1,4 @@
-import { newId, remapAccentFace } from '@core'
+import { copyLevelInVariants, newId, remapAccentFace, type LevelCopyMaps } from '@core'
 import type { Doc, Id, Level } from '@core/types'
 import { t } from '@/i18n'
 import { docStore } from '@/store/document'
@@ -9,10 +9,13 @@ import { currentDoc } from './util'
 /**
  * Copies every plan entity of `srcLevel` in `src` into `draft` on level `dstLevel`, with fresh ids,
  * shifted by (dx, dy). Project-local materials and assets referenced are copied too (same ids).
+ * Returns old → new ids of the walls, rooms and openings (the finishes of other furnishing variants follow them).
  */
-export function copyLevelInto(src: Doc, srcLevel: Id, draft: Doc, dstLevel: Id, dx = 0, dy = 0): void {
+export function copyLevelInto(src: Doc, srcLevel: Id, draft: Doc, dstLevel: Id, dx = 0, dy = 0): LevelCopyMaps {
   const nodeMap = new Map<Id, Id>()
   const wallMap = new Map<Id, Id>()
+  const roomMap = new Map<Id, Id>()
+  const openingMap = new Map<Id, Id>()
   for (const n of Object.values(src.nodes)) {
     if (n.levelId !== srcLevel) continue
     const id = newId('n')
@@ -32,23 +35,40 @@ export function copyLevelInto(src: Doc, srcLevel: Id, draft: Doc, dstLevel: Id, 
     const wallId = wallMap.get(o.wallId)
     if (!wallId) continue
     const id = newId('o')
+    openingMap.set(o.id, id)
     draft.openings[id] = structuredClone({ ...o, id, wallId })
   }
   for (const r of Object.values(src.rooms)) {
     if (r.levelId !== srcLevel) continue
     const id = newId('r')
+    roomMap.set(r.id, id)
     draft.rooms[id] = structuredClone({ ...r, id, levelId: dstLevel, anchor: { x: r.anchor.x + dx, y: r.anchor.y + dy } })
     remapAccentFace(draft.rooms[id], wallMap)
   }
+  const itemMap = new Map<Id, Id>()
+  const lightMap = new Map<Id, Id>()
   for (const it of Object.values(src.items)) {
     if (it.levelId !== srcLevel) continue
     const id = newId('i')
+    itemMap.set(it.id, id)
     draft.items[id] = structuredClone({ ...it, id, levelId: dstLevel, x: it.x + dx, y: it.y + dy, groupId: undefined })
   }
   for (const l of Object.values(src.lights)) {
     if (l.levelId !== srcLevel) continue
     const id = newId('l')
+    lightMap.set(l.id, id)
     draft.lights[id] = structuredClone({ ...l, id, levelId: dstLevel, x: l.x + dx, y: l.y + dy })
+  }
+  for (const e of Object.values(src.electrical ?? {})) {
+    if (e.levelId !== srcLevel) continue
+    const id = newId('e')
+    const wallId = e.wallId ? wallMap.get(e.wallId) : undefined
+    const copy = { ...e, id, levelId: dstLevel, x: e.x + dx, y: e.y + dy, wallId }
+    if (!wallId) {
+      delete copy.wallId
+      delete copy.side
+    }
+    ;(draft.electrical ??= {})[id] = copy
   }
   for (const dm of Object.values(src.dimensions)) {
     if (dm.levelId !== srcLevel) continue
@@ -69,6 +89,7 @@ export function copyLevelInto(src: Doc, srcLevel: Id, draft: Doc, dstLevel: Id, 
     for (const m of Object.values(src.materials)) if (!draft.materials[m.id]) draft.materials[m.id] = structuredClone(m)
     for (const a of Object.values(src.assets)) if (!draft.assets[a.id]) draft.assets[a.id] = structuredClone(a)
   }
+  return { walls: wallMap, rooms: roomMap, openings: openingMap, items: itemMap, lights: lightMap }
 }
 
 /** Removes a level and everything on it (draft mutation). */
@@ -85,6 +106,9 @@ export function removeLevelFromDraft(d: Doc, levelId: Id): void {
   for (const c of colls) {
     const rec = d[c] as Record<Id, { levelId: Id }>
     for (const [id, e] of Object.entries(rec)) if (e.levelId === levelId) delete rec[id]
+  }
+  if (d.electrical) {
+    for (const [id, e] of Object.entries(d.electrical)) if (e.levelId === levelId) delete d.electrical[id]
   }
   removeLevelMarks(d, levelId)
   delete d.levels[levelId]
@@ -106,7 +130,11 @@ export function addLevel(copyFrom?: Id): Id {
   docStore.getState().transact(copyFrom ? t('Копировать этаж') : t('Добавить этаж'), (d) => {
     d.levels[id] = { id, name: t('Этаж {n}', { n }), elevation: geom.elevation, height: geom.height, visible: true }
     d.levelOrder.push(id)
-    if (copyFrom && doc.levels[copyFrom]) copyLevelInto(doc, copyFrom, d, id)
+    if (copyFrom && doc.levels[copyFrom]) {
+      const maps = copyLevelInto(doc, copyFrom, d, id)
+      // the other furnishing variants get their furniture and finishes on the copy too
+      copyLevelInVariants(d, copyFrom, id, maps)
+    }
   })
   uiStore.getState().set({ activeLevelId: id, selection: [] })
   return id

@@ -18,6 +18,38 @@ export interface Vec2 {
   y: number
 }
 
+// ───────────────────────────── Layers (outliner) ─────────────────────────────
+
+/**
+ * Outliner state every plan object may carry (layers panel, see core/layers):
+ * own visibility / lock, a user name and the user layer the object is on.
+ * The effective state also depends on the kind's group flags (`Doc.groupFlags`) and the layer's flags.
+ */
+export interface LayerFlags {
+  /** user name shown in the layers panel (absent = generated from the object) */
+  name?: string
+  /** hidden everywhere: 2D plan, 3D, exports */
+  hidden?: boolean
+  /** not pickable on the plan / in 3D, protected from delete */
+  locked?: boolean
+  /** user layer (`Doc.layers`) the object is on; absent = no layer */
+  layerId?: Id
+}
+
+/** A flat user layer (like an AutoCAD layer / SketchUp tag): objects reference it by `layerId`. */
+export interface UserLayer {
+  id: Id
+  name: string
+  hidden?: boolean
+  locked?: boolean
+}
+
+/** visibility / lock of a whole kind of objects (all walls, all furniture…) */
+export interface GroupFlags {
+  hidden?: boolean
+  locked?: boolean
+}
+
 // ───────────────────────────── Levels ─────────────────────────────
 
 export interface Level {
@@ -92,7 +124,7 @@ export interface WallDims {
   right?: DimProvenance
 }
 
-export interface Wall {
+export interface Wall extends LayerFlags {
   id: Id
   levelId: Id
   a: Id
@@ -144,7 +176,7 @@ export const DOOR_LEAF_STYLES: readonly DoorLeafStyle[] = ['flush', 'panel', 'gl
 export type DoorSlide = 'surface' | 'pocket' | 'barn' | 'folding'
 export const DOOR_SLIDES: readonly DoorSlide[] = ['surface', 'pocket', 'barn', 'folding']
 
-export interface Opening {
+export interface Opening extends LayerFlags {
   id: Id
   wallId: Id
   kind: OpeningKind
@@ -249,7 +281,7 @@ export interface CeilingSpec extends SurfaceFinish {
  * Persistent room record. Geometry is DERIVED (see DerivedRoom in core/rooms) —
  * a record is matched to the detected face that contains `anchor`.
  */
-export interface Room {
+export interface Room extends LayerFlags {
   id: Id
   levelId: Id
   anchor: Vec2
@@ -287,7 +319,7 @@ export interface RoomDesign {
  */
 export type MountKind = 'floor' | 'wall' | 'ceiling' | 'surface' | 'free'
 
-export interface Item {
+export interface Item extends LayerFlags {
   id: Id
   levelId: Id
   assetId: Id
@@ -318,7 +350,7 @@ export interface Item {
 
 export type LightKind = 'ceiling' | 'spot' | 'pendant' | 'point' | 'strip' | 'area'
 
-export interface Light {
+export interface Light extends LayerFlags {
   id: Id
   levelId: Id
   kind: LightKind
@@ -336,9 +368,92 @@ export interface Light {
   size?: { w: number; d: number }
 }
 
+// ───────────────────────────── Electrical points ─────────────────────────────
+
+/**
+ * Kind of an electrical / low-voltage point. The catalog (names, plan symbols, default heights,
+ * 3D look) lives in core/electrical `ELECTRIC_TYPES`; unknown kinds in files are kept as `other`.
+ */
+export type ElectricKind =
+  // sockets
+  | 'socket'
+  | 'socketDouble'
+  | 'socketGround'
+  | 'socketIP44'
+  | 'socketLid'
+  | 'socketPower'
+  | 'socketUsbA'
+  | 'socketUsbC'
+  | 'socketUsbAC'
+  // USB modules
+  | 'usbA'
+  | 'usbC'
+  // switches
+  | 'switch1'
+  | 'switch2'
+  | 'switch3'
+  | 'switchPass'
+  | 'switchCross'
+  | 'dimmer'
+  | 'bell'
+  // low voltage
+  | 'tv'
+  | 'rj45'
+  | 'phone'
+  | 'hdmi'
+  | 'speaker'
+  // cable outlets for appliances / fixtures
+  | 'outAc'
+  | 'outLight'
+  | 'outSconce'
+  | 'outHood'
+  | 'outBoiler'
+  | 'outWasher'
+  // equipment
+  | 'junction'
+  | 'panel'
+  | 'sensorLeak'
+  | 'sensorSmoke'
+  | 'sensorMotion'
+  | 'thermostat'
+  | 'other'
+
+/** wall: on a wall face · floor: in the floor · ceiling: on the ceiling */
+export type ElectricMount = 'wall' | 'floor' | 'ceiling'
+
+/**
+ * A socket, switch, data / TV outlet, cable outlet, junction box, panel or sensor. Stored in
+ * `Doc.electrical` (optional: absent in files from before 0.12).
+ *
+ * The plan position is the truth; a wall point also remembers the wall face it sits on and is kept on
+ * that face when the wall moves or changes thickness (core/electrical `reattachElectrical`).
+ */
+export interface ElectricPoint extends LayerFlags {
+  id: Id
+  levelId: Id
+  kind: ElectricKind
+  mount: ElectricMount
+  /** plan position, mm: for a wall point, the point on the wall face (centre of the frame) */
+  x: number
+  y: number
+  /** height of the centre above the floor, mm (ceiling points: the ceiling height) */
+  elevation: number
+  /** direction the face of the device looks to on plan, degrees clockwise (wall: into the room) */
+  rotation: number
+  /** wall the point is mounted on and the face side (absent for floor / ceiling / free points) */
+  wallId?: Id
+  side?: 'left' | 'right'
+  /** devices of this kind in one frame (posts), 1–5; default 1 */
+  gangs?: number
+  /** frame of several posts laid vertically (default horizontal) */
+  vertical?: boolean
+  /** free text: what is plugged in, the circuit, notes for the electrician */
+  comment?: string
+}
+
 // ───────────────────────────── Annotations ─────────────────────────────
 
-export interface Dimension {
+export interface Dimension extends LayerFlags {
   id: Id
   levelId: Id
   a: Vec2
@@ -347,7 +462,7 @@ export interface Dimension {
   offset: number
 }
 
-export interface Label {
+export interface Label extends LayerFlags {
   id: Id
   levelId: Id
   x: number
@@ -357,10 +472,10 @@ export interface Label {
 }
 
 /**
- * «Карандаш»: a freehand mark drawn over the plan to point at a zone in the AI chat
+ * «Пометка»: a freehand mark drawn over the plan to point at a zone in the AI chat
  * («в ① ширина 180 см»). Editor-only: not exported, not shown in 3D.
  */
-export interface Annotation {
+export interface Annotation extends LayerFlags {
   id: Id
   levelId: Id
   /** badge number shown as ①, ② … */
@@ -390,6 +505,10 @@ export interface Underlay {
   locked: boolean
   widthPx: number
   heightPx: number
+  /** user name shown in the layers panel */
+  name?: string
+  /** user layer (`Doc.layers`) the image is on */
+  layerId?: Id
 }
 
 // ───────────────────────────── Catalog: materials & assets ─────────────────────────────
@@ -694,6 +813,18 @@ export interface DocMeta {
 }
 
 export const DOC_VERSION = 1
+/**
+ * Format of a document with two or more furnishing variants (doplan 0.12). Older apps refuse it
+ * (instead of silently dropping the inactive variants on their next save); see `docFormatVersion`
+ * in core/variants.
+ */
+export const DOC_VERSION_VARIANTS = 2
+/**
+ * Format 3: data of doplan 0.13 — user layers and group flags of the layers panel, objects' own
+ * hidden / locked / layer / user name (see `usesLayers` in core/layers), then electrical points.
+ * doplan 0.12 accepts format 2 and would silently drop this data, so it must refuse the file.
+ */
+export const DOC_VERSION_V3 = 3
 
 export interface Doc {
   version: number
@@ -709,6 +840,10 @@ export interface Doc {
   rooms: Record<Id, Room>
   items: Record<Id, Item>
   lights: Record<Id, Light>
+  /** sockets, switches, low-voltage and cable outlets (see ElectricPoint). Optional in the type for
+   *  older callers, but createEmptyDoc/parseDoc always create it and it is never deleted. Shared by
+   *  all furnishing variants, like the walls (not in VARIANT_COLLECTIONS). */
+  electrical?: Record<Id, ElectricPoint>
   dimensions: Record<Id, Dimension>
   labels: Record<Id, Label>
   /** pencil marks (editor-only, see Annotation) */
@@ -722,6 +857,68 @@ export interface Doc {
   source?: DocSource
   /** design layer: apartment style, currency and the user's price list */
   design?: DocDesign
+  /** flat user layers (layers panel); objects reference them by `layerId` */
+  layers?: Record<Id, UserLayer>
+  /** panel order of `layers` */
+  layerOrder?: Id[]
+  /** visibility / lock of whole kinds, keyed by the kind (`EntityRef.kind`, e.g. 'wall', 'item') */
+  groupFlags?: Record<string, GroupFlags>
+  /** furnishing variants over the shared apartment (absent = one implicit variant; see core/variants) */
+  variants?: DocVariants
+}
+
+// ───────────────────────────── Furnishing variants ─────────────────────────────
+
+/**
+ * WHAT LIVES IN A VARIANT — the single list. Everything else (walls, openings, rooms, levels,
+ * dimensions, labels, underlays, cameras, settings, prices) is the shared apartment.
+ *
+ *  - `VARIANT_COLLECTIONS`: whole Doc collections owned by the variant. Items of the apartment
+ *    itself (columns, stairs, boxing — see `isApartmentItem` in core/variants) stay shared.
+ *    To put a new kind of object into variants: add its Doc key here and its reader to
+ *    `VARIANT_READERS` in core/io.ts (the compiler asks for it).
+ *  - `VARIANT_*_FIELDS`: finish fields of shared records (the geometry stays shared).
+ *  - the style applied to the apartment (`DocDesign.styleId`).
+ *
+ * The ACTIVE variant's content lives in the document itself (doc.items, doc.walls[…].left …), so
+ * every reader works unchanged; inactive variants keep theirs in `VariantRecord.stash`.
+ */
+export const VARIANT_COLLECTIONS = ['items', 'lights'] as const
+export type VariantCollection = (typeof VARIANT_COLLECTIONS)[number]
+export const VARIANT_ROOM_FIELDS = ['floor', 'ceiling', 'skirting', 'skirtingMaterialId', 'design'] as const
+export const VARIANT_WALL_FIELDS = ['left', 'right'] as const
+export const VARIANT_OPENING_FIELDS = ['frameMaterialId', 'leafMaterialId', 'style', 'curtain'] as const
+
+export type RoomVariantFinish = Partial<Pick<Room, (typeof VARIANT_ROOM_FIELDS)[number]>>
+export type WallVariantFinish = Partial<Pick<Wall, (typeof VARIANT_WALL_FIELDS)[number]>>
+export type OpeningVariantFinish = Partial<Pick<Opening, (typeof VARIANT_OPENING_FIELDS)[number]>>
+
+/** Finishes of one inactive variant, by shared record id (kept complete by pruneVariants; a missing record keeps the live finish). */
+export interface VariantFinishes {
+  rooms: Record<Id, RoomVariantFinish>
+  walls: Record<Id, WallVariantFinish>
+  openings: Record<Id, OpeningVariantFinish>
+}
+
+/** Content of an inactive variant. */
+export interface VariantStash {
+  collections: { [K in VariantCollection]?: NonNullable<Doc[K]> }
+  finishes: VariantFinishes
+  styleId?: Id
+}
+
+export interface VariantRecord {
+  id: Id
+  name: string
+  /** inactive variants only: their content (the active one's lives in the document) */
+  stash?: VariantStash
+}
+
+export interface DocVariants {
+  activeId: Id
+  /** display order */
+  order: Id[]
+  list: Record<Id, VariantRecord>
 }
 
 /** Project-wide design settings. */
@@ -741,6 +938,7 @@ export type EntityKind =
   | 'room'
   | 'item'
   | 'light'
+  | 'electric'
   | 'dimension'
   | 'label'
   | 'underlay'

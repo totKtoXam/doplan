@@ -16,6 +16,7 @@ import {
   createProjectFolder,
   offerResetGitConfig,
   offerTrustFolder,
+  unsafeGitNotice,
 } from '@/actions/project'
 import { useT } from '@/i18n'
 import { api } from '@/store/api'
@@ -261,12 +262,8 @@ function HistoryDialog() {
       ) : info && info.unsafeGit ? (
         <div className="flex flex-col gap-2 text-[12px] leading-relaxed">
           {error && <div className="text-[11px] text-[#ff8589]">{error}</div>}
-          <div>
-            {t('В настройках git этой папки есть параметры, через которые git или его дополнения могут запускать программы: {keys}. Пока они там, doplan не запускает в папке git: история версий выключена, сохранение пишет только файлы.', {
-              keys: info.unsafeGit.keys.slice(0, 8).join(', ') + (info.unsafeGit.keys.length > 8 ? ', …' : ''),
-            })}
-          </div>
-          {info.unsafeGit.resettable ? (
+          <div>{unsafeGitNotice(info.unsafeGit).text}</div>
+          {info.unsafeGit.resettable && (
             <>
               <div className="text-[var(--muted)]">
                 {t('Сброс оставит в .git/config только простые параметры (имя автора, адрес удалённого репозитория, ветки); прежний файл сохранится как .git/config.doplan-backup.')}
@@ -284,8 +281,6 @@ function HistoryDialog() {
                 </Button>
               </div>
             </>
-          ) : (
-            <div className="text-[var(--muted)]">{t('Этот репозиторий устроен иначе, и doplan не может сбросить его настройки: работайте без версий или исправьте .git/config сами.')}</div>
           )}
         </div>
       ) : (
@@ -561,7 +556,9 @@ export function ProjectFolderSection() {
           ) : gitFile ? (
             <div className="text-[11px] text-[var(--muted)]">{t('Папка входит в другой репозиторий git — история версий doplan выключена')}</div>
           ) : unsafeGit ? (
-            <div className="text-[11px] text-[var(--muted)]">{t('История версий выключена: небезопасные настройки git в папке')}</div>
+            <div className="text-[11px] text-[var(--muted)]">
+              {unsafeGit.layout?.length ? t('История версий выключена: репозиторий с неподдерживаемыми ссылками или файлами') : t('История версий выключена: небезопасные настройки git в папке')}
+            </div>
           ) : (
             !git && <div className="text-[11px] text-[var(--muted)]">{t('Git не найден — история версий недоступна')}</div>
           )}

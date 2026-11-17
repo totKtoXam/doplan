@@ -1,5 +1,5 @@
 /** Builds the entries of the right-click menu for whatever is under the cursor. */
-import { duplicateEntities, removeEntities, splitWall } from '@core'
+import { duplicateEntities, entityKinds, isOwnHidden, kindTable, pickableRefs, removeEntities, setHidden, splitWall, unlockedRefs } from '@core'
 import type { EntityRef, Id, Vec2 } from '@core/types'
 import { t } from '@/i18n'
 import { docStore } from '@/store/document'
@@ -10,7 +10,7 @@ import { requestWallFrom } from './tools/wallStart'
 import { addSelectionToChat } from '@/ai/store' // ai-chat
 import { markMenuItems } from './tools/pencil' // ai-chat
 
-const DUPLICABLE = new Set(['wall', 'opening', 'item', 'light', 'label', 'dimension'])
+const DUPLICABLE = new Set(['wall', 'opening', 'item', 'light', 'electric', 'label', 'dimension'])
 
 export function buildContextMenu(ctx: EditorCtx, plan: Vec2, zoomToFit: () => void): ContextMenuItem[] {
   const ui = uiStore.getState()
@@ -38,22 +38,26 @@ export function buildContextMenu(ctx: EditorCtx, plan: Vec2, zoomToFit: () => vo
         }
         for (const id in doc.items) if (doc.items[id].levelId === levelId && !doc.items[id].hidden) refs.push({ kind: 'item', id })
         for (const id in doc.lights) if (doc.lights[id].levelId === levelId) refs.push({ kind: 'light', id })
+        for (const id in doc.electrical) if (doc.electrical[id].levelId === levelId) refs.push({ kind: 'electric', id })
         for (const id in doc.labels) if (doc.labels[id].levelId === levelId) refs.push({ kind: 'label', id })
         for (const id in doc.dimensions) if (doc.dimensions[id].levelId === levelId) refs.push({ kind: 'dimension', id })
-        uiStore.getState().select(refs)
+        uiStore.getState().select(pickableRefs(doc, refs))
       },
     })
-    const hidden = Object.values(doc.items).filter((it) => it.levelId === levelId && it.hidden)
+    // objects of this level hidden one by one (eye in the layers panel); hidden kinds / layers stay as they are
+    const hidden: { kind: string; id: Id }[] = []
+    for (const def of entityKinds()) {
+      const table = kindTable(doc, def)
+      if (!table) continue
+      for (const id in table) {
+        const r = { kind: def.kind, id }
+        if (def.level(table[id], doc) === levelId && isOwnHidden(doc, r)) hidden.push(r)
+      }
+    }
     if (hidden.length) {
       items.push({
-        label: t('Показать скрытые предметы'),
-        run: () =>
-          transact(t('Показать скрытые предметы'), (d) => {
-            for (const it of hidden) {
-              const x = d.items[it.id]
-              if (x) x.hidden = false
-            }
-          }),
+        label: t('Показать скрытые объекты'),
+        run: () => transact(t('Показать скрытые объекты'), (d) => setHidden(d, hidden, false)),
       })
     }
     return items
@@ -247,7 +251,7 @@ export function buildContextMenu(ctx: EditorCtx, plan: Vec2, zoomToFit: () => vo
   }
 
   const dup = sel.filter((r) => DUPLICABLE.has(r.kind))
-  const removable = sel.filter((r) => r.kind !== 'room')
+  const removable = unlockedRefs(doc, sel).filter((r) => r.kind !== 'room')
   if (items.length && (dup.length || removable.length)) items.push({ label: '', separator: true })
   if (dup.length) {
     items.push({
@@ -268,6 +272,8 @@ export function buildContextMenu(ctx: EditorCtx, plan: Vec2, zoomToFit: () => vo
               return !!now.items[r.id]
             case 'light':
               return !!now.lights[r.id]
+            case 'electric':
+              return !!now.electrical?.[r.id]
             case 'label':
               return !!now.labels[r.id]
             case 'dimension':

@@ -6,6 +6,7 @@ import { actions } from '@/actions'
 import { useT } from '@/i18n'
 import { useDoc } from '@/store/document'
 import { uiStore, useUi } from '@/store/ui'
+import { VariantTabs } from '@/ui/variants/VariantTabs'
 import { ContextMenu, IconBtn, type MenuEntry } from './primitives'
 
 export function LevelTabs() {
@@ -61,6 +62,7 @@ export function LevelTabs() {
       })}
       <IconBtn icon={Plus} size="sm" label={t('Добавить этаж')} tipSide="top" onClick={() => actions.addLevel()} />
       <ContextMenu at={menu?.at ?? null} items={menu ? menuItems(menu.id) : []} onClose={close} />
+      <VariantTabs />
     </div>
   )
 }

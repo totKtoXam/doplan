@@ -6,11 +6,12 @@ import {
   CopyPlus,
   DoorOpen,
   Hand,
+  Highlighter,
   LampCeiling,
   MousePointer2,
   Paintbrush,
-  Pencil,
   Pipette,
+  Plug,
   RotateCw,
   Ruler,
   RulerDimensionLine,
@@ -23,7 +24,9 @@ import { actions } from '@/actions'
 import { useT } from '@/i18n'
 import { uiStore, useUi } from '@/store/ui'
 import type { ToolId } from '@/contracts'
+import { MARK_HINT } from '@/store/marks'
 import { IconBtn } from './primitives'
+import '@/ui/electricI18n'
 
 export interface ToolDef {
   id: ToolId
@@ -33,6 +36,8 @@ export interface ToolDef {
   key?: string
   /** status-bar hint shown when the tool is activated */
   hint: string
+  /** false: has a hotkey but no rail button (started elsewhere) */
+  rail?: false
 }
 
 /** Tool definitions shared by the rail and the keyboard shortcuts. Labels/hints are i18n keys. */
@@ -45,16 +50,18 @@ export const TOOLS: (ToolDef | 'sep')[] = [
   { id: 'door', icon: DoorOpen, label: 'Дверь', key: 'D', hint: 'Кликните по стене, чтобы поставить дверь' },
   { id: 'window', icon: AppWindow, label: 'Окно', key: 'N', hint: 'Кликните по стене, чтобы поставить окно' },
   { id: 'light', icon: LampCeiling, label: 'Светильник', key: 'L', hint: 'Кликните, чтобы поставить светильник' },
+  { id: 'electric', icon: Plug, label: 'Электроточка', key: 'E', hint: 'Кликните у стены, чтобы поставить розетку или выключатель (тип — во вкладке «Электрика»)' },
   'sep',
   { id: 'dimension', icon: RulerDimensionLine, label: 'Размер', hint: 'Укажите две точки размерной линии, затем её отступ' },
   { id: 'measure', icon: Ruler, label: 'Рулетка', key: 'M', hint: 'Укажите две точки, чтобы измерить расстояние' },
   { id: 'survey', icon: ClipboardCheck, label: 'Обмер', hint: 'Щёлкните размер комнаты и введите длину, замеренную рулеткой' },
   { id: 'label', icon: Type, label: 'Надпись', key: 'T', hint: 'Кликните, чтобы добавить надпись' },
-  { id: 'pencil', icon: Pencil, label: 'Карандаш', key: 'P', hint: 'Обведите место на плане и добавьте пометку в чат ИИ (Ctrl+L)' },
   'sep',
   { id: 'paint', icon: Paintbrush, label: 'Покраска', key: 'B', hint: 'Кликните по полу, стене или предмету, чтобы применить материал' },
   { id: 'eyedropper', icon: Pipette, label: 'Пипетка', key: 'I', hint: 'Кликните по поверхности, чтобы взять её материал' },
   { id: 'split', icon: Scissors, label: 'Разделить стену', key: 'X', hint: 'Кликните по стене, чтобы разделить её в этой точке' },
+  // a chat tool: the «Пометить» button in the chat input row (ai/MarkButton), P still starts it
+  { id: 'pencil', icon: Highlighter, label: 'Пометить', key: 'P', hint: MARK_HINT, rail: false },
 ]
 
 export function toolDef(id: ToolId): ToolDef | undefined {
@@ -77,7 +84,7 @@ export function ToolRail() {
   return (
     <nav className="flex w-11 shrink-0 flex-col items-center gap-0.5 border-r border-border bg-panel py-1.5" aria-label={t('Инструменты')}>
       {TOOLS.map((d, i) =>
-        d === 'sep' ? (
+        d !== 'sep' && d.rail === false ? null : d === 'sep' ? (
           <div key={`sep${i}`} className="my-1 h-px w-6 bg-border" />
         ) : (
           <IconBtn
@@ -87,7 +94,7 @@ export function ToolRail() {
             kbd={d.key}
             tipSide="right"
             active={tool === d.id}
-            disabled={mode === '3d' && (d.id === 'wall' || d.id === 'room' || d.id === 'dimension' || d.id === 'split' || d.id === 'measure' || d.id === 'label' || d.id === 'pencil')}
+            disabled={mode === '3d' && (d.id === 'wall' || d.id === 'room' || d.id === 'dimension' || d.id === 'split' || d.id === 'measure' || d.id === 'label')}
             onClick={() => activateTool(d.id, t)}
           />
         ),

@@ -33,7 +33,7 @@ export class ItemsLayer {
   }
 
   update(ctx: EditorCtx): void {
-    const doc = ctx.doc()
+    const { doc } = ctx.view()
     const ui = ctx.ui()
     const pal = ctx.palette()
     const levelId = ctx.levelId()

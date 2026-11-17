@@ -6,6 +6,7 @@ import { DEG } from '../geom'
 import { cameraGizmo, type Handle, handleKey } from '../handles'
 import type { Painter } from '../painter'
 import { entityShape } from '../shapes'
+import { electricRingPx } from '../electricGlyph'
 
 function highlight(ctx: EditorCtx, p: Painter, ref: EntityRef, color: number, strong: boolean): void {
   const shape = entityShape(ctx.doc(), ctx.derived(), ref)
@@ -22,6 +23,9 @@ function highlight(ctx: EditorCtx, p: Painter, ref: EntityRef, color: number, st
     })
   } else if (shape.type === 'line') {
     p.line(shape.a, shape.b, color, strong ? 3 : 2, strong ? 1 : 0.8)
+  } else if (ref.kind === 'electric') {
+    const e = ctx.doc().electrical?.[ref.id]
+    if (e) p.ring(shape.p, electricRingPx(ctx.camera, e), color, strong ? 2 : 1.5)
   } else if (ref.kind === 'light') {
     p.ring(shape.p, Math.min(20, Math.max(10, 110 * ctx.camera.scale + 4)), color, strong ? 2 : 1.5)
   } else {

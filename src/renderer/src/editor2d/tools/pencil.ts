@@ -1,17 +1,26 @@
 /**
- * «Карандаш» (P): freehand marks over the plan for the AI chat. A drag draws a line, a lasso or a
- * rectangle (the shape is chosen in the pencil panel); a click selects a mark, Delete removes it.
- * Marks are stored in doc.annotations (undoable) and drawn by drawMarks on every frame.
+ * «Пометить» (P, or the button in the chat input row): freehand marks over the plan for the AI chat.
+ * A drag draws a line, a lasso or a rectangle (the shape is picked in the chat button's popover); the
+ * mark goes into the message as a «Пометка ①» chip and the keyboard returns to the chat input.
+ * A click selects a mark, Delete removes it. Marks are stored in doc.annotations (undoable) and drawn
+ * by drawMarks on every frame.
  */
-import { markAt, markBadge } from '@core'
+import { layerIndex, markAt, markBadge } from '@core'
 import type { Annotation, Vec2 } from '@core/types'
 import { addMarkToChat } from '@/ai/store'
 import { t } from '@/i18n'
-import { addMark, clearMarks, deleteMark, marksStore } from '@/store/marks'
+import { addMark, clearMarks, deleteMark, MARK_HINT, marksStore } from '@/store/marks'
 import type { ContextMenuItem, EditorCtx } from '../context'
 import { dist } from '../geom'
 import type { Painter } from '../painter'
 import type { Tool } from './types'
+
+/** the mark under the pointer; hidden or locked (layers panel) marks cannot be picked */
+function markHit(ctx: EditorCtx, plan: Vec2, radius: number): Annotation | null {
+  const doc = ctx.view().doc
+  const m = markAt(doc, ctx.levelId(), plan, radius)
+  return m && layerIndex(doc).pickable('annotation', m.id) ? m : null
+}
 
 const rectPts = (a: Vec2, b: Vec2): Vec2[] => [a, { x: b.x, y: a.y }, b, { x: a.x, y: b.y }]
 
@@ -37,7 +46,7 @@ function badgeAnchor(m: Pick<Annotation, 'points' | 'shape'>): Vec2 {
 
 /** all marks of the active level (called by the editor every frame, above the plan) */
 export function drawMarks(ctx: EditorCtx, p: Painter): void {
-  const all = ctx.doc().annotations
+  const all = ctx.view().doc.annotations
   if (!all) return
   const lv = ctx.levelId()
   const pal = p.pal
@@ -57,7 +66,7 @@ export function drawMarks(ctx: EditorCtx, p: Painter): void {
 
 /** context-menu items for a mark under the pointer, or null */
 export function markMenuItems(ctx: EditorCtx, plan: Vec2): ContextMenuItem[] | null {
-  const m = markAt(ctx.doc(), ctx.levelId(), plan, ctx.mm(8))
+  const m = markHit(ctx, plan, ctx.mm(8))
   if (!m) return null
   marksStore.getState().select(m.id)
   const lv = ctx.levelId()
@@ -74,30 +83,27 @@ export function createPencilTool(ctx: EditorCtx): Tool {
   let start: Vec2 | null = null
 
   function idleHint(): void {
-    ctx.setHint(t('Карандаш: обведите место на плане · щелчок — выбрать пометку, Delete — удалить, Ctrl+L — в чат'))
+    ctx.setHint(t(MARK_HINT))
   }
 
   return {
     cursor: 'crosshair',
     activate() {
       pts = null
-      marksStore.getState().setPrompt(null)
       idleHint()
     },
     deactivate() {
       pts = null
-      marksStore.getState().setPrompt(null)
       ctx.setHint('')
     },
     pointerDown(e) {
       if (e.button !== 0) return
-      marksStore.getState().setPrompt(null)
       start = e.plan
       pts = [e.plan]
     },
     pointerMove(e) {
       if (!pts || !start) {
-        const m = markAt(ctx.doc(), ctx.levelId(), e.plan, ctx.mm(6))
+        const m = markHit(ctx, e.plan, ctx.mm(6))
         ctx.setCursor(m ? 'pointer' : 'crosshair')
         return
       }
@@ -113,7 +119,7 @@ export function createPencilTool(ctx: EditorCtx): Tool {
       if (!drawn || !from) return
       if (extent(drawn) < ctx.mm(6)) {
         // a click: select the mark under the pointer
-        const m = markAt(ctx.doc(), ctx.levelId(), e.plan, ctx.mm(8))
+        const m = markHit(ctx, e.plan, ctx.mm(8))
         marksStore.getState().select(m?.id ?? null)
         ctx.requestRender()
         return
@@ -124,8 +130,8 @@ export function createPencilTool(ctx: EditorCtx): Tool {
       const closed = shape !== 'free' || (drawn.length >= 8 && dist(drawn[0], drawn[drawn.length - 1]) <= ctx.mm(16))
       if (closed && drawn.length < 3) return
       const id = addMark(ctx.levelId(), closed ? 'zone' : 'stroke', drawn)
-      // like a text selection in Claude: a small field to say what to do with this place
-      marksStore.getState().setPrompt({ id, x: e.client.x, y: e.client.y })
+      // into the message as a chip; the keyboard goes back to the chat input to say what to do there
+      void addMarkToChat(id)
       idleHint()
     },
     keyDown(e) {

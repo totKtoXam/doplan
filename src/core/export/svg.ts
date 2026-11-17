@@ -158,7 +158,7 @@ export function toSvg(dl: DisplayList, opts: SvgOptions = {}): SvgResult {
   if (defs.length) out.push(`<defs>${defs.join('')}</defs>`)
   if (opts.background !== false) out.push(`<rect x="${r2(x0)}" y="${r2(y0)}" width="${r2(w)}" height="${r2(h)}" fill="${esc(dl.background)}"/>`)
   for (const [layer, body] of layers) {
-    const extra = layer === 'text' || layer === 'dimensions' || layer === 'sheet' || layer === 'annotations' ? ` font-family="${esc(font)}"` : ''
+    const extra = layer === 'text' || layer === 'dimensions' || layer === 'sheet' || layer === 'annotations' || layer === 'electrical' ? ` font-family="${esc(font)}"` : ''
     out.push(`<g id="${esc(layer)}"${extra}>${body.join('')}</g>`)
   }
   out.push('</svg>')

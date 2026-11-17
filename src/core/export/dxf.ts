@@ -1,7 +1,8 @@
 /**
  * Plan level → DXF (AutoCAD 2007, AC1021, UTF-8) via @tarikjabiri/dxf.
  * Built from the display list (without sheet chrome), y flipped (DXF is y-up), units = mm.
- * Layers: WALLS, OPENINGS, ROOMS, DIMENSIONS, FURNITURE, TEXT.
+ * Layers: WALLS, OPENINGS, ROOMS, DIMENSIONS, FURNITURE, TEXT, ELECTRICAL; an object on a user layer
+ * (layers panel) goes to a DXF layer named after that layer. Objects hidden in the layers panel are not exported.
  * Dimensions are written as plain lines + text so every viewer shows them identically.
  */
 import {
@@ -14,6 +15,17 @@ import {
 } from '@tarikjabiri/dxf'
 import type { Doc, Id, Vec2 } from '../types'
 import { buildDisplayList, type DisplayItem, type DisplayOptions, type DlPen } from '../display'
+import { entityOf } from '../layers'
+
+/** a user layer name as a DXF layer name (no < > / \ " : ; ? * | = `) */
+export function dxfLayerName(name: string): string {
+  const s = name
+    .replace(/[<>/\\":;?*|=`]/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 200)
+  return s || 'LAYER'
+}
 
 export interface DxfOptions {
   /** display options override (sheet chrome is always off) */
@@ -27,6 +39,7 @@ const LAYERS: { name: string; color: number }[] = [
   { name: 'DIMENSIONS', color: 3 },
   { name: 'FURNITURE', color: 9 },
   { name: 'TEXT', color: 7 },
+  { name: 'ELECTRICAL', color: 1 },
 ]
 
 const DASHED = 'DP_DASHED'
@@ -47,6 +60,8 @@ function layerOf(it: DisplayItem): string | null {
     case 'text':
     case 'annotations':
       return 'TEXT'
+    case 'electrical':
+      return 'ELECTRICAL'
     default:
       return null
   }
@@ -71,6 +86,26 @@ export function toDxf(doc: Doc, levelId: Id, opts: DxfOptions = {}): string {
   dxf.setUnits(Units.Millimeters)
   dxf.addLType(DASHED, '__ __ __', [3 * S, -1.5 * S])
   for (const l of LAYERS) dxf.addLayer(l.name, l.color, 'Continuous')
+  // user layers of the objects in the drawing
+  const userLayerOf = new Map<string, string | null>()
+  const added = new Set(LAYERS.map((l) => l.name))
+  const userLayer = (it: DisplayItem): string | null => {
+    const ref = it.ref
+    if (!ref || !doc.layers) return null
+    const key = `${ref.kind}:${ref.id}`
+    let name = userLayerOf.get(key)
+    if (name === undefined) {
+      const layerId = entityOf(doc, ref)?.layerId
+      const layer = typeof layerId === 'string' ? doc.layers[layerId] : undefined
+      name = layer ? dxfLayerName(layer.name) : null
+      if (name && !added.has(name)) {
+        dxf.addLayer(name, 7, 'Continuous')
+        added.add(name)
+      }
+      userLayerOf.set(key, name)
+    }
+    return name
+  }
 
   const P = (p: Vec2) => point3d(p.x, -p.y, 0)
   const lt = (pen?: DlPen) => (pen?.dash && pen.dash.length ? DASHED : undefined)
@@ -83,8 +118,9 @@ export function toDxf(doc: Doc, levelId: Id, opts: DxfOptions = {}): string {
   }
 
   for (const it of dl.items) {
-    const layerName = layerOf(it)
-    if (!layerName) continue
+    const category = layerOf(it)
+    if (!category) continue
+    const layerName = userLayer(it) ?? category
     switch (it.t) {
       case 'poly': {
         // merged wall outlines are drawn separately in the display list; DXF keeps one closed outline per wall piece

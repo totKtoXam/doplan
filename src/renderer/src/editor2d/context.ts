@@ -51,6 +51,11 @@ export interface EditorCtx {
   ui(): UiState
   levelId(): Id
   derived(): DerivedPlan
+  /**
+   * what the plan shows: the document and derived plan without the objects hidden in the layers
+   * panel (core/layers visibleDoc / visiblePlan). For DRAWING only — tools read and edit `doc()`.
+   */
+  view(): { doc: Doc; derived: DerivedPlan }
   setHint(text: string): void
   setCursor(css: string): void
   /** tolerance helpers: screen px → plan mm */

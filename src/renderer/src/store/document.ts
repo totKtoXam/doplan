@@ -7,7 +7,7 @@
 import { applyPatches, enablePatches, type Patch, produce, produceWithPatches } from 'immer'
 import { createStore } from 'zustand/vanilla'
 import { useStore } from 'zustand'
-import { createEmptyDoc, derivePlan, normalize, syncRooms } from '@core'
+import { createEmptyDoc, derivePlan, normalize, syncFormatVersion, syncRooms } from '@core'
 import type { DerivedPlan, Doc, EntityRef, Id } from '@core/types'
 import type { DocState } from '@/contracts'
 
@@ -140,6 +140,12 @@ function normalizeDraft(d: Doc): void {
     syncRooms(d)
   } catch (err) {
     console.error('[doplan] syncRooms failed', err)
+  }
+  // layers / variants raise the file format (older apps must refuse the file, not drop data)
+  try {
+    syncFormatVersion(d)
+  } catch (err) {
+    console.error('[doplan] syncFormatVersion failed', err)
   }
 }
 

@@ -10,7 +10,9 @@ import {
   decodeCsvBytes,
   defaultPriceUnit,
   formatMoney,
+  listVariants,
   localDate,
+  materializeVariant,
   mergeCatalog,
   parsePriceListCsv,
   priceListToCsv,
@@ -59,6 +61,7 @@ addTranslations('en', {
   'Поставщик': 'Vendor',
   'Артикул': 'SKU',
   'Ссылка': 'Link',
+  'Вариант обстановки': 'Furnishing variant',
 })
 
 export interface DialogPropsBase {
@@ -96,16 +99,22 @@ export function BomDialog({ open, onClose }: DialogPropsBase) {
   const [q, setQ] = useState('')
   const [status, setStatus] = useState('')
   const currency = doc.design?.currency
+  // furnishing variant the estimate is for (the active one by default); prices are the project's
+  const variants = useMemo(() => listVariants(doc), [doc])
+  const [picked, setPicked] = useState<string | null>(null)
+  const variantId = variants.find((v) => v.id === picked)?.id ?? variants.find((v) => v.active)!.id
+  const variantName = t(variants.find((v) => v.id === variantId)?.name ?? '')
 
-  const { rows, cat, error } = useMemo(() => {
-    if (!open) return { rows: [] as BomRow[], cat: undefined as Catalog | undefined, error: '' }
+  const { rows, cat, error, view } = useMemo(() => {
+    if (!open) return { rows: [] as BomRow[], cat: undefined as Catalog | undefined, error: '', view: doc }
     try {
       const c = mergeCatalog(builtins(), catalog)
-      return { rows: computeBom(doc, c), cat: c, error: '' }
+      const v = materializeVariant(doc, variantId, c)
+      return { rows: computeBom(v, c), cat: c, error: '', view: v }
     } catch (e) {
-      return { rows: [] as BomRow[], cat: undefined, error: errorText(e) }
+      return { rows: [] as BomRow[], cat: undefined, error: errorText(e), view: doc }
     }
-  }, [open, doc, catalog])
+  }, [open, doc, catalog, variantId])
 
   /** price unit set on the price list entry or the material card, even before a price is typed */
   const unitOf = (refId: string) => productFor(doc, cat, refId)?.priceUnit
@@ -186,14 +195,14 @@ export function BomDialog({ open, onClose }: DialogPropsBase) {
     })
 
   const exportCsv = async () => {
-    const name = `${safeName(doc.meta.name || 'doplan')} — ${t('смета')}.csv`
+    const name = `${safeName(doc.meta.name || 'doplan')}${variants.length > 1 ? ` — ${safeName(variantName)}` : ''} — ${t('смета')}.csv`
     const path = await window.doplan.files.saveText(name, [{ name: 'CSV', extensions: ['csv'] }], `﻿${bomToCsv(rows, currency, t).replace(/\n/g, '\r\n')}\r\n`)
     if (path) setStatus(path)
   }
 
   const exportPriceList = async () => {
     const name = `${safeName(doc.meta.name || 'doplan')} — ${t('прайс-лист')}.csv`
-    const path = await window.doplan.files.saveText(name, [{ name: 'CSV', extensions: ['csv'] }], `﻿${priceListToCsv(rows, doc, cat).replace(/\n/g, '\r\n')}\r\n`)
+    const path = await window.doplan.files.saveText(name, [{ name: 'CSV', extensions: ['csv'] }], `﻿${priceListToCsv(rows, view, cat).replace(/\n/g, '\r\n')}\r\n`)
     if (path) setStatus(path)
   }
 
@@ -241,6 +250,8 @@ export function BomDialog({ open, onClose }: DialogPropsBase) {
       onClose={onClose}
       title={t('Ведомость материалов и смета')}
       width="max-w-5xl"
+      resizeKey="dialog.bom"
+      resizeLabel={t('Размер окна')}
       footer={
         <>
           {status && <span className="mr-auto truncate text-[10px] text-[var(--muted)]">{status}</span>}
@@ -262,6 +273,18 @@ export function BomDialog({ open, onClose }: DialogPropsBase) {
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <SearchInput value={q} onChange={setQ} placeholder={t('Фильтр')} className="max-w-xs flex-1" />
+          {variants.length > 1 && (
+            <label className="flex items-center gap-1.5 text-[11px] text-[var(--muted)]">
+              {t('Вариант обстановки')}
+              <Select
+                value={variantId}
+                options={variants.map((v) => ({ value: v.id, label: t(v.name) }))}
+                onChange={setPicked}
+                aria-label={t('Вариант обстановки')}
+                className="w-44"
+              />
+            </label>
+          )}
           <label className="flex items-center gap-1.5 text-[11px] text-[var(--muted)]">
             {t('Валюта')}
             <Select value={currency ?? 'none'} options={currencyOptions} onChange={setCurrency} aria-label={t('Валюта проекта')} className="w-36" />

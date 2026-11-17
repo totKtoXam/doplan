@@ -119,6 +119,20 @@ export interface AiToolResult {
   image?: { mime: 'image/png' | 'image/jpeg'; data: string }
 }
 
+/** one question of the agent's ask_user call */
+export interface AiQuestion {
+  question: string
+  header?: string
+  options: { label: string; description?: string }[]
+  multiSelect?: boolean
+}
+
+/** the user's answer to one question: the options picked and / or their own words */
+export interface AiQuestionAnswer {
+  picked: string[]
+  other?: string
+}
+
 // ───────────── persisted chats ─────────────
 
 export type AiPart =
@@ -139,6 +153,15 @@ export type AiPart =
       changes?: string[]
       /** thumbnail data URL for render_snapshot */
       image?: string
+    }
+  /** the agent's questions (ask_user): `id` is the tool call's; `note`: what the user typed in the chat box */
+  | {
+      type: 'question'
+      id: string
+      questions: AiQuestion[]
+      status: 'pending' | 'answered' | 'cancelled'
+      answers?: AiQuestionAnswer[]
+      note?: string
     }
   /** login: the CLI's sign-in expired — the notice offers «Войти» */
   | { type: 'notice'; level: 'info' | 'warning' | 'error'; text: string; login?: AiProviderId }
@@ -195,6 +218,8 @@ export interface AiChatApi {
   stop(runId: string): Promise<void>
   onEvent(cb: (runId: string, ev: AiRunEvent) => void): () => void
   onToolCall(cb: (call: AiToolCall) => void): () => void
+  /** main gave up waiting for a call (a question nobody answered within the hour) */
+  onToolCancel(cb: (call: { callId: string; runId: string }) => void): () => void
   toolResult(callId: string, result: AiToolResult): void
   listChats(projectPath: string | null): Promise<AiChatMeta[]>
   loadChat(projectPath: string | null, chatId: string): Promise<AiChatRecord | null>

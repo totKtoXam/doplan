@@ -49,6 +49,56 @@ export const ROOM_TYPES = [
 
 const levelId = id('id уровня (lv_…); по умолчанию активный уровень').optional()
 
+/** kinds of electrical points (the same list as ELECTRIC_KINDS in core/electrical.ts; a test keeps them equal) */
+export const ELECTRIC_KIND_IDS = [
+  'socket',
+  'socketDouble',
+  'socketGround',
+  'socketIP44',
+  'socketLid',
+  'socketPower',
+  'socketUsbA',
+  'socketUsbC',
+  'socketUsbAC',
+  'usbA',
+  'usbC',
+  'switch1',
+  'switch2',
+  'switch3',
+  'switchPass',
+  'switchCross',
+  'dimmer',
+  'bell',
+  'tv',
+  'rj45',
+  'phone',
+  'hdmi',
+  'speaker',
+  'outAc',
+  'outLight',
+  'outSconce',
+  'outHood',
+  'outBoiler',
+  'outWasher',
+  'junction',
+  'panel',
+  'sensorLeak',
+  'sensorSmoke',
+  'sensorMotion',
+  'thermostat',
+  'other',
+] as const
+
+const electricKind = z
+  .enum(ELECTRIC_KIND_IDS)
+  .describe('Тип точки (полный список с высотами — list_electric catalog=true): socket, socketDouble, socketGround, socketIP44, socketUsbA…, switch1/2/3, switchPass, dimmer, tv, rj45, outAc, outLight, junction, panel, sensorLeak…')
+const electricWall = {
+  wallId: id('Стена (w_…), на которую ставить точку').optional(),
+  side: z.enum(['left', 'right']).optional().describe('Сторона стены; по умолчанию та, что смотрит в комнату'),
+  offset: mm('Расстояние вдоль оси стены от узла a до центра точки').min(0).optional(),
+  at: point.optional().describe('Альтернатива offset: точка, проецируемая на стену (или место для точки без стены)'),
+}
+
 /** Shapes of the tool arguments (zod raw shapes: the MCP SDK takes these directly). */
 export const AI_TOOL_SHAPES = {
   get_plan: {
@@ -169,6 +219,51 @@ export const AI_TOOL_SHAPES = {
     note: z.string().max(200).optional().describe('Комментарий к замеру (сохраняется в источнике размера)'),
     levelId,
   },
+  list_electric: {
+    levelId,
+    wallId: id('Только точки этой стены (w_…)').optional(),
+    catalog: z.boolean().optional().describe('true — вернуть ещё каталог типов (код, монтаж, высота по умолчанию)'),
+  },
+  place_electric: {
+    kind: electricKind,
+    ...electricWall,
+    elevation: mm('Высота центра от пола (по умолчанию — типовая для вида)').min(0).max(10000).optional(),
+    gangs: z.number().int().min(1).max(5).optional().describe('Постов в рамке 1–5 (розетки, выключатели, слаботочка)'),
+    vertical: z.boolean().optional().describe('Многопостовая рамка вертикально'),
+    rotation: finite().min(-360).max(360).optional().describe('Поворот точки без стены (пол, потолок), градусы по часовой'),
+    comment: z.string().max(500).optional().describe('Комментарий, например «под холодильник»'),
+    levelId,
+  },
+  set_electric: {
+    electricId: id('id электроточки (e_…)'),
+    kind: electricKind.optional(),
+    ...electricWall,
+    elevation: mm('Высота центра от пола').min(0).max(10000).optional(),
+    gangs: z.number().int().min(1).max(5).optional(),
+    vertical: z.boolean().optional(),
+    rotation: finite().min(-360).max(360).optional().describe('Поворот точки без стены'),
+    comment: z.string().max(500).optional().describe('Новый комментарий; пустая строка — убрать'),
+  },
+  ask_user: {
+    questions: z
+      .array(
+        z
+          .object({
+            question: z.string().min(1).max(500).describe('Вопрос целиком, с вопросительным знаком'),
+            header: z.string().max(30).optional().describe('Короткая метка вопроса, 1–3 слова'),
+            options: z
+              .array(z.object({ label: z.string().min(1).max(80).describe('Вариант ответа, 1–5 слов'), description: z.string().max(300).optional().describe('Что значит этот вариант') }).strict())
+              .min(2)
+              .max(4)
+              .describe('2–4 варианта; пользователь всегда может ответить и своими словами'),
+            multiSelect: z.boolean().optional().describe('true — можно выбрать несколько вариантов'),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(4)
+      .describe('1–4 вопроса сразу: собери всё, что нужно узнать, в один вызов'),
+  },
   render_snapshot: {
     view: z.enum(['2d', '3d']).describe('2d — чертёж уровня, 3d — текущая камера 3D'),
     width: z.number().int().min(256).max(1600).optional(),
@@ -194,19 +289,21 @@ export const MUTATING_TOOLS: ReadonlySet<AiToolName> = new Set<AiToolName>([
   'set_material',
   'apply_planspec',
   'apply_measurement',
+  'place_electric',
+  'set_electric',
 ])
 
 export const AI_TOOL_DESCRIPTIONS: Record<AiToolName, string> = {
   get_plan:
     'Сводка открытого плана: уровни, комнаты (площадь, тип, отделка), узлы и стены с координатами и толщиной, проёмы, предметы. Вызывай первым делом, чтобы знать id.',
   get_selection: 'Что пользователь сейчас выделил в редакторе (id и краткие данные).',
-  get_entity: 'Полные данные одной сущности по id (стена, узел, проём, комната, предмет, свет…).',
+  get_entity: 'Полные данные одной сущности по id (стена, узел, проём, комната, предмет, свет, электроточка…).',
   add_wall:
     'Добавить стену между двумя узлами или точками (мм). Концы прилипают к существующим узлам, пересечённые стены разбиваются. Возвращает id новых стен.',
   add_rect_room: 'Добавить прямоугольную комнату из четырёх стен (координаты по осям стен) и, по желанию, задать её имя и тип.',
   move_node: 'Переместить узел стен (концы всех присоединённых стен двигаются вместе с ним).',
   set_wall: 'Изменить толщину, высоту, тип или длину стены.',
-  delete: 'Удалить сущности по id (стены, проёмы, предметы, свет, подписи…).',
+  delete: 'Удалить сущности по id (стены, проёмы, предметы, свет, электроточки e_…, подписи…).',
   add_opening: 'Добавить дверь, окно или проём в стену: по offset от узла a или по точке at.',
   set_room: 'Изменить комнату: название, тип, материал пола/потолка/стен, высоту потолка, плинтус.',
   place_item:
@@ -218,6 +315,13 @@ export const AI_TOOL_DESCRIPTIONS: Record<AiToolName, string> = {
     'Построить план из PlanSpec v1 (как импорт «План по фото»): replace — заменить план активного уровня, newLevel — добавить новым этажом.',
   get_planspec_schema: 'Описание формата PlanSpec v1 и правил распознавания планов (для apply_planspec).',
   render_snapshot: 'Снимок 2D-плана или 3D-вида в PNG, чтобы посмотреть результат.',
+  list_electric:
+    'Электроточки уровня (розетки, выключатели, слаботочка, выводы): тип, высота от пола, стена и сторона, расстояния до углов комнаты слева и справа (лицом к стене). catalog=true — ещё список типов.',
+  place_electric:
+    'Поставить электроточку. На стену: wallId + offset (от узла a) или at — точка прилипает к грани стены, смотрящей в комнату. Без wallId с at: настенный тип прилипает к ближайшей стене в 400 мм, иначе стоит свободно. Высота по умолчанию — типовая (розетки 300, выключатели 900…). Удалить — delete.',
+  set_electric: 'Изменить электроточку: тип, высоту, посты рамки, комментарий; перенести по стене (offset / at) или на другую стену (wallId).',
+  ask_user:
+    'Спросить пользователя о том, чего нет в плане и в запросе: названия комнат (на плане только номера), размеры, назначение, пожелания. Не выдумывай такие данные — спроси. Собери все вопросы в один вызов (до 4), у каждого 2–4 варианта; пользователь может ответить и своими словами. Ждёт ответа и возвращает его.',
   apply_measurement:
     'Внести замеры рулеткой: выставить чистую длину стороны стены (side = wallId:left|right, включая глубину и ширину ниши) или расстояние между узлами. Двигается конец moveEnd (по умолчанию b), соседние стены следуют за ним; размер помечается как «замерено». Все замеры вызова — один шаг отмены. Если неясно, к какой стороне или размеру относится число (чистый или по оси), сначала спроси пользователя.',
 }
@@ -240,7 +344,11 @@ export const AI_TOOL_TITLES: Record<AiToolName, string> = {
   apply_planspec: 'Построить план',
   get_planspec_schema: 'Формат PlanSpec',
   render_snapshot: 'Снимок',
+  ask_user: 'Вопрос пользователю',
   apply_measurement: 'Обмер',
+  list_electric: 'Электроточки',
+  place_electric: 'Поставить электроточку',
+  set_electric: 'Изменить электроточку',
 }
 
 const OBJECTS = Object.fromEntries(
@@ -265,6 +373,18 @@ export function parseToolArgs<K extends AiToolName>(
     return `${path}: ${i.message}`
   })
   return { ok: false, error: `Неверные аргументы ${name}: ${lines.join('; ')}` }
+}
+
+/** The user's answers as the ask_user result the agent reads. */
+export function formatAnswers(questions: { question: string; header?: string }[], answers: { picked: string[]; other?: string }[], note?: string): string {
+  const lines = questions.map((q, i) => {
+    const a = answers[i]
+    const parts = [...(a?.picked ?? [])]
+    if (a?.other?.trim()) parts.push(`своими словами: ${a.other.trim()}`)
+    return `${i + 1}. ${q.question}\n   Ответ: ${parts.length ? parts.join('; ') : '(без ответа)'}`
+  })
+  if (note?.trim()) lines.push(`Пользователь ответил в чате своими словами: ${note.trim()}`)
+  return `Ответы пользователя:\n${lines.join('\n')}`
 }
 
 /** JSON Schema of a tool's input (for the Anthropic Messages API). */

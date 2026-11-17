@@ -30,6 +30,7 @@ const KIND_RU: Record<EntityKind, string> = {
   room: 'Помещения',
   item: 'Предметы',
   light: 'Светильники',
+  electric: 'Электроточки',
   dimension: 'Размеры',
   label: 'Подписи',
   underlay: 'Подложки',
@@ -54,13 +55,25 @@ function boxesOf(doc: Doc, refs: EntityRef[]): Box[] {
     } else if (r.kind === 'label') {
       const l = doc.labels[r.id]
       if (l) out.push({ ref: r, cx: l.x, cy: l.y, hw: 0, hh: 0 })
+    } else if (r.kind === 'electric') {
+      const e = doc.electrical?.[r.id]
+      if (e) out.push({ ref: r, cx: e.x, cy: e.y, hw: 0, hh: 0 })
     }
   }
   return out
 }
 
 function moveTo(d: Doc, ref: EntityRef, x: number, y: number) {
-  const e = ref.kind === 'item' ? d.items[ref.id] : ref.kind === 'light' ? d.lights[ref.id] : ref.kind === 'label' ? d.labels[ref.id] : undefined
+  const e =
+    ref.kind === 'item'
+      ? d.items[ref.id]
+      : ref.kind === 'light'
+        ? d.lights[ref.id]
+        : ref.kind === 'label'
+          ? d.labels[ref.id]
+          : ref.kind === 'electric'
+            ? d.electrical?.[ref.id]
+            : undefined
   if (!e) return
   e.x = Math.round(x)
   e.y = Math.round(y)

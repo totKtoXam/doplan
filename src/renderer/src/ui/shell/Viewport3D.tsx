@@ -121,7 +121,7 @@ function Overlay({ engine, hidden }: { engine: Engine3DHandle; hidden?: boolean 
     <>
       {/* both bars share one wrapping row so they stack instead of overlapping in a narrow (split) viewport */}
       <div className="pointer-events-none absolute inset-x-2 top-2 flex flex-wrap items-start justify-between gap-2">
-      <div className="pointer-events-auto flex items-center gap-1 rounded-lg border border-border bg-panel/90 p-1 shadow-pop backdrop-blur">
+      <div className="pointer-events-auto flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-border bg-panel/90 p-1 shadow-pop backdrop-blur">
         <Segmented
           size="sm"
           value={cameraMode}
@@ -138,7 +138,7 @@ function Overlay({ engine, hidden }: { engine: Engine3DHandle; hidden?: boolean 
         <IconBtn icon={RotateCcw} size="sm" label={t('Сбросить камеру')} onClick={() => engine.resetCamera()} />
       </div>
 
-      <div className="pointer-events-auto ml-auto flex items-center gap-1 rounded-lg border border-border bg-panel/90 p-1 shadow-pop backdrop-blur">
+      <div className="pointer-events-auto ml-auto flex max-w-full flex-wrap items-center justify-end gap-1 rounded-lg border border-border bg-panel/90 p-1 shadow-pop backdrop-blur">
         <MiniSelect
           title={t('Качество')}
           value={quality}

@@ -13,6 +13,7 @@
 import 'pixi.js/unsafe-eval'
 import { Application, Container, Graphics } from 'pixi.js'
 import type { Doc, EntityRef, Id } from '@core/types'
+import { visibleDoc, visiblePlan } from '@core/layers'
 import type { CreateEditor2D, Editor2DHandle, ToolId } from '@/contracts'
 import { docStore } from '@/store/document'
 import { handles as appHandles } from '@/store/handles'
@@ -138,6 +139,10 @@ export const createEditor2D: CreateEditor2D = async (container: HTMLElement): Pr
     ui: () => uiStore.getState(),
     levelId,
     derived: () => docStore.getState().derived[levelId()] ?? EMPTY_DERIVED,
+    view() {
+      const s = docStore.getState()
+      return { doc: visibleDoc(s.doc), derived: visiblePlan(s.doc, s.derived[levelId()] ?? EMPTY_DERIVED) }
+    },
     setHint(text: string) {
       // compare with the store, not a local copy: the shell also writes tool hints
       if (uiStore.getState().hint === text) return
@@ -216,7 +221,7 @@ export const createEditor2D: CreateEditor2D = async (container: HTMLElement): Pr
       app.renderer.background.color = palette.bg
     }
 
-    const doc = ctx.doc()
+    const doc = ctx.view().doc
     const lv = levelId()
     world.position.set(camera.tx, camera.ty)
     world.scale.set(camera.scale)
@@ -275,9 +280,16 @@ export const createEditor2D: CreateEditor2D = async (container: HTMLElement): Pr
     const untouched = camera.version === fitVersion
     const { width, height } = camera
     if (!syncSize()) return
+    const changed = camera.width !== width || camera.height !== height
     // an untouched fitted view is refit to the new size; otherwise setSize kept the centre point fixed
-    if (fitPending || (untouched && (camera.width !== width || camera.height !== height))) zoomToFit()
+    if (fitPending || (untouched && changed)) zoomToFit()
     else requestRender()
+    // the resized canvas is cleared and ResizeObserver runs after this frame's animation callbacks:
+    // draw now so no empty frame reaches the screen while a panel border is dragged
+    if (changed && raf) {
+      cancelAnimationFrame(raf)
+      frame()
+    }
   }
 
   const ro = new ResizeObserver(() => resize())

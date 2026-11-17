@@ -20,6 +20,8 @@ const pending = new Map<string, Pending>()
 const closed = new Set<string>()
 /** generous: ask mode waits for the user to approve */
 const CALL_TIMEOUT_MS = 15 * 60 * 1000
+/** a question waits for the user's answer up to an hour (the user may go and measure a room) */
+export const ASK_TIMEOUT_MS = 60 * 60 * 1000
 const MAX_TEXT = 200_000
 
 function sanitizeResult(raw: unknown): AiToolResult {
@@ -53,10 +55,16 @@ export async function callDocTool(runId: string, tool: string, args: unknown): P
   if (!getMainWindow()) return { ok: false, text: 'Окно редактора закрыто' }
   const callId = randomUUID()
   return new Promise<AiToolResult>((resolve) => {
+    const ask = tool === 'ask_user'
     const timer = setTimeout(() => {
       pending.delete(callId)
-      resolve({ ok: false, text: 'Нет ответа от редактора (время ожидания истекло)' })
-    }, CALL_TIMEOUT_MS)
+      // the card in the chat goes on its own: the renderer gets the same call id resolved
+      sendToRenderer(CH.evAiChatToolCancel, { callId, runId })
+      resolve({
+        ok: false,
+        text: ask ? 'Пользователь не ответил на вопросы за час. Не выдумывай ответы: закончи то, что можно сделать без них, и перечисли, что осталось уточнить.' : 'Нет ответа от редактора (время ожидания истекло)',
+      })
+    }, ask ? ASK_TIMEOUT_MS : CALL_TIMEOUT_MS)
     pending.set(callId, { runId, resolve, timer })
     sendToRenderer(CH.evAiChatToolCall, { callId, runId, tool, args: parsed.args })
   })

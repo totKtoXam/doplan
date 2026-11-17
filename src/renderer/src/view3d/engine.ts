@@ -22,9 +22,12 @@ import type {
   ProceduralFactory,
   StillOptions,
 } from '@/contracts'
+import { visibleDoc, visiblePlan } from '@core/layers'
 import { docStore } from '@/store/document'
+import { isLiveResizing, onLiveResizeEnd } from '@/store/liveResize'
 import { uiStore } from '@/store/ui'
 import { Architecture } from './build/architecture'
+import { ElectricalBuilder } from './build/electrical'
 import { createControls } from './controls'
 import { ThumbRenderer, convertModel, exportSceneGlb, imageToBlob, readTarget } from './export'
 import { createInteraction } from './interaction'
@@ -137,6 +140,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     architecture: group('architecture'),
     items: group('items'),
     lights: group('lights'),
+    electrical: group('electrical'),
     helpers: group('helpers'),
   }
   roots.helpers.userData.helper = true
@@ -218,6 +222,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     invalidate()
   }
   const items = new ItemsLayer(ctx, lib, factory, afterSceneChange)
+  const electrical = new ElectricalBuilder(roots.electrical)
   const thumbs = new ThumbRenderer(ctx, lib, items)
 
   // ── document → scene ──
@@ -273,6 +278,10 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       }
       return found
     }
+    if (ref.kind === 'electric') {
+      const o = electrical.objectFor(ref.id)
+      return o ? [o] : []
+    }
     return []
   }
 
@@ -314,9 +323,11 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     lastSyncChanged = false
     const ds = docStore.getState()
     const ui = uiStore.getState()
-    const doc = ds.doc
+    // the scene is built from what the layers panel shows (hidden objects are left out)
+    const doc = visibleDoc(ds.doc)
     const levelId = activeLevel(doc)
-    const plan = ds.derived[levelId]
+    const fullPlan = ds.derived[levelId]
+    const plan = fullPlan && visiblePlan(ds.doc, fullPlan)
 
     if (doc.render.quality && doc.render.quality !== lastDocQuality) {
       lastDocQuality = doc.render.quality
@@ -365,6 +376,13 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
         moved = r.moved
       } catch (err) {
         console.error('[doplan] items build failed', err)
+      }
+    }
+    if (!lastDoc || levelChanged || doc.electrical !== lastDoc.electrical) {
+      try {
+        if (electrical.sync(doc, levelId)) sceneChanged = true
+      } catch (err) {
+        console.error('[doplan] electrical build failed', err)
       }
     }
     if (archDirty || sceneChanged || moved) updateBounds(plan, doc, levelId)
@@ -473,10 +491,35 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     // keep ticking until the idle refinement happened
     if (lowRes && !moving) dirtyFrames = Math.max(dirtyFrames, 1)
   }
+  let liveTimer = 0
   function resize(): void {
     if (destroyed) return
-    applySize(targetDpr(false))
+    if (isLiveResizing()) {
+      // a panel border is being dragged: reallocating every target each frame halves the frame
+      // rate, so the canvas stretches with CSS in between and is resized a few times a second at the
+      // moving resolution; the drag's end resizes it in full (onLiveResizeEnd below)
+      if (!liveTimer) {
+        liveTimer = window.setTimeout(() => {
+          liveTimer = 0
+          if (!isLiveResizing()) return
+          lastMoveAt = performance.now()
+          resizeTo(targetDpr(true))
+        }, 120)
+      }
+      return
+    }
+    resizeTo(targetDpr(false))
+  }
+  function resizeTo(dpr: number): void {
+    if (destroyed) return
+    const w0 = canvas.width
+    const h0 = canvas.height
+    applySize(dpr)
     invalidate()
+    // a new canvas size clears it; ResizeObserver callbacks run after this frame's animation
+    // callbacks, so without drawing now the cleared canvas would reach the screen (flicker while
+    // a panel border is dragged)
+    if (running && (canvas.width !== w0 || canvas.height !== h0)) tick()
   }
 
   // ── frame loop ──
@@ -693,6 +736,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     })
   })
   observer.observe(container)
+  const offLiveResize = onLiveResizeEnd(() => resize())
   const onVisibility = (): void => {
     if (document.hidden) {
       // keep long path-trace jobs running in the background
@@ -779,6 +823,8 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       measure.dispose()
       observer.disconnect()
       if (resizeRaf) cancelAnimationFrame(resizeRaf)
+      if (liveTimer) clearTimeout(liveTimer)
+      offLiveResize()
       if (collectTimer) clearTimeout(collectTimer)
       document.removeEventListener('visibilitychange', onVisibility)
       dprQuery?.removeEventListener('change', onDprChange)
@@ -905,7 +951,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
         }
       })
       try {
-        return await exportSceneGlb([roots.architecture, roots.items])
+        return await exportSceneGlb([roots.architecture, roots.items, roots.electrical])
       } finally {
         for (const o of shown) o.visible = false
         arch.setExportMode(false)

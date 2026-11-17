@@ -1,6 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createEmptyDoc } from '@core'
 import type { Doc } from '@core/types'
+import { chatTranscript } from './history'
 
 // ask_user: the agent's questions wait on a card above the input box; the answer (picked options, the
 // «Другое» text, or text typed in the chat box) goes back as the tool result of that call only.
@@ -47,7 +48,7 @@ const fake = vi.hoisted(() => {
 vi.mock('@/store/api', () => ({ api: fake.api }))
 
 const { openProject } = await import('@/actions/project')
-const { aiStore, answerQuestion, hasAnswer, initAi, pickAnswer, send, setAnswerOther, stop } = await import('./store')
+const { addQuote, aiStore, answerQuestion, hasAnswer, initAi, pickAnswer, send, setAnswerOther, stop } = await import('./store')
 
 const settle = () => new Promise((r) => setTimeout(r, 10))
 
@@ -290,6 +291,33 @@ describe('ask_user', () => {
     expect(aiStore.getState().images.map((i) => i.name)).toEqual(['второе.jpg'])
     expect(aiStore.getState().status).toContain('одно изображение')
     aiStore.setState({ images: [], status: '' })
+  })
+
+  it('quotes in the chat box go with the answer (alone they are an answer too); the box is emptied', async () => {
+    busy('r15')
+    ask('r15', 'c15')
+    await settle()
+    addQuote('стена кухни\n3000 мм')
+    expect(hasAnswer(aiStore.getState().asking, '', aiStore.getState().quotes.length > 0)).toBe(true)
+    await send('вот про эту')
+    await settle()
+    const [r] = resultOf('c15')
+    expect(r.ok).toBe(true)
+    expect(r.text).toContain('Пользователь ответил в чате своими словами: вот про эту')
+    expect(r.text).toContain('Пользователь процитировал из переписки:\n> стена кухни\n> 3000 мм')
+    expect(part()).toMatchObject({ status: 'answered', note: 'вот про эту', quotes: ['стена кухни\n3000 мм'] })
+    // an agent started anew after an edit reads them in the chat so far
+    expect(chatTranscript(aiStore.getState().chat.messages)).toContain('Quoted:\n> стена кухни\n> 3000 мм\nNote: вот про эту')
+    expect(aiStore.getState().quotes).toEqual([])
+    expect(fake.calls.run).toEqual([])
+    // a quote alone answers the next question: nothing typed, nothing picked
+    ask('r15', 'c16')
+    await settle()
+    addQuote('только ванная')
+    await send('')
+    await settle()
+    expect(resultOf('c16')[0].text).toContain('> только ванная')
+    expect(aiStore.getState().quotes).toEqual([])
   })
 
   it('a call of a turn that is not running, or with bad arguments, shows no card', async () => {

@@ -16,6 +16,7 @@ import { API_MODELS, runAnthropicApi } from './anthropicApi'
 import { abortRunCalls, closeRun, forgetRun, onToolResult } from './bridge'
 import { runClaude, runCodex, runGemini, type RunCtx } from './cliRunners'
 import { binVersion, findOnPath, killTree, type ResolvedBin } from './detect'
+import { historyPrefix, startsFresh, validHistory } from './history'
 import { authStatus, cancelLogin, isAuthError, loginInput, startLogin } from './login'
 import { closeMcpServer, openEndpoint, revokeRun } from './mcpServer'
 import { AGENT_SYSTEM_PROMPT, PLAN_MODE_NOTE, PROJECT_FOLDER_NOTE, PROJECT_INSTRUCTIONS_NOTE, UNTRUSTED_FOLDER_NOTE } from './prompt'
@@ -139,6 +140,7 @@ function validRequest(raw: unknown): AiRunRequest {
     resumeId: typeof r.resumeId === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(r.resumeId) ? r.resumeId : undefined,
     resumeCwd: typeof r.resumeCwd === 'string' && r.resumeCwd.length < 4096 ? r.resumeCwd : undefined,
     apiHistory: Array.isArray(r.apiHistory) ? r.apiHistory : undefined,
+    history: validHistory(r.history),
   }
 }
 
@@ -242,13 +244,15 @@ async function startRun(raw: unknown): Promise<void> {
     }
     sendToRenderer(CH.evAiChatEvent, req.runId, ev)
   }
-  const userText = chipsText(req.chips) + req.text
+  // an agent without its own memory of the chat gets the earlier turns as text
+  const userTextFor = (r: AiRunRequest) =>
+    (startsFresh(r.settings.provider, r.resumeId, r.apiHistory) ? historyPrefix(r.history) : '') + chipsText(r.chips) + r.text
 
   void (async () => {
     try {
       const place = await agentPlace(req)
       if (prov.info.id === 'api') {
-        await runAnthropicApi({ req, emit, signal: run.abort.signal, systemPrompt: systemPrompt(req, place), userText })
+        await runAnthropicApi({ req, emit, signal: run.abort.signal, systemPrompt: systemPrompt(req, place), userText: userTextFor(req) })
       } else {
         const endpoint = await openEndpoint(req.runId)
         // stopped while the endpoint was opening: the token is born revoked
@@ -256,15 +260,16 @@ async function startRun(raw: unknown): Promise<void> {
           revokeRun(req.runId)
           return
         }
+        const runReq = (await resumesHere(req, place.cwd)) ? req : { ...req, resumeId: undefined }
         const ctx: RunCtx = {
-          req: (await resumesHere(req, place.cwd)) ? req : { ...req, resumeId: undefined },
+          req: runReq,
           // the renderer keeps the folder with the session id: a session resumes only where it was made
           emit: (ev) => emit(ev.type === 'session' ? { ...ev, cwd: place.cwd } : ev),
           signal: run.abort.signal,
           endpoint,
           cwd: place.cwd,
           systemPrompt: systemPrompt(req, place),
-          userText,
+          userText: userTextFor(runReq),
           track: (c) => {
             run.children.add(c)
             c.once('close', () => run.children.delete(c))

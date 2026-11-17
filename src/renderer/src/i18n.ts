@@ -645,6 +645,11 @@ export function useT(): typeof t {
   return useCallback((key: string, vars?: Vars) => translate(lang, key, vars), [lang])
 }
 
+/** `s` is `key` in one of the languages: text stored under a language the UI has since been switched from */
+export function isAnyTranslation(s: string, key: string): boolean {
+  return s === key || Object.values(dictionaries).some((d) => d[key] === s)
+}
+
 /** Register extra translations at runtime (e.g. from a module that owns many strings). */
 export function addTranslations(lang: 'ru' | 'en', entries: Record<string, string>): void {
   Object.assign(dictionaries[lang], entries)

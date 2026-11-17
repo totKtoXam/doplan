@@ -10,6 +10,11 @@ files:
   - "!**/*.map"
   - "!**/node_modules/**/*"
 asar: true
+# Chromium UI strings (dialogs, context menus, spellcheck labels): the app ships in Russian and English only.
+# The rest of the 55 locales are ~49 MB unpacked / ~7.5 MB in the installer.
+electronLanguages:
+  - en-US
+  - ru
 compression: normal
 extraResources:
   - from: resources/assets
@@ -17,6 +22,7 @@ extraResources:
     filter:
       - "**/*"
       - "!downloaded/**"
+      - "!**/*.fix.json"
 fileAssociations:
   - ext: doplan
     name: doplan project

@@ -9,7 +9,7 @@ import { releasePageUrl } from '@shared/updater'
 import { DEFAULT_FEEDS } from '@shared/feeds'
 
 /** version shown by the web build (no Electron); keep in step with package.json */
-const WEB_VERSION = '0.13.0-web'
+const WEB_VERSION = '0.14.0-web'
 
 const SETTINGS_KEY = 'doplan.settings'
 

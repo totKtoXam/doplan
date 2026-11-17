@@ -6,9 +6,10 @@
 import type { AppSettings, DoplanApi, FileFilter, MenuCommand } from '@shared/ipc'
 import { DEFAULT_AI_SETTINGS } from '@shared/aiChat'
 import { releasePageUrl } from '@shared/updater'
+import { DEFAULT_FEEDS } from '@shared/feeds'
 
 /** version shown by the web build (no Electron); keep in step with package.json */
-const WEB_VERSION = '0.13.0-web'
+const WEB_VERSION = '0.14.0-web'
 
 const SETTINGS_KEY = 'doplan.settings'
 
@@ -20,6 +21,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   anthropicApiKeySet: false,
   recent: [],
   projectsDir: null,
+  assetFeeds: DEFAULT_FEEDS.map((f) => ({ ...f })),
 }
 
 function readLocalSettings(): AppSettings {

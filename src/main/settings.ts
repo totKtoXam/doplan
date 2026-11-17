@@ -1,5 +1,6 @@
 import { basename, isAbsolute, resolve } from 'node:path'
 import { safeStorage } from 'electron'
+import { sanitizeFeeds, type AssetFeed } from '../shared/feeds'
 import type { AppSettings, RecentProject } from '../shared/ipc'
 import { atomicWrite, readJson } from './fsutil'
 import { paths } from './paths'
@@ -26,6 +27,8 @@ interface StoredSettings {
   trustedFolders?: TrustedFolder[]
   /** base64 of safeStorage-encrypted API key */
   apiKeyEnc?: string
+  /** asset feeds in priority order; absent → the built-in defaults */
+  assetFeeds?: AssetFeed[]
 }
 
 const DEFAULTS: StoredSettings = {
@@ -73,6 +76,7 @@ function sanitize(raw: Partial<StoredSettings> | null | undefined): StoredSettin
           .slice(-500)
       : undefined,
     apiKeyEnc: typeof r.apiKeyEnc === 'string' && r.apiKeyEnc ? r.apiKeyEnc : undefined,
+    assetFeeds: r.assetFeeds === undefined ? undefined : sanitizeFeeds(r.assetFeeds),
   }
 }
 
@@ -98,6 +102,7 @@ function toPublic(s: StoredSettings): AppSettings {
     anthropicApiKeySet: !!s.apiKeyEnc || !!sessionKey,
     recent: s.recent.map((r) => ({ ...r })),
     projectsDir: s.projectsDir ?? null,
+    assetFeeds: sanitizeFeeds(s.assetFeeds),
   }
 }
 
@@ -124,6 +129,7 @@ export async function setSettings(patch: unknown): Promise<AppSettings> {
     theme: p.theme ?? cur.theme,
     backend: p.backend ?? cur.backend,
     autosaveSec: p.autosaveSec ?? cur.autosaveSec,
+    assetFeeds: p.assetFeeds ?? cur.assetFeeds,
   })
   next.apiKeyEnc = cur.apiKeyEnc
   next.recent = cur.recent
@@ -134,6 +140,11 @@ export async function setSettings(patch: unknown): Promise<AppSettings> {
   await persist(next)
   emit(next)
   return toPublic(next)
+}
+
+/** enabled and disabled asset feeds in priority order */
+export async function getAssetFeeds(): Promise<AssetFeed[]> {
+  return sanitizeFeeds((await load()).assetFeeds)
 }
 
 /** UI language as last stored (main-process messages follow it); 'ru' before the settings are loaded */

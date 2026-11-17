@@ -7,8 +7,9 @@ import { Button, Dialog, IconButton, Input, NumberInput, Row, Section, Segmented
 import { displayName, errorText, useAllAssets, useLang } from './common/catalog'
 import '@/ui/catalogI18n'
 import type { DialogPropsBase } from './BomDialog'
+import { AssetFeedsSection } from './AssetFeedsSection'
 
-type Editable = Pick<AppSettings, 'lang' | 'theme' | 'backend' | 'autosaveSec'>
+type Editable = Pick<AppSettings, 'lang' | 'theme' | 'backend' | 'autosaveSec' | 'assetFeeds'>
 
 /** application settings (persisted by the main process) */
 export function SettingsDialog({ open, onClose }: DialogPropsBase) {
@@ -211,6 +212,7 @@ export function SettingsDialog({ open, onClose }: DialogPropsBase) {
               </div>
             </div>
           </Section>
+          {window.doplan.platform !== 'browser' && <AssetFeedsSection feeds={s.assetFeeds} onChange={(assetFeeds) => void update({ assetFeeds })} />}
           <ModelCredits />
           {error && <p className="text-[#ff8589]">{error}</p>}
         </div>

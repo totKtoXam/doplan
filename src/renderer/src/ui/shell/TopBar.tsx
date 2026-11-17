@@ -8,13 +8,11 @@ import {
   ChevronDown,
   ClipboardList,
   Columns2,
-  Download,
   FilePlus,
   FolderOpen,
   House,
   Image,
   ImagePlus,
-  Languages,
   Moon,
   Package,
   Paintbrush,
@@ -74,7 +72,6 @@ export function TopBar() {
   const filePath = useDoc((s) => s.filePath)
   const mode = useUi((s) => s.mode)
   const theme = useUi((s) => s.theme)
-  const lang = useUi((s) => s.lang)
   const recent = useUi((s) => s.appSettings?.recent ?? [])
 
   const fileMenu = (): MenuEntry[] => [
@@ -179,17 +176,7 @@ export function TopBar() {
           <Sparkles size={14} />
           {t('Рендер')}
         </TextBtn>
-        <DropdownMenu
-          align="right"
-          items={exportMenu}
-          trigger={({ toggle }) => <IconBtn icon={Download} label={t('Экспорт')} onClick={toggle} />}
-        />
         <Sep />
-        <IconBtn
-          icon={Languages}
-          label={lang === 'ru' ? 'English' : 'Русский'}
-          onClick={() => uiStore.getState().setLang(lang === 'ru' ? 'en' : 'ru')}
-        />
         <IconBtn
           icon={theme === 'dark' ? Sun : Moon}
           label={theme === 'dark' ? t('Светлая тема') : t('Тёмная тема')}

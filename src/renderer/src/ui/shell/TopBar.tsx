@@ -22,7 +22,7 @@ import {
   Save,
   ScanLine,
   Settings,
-  Sparkles,
+  Aperture,
   Square,
   Sun,
   Undo2,
@@ -114,7 +114,7 @@ export function TopBar() {
     { type: 'header', label: '3D' },
     { label: t('Модель GLB'), icon: Box, onSelect: () => void actions.exportGlb() },
     { label: t('Снимок 3D-вида'), icon: Camera, onSelect: () => void actions.snapshot3d() },
-    { label: t('Рендер…'), icon: Sparkles, onSelect: () => dialogStore.getState().open('render') },
+    { label: t('Рендер…'), icon: Aperture, onSelect: () => dialogStore.getState().open('render') },
     { type: 'separator' },
     { label: t('Смета материалов…'), icon: ClipboardList, onSelect: () => dialogStore.getState().open('bom') },
     { type: 'separator' },
@@ -168,14 +168,14 @@ export function TopBar() {
         <Sep />
         <TextBtn variant="ghost" onClick={() => actions.planFromPhoto()} title={t('Распознать план по фото или скану')}>
           <ScanLine size={14} />
-          <span className="hidden xl:inline">{t('Фото → план')}</span>
+          <span className="hidden xl:inline">{t('План по фото')}</span>
         </TextBtn>
         <TextBtn variant="ghost" onClick={() => dialogStore.getState().open('bom')} title={t('Смета материалов')}>
           <ClipboardList size={14} />
           <span className="hidden xl:inline">{t('Смета')}</span>
         </TextBtn>
         <TextBtn variant="primary" onClick={() => dialogStore.getState().open('render')}>
-          <Sparkles size={14} />
+          <Aperture size={14} />
           {t('Рендер')}
         </TextBtn>
         <Sep />

@@ -217,7 +217,7 @@ function MenuList({ items, onClose, style }: { items: MenuEntry[]; onClose(): vo
         if (it.type === 'separator') return <div key={i} className="my-1 h-px bg-border" />
         if (it.type === 'header')
           return (
-            <div key={i} className="px-3 pt-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wide text-faint">
+            <div key={i} className="px-3 pt-1.5 pb-0.5 text-[11px] font-medium text-faint">
               {it.label}
             </div>
           )

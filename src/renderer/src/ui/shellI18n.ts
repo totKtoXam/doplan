@@ -2,6 +2,22 @@
 import { addTranslations } from '@/i18n'
 
 addTranslations('en', {
+  // colour themes (Settings)
+  'План по фото': 'Plan from photo',
+  Тёмные: 'Dark',
+  Светлые: 'Light',
+  'Установить тему…': 'Install theme…',
+  'Сохранить в файл': 'Save to file',
+  'Удалить тему': 'Remove theme',
+  'Тема «{name}» установлена': 'Theme “{name}” installed',
+  'Установлено тем: {n}': 'Themes installed: {n}',
+  'Подходят файлы цветовых тем VS Code (.json из папки themes расширения) и темы doplan. Чтобы изменить только часть цветов, укажите в файле "extends" с именем другой темы.':
+    'VS Code colour theme files (.json from the extension’s themes folder) and doplan themes work. To change only some colours, put "extends" with the name of another theme in the file.',
+  'Файл не похож на тему: это не JSON': 'This file is not a theme: it is not JSON',
+  'Файл не похож на тему: это не JSON-объект': 'This file is not a theme: it is not a JSON object',
+  'Это package.json расширения. Выберите файл темы из его папки themes': 'This is an extension’s package.json. Pick the theme file from its themes folder',
+  'В теме нет своих цветов: она подключает другой файл (include). Установите тот файл': 'The theme has no colours of its own: it includes another file. Install that file',
+  'В файле нет цветов интерфейса (colors)': 'The file has no interface colours (colors)',
   // activity bar
   Разделы: 'Sections',
   Строить: 'Build',

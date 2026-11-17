@@ -46,7 +46,7 @@ function Snaps() {
         aria-label={t('Шаг сетки')}
         value={settings.gridMm}
         onChange={(e) => setSetting('gridMm', Number(e.target.value))}
-        className="h-5 shrink-0 cursor-pointer rounded bg-transparent px-0.5 font-mono text-[11px] text-muted outline-none hover:bg-hover hover:text-text"
+        className="h-5 shrink-0 cursor-pointer rounded bg-transparent px-0.5 text-[11px] tabular-nums text-muted outline-none hover:bg-hover hover:text-text"
       >
         {(GRID_SIZES.includes(settings.gridMm) ? GRID_SIZES : [...GRID_SIZES, settings.gridMm].sort((a, b) => a - b)).map((g) => (
           <option key={g} value={g}>
@@ -152,7 +152,7 @@ function VersionLabel() {
   return (
     <button
       type="button"
-      className="flex shrink-0 items-center gap-1 font-mono text-faint hover:text-text"
+      className="flex shrink-0 items-center gap-1 tabular-nums text-faint hover:text-text"
       title={pending ? t('Доступно обновление {v}', { v: pending }) : t('doplan {v} — о программе и обновления', { v: api.version })}
       onClick={() => dialogStore.getState().open('about')}
     >
@@ -198,7 +198,7 @@ export function StatusBar() {
 
   return (
     <footer className="flex h-6 shrink-0 items-center gap-3 border-t border-border bg-panel px-2 text-[11px] text-muted">
-      <span className="flex w-[150px] shrink-0 items-center gap-1 font-mono">
+      <span className="flex w-[150px] shrink-0 items-center gap-1 tabular-nums">
         <Crosshair size={11} />
         {cursor ? `${formatLength(cursor.x, units)}, ${formatLength(cursor.y, units)} ${unitLabel}` : '—'}
       </span>
@@ -237,7 +237,7 @@ export function StatusBar() {
       {mode !== '3d' && (
         <span className="flex shrink-0 items-center gap-0.5 border-l border-border pl-2">
           <IconBtn icon={Minus} size="sm" label={t('Уменьшить')} tipSide="top" onClick={() => handles.editor2d?.zoomBy(1 / 1.25)} />
-          <span className="w-12 text-center font-mono">{zoom}</span>
+          <span className="w-12 text-center tabular-nums">{zoom}</span>
           <IconBtn icon={Plus} size="sm" label={t('Увеличить')} tipSide="top" onClick={() => handles.editor2d?.zoomBy(1.25)} />
           <IconBtn icon={Maximize2} size="sm" label={t('Показать весь план')} tipSide="top" onClick={() => handles.editor2d?.zoomToFit()} />
         </span>

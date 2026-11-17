@@ -8,6 +8,7 @@ import { displayName, errorText, useAllAssets, useLang } from './common/catalog'
 import '@/ui/catalogI18n'
 import type { DialogPropsBase } from './BomDialog'
 import { AssetFeedsSection } from './AssetFeedsSection'
+import { ThemePicker } from './ThemePicker'
 
 type Editable = Pick<AppSettings, 'lang' | 'theme' | 'backend' | 'autosaveSec' | 'assetFeeds'>
 
@@ -89,7 +90,7 @@ export function SettingsDialog({ open, onClose }: DialogPropsBase) {
       open={open}
       onClose={onClose}
       title={t('Настройки')}
-      width="max-w-md"
+      width="max-w-lg"
       footer={
         <Button variant="primary" onClick={onClose}>
           {t('Готово')}
@@ -113,16 +114,8 @@ export function SettingsDialog({ open, onClose }: DialogPropsBase) {
                   aria-label={t('Язык')}
                 />
               </Row>
-              <Row label={t('Тема')}>
-                <Segmented<AppSettings['theme']>
-                  value={s.theme}
-                  onChange={(v) => void update({ theme: v })}
-                  options={[
-                    { value: 'dark', label: t('Тёмная') },
-                    { value: 'light', label: t('Светлая') },
-                  ]}
-                  aria-label={t('Тема')}
-                />
+              <Row label={t('Тема')} stacked>
+                <ThemePicker />
               </Row>
             </div>
           </Section>

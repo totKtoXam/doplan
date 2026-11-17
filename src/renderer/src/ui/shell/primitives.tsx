@@ -189,7 +189,18 @@ export function Segmented<T extends string>({
 // ───────────── dropdown menu ─────────────
 
 export type MenuEntry =
-  | { type?: 'item'; label: string; icon?: LucideIcon; kbd?: string; disabled?: boolean; danger?: boolean; checked?: boolean; onSelect(): void }
+  | {
+      type?: 'item'
+      label: string
+      icon?: LucideIcon
+      kbd?: string
+      disabled?: boolean
+      danger?: boolean
+      checked?: boolean
+      /** a toggle: the menu stays open after the click, so several can be flipped in a row */
+      keepOpen?: boolean
+      onSelect(): void
+    }
   | { type: 'separator' }
   | { type: 'header'; label: string }
   | { type: 'submenu'; label: string; icon?: LucideIcon; items: MenuEntry[]; disabled?: boolean }
@@ -240,7 +251,7 @@ function MenuList({ items, onClose, style }: { items: MenuEntry[]; onClose(): vo
             disabled={it.disabled}
             onPointerEnter={() => setSub(null)}
             onClick={() => {
-              onClose()
+              if (!it.keepOpen) onClose()
               it.onSelect()
             }}
             className={clsx(
@@ -250,8 +261,9 @@ function MenuList({ items, onClose, style }: { items: MenuEntry[]; onClose(): vo
             )}
           >
             <span className="flex w-4 justify-center text-muted">
-              {it.checked ? <span className="text-accent">✓</span> : Icon ? <Icon size={14} /> : null}
+              {it.checked ? <span className="text-accent">✓</span> : Icon && it.checked === undefined ? <Icon size={14} /> : null}
             </span>
+            {Icon && it.checked !== undefined && <Icon size={14} className="shrink-0 text-muted" />}
             <span className="flex-1 truncate">{it.label}</span>
             {it.kbd && <span className="ml-4 font-mono text-[10px] text-faint">{it.kbd}</span>}
           </button>

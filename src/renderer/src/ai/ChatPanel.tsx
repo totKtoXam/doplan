@@ -34,7 +34,7 @@ import { type ClipboardEvent, type KeyboardEvent, type ReactNode, type RefObject
 import type { AiChatMeta, AiChatSettings, AiMessage, AiPart, AiProviderInfo } from '@shared/aiChat'
 import { useDoc } from '@/store/document'
 import { uiStore, useUi } from '@/store/ui'
-import { activateTool } from '@/ui/shell/ToolRail'
+import { activateTool } from '@/ui/shell/tools'
 import { cn, Popover } from '@/ui/kit'
 import {
   addImageFiles,

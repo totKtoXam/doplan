@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { createEmptyDoc } from '@core'
 import type { Vec2 } from '@core/types'
 
-// «Пометить» is a chat tool now: no button on the left rail, P still starts it, and a mark drawn on
+// «Пометить» is a chat tool now: no button in the tool bar, P still starts it, and a mark drawn on
 // the plan goes into the message as a «Пометка ①» chip with the keyboard back in the chat input.
 
 vi.mock('@/store/api', () => {
@@ -15,7 +15,7 @@ const { uiStore } = await import('@/store/ui')
 const { marksStore, MARK_HINT } = await import('@/store/marks')
 const { aiStore } = await import('./store')
 const { createPencilTool } = await import('@/editor2d/tools/pencil')
-const { TOOLS } = await import('@/ui/shell/ToolRail')
+const { TOOLS } = await import('@/ui/shell/tools')
 const { t } = await import('@/i18n')
 await import('./i18n')
 
@@ -24,9 +24,9 @@ beforeAll(() => {
 })
 
 describe('the «Пометить» tool', () => {
-  it('has the P hotkey but no rail button; the label, hint and status text are translated', () => {
+  it('has the P hotkey but no tool-bar button; the label, hint and status text are translated', () => {
     const def = TOOLS.find((d) => d !== 'sep' && d.id === 'pencil')
-    expect(def).toMatchObject({ key: 'P', label: 'Пометить', hint: MARK_HINT, rail: false })
+    expect(def).toMatchObject({ key: 'P', label: 'Пометить', hint: MARK_HINT, place: 'chat' })
     uiStore.setState({ lang: 'en' })
     try {
       expect(t('Пометить')).toBe('Mark')
@@ -35,8 +35,8 @@ describe('the «Пометить» tool', () => {
     } finally {
       uiStore.setState({ lang: 'ru' })
     }
-    // nothing else is left off the rail
-    expect(TOOLS.filter((d) => d !== 'sep' && d.rail === false).map((d) => d !== 'sep' && d.id)).toEqual(['pencil'])
+    // no other tool lives in the chat
+    expect(TOOLS.filter((d) => d !== 'sep' && d.place === 'chat').map((d) => d !== 'sep' && d.id)).toEqual(['pencil'])
   })
 
   it('a mark drawn on the plan becomes a numbered chip and the chat input gets the keyboard', async () => {

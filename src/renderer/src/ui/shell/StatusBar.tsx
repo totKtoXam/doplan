@@ -1,4 +1,5 @@
-import { Cpu, Crosshair, Maximize2, Minus, MousePointer2, Plus, SquareDashed } from 'lucide-react'
+import clsx from 'clsx'
+import { Cpu, Crosshair, Magnet, Maximize2, Minus, MousePointer2, Plus, SquareDashed } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { summarizeLevelRooms } from '@core'
 import type { Doc, EntityKind, EntityRef } from '@core/types'
@@ -11,6 +12,53 @@ import { handles, onHandlesChange } from '@/store/handles'
 import { useNotify } from '@/store/notify'
 import { useUi } from '@/store/ui'
 import { IconBtn } from './primitives'
+import { setSetting } from './ToolOptionsBar'
+import '@/ui/shellI18n'
+
+const GRID_SIZES = [10, 50, 100, 250, 500, 1000]
+
+/** a snap switch of the status bar: the text lights up when it is on */
+function SnapToggle({ on, label, title, onChange }: { on: boolean; label: string; title: string; onChange(v: boolean): void }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      title={title}
+      onClick={() => onChange(!on)}
+      className={clsx('h-5 shrink-0 rounded px-1.5', on ? 'bg-accent-soft text-accent' : 'text-faint hover:bg-hover hover:text-text')}
+    >
+      {label}
+    </button>
+  )
+}
+
+/** snaps of the plan editor (document settings): grid with its step, objects, 15° angles */
+function Snaps() {
+  const t = useT()
+  const settings = useDoc((s) => s.doc.settings)
+  const gridLabel = (g: number) => (g >= 1000 ? `${g / 1000} ${t('м')}` : g >= 100 ? `${g / 10} ${t('см')}` : `${g} ${t('мм')}`)
+  return (
+    <span className="flex shrink-0 items-center gap-0.5" role="group" aria-label={t('Привязки')}>
+      <Magnet size={11} className="mr-0.5" aria-hidden />
+      <SnapToggle on={settings.snapGrid} label={t('Сетка')} title={t('Привязка к сетке')} onChange={(v) => setSetting('snapGrid', v)} />
+      <select
+        title={t('Шаг сетки')}
+        aria-label={t('Шаг сетки')}
+        value={settings.gridMm}
+        onChange={(e) => setSetting('gridMm', Number(e.target.value))}
+        className="h-5 shrink-0 cursor-pointer rounded bg-transparent px-0.5 font-mono text-[11px] text-muted outline-none hover:bg-hover hover:text-text"
+      >
+        {(GRID_SIZES.includes(settings.gridMm) ? GRID_SIZES : [...GRID_SIZES, settings.gridMm].sort((a, b) => a - b)).map((g) => (
+          <option key={g} value={g}>
+            {gridLabel(g)}
+          </option>
+        ))}
+      </select>
+      <SnapToggle on={settings.snapObjects} label={t('Объекты')} title={t('Привязка к стенам и узлам')} onChange={(v) => setSetting('snapObjects', v)} />
+      <SnapToggle on={settings.snapAngle} label={t('Углы 15°')} title={t('Привязка к углам 15°')} onChange={(v) => setSetting('snapAngle', v)} />
+    </span>
+  )
+}
 
 export function formatLength(mm: number, units: Doc['settings']['units']): string {
   switch (units) {
@@ -185,8 +233,9 @@ export function StatusBar() {
           {t('{n} комн.', { n: area.count })} · {area.total.toFixed(1)} {t('м²')}
         </span>
       )}
+      {mode !== '3d' && <Snaps />}
       {mode !== '3d' && (
-        <span className="flex shrink-0 items-center gap-0.5">
+        <span className="flex shrink-0 items-center gap-0.5 border-l border-border pl-2">
           <IconBtn icon={Minus} size="sm" label={t('Уменьшить')} tipSide="top" onClick={() => handles.editor2d?.zoomBy(1 / 1.25)} />
           <span className="w-12 text-center font-mono">{zoom}</span>
           <IconBtn icon={Plus} size="sm" label={t('Увеличить')} tipSide="top" onClick={() => handles.editor2d?.zoomBy(1.25)} />

@@ -8,7 +8,7 @@ import { useT } from '@/i18n'
 import { marksStore, type PencilShape, useMarks } from '@/store/marks'
 import { useUi } from '@/store/ui'
 import { cn, Popover } from '@/ui/kit'
-import { activateTool } from '@/ui/shell/ToolRail'
+import { activateTool } from '@/ui/shell/tools'
 import './i18n'
 
 export const MARK_SHAPES: { id: PencilShape; label: string; icon: typeof Pencil }[] = [

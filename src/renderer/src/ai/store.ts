@@ -9,7 +9,7 @@ import { useStore } from 'zustand'
 import { derivePlan, describeMark, markBadge, markTargets } from '@core'
 import type { EntityRef, Id } from '@core/types'
 import type { AiChatMeta, AiChatRecord, AiChatSettings, AiChip, AiImage, AiLoginEvent, AiMessage, AiPart, AiProviderId, AiProviderInfo, AiQuestion, AiQuestionAnswer, AiRunEvent, AiToolCall } from '@shared/aiChat'
-import { DEFAULT_AI_SETTINGS } from '@shared/aiChat'
+import { DEFAULT_AI_SETTINGS, quoteMarkdown } from '@shared/aiChat'
 import { AI_TOOL_TITLES, formatAnswers, isAiToolName, parseToolArgs } from '@shared/aiTools'
 import { ensureAiFolderTrust } from '@/actions/project'
 import { t } from '@/i18n'
@@ -18,6 +18,7 @@ import { docStore } from '@/store/document'
 import { getMark, marksStore, setMarkNumberFloor } from '@/store/marks'
 import { addProjectHook } from '@/store/projectHooks'
 import { uiStore } from '@/store/ui'
+import { chatTranscript } from './history'
 import { DraftHost, liveHost } from './hosts'
 import { markSnapshot } from './markSnapshot'
 import type { MarkupShape } from './markup'
@@ -28,6 +29,12 @@ export type DockTab = 'props' | 'ai'
 
 /** an image waiting to be sent; `markup` keeps the clean picture and the pencil marks drawn over it (re-editable) */
 export type PendingImage = AiImage & { url: string; markup?: { base: string; shapes: MarkupShape[] } }
+
+/** a passage of the conversation the user picked to quote in the next message */
+export interface ChatQuote {
+  id: string
+  text: string
+}
 
 /** in-app CLI sign-in in progress (or just finished) */
 export interface LoginState {
@@ -55,6 +62,7 @@ export interface AiState {
   status: string
   chips: AiChip[]
   images: PendingImage[]
+  quotes: ChatQuote[]
   /** plan mode: number of proposed edits waiting for «Применить» */
   draftCount: number
   draftChanges: string[]
@@ -99,6 +107,7 @@ export const aiStore = createStore<AiState>()(() => ({
   status: '',
   chips: [],
   images: [],
+  quotes: [],
   draftCount: 0,
   draftChanges: [],
   dockTab: readTab(),
@@ -426,7 +435,7 @@ async function setProject(gone: string | null): Promise<void> {
   copyClaim = null
   claimFailed = false
   // switched at once: whatever is saved from now on lands in the new project
-  set({ projectPath: ref, legacy: false, chats: [], chat: emptyChat(get().settings.provider), chips: [], images: [], status: '' })
+  set({ projectPath: ref, legacy: false, chats: [], chat: emptyChat(get().settings.provider), chips: [], images: [], quotes: [], status: '' })
   if (gone && gone !== ref) void queueWrite(() => api.aiChat.dropChats(gone)).catch(() => {})
   const { filePath } = docStore.getState()
   if (filePath && ref.startsWith('id:')) {
@@ -645,6 +654,20 @@ export function removeChip(id: string): void {
   set({ chips: get().chips.filter((c) => c.id !== id) })
 }
 
+const MAX_QUOTE = 4000
+
+/** quotes a passage of the conversation in the next message (the text selected in the chat) */
+export function addQuote(text: string): void {
+  const q = text.replace(/\r\n?/g, '\n').replace(/\n{3,}/g, '\n\n').trim().slice(0, MAX_QUOTE)
+  if (!q || get().quotes.some((x) => x.text === q)) return focusChat()
+  set({ quotes: [...get().quotes, { id: uid(), text: q }].slice(-10) })
+  focusChat()
+}
+
+export function removeQuote(id: string): void {
+  set({ quotes: get().quotes.filter((q) => q.id !== id) })
+}
+
 const MAX_SIDE = 1568
 
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -690,12 +713,17 @@ export async function addImageFiles(files: File[]): Promise<void> {
 
 /** attaches the active level's underlay (traced plan photo) */
 export async function addUnderlayImage(): Promise<boolean> {
+  const im = await underlayAttachment()
+  if (!im) return false
+  set({ images: [...get().images, im].slice(0, 8) })
+  return true
+}
+
+async function underlayAttachment(): Promise<PendingImage | null> {
   const { doc } = docStore.getState()
   const lv = uiStore.getState().activeLevelId
   const u = Object.values(doc.underlays).find((x) => x.levelId === lv) ?? Object.values(doc.underlays)[0]
-  if (!u) return false
-  set({ images: [...get().images, await toAttachment(u.src, 'подложка')].slice(0, 8) })
-  return true
+  return u ? toAttachment(u.src, 'подложка') : null
 }
 
 /** puts the image back after drawing pencil marks on it */
@@ -779,13 +807,56 @@ export function currentProvider(): AiProviderInfo | undefined {
 /** a trust question is open (send() awaits it): a second send waits for nothing */
 let askingTrust = false
 
+/**
+ * The pictures of the latest messages at full size: a message edited later is sent again with them
+ * (after a restart, with the thumbnails the chat keeps).
+ */
+const sentImages = new Map<string, PendingImage[]>()
+const KEEP_SENT_IMAGES = 20
+
+function rememberImages(msgId: string, images: PendingImage[]): void {
+  if (!images.length) return
+  sentImages.set(msgId, images)
+  while (sentImages.size > KEEP_SENT_IMAGES) sentImages.delete(sentImages.keys().next().value!)
+}
+
+/** a picture kept in the chat (a data URL) as an attachment */
+function fromThumb(url: string): PendingImage {
+  const mime = (/^data:(image\/(?:png|jpeg|webp|gif));base64,/.exec(url)?.[1] ?? 'image/jpeg') as AiImage['mime']
+  return { mime, data: url.slice(url.indexOf(',') + 1), name: 'изображение', url }
+}
+
+/** what goes with the text of a message */
+interface TurnInput {
+  chips: AiChip[]
+  images: PendingImage[]
+  quotes: string[]
+}
+
 export async function send(raw: string): Promise<void> {
   // a question is open: the text typed is the answer (with what is picked on the card)
   if (get().asking && get().running) {
     answerQuestion(raw)
     return
   }
-  if (get().running || askingTrust) return
+  await runTurn(raw, null)
+}
+
+/**
+ * Sends an earlier message of the user again, changed. The chat goes on from there: the messages after
+ * it are dropped, and so are the agent sessions and the API history (they remember the old conversation);
+ * the agent starts anew and gets the chat so far as text. The message keeps its chips, quotes and
+ * pictures. Nothing happens while a turn runs. True when the turn started.
+ */
+export function editAndResend(msgId: string, raw: string): Promise<boolean> {
+  return runTurn(raw, msgId)
+}
+
+/** the open chat still has this message of the user */
+const hasUserMsg = (id: string) => get().chat.messages.some((m) => m.id === id && m.role === 'user')
+
+async function runTurn(raw: string, editId: string | null): Promise<boolean> {
+  if (get().running || askingTrust) return false
   // a turn starts where the chats are, not halfway through moving them
   if (moving) await moving
   if (currentProvider()?.id !== 'api' && currentProvider()?.available) {
@@ -793,52 +864,81 @@ export async function send(raw: string): Promise<void> {
     askingTrust = true
     try {
       if (!(await ensureAiFolderTrust())) {
-        // the composer was cleared on Enter: a cancelled question gives the message back
-        insertIntoComposer(raw, false)
-        return
+        // the composer was cleared on Enter: a cancelled question gives the message back (an edit stays open)
+        if (!editId) insertIntoComposer(raw, false)
+        return false
       }
     } finally {
       askingTrust = false
     }
   }
   const st = get()
-  if (st.running) return
+  if (st.running) return false
+  let input: TurnInput
+  if (editId) {
+    const m = st.chat.messages.find((x) => x.id === editId && x.role === 'user')
+    if (!m) return false
+    input = { chips: m.chips ?? [], quotes: m.quotes ?? [], images: sentImages.get(editId) ?? (m.images ?? []).filter(Boolean).map(fromThumb) }
+  } else input = { chips: st.chips, images: st.images, quotes: st.quotes.map((q) => q.text) }
   const { text, needsImage } = expandQuick(raw)
-  if (!text.trim() && !st.images.length) return
+  if (!text.trim() && !input.images.length && !input.quotes.length) return false
   const prov = currentProvider()
   if (!prov?.available) {
     set({ status: prov?.reason ?? t('Провайдер недоступен') })
-    return
+    return false
   }
-  if (needsImage && !st.images.length) {
-    if (!(await addUnderlayImage().catch(() => false))) {
+  if (needsImage && !input.images.length) {
+    const u = await underlayAttachment().catch(() => null)
+    if (!u) {
       set({ status: t('Приложите фото плана (скрепка или Ctrl+V) или добавьте подложку') })
-      return
+      return false
     }
+    input = { ...input, images: [u] }
   }
-  const images = get().images
-  const chips = st.chips
   const runId = uid()
   const userMsg: AiMessage = {
     id: uid(),
     role: 'user',
     createdAt: now(),
-    parts: [{ type: 'text', text: raw.trim() || t('(изображение)') }],
-    chips: chips.length ? chips : undefined,
-    images: images.length ? await Promise.all(images.map((im) => thumb(im.url))) : undefined,
+    parts: [{ type: 'text', text: raw.trim() || (input.quotes.length ? '' : t('(изображение)')) }],
+    chips: input.chips.length ? input.chips : undefined,
+    images: input.images.length ? await Promise.all(input.images.map((im) => thumb(im.url))) : undefined,
+    quotes: input.quotes.length ? input.quotes : undefined,
   }
+  // the pictures were being made: a turn may have started meanwhile, or the chat changed
+  if (get().running || (editId && !hasUserMsg(editId))) return false
   const asst: AiMessage = { id: uid(), role: 'assistant', createdAt: now(), parts: [] }
-  const settings = st.settings
+  const settings = get().settings
+  if (editId) {
+    // the plan-mode proposal of the dropped turns goes with them
+    discardDraft()
+    const chatId = get().chat.id
+    // what a stopped turn of the old conversation still reports must not bring its session back
+    for (const s of stoppedRuns.values()) if (s.chatId === chatId) s.cut = true
+    patchChat((c) => {
+      const i = c.messages.findIndex((m) => m.id === editId)
+      c.messages.splice(i)
+      delete c.resume
+      delete c.resumeCwd
+      delete c.apiHistory
+      if (i === 0) c.title = ''
+    })
+  }
+  // the chat so far, for an agent that starts without its own memory of it (main decides)
+  const before = get().chat.messages
+  const history = before.length ? chatTranscript(before) : undefined
   // an empty draft left by an earlier turn was taken from the plan as it was then
   if (settings.planMode && (!draft || draft.empty)) draft = new DraftHost()
   partIndex = new Map()
   patchChat((c) => {
     c.messages.push(userMsg, asst)
-    if (!c.title) c.title = (raw.trim() || t('Изображение')).slice(0, 60)
+    if (!c.title) c.title = (raw.trim() || input.quotes[0] || t('Изображение')).replace(/\s+/g, ' ').slice(0, 60)
     c.provider = settings.provider
     c.updatedAt = now()
   })
-  set({ running: { runId, msgId: asst.id }, chips: [], images: [], status: t('Запуск…'), showHistory: false })
+  rememberImages(userMsg.id, input.images)
+  // an edit leaves the input box as it is
+  set({ running: { runId, msgId: asst.id }, ...(editId ? {} : { chips: [], images: [], quotes: [] }), status: t('Запуск…'), showHistory: false })
   const chat = get().chat
   try {
     await api.aiChat.run({
@@ -848,16 +948,18 @@ export async function send(raw: string): Promise<void> {
       projectPath: chatRef(),
       projectRoot: null,
       settings,
-      text,
-      images: images.map(({ mime, data, name }) => ({ mime, data, name })),
-      chips,
+      text: quoteMarkdown(input.quotes) + text,
+      images: input.images.map(({ mime, data, name }) => ({ mime, data, name })),
+      chips: input.chips,
       resumeId: chat.resume?.[settings.provider],
       resumeCwd: chat.resumeCwd?.[settings.provider],
       apiHistory: settings.provider === 'api' ? chat.apiHistory : undefined,
+      history,
     })
   } catch (e) {
     onRunEvent(runId, { type: 'done', ok: false, error: (e as Error).message })
   }
+  return true
 }
 
 /**
@@ -886,6 +988,8 @@ interface StoppedRun {
   /** where the chat lives now (a Save As that moved the chats moves it too) */
   ref: string | null
   noSession?: boolean
+  /** an earlier message of its chat was edited since: its session and API history are of the old conversation */
+  cut?: boolean
   /** the reference it was stopped in, and how many session drops that reference had then */
   stoppedIn: string | null
   drops: number
@@ -926,6 +1030,7 @@ function onStoppedRunEvent(runId: string, ev: AiRunEvent): void {
   }
   if (ev.type !== 'session' && ev.type !== 'apiHistory' && ev.type !== 'usage') return
   if (ev.type === 'session' && sessionGone(s)) return
+  if (s.cut && ev.type !== 'usage') return
   if (get().chat.id === s.chatId && chatRef() === s.ref) {
     patchChat((c) => recordEvent(c, s.msgId, ev))
     void persist()

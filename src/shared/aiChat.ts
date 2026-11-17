@@ -87,6 +87,12 @@ export interface AiRunRequest {
   resumeCwd?: string
   /** Anthropic API provider: prior conversation (opaque JSON kept by the chat) */
   apiHistory?: unknown[]
+  /**
+   * The earlier turns of the chat as plain text (chatTranscript). Main puts it before the message when
+   * the agent starts without a session of its own (none kept, a message was edited, the folder changed),
+   * so the new session knows what was said.
+   */
+  history?: string
 }
 
 /** Normalised stream of a running turn (main → renderer). */
@@ -174,6 +180,8 @@ export interface AiMessage {
   chips?: AiChip[]
   /** attached images (data URLs, thumbnails only in storage) */
   images?: string[]
+  /** passages of the conversation the user quoted (they go before the text as markdown quotes) */
+  quotes?: string[]
   usage?: { inputTokens?: number; outputTokens?: number; costUsd?: number }
   error?: string
 }
@@ -247,4 +255,13 @@ export interface AiChatApi {
   loginInput(text: string): Promise<void>
   loginCancel(): Promise<void>
   onLogin(cb: (provider: AiProviderId, ev: AiLoginEvent) => void): () => void
+}
+
+/** quoted passages as markdown quotes, ready to go before the user's text */
+export function quoteMarkdown(quotes: readonly string[]): string {
+  return quotes
+    .map((q) => q.replace(/\r\n?/g, '\n').trim())
+    .filter(Boolean)
+    .map((q) => `${q.split('\n').map((l) => (l.trim() ? `> ${l}` : '>')).join('\n')}\n\n`)
+    .join('')
 }

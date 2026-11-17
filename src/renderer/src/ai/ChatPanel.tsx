@@ -46,6 +46,7 @@ import {
   consumeInsert,
   discardDraft,
   dismissLogin,
+  editAndResend,
   hasAnswer,
   newChat,
   openChat,
@@ -56,6 +57,7 @@ import {
   removeChat,
   removeChip,
   removeImage,
+  removeQuote,
   replaceImage,
   send,
   sendLoginCode,
@@ -69,6 +71,7 @@ import { pluralKey, tAi } from './i18n'
 import { ImageMarkup } from './ImageMarkup'
 import { MarkButton } from './MarkButton'
 import { parseMarkdown } from './markdown'
+import { QuoteButton } from './QuoteButton'
 import { t } from '@/i18n'
 
 type ToolPart = Extract<AiPart, { type: 'tool' }>
@@ -478,33 +481,144 @@ function Notice({ part }: { part: Extract<AiPart, { type: 'notice' }> }) {
   )
 }
 
-function Message({ m, live }: { m: AiMessage; live: boolean }) {
-  if (m.role === 'user') {
-    const text = m.parts.map((p) => (p.type === 'text' ? p.text : '')).join('')
-    return (
-      <div className="flex flex-col items-end gap-1">
-        {m.images && m.images.some(Boolean) && (
-          <div className="flex flex-wrap justify-end gap-1">
-            {m.images.filter(Boolean).map((src, i) => (
-              <img key={i} src={src} alt="" className="h-14 rounded-lg border border-border" />
-            ))}
-          </div>
-        )}
-        <div className="max-w-[88%] rounded-2xl bg-panel-3 px-3 py-1.5">
-          {m.chips && (
-            <div className="mb-1 flex flex-wrap gap-1">
-              {m.chips.map((c) => (
-                <span key={c.id} className="rounded bg-[color-mix(in_srgb,var(--accent)_18%,transparent)] px-1.5 text-[10px]" title={c.summary}>
-                  {t(c.label)}
-                </span>
-              ))}
-            </div>
-          )}
-          <RichText text={text} />
-        </div>
+/** passages the user quoted: above the text of their message, and in the input box before sending */
+function QuoteBlock({ text, className, children }: { text: string; className?: string; children?: ReactNode }) {
+  return (
+    <div data-ai-quote className={cn('flex min-w-0 items-start gap-1 border-l-2 border-[color-mix(in_srgb,var(--accent)_55%,transparent)] pl-2', className)}>
+      <div className="line-clamp-3 min-w-0 flex-1 text-[11.5px] leading-snug whitespace-pre-wrap text-muted [overflow-wrap:anywhere] select-text" title={text}>
+        {text}
       </div>
-    )
+      {children}
+    </div>
+  )
+}
+
+function UserMessage({ m }: { m: AiMessage }) {
+  const running = useAi((s) => !!s.running)
+  const raw = m.parts.map((p) => (p.type === 'text' ? p.text : '')).join('')
+  const images = m.images?.filter(Boolean) ?? []
+  // a picture sent alone shows a placeholder text: the edit starts empty
+  const text = images.length && (raw === '(изображение)' || raw === t('(изображение)')) ? '' : raw
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(text)
+  const [busy, setBusy] = useState(false)
+  const ta = useRef<HTMLTextAreaElement>(null)
+
+  useLayoutEffect(() => {
+    const el = ta.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(240, el.scrollHeight)}px`
+  }, [value, editing])
+
+  // a turn started elsewhere: the edit closes (nothing is lost, the message is as it was)
+  useEffect(() => {
+    if (running && !busy) setEditing(false)
+  }, [running, busy])
+
+  const canSend = !!value.trim() || images.length > 0 || !!m.quotes?.length
+  const submit = async () => {
+    if (!canSend || busy) return
+    setBusy(true)
+    try {
+      // started: a new message replaces this one (this component goes); not started: the edit stays open
+      if (!(await editAndResend(m.id, value))) setBusy(false)
+    } catch {
+      setBusy(false)
+    }
   }
+
+  const extras = (
+    <>
+      {m.quotes?.map((q, i) => <QuoteBlock key={i} text={q} className="mb-1" />)}
+      {m.chips && (
+        <div className="mb-1 flex flex-wrap gap-1">
+          {m.chips.map((c) => (
+            <span key={c.id} className="rounded bg-[color-mix(in_srgb,var(--accent)_18%,transparent)] px-1.5 text-[10px]" title={c.summary}>
+              {t(c.label)}
+            </span>
+          ))}
+        </div>
+      )}
+    </>
+  )
+
+  return (
+    <div data-ai-user-msg className="group/msg flex flex-col items-end gap-1">
+      {images.length > 0 && (
+        <div className="flex flex-wrap justify-end gap-1">
+          {images.map((src, i) => (
+            <img key={i} src={src} alt="" className="h-14 rounded-lg border border-border" />
+          ))}
+        </div>
+      )}
+      {editing ? (
+        <div data-ai-edit className="w-full rounded-2xl border border-border-strong bg-input px-3 pt-2 pb-1.5 focus-within:border-[color-mix(in_srgb,var(--accent)_60%,var(--border-strong))]">
+          {extras}
+          <textarea
+            ref={ta}
+            autoFocus
+            value={value}
+            rows={1}
+            disabled={busy}
+            className="block max-h-[240px] w-full resize-none bg-transparent text-[12.5px] leading-relaxed outline-none"
+            onFocus={(e) => e.currentTarget.setSelectionRange(e.currentTarget.value.length, e.currentTarget.value.length)}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault()
+                void submit()
+              } else if (e.key === 'Escape') {
+                e.preventDefault()
+                setEditing(false)
+              }
+              e.stopPropagation() // editor shortcuts must not fire while typing
+            }}
+          />
+          <div className="mt-1 flex items-center gap-1.5">
+            <span className="min-w-0 flex-1 text-[10px] text-faint">{t('Ответы после этого сообщения будут заменены')}</span>
+            <button type="button" className="rounded-md px-2 py-0.5 text-[11px] text-muted hover:bg-hover hover:text-text" onClick={() => setEditing(false)}>
+              {t('Отмена')}
+            </button>
+            <button
+              type="button"
+              className="rounded-md bg-accent px-2 py-0.5 text-[11px] text-accent-fg hover:bg-accent-hover disabled:bg-panel-3 disabled:text-faint"
+              disabled={!canSend || busy}
+              onClick={() => void submit()}
+            >
+              {t('Отправить')}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex max-w-full items-start justify-end gap-1">
+          {!running && (
+            <button
+              type="button"
+              data-ai-edit-btn
+              aria-label={t('Изменить сообщение')}
+              title={t('Изменить и отправить заново')}
+              className="mt-1 shrink-0 rounded-md p-1 text-faint opacity-0 group-hover/msg:opacity-100 hover:bg-hover hover:text-text focus-visible:opacity-100"
+              onClick={() => {
+                setValue(text)
+                setEditing(true)
+              }}
+            >
+              <Pencil size={12} />
+            </button>
+          )}
+          <div className="max-w-[88%] min-w-0 rounded-2xl bg-panel-3 px-3 py-1.5">
+            {extras}
+            {text && <RichText text={text} />}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Message({ m, live }: { m: AiMessage; live: boolean }) {
+  if (m.role === 'user') return <UserMessage m={m} />
 
   // group consecutive tool / thinking parts
   const blocks: ({ kind: 'part'; part: AiPart } | { kind: 'group'; items: Activity[] })[] = []
@@ -1098,6 +1212,7 @@ function PlusMenu({ onQuick }: { onQuick(cmd: string): void }) {
 function Composer() {
   const chips = useAi((s) => s.chips)
   const images = useAi((s) => s.images)
+  const quotes = useAi((s) => s.quotes)
   const running = useAi((s) => !!s.running)
   const asking = useAi((s) => (s.running ? s.asking : null))
   const focusTick = useAi((s) => s.focusTick)
@@ -1135,7 +1250,7 @@ function Composer() {
   const slash = text.startsWith('/') && !text.includes('\n') ? QUICK_ACTIONS.filter((q) => text.trim() === '/' || [quickCmd(q), q.cmd].some((c) => c.toLowerCase().startsWith(text.trim().toLowerCase()))) : []
   // a question is open: what is sent answers it (the text, the options picked on the card)
   const answering = !!asking
-  const canSend = answering ? hasAnswer(asking, text, chips.length > 0 || images.length > 0) : !running && (!!text.trim() || images.length > 0)
+  const canSend = answering ? hasAnswer(asking, text, chips.length > 0 || images.length > 0) : !running && (!!text.trim() || images.length > 0 || quotes.length > 0)
 
   const submit = () => {
     if (!canSend) return
@@ -1186,6 +1301,17 @@ function Composer() {
         </div>
       )}
       <div className="rounded-2xl border border-border-strong bg-input shadow-sm focus-within:border-[color-mix(in_srgb,var(--accent)_60%,var(--border-strong))]">
+        {quotes.length > 0 && (
+          <div className="flex flex-col gap-1.5 px-2.5 pt-2.5">
+            {quotes.map((q) => (
+              <QuoteBlock key={q.id} text={q.text}>
+                <button type="button" aria-label={t('Убрать')} className="shrink-0 text-muted hover:text-text" onClick={() => removeQuote(q.id)}>
+                  <X size={11} />
+                </button>
+              </QuoteBlock>
+            ))}
+          </div>
+        )}
         {(chips.length > 0 || images.length > 0) && (
           <div className="flex flex-wrap gap-1.5 px-2.5 pt-2.5">
             {images.map((im, i) => (
@@ -1307,6 +1433,7 @@ export function ChatPanel({ className }: { className?: string }) {
           <Message key={m.id} m={m} live={!!running && running.msgId === m.id} />
         ))}
       </div>
+      <QuoteButton root={scroller} />
       {prov && !prov.available && (
         <div className="mx-2 mb-1.5 flex items-center gap-1.5 rounded-xl border border-border bg-panel-2 px-3 py-1.5 text-[11px] text-warning">
           <TriangleAlert size={12} className="shrink-0" /> <span className="min-w-0 flex-1">{tAi(prov.reason)}</span>

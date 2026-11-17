@@ -110,5 +110,21 @@ describe('checkBundledAssets', () => {
     )
     expect(res.checked).toBe(6)
     expect(res.missing.map((m) => m.path)).toEqual(['materials/m/color.jpg', 'materials/m/normal.jpg', 'models/a/tex/a.jpg'])
+    expect(res.stray).toEqual([])
+  })
+
+  it('reports files that no bundled entry uses (an on-demand model left on disk)', () => {
+    dir = mkdtempSync(path.join(tmpdir(), 'doplan-assets-check-'))
+    put('models/a/a.glb', 'x')
+    put('models/a/a.glb.fix.json', '{}')
+    put('models/b/b.gltf', JSON.stringify({ buffers: [{ uri: 'b.bin' }] }))
+    put('models/b/b.bin', 'x')
+    put('hdris/h.hdr', 'x')
+    const res = checkBundledAssets(
+      { assets: [{ id: 'a', src: 'models/a/a.glb' }, { id: 'b', src: 'models/b/b.gltf', remote: true }], hdris: [] },
+      dir,
+    )
+    expect(res.missing).toEqual([])
+    expect(res.stray).toEqual(['hdris/h.hdr', 'models/b/b.bin', 'models/b/b.gltf'])
   })
 })

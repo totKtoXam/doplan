@@ -5,7 +5,9 @@ import { unzipSync } from 'fflate'
 import type { Asset, Catalog, Hdri, Material, MaterialMaps } from '../core/types'
 import { CH } from './channels'
 import { atomicWrite, cleanExt, readJson, rmrf, safeJoin, toBytes } from './fsutil'
+import { expectedFiles, fromFeed } from './feeds'
 import { paths } from './paths'
+import { getAssetFeeds, msg } from './settings'
 import { broadcast } from './window'
 
 const USER_AGENT = 'doplan/0.1'
@@ -344,28 +346,10 @@ async function fetchBytes(url: string, progress: Progress): Promise<Uint8Array> 
 
 const baseName = (p: string) => posix.basename(p.replace(/\\/g, '/')).toLowerCase()
 
-async function runDownload(kind: Kind, id: string): Promise<AnyEntry> {
-  const coll = COLL[kind]
-  const [base, lib] = await Promise.all([readBase(), readLib()])
-  const existing = lib[coll].find((e) => e.id === id)
-  if (existing) return resolveEntry(existing, 'library', false)
-  const raw = base[coll].find((e) => e.id === id)
-  if (!raw) throw new Error(`Элемент каталога не найден: ${id}`)
-  if (!raw.remote) return resolveEntry(raw, 'catalog', true)
-  const spec = raw.download
-  if (!spec || (!spec.files?.length && !spec.zip)) throw new Error(`Для «${id}» не указан источник загрузки`)
-
-  const progress = new Progress(id)
-  progress.emit(true)
-  const written: string[] = []
-
-  for (const f of spec.files ?? []) {
-    const target = libPath(f.path)
-    const data = await fetchBytes(f.url, progress)
-    await atomicWrite(target, data)
-    written.push(cleanRel(f.path))
-  }
-
+/** the entry's files from its original sources (catalog `download` URLs), keyed by library path */
+async function fromUpstream(spec: DownloadSpec, progress: Progress): Promise<Map<string, Uint8Array>> {
+  const out = new Map<string, Uint8Array>()
+  for (const f of spec.files ?? []) out.set(cleanRel(f.path), await fetchBytes(f.url, progress))
   if (spec.zip) {
     const zipBytes = await fetchBytes(spec.zip.url, progress)
     const wanted = spec.zip.files
@@ -388,10 +372,61 @@ async function runDownload(kind: Kind, id: string): Promise<AnyEntry> {
     }
     const missing = Object.keys(wanted).filter((k) => !found.has(k))
     if (missing.length) throw new Error(`В архиве нет файлов: ${missing.join(', ')}`)
-    for (const [entryName, rel] of Object.entries(wanted)) {
-      await atomicWrite(libPath(rel), found.get(entryName)!)
-      written.push(cleanRel(rel))
+    for (const [entryName, rel] of Object.entries(wanted)) out.set(cleanRel(rel), found.get(entryName)!)
+  }
+  return out
+}
+
+/** a file of a doplan feed: https download, or a read from a local feed folder */
+async function readFeedFile(location: string, progress: Progress): Promise<Uint8Array> {
+  if (/^https:/i.test(location)) return fetchBytes(location, progress)
+  const st = await fsp.stat(location)
+  if (!st.isFile()) throw new Error(`${location}: not a file`)
+  if (st.size > MAX_DOWNLOAD_BYTES) throw new Error('Файл слишком большой для загрузки')
+  const data = new Uint8Array(await fsp.readFile(location))
+  progress.done += data.length
+  progress.total += data.length
+  progress.emit()
+  return data
+}
+
+async function runDownload(kind: Kind, id: string): Promise<AnyEntry> {
+  const coll = COLL[kind]
+  const [base, lib] = await Promise.all([readBase(), readLib()])
+  const existing = lib[coll].find((e) => e.id === id)
+  if (existing) return resolveEntry(existing, 'library', false)
+  const raw = base[coll].find((e) => e.id === id)
+  if (!raw) throw new Error(`Элемент каталога не найден: ${id}`)
+  if (!raw.remote) return resolveEntry(raw, 'catalog', true)
+  const spec = raw.download
+  if (!spec || (!spec.files?.length && !spec.zip)) throw new Error(`Для «${id}» не указан источник загрузки`)
+
+  const progress = new Progress(id)
+  progress.emit(true)
+  const expected = expectedFiles(spec)
+  const feeds = (await getAssetFeeds()).filter((f) => f.enabled)
+  if (!feeds.length) throw new Error(msg('Все источники ресурсов отключены (Настройки → Источники ресурсов)', 'All asset sources are switched off (Settings → Asset sources)'))
+  let files: Map<string, Uint8Array> | null = null
+  const errors: string[] = []
+  for (const feed of feeds) {
+    progress.done = 0
+    progress.total = 0
+    try {
+      files = feed.url === null ? await fromUpstream(spec, progress) : await fromFeed(feed.url, id, expected, (loc) => readFeedFile(loc, progress))
+    } catch (err) {
+      errors.push(`${feed.name}: ${(err as Error).message}`)
+      continue
     }
+    if (files) break
+  }
+  if (!files) {
+    const why = errors.length ? errors.join('; ') : msg('ни в одном включённом источнике нет этого элемента', 'no enabled source has this entry')
+    throw new Error(`${msg('Не удалось скачать', 'Download failed')} «${id}»: ${why}`)
+  }
+  const written: string[] = []
+  for (const [rel, data] of files) {
+    await atomicWrite(libPath(rel), data)
+    written.push(cleanRel(rel))
   }
 
   // thumbnails of remote entries are usually bundled: keep an absolute URL if so

@@ -294,6 +294,11 @@ export interface Room extends LayerFlags {
   skirtingMaterialId?: Id
   /** area printed on the source plan, m² (computed-vs-labelled report) */
   labelledArea?: number
+  /**
+   * a technical void, not floor (the inside of a shaft / riser box / column cut out of a room): left
+   * out of every area total whatever its size, as long as the type stays non-specific (other / storage)
+   */
+  technical?: boolean
   /** design layer: style the room was dressed in (core/styles) */
   design?: RoomDesign
 }

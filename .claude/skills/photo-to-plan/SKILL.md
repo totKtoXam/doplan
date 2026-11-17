@@ -127,7 +127,9 @@ Write `../dopan.projects/.work/<slug>/draft-01.json`. **Prefer rooms-mode, units
     on the room. `rect` is in plan coordinates, inside the room, the **outer** footprint of the shaft as
     seen from the room (its walls included). The compiler subtracts it from the floor, builds the shaft
     walls (`wall`, default `defaults.partitionThickness`; a `column` is solid) and leaves the void
-    as a technical room. Cutouts touching the room outline become notches, free-standing ones holes.
+    as a technical room, out of every total whatever its size. Cutouts touching the room outline
+    become notches, free-standing ones holes; a side within 30 mm of the outline is snapped onto it.
+    Cutouts must not overlap: an L-shaped shaft is two touching rects.
   - L-shapes and steps (a wall thicker over part of its length, a recess) → `polygon`. Steps are where
     two rooms' gaps differ along one wall: give each room its own true edge, the compiler builds a wall
     of the right thickness on each part and joins them.
@@ -169,6 +171,10 @@ Codes are explained in `planspec-reference.md`.
    digit is illegible) → keep the printed numbers and explain it in the room's `areaNote`.
 Only (5) — a difference you understand and cannot remove — goes into `areaNote` (`source.areaNote`
 for the total). An explained mismatch is reported as a warning instead of an error.
+
+`BUILT_SHAPE_MISMATCH` (error) means the walls the compiler synthesized do not give the floor you
+checked (a cutout too close to the outline or to another cutout, an awkward corner): the .doplan
+would show other areas. Move or split the cutout as the message says; never `areaNote` it.
 
 `spec validate` ends with the **build gate** line: `spec build` refuses a spec with errors, including
 unexplained area mismatches above max(0.4 m², 5 %). `--force` overrides it (say so to the user);

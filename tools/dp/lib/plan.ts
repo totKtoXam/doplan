@@ -210,13 +210,18 @@ export function areaMetrics(
       } else {
         usedFaces.set(face.roomId, r.id)
         const coef = r.balcony === true ? 0.3 : SUMMER_COEF[rType]
-        grossArea += face.area
-        if (coef !== undefined) totalArea += face.area * coef
-        else {
-          totalArea += face.area
-          roomsArea += face.area
+        // a shaft / box void (marked technical, or a tiny non-specific area) is no floor
+        const rec = doc.rooms[face.roomId]
+        const tech = (r.technical === true || rec?.technical === true) && isTechnicalRoom(rec?.type, face.area, true)
+        if (!tech) {
+          grossArea += face.area
+          if (coef !== undefined) totalArea += face.area * coef
+          else {
+            totalArea += face.area
+            roomsArea += face.area
+          }
+          if (LIVING_TYPES.has(rType)) livingArea += face.area
         }
-        if (LIVING_TYPES.has(rType)) livingArea += face.area
       }
       if (m.labelled !== undefined) {
         const d = face.area * k - m.labelled
@@ -281,7 +286,7 @@ export function areaMetrics(
   // shaft / box voids and other < 1 m² technical niches are expected, not a forgotten room
   const technical = (f: { roomId: string; area: number }) => {
     const rec = doc.rooms[f.roomId]
-    return rec ? isTechnicalRoom(rec.type, f.area) : f.area < 1
+    return rec ? isTechnicalRoom(rec.type, f.area, rec.technical) : f.area < 1
   }
   const realUnmatched = unmatchedFaces.filter((f) => !technical(f))
   const techUnmatched = unmatchedFaces.filter(technical)
@@ -296,7 +301,7 @@ export function areaMetrics(
     issues.push({
       level: 'info',
       code: 'TECHNICAL_FACE',
-      msg: `${techUnmatched.length} technical void(s) (shaft / box / niche < 1 m²): ${techUnmatched.map((f) => `${f.name ?? 'void'} ${f.area} m²`).join(', ')}`,
+      msg: `${techUnmatched.length} technical void(s) (shaft / box / column void, or a niche < 1 m²): ${techUnmatched.map((f) => `${f.name ?? 'void'} ${f.area} m²`).join(', ')}`,
     })
   }
   return { metrics, issues, faceToSpec: usedFaces }

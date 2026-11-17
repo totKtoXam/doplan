@@ -48,6 +48,14 @@ describe('summarizeRoomAreas (BTI rules)', () => {
     expect(isTechnicalRoom('other', 1)).toBe(false)
     expect(isTechnicalRoom('wardrobe', 0.8)).toBe(false)
   })
+
+  it('a room marked technical (a shaft / box void) is technical at any size, while it stays other / storage', () => {
+    expect(isTechnicalRoom('other', 2.25, true)).toBe(true)
+    expect(isTechnicalRoom(undefined, 5, true)).toBe(true)
+    expect(isTechnicalRoom('storage', 1.5, true)).toBe(true)
+    // retyped into a real room by the user: counted again
+    expect(isTechnicalRoom('bedroom', 2.25, true)).toBe(false)
+  })
 })
 
 describe('summarizeLevelRooms', () => {
@@ -56,5 +64,12 @@ describe('summarizeLevelRooms', () => {
     const rooms = { r1: { id: 'r1', type: 'loggia' } as Room, r2: { id: 'r2', type: 'kids' } as Room }
     const s = summarizeLevelRooms({ rooms }, [dr('r1', 6), dr('r2', 10), dr('auto_x', 0.3), dr('auto_y', 5)])
     expect(s).toEqual({ count: 3, total: 18, living: 10, outdoor: 6, technicalCount: 1 })
+  })
+
+  it('leaves out a room marked technical even when its face is over 1 m²', () => {
+    const dr = (roomId: string, area: number) => ({ roomId, area }) as DerivedRoom
+    const rooms = { r1: { id: 'r1', type: 'living' } as Room, v: { id: 'v', type: 'other', technical: true } as Room }
+    const s = summarizeLevelRooms({ rooms }, [dr('r1', 14), dr('v', 2.25)])
+    expect(s).toEqual({ count: 1, total: 14, living: 14, outdoor: 0, technicalCount: 1 })
   })
 })

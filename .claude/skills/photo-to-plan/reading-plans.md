@@ -94,7 +94,9 @@ validator suggests the coefficient when an outdoor room is ≈ 2× or ≈ 3.3× 
 A room's printed area is its **clear floor**: shafts, ventilation boxes and columns inside it are
 excluded. They are drawn as small hatched or filled rectangles in a corner or at a wall, often with
 "в/ш". Model each one as a cutout of the room (`cutouts` in `planspec-reference.md`): its `rect` is
-the outer footprint seen from the room, including its walls.
+the outer footprint seen from the room, including its walls. A shaft against a wall gets the wall's
+coordinate exactly (a few mm off is snapped); an L-shaped shaft is two touching rectangles. A large
+shaft (over 1 m²) is still a void, not a room: it never counts in the areas.
 
 A wall that changes thickness along its length (a step: a pilaster, a thicker part next to a shaft)
 makes the room an L-shape: use a `polygon` with the step. Signs: the wall line jumps; the clear sizes

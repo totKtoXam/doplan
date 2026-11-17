@@ -63,6 +63,8 @@ export interface SpecRoom {
   areaNote?: string
   /** shafts / boxes / columns cut out of the room: rect in plan coordinates, inside the room */
   cutouts?: { rect: number[]; kind?: string; wall?: number; name?: string }[]
+  /** not floor: a shaft / box void drawn as its own area (left out of the totals) */
+  technical?: boolean
   ceilingHeight?: number
   edgeWall?: { kind: string; thickness?: number; height?: number }
   confidence?: number

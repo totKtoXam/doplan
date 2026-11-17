@@ -84,7 +84,7 @@ File → «План из PlanSpec (JSON)…», and the CLI uses it in `pnpm dp s
 ## rooms
 ```ts
 { id, name?, type?, number?, rect? | polygon? | at?, labelledArea?, labelledAreaCoef?, areaNote?, cutouts?,
-  ceilingHeight?, edgeWall?, balcony?, glazed?, confidence? }
+  ceilingHeight?, edgeWall?, balcony?, glazed?, technical?, confidence? }
 ```
 - `labelledArea`: m² as printed.
 - `labelledAreaCoef`: the printed area is clear area × this, in (0, 1]: BTI loggia `0.5`, balcony /
@@ -92,7 +92,7 @@ File → «План из PlanSpec (JSON)…», and the CLI uses it in `pnpm dp s
   equivalent (label ÷ k). Real depth of such a room = label ÷ k ÷ length.
 - `areaNote`: why the computed area legitimately differs from the label (the plan contradicts itself,
   a digit is illegible…). An explained `AREA_MISMATCH` is a warning, not an error. Do not use it to
-  hide a missing cutout or step.
+  hide a missing cutout or step. A blank note (spaces only) explains nothing: the error stays.
 - `cutouts`: shafts, boxes and columns that are not floor:
   ```ts
   { rect: [x, y, w, h], kind?: "shaft" | "box" | "column", wall?: mm, name? }
@@ -101,12 +101,24 @@ File → «План из PlanSpec (JSON)…», and the CLI uses it in `pnpm dp s
     as seen from the room, shaft walls included.
   - The floor is the room minus its cutouts (that is the area checked). Cutouts touching the outline
     make a notch; free-standing ones make a hole.
+  - A side within 30 mm of the room outline (or of an earlier cutout) is snapped onto it
+    (`CUTOUT_SNAPPED`, info), so a rect read a few mm off still makes a clean notch. After snapping
+    the rect must lie inside the room: `CUTOUT_OUTSIDE` has no further tolerance.
+  - Cutouts must not overlap (`CUTOUT_OVERLAP`). An L-shaped shaft is two rectangles side by side,
+    touching, not overlapping; each becomes its own void with a wall between them.
   - The compiler builds the cutout walls: sides facing the floor are `wall` thick (default
     `defaults.partitionThickness`; thinned if the cutout is too small); sides on the room outline
-    continue the room's own wall. The void inside is a technical room named `name` (default
-    Шахта / Короб / Колонна). `kind: "column"` is solid (the walls fill it).
+    continue the room's own wall, and so does a side in line with the outline wall at a reflex
+    corner (a cutout against the inner corner of an L-room). The void inside is a technical room
+    (`technical: true`, type other) named `name` (default Шахта / Короб / Колонна): whatever its size
+    it is not floor, so it is left out of the room, total and living areas (in the check, in
+    `dp spec validate` and in the app). `kind: "column"` is solid (the walls fill it).
   - Rooms must be orthogonal (rect or axis-aligned polygon) to have cutouts.
-  - Errors: `CUTOUT_OUTSIDE` (the rect leaves the room), `CUTOUT_SPLITS_ROOM` (cuts the room in two).
+  - Errors: `CUTOUT_OUTSIDE` (the rect leaves the room), `CUTOUT_OVERLAP`, `CUTOUT_SPLITS_ROOM` (cuts
+    the room in two), `BUILT_SHAPE_MISMATCH` (the built walls do not give the checked floor).
+- `technical`: a technical void (shaft / box / column void, type other or storage): not floor, out of
+  every total whatever its size; it carries no `labelledArea`. `dp doc spec` writes it for the voids of
+  cutouts; do not put it on a real room (a storeroom marked so would drop out of the totals).
 - `type`: `living`, `bedroom`, `kitchen`, `kitchenLiving`, `bathroom`, `toilet`, `hallway`,
   `corridor`, `balcony`, `loggia`, `wardrobe`, `office`, `kids`, `storage`, `other`.
 - `type` aliases:
@@ -178,13 +190,16 @@ Issues have the shape `{severity, code, message, path?, ids?}`. Errors block `sp
 | SCALE_INCONSISTENT | calibration refs disagree: a ref spans other faces than you think |
 | DIMENSION_PRIOR | a size is implausible (e.g. a 6 m door): units mix-up |
 | ROOM_NO_GEOMETRY | a room has no rect, polygon or at |
-| ROOM_OPEN | the room label is not inside a closed face (walls-mode) |
+| ROOM_OPEN | the room label is not inside a closed face (walls-mode; in rooms-mode the walls around a cutout did not close — move or split the cutout) |
 | ROOM_MERGED | two room labels in one face: a separating gap or wall is missing |
 | ROOM_OVERLAP | rects overlap: a coordinate typo |
 | FACE_UNLABELLED | an enclosed face without a room |
 | AREA_MISMATCH | computed (× `labelledAreaCoef`) differs from `labelledArea`: missing cutout / step, BTI coefficient, misread number (diagnosis: SKILL.md step 7); `areaNote` downgrades it to a warning |
 | TOTAL_AREA_MISMATCH | the sum differs from `labelledTotalArea` (balconies may be counted ×0.3/×0.5 in the label); `source.areaNote` downgrades it |
-| CUTOUT_OUTSIDE | a cutout rect is (partly) outside its room, or covers the whole room |
+| CUTOUT_OUTSIDE | a cutout rect is (partly) outside its room after snapping, or covers the whole room |
+| CUTOUT_OVERLAP | two cutouts overlap: an L-shaped shaft is two touching rectangles |
+| CUTOUT_SNAPPED | info: a cutout side within 30 mm of the outline or another cutout was moved onto it |
+| BUILT_SHAPE_MISMATCH | the built plan's floor (from the synthesized walls) differs from the checked shape: a wall end poking into the floor, a cutout that did not become a notch / hole, a floor strip swallowed by a wall. Error when the area differs by ≥ 0.05 m², a hole is missing or the outline is off by ≥ 300 mm; a smaller corner notch is a warning. Fix: make a cutout touch the outline exactly or keep it at least a wall thickness away from the outline and other cutouts, split an awkward one into rectangles, simplify the corner. If it persists, it is a compiler limitation: tell the user, `--force` only with their consent |
 | CUTOUT_SPLITS_ROOM | cutouts cut the room into separate parts |
 | CUTOUT_UNSUPPORTED | cutouts on a non-orthogonal polygon (ignored) or on a room without rect/polygon |
 | CUTOUT_THIN | info: a cutout smaller than two walls; its walls were thinned |
@@ -209,7 +224,8 @@ Issues have the shape `{severity, code, message, path?, ids?}`. Errors block `sp
 
 The CLI adds its own area checks (on the built plan's rooms):
 - `ROOM_NOT_FOUND`, `ROOMS_SHARE_FACE`, `UNLABELLED_FACE`;
-- `TECHNICAL_FACE` (info): shaft voids and other < 1 m² niches without a room — expected;
+- `TECHNICAL_FACE` (info): shaft / box / column voids (any size, `technical`) and other < 1 m² niches
+  without a room — expected, and out of the totals;
 - `AREA_MISMATCH`: warning above max(0.15 m², 2 %), error above max(0.4 m², 5 %); an `areaNote` turns
   the error into a warning;
 - `TOTAL_AREA_MISMATCH`, `LIVING_AREA_MISMATCH`.

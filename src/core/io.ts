@@ -987,6 +987,7 @@ export function parseDoc(json: unknown): Doc {
     room.skirtingMaterialId = sk ?? DEFAULT_MATERIALS.skirting
     const labelledArea = optNum(v.labelledArea, 0, 1e6)
     if (labelledArea !== undefined && labelledArea > 0) room.labelledArea = labelledArea
+    if (v.technical === true) room.technical = true
     if (isObj(v.design)) {
       const styleId = optStr(v.design.styleId)
       const accentFace = optStr(v.design.accentFace)

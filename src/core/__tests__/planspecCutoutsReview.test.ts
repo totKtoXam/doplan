@@ -4,7 +4,10 @@ import { describe, expect, it } from 'vitest'
 import { summarizeLevelRooms } from '../area'
 import { derivePlan } from '../derive'
 import { parseDoc, serializeDoc } from '../io'
+import { normalize, removeEntities, syncRooms } from '../ops'
 import { compilePlanSpecDetailed, docToPlanSpec, parsePlanSpec, validatePlanSpecDetailed, type PlanSpec } from '../planspec'
+import { DOC_VERSION, DOC_VERSION_V4 } from '../types'
+import { docFormatVersion } from '../variants'
 
 const base = (rooms: unknown[], extra: Record<string, unknown> = {}): PlanSpec =>
   ({
@@ -182,16 +185,228 @@ describe('planspec cutouts: review findings', () => {
   })
 
   it('a built floor that differs from the checked shape is reported (a corner notch only warns)', () => {
-    // three rooms meeting diagonally leave a ≈0.02 m² notch at the corner: a warning, the areas hold
+    // two rows of rooms with offset gaps leave a ≈0.02 m² notch at a junction: a warning, the areas hold
     const v = validatePlanSpecDetailed(
       base([
-        { id: 'a', type: 'living', rect: [0, 0, 4000, 3000] },
-        { id: 'b', type: 'bedroom', rect: [0, 3120, 4000, 3000] },
-        { id: 'c', type: 'kitchen', rect: [-3120, 0, 3000, 3000] },
+        { id: 'r0', type: 'bedroom', rect: [0, 0, 2300, 3250] },
+        { id: 'r1', type: 'living', rect: [2500, 0, 2900, 3600] },
+        { id: 's0', type: 'bedroom', rect: [150, 3720, 2050, 2200] },
+        { id: 's1', type: 'bedroom', rect: [2300, 3720, 1500, 2950] },
       ]),
     )
     const m = v.issues.filter((i) => i.code === 'BUILT_SHAPE_MISMATCH')
     expect(m.length).toBeGreaterThan(0)
     expect(m.every((i) => i.severity === 'warning')).toBe(true)
+  })
+})
+
+describe('planspec cutouts: review round 2', () => {
+  const T = (t: number, rooms: unknown[]) =>
+    ({ version: 1, units: 'mm', defaults: { exteriorThickness: t, partitionThickness: 100, loadBearingThickness: 200 }, rooms, openings: [] }) as unknown as PlanSpec
+  const rectArea = (r: { rect?: number[] }) => (r.rect![2] * r.rect![3]) / 1e6
+  const nb = { id: 'b', type: 'bathroom', rect: [2100, 0, 1900, 900] }
+  const shapeErrors = (spec: unknown) => errors(spec).filter((i) => i.code !== 'NO_ENTRANCE')
+
+  it('#12 plans without cutouts build exactly with 380–640 mm exterior walls (no false BUILT_SHAPE_MISMATCH)', () => {
+    const layouts: { id: string; type: string; rect: number[] }[][] = [
+      [
+        { id: 'a', type: 'living', rect: [0, 0, 4000, 3000] },
+        { id: 'b', type: 'bedroom', rect: [4100, 500, 3000, 2000] },
+      ],
+      [
+        { id: 'a', type: 'living', rect: [0, 0, 4000, 4000] },
+        { id: 'k', type: 'kitchen', rect: [4000, 0, 2500, 3000] },
+      ],
+      [
+        { id: 'h', type: 'hallway', rect: [0, 0, 1200, 6000] },
+        { id: 'l', type: 'living', rect: [-4100, 0, 4000, 3500] },
+        { id: 'r', type: 'bedroom', rect: [1300, 1000, 3500, 3000] },
+      ],
+    ]
+    for (const t of [300, 380, 510, 640])
+      for (const rooms of layouts) {
+        const spec = T(t, rooms)
+        expect(shapeErrors(spec).map((i) => i.code)).toEqual([])
+        const { face } = build(spec)
+        for (const r of rooms) expect(face(r.id)?.area).toBeCloseTo(rectArea(r), 2)
+      }
+  })
+
+  it('#12 an L-room with a bathroom in its notch builds exactly with thick exterior walls', () => {
+    for (const t of [300, 380, 510, 640]) {
+      const spec = T(t, [{ id: 'a', type: 'living', polygon: L }, nb])
+      expect(shapeErrors(spec)).toEqual([])
+      const { face } = build(spec)
+      expect(face('a')?.area).toBeCloseTo(10, 2)
+      expect(face('b')?.area).toBeCloseTo(1.71, 2)
+    }
+  })
+
+  it('#12 a tight two-row layout with 640 mm walls stays closed', () => {
+    const spec = T(640, [
+      { id: 'r0', type: 'hallway', rect: [0, -200, 1750, 2100] },
+      { id: 'r1', type: 'hallway', rect: [1870, 0, 2200, 2650] },
+      { id: 'r2', type: 'hallway', rect: [4070, 400, 1750, 3400] },
+      { id: 'r3', type: 'bathroom', rect: [5820, -250, 3150, 3400] },
+      { id: 's0', type: 'bedroom', rect: [-50, 4000, 2200, 1600] },
+      { id: 's1', type: 'bedroom', rect: [2250, 4000, 3150, 2250] },
+    ])
+    const codes = validatePlanSpecDetailed(spec).issues.map((i) => i.code)
+    expect(codes).not.toContain('ROOM_OPEN')
+    expect(codes).not.toContain('ROOM_MERGED')
+  })
+
+  it('#1 #2 a cutout misread 10–20 mm off a reflex vertex snaps onto it', () => {
+    const cases: [number[], number, number][] = [
+      // [rect, built floor, holes]
+      [[1990, 1000, 600, 600], 9.646, 0],
+      [[1410, 1000, 600, 600], 9.646, 1],
+      [[1400, 990, 600, 600], 9.646, 1],
+      [[1420, 1000, 600, 600], 9.652, 1],
+    ]
+    for (const [cut, area, holes] of cases) {
+      const spec = base([{ id: 'a', type: 'living', polygon: L, cutouts: [{ rect: cut }] }])
+      const v = validatePlanSpecDetailed(spec)
+      expect(v.issues.filter((i) => i.severity === 'error')).toEqual([])
+      expect(v.issues.some((i) => i.code === 'CUTOUT_SNAPPED')).toBe(true)
+      expect(v.issues.some((i) => i.code === 'BUILT_SHAPE_MISMATCH')).toBe(false)
+      const f = build(spec).face('a')!
+      expect(f.area).toBeCloseTo(area, 3)
+      expect(f.holes).toHaveLength(holes)
+    }
+  })
+
+  it('#3 #5 a cutout at a reflex corner shared with a neighbour keeps the partition (no 300 mm stubs)', () => {
+    for (const cut of [
+      [2000, 1000, 600, 600],
+      [1400, 400, 600, 600],
+    ]) {
+      const spec = T(300, [{ id: 'a', type: 'living', polygon: L, cutouts: [{ rect: cut, kind: 'shaft' }] }, nb])
+      const v = validatePlanSpecDetailed(spec)
+      expect(v.issues.filter((i) => ['BUILT_SHAPE_MISMATCH', 'DANGLING_WALL'].includes(i.code))).toEqual([])
+      const { res, plan, face, walls } = build(spec)
+      expect(face('a')?.area).toBeCloseTo(9.64, 2)
+      expect(face('b')?.area).toBeCloseTo(1.71, 2)
+      const shaft = Object.values(res.doc.rooms).find((r) => r.technical)!
+      expect(plan.rooms.find((f) => f.roomId === shaft.id)?.area).toBeCloseTo(0.2, 2)
+      // every wall around the shaft (inside the L's bounding box, off the outline) is a partition
+      const inner = walls.filter((w) => [w.pa, w.pb].every((p) => p.x > 100 && p.x < 3900 && p.y > 100 && p.y < 2900))
+      expect(inner.every((w) => w.t <= 100)).toBe(true)
+    }
+  })
+
+  it('#4 a column partly next to a shaft stays solid to its box', () => {
+    for (const cutouts of [
+      [{ rect: [0, 0, 600, 1000], kind: 'column' }, { rect: [600, 0, 600, 600], kind: 'shaft' }],
+      [{ rect: [0, 0, 600, 600], kind: 'shaft' }, { rect: [600, 0, 600, 1000], kind: 'column' }],
+    ]) {
+      const spec = base([{ id: 'a', type: 'living', rect: [0, 0, 4000, 3000], cutouts }])
+      const v = validatePlanSpecDetailed(spec)
+      expect(v.issues.filter((i) => i.code === 'BUILT_SHAPE_MISMATCH')).toEqual([])
+      expect(v.metrics.perRoom[0].computed).toBeCloseTo(11.04, 2)
+      expect(build(spec).face('a')?.area).toBeCloseTo(11.04, 2)
+    }
+  })
+
+  it('#6 a corner column or shaft with neighbours on both sides pokes into neither', () => {
+    for (const cut of [
+      { rect: [3600, 2600, 400, 400], kind: 'column' },
+      { rect: [3400, 2400, 600, 600] },
+    ]) {
+      const spec = T(300, [
+        { id: 'a', type: 'living', rect: [0, 0, 4000, 3000], cutouts: [cut] },
+        { id: 'b', type: 'bedroom', rect: [4100, 0, 3000, 3000] },
+        { id: 'c', type: 'bedroom', rect: [0, 3100, 4000, 2000] },
+      ])
+      expect(validatePlanSpecDetailed(spec).issues.filter((i) => ['BUILT_SHAPE_MISMATCH', 'DANGLING_WALL'].includes(i.code))).toEqual([])
+      const { face } = build(spec)
+      expect(face('b')?.area).toBeCloseTo(9, 2)
+      expect(face('c')?.area).toBeCloseTo(8, 2)
+    }
+  })
+
+  it('#7 two partly touching shafts mid-room: no false hole-count error, both voids are shafts', () => {
+    const spec = base([{ id: 'a', type: 'living', rect: [0, 0, 4000, 3000], cutouts: [{ rect: [1000, 1000, 500, 500] }, { rect: [1500, 1200, 500, 500] }] }])
+    const v = validatePlanSpecDetailed(spec)
+    expect(v.issues.filter((i) => i.code === 'BUILT_SHAPE_MISMATCH')).toEqual([])
+    expect(v.ok).toBe(true)
+    const { res, face } = build(spec)
+    expect(face('a')?.area).toBeCloseTo(11.5, 2)
+    const shafts = Object.values(res.doc.rooms).filter((r) => r.technical)
+    expect(shafts).toHaveLength(2)
+    expect(shafts.every((r) => r.name === 'Шахта' && r.type === 'other')).toBe(true)
+  })
+
+  it('#7 a hole really missing from the built floor is still an error', () => {
+    // a cutout that cannot become a hole (its void is swallowed) must not pass as two touching holes
+    const spec = base([{ id: 'a', type: 'living', rect: [0, 0, 4000, 3000], cutouts: [{ rect: [1000, 1000, 500, 500] }] }])
+    expect(validatePlanSpecDetailed(spec).issues.filter((i) => i.code === 'BUILT_SHAPE_MISMATCH')).toEqual([])
+    expect(build(spec).face('a')?.holes).toHaveLength(1)
+  })
+
+  it('#8 removing the walls of a centred shaft gives the floor back to the room', () => {
+    for (const cut of [
+      [1900, 1900, 1200, 1200],
+      [1000, 1000, 2000, 2000],
+    ]) {
+      const { res } = build({ version: 1, units: 'mm', rooms: [{ id: 'a', type: 'living', rect: [0, 0, 5000, 5000], cutouts: [{ rect: cut, kind: 'shaft' }] }], openings: [] })
+      const doc = res.doc
+      const [x, y, w, h] = cut
+      const inside = (p: { x: number; y: number }) => p.x > x - 1 && p.x < x + w + 1 && p.y > y - 1 && p.y < y + h + 1
+      const shaftWalls = Object.values(doc.walls).filter((wl) => inside(doc.nodes[wl.a]) && inside(doc.nodes[wl.b]))
+      expect(shaftWalls.length).toBeGreaterThan(0)
+      removeEntities(
+        doc,
+        shaftWalls.map((wl) => ({ kind: 'wall' as const, id: wl.id })),
+      )
+      normalize(doc)
+      syncRooms(doc)
+      const plan = derivePlan(doc, res.levelId)
+      expect(plan.rooms).toHaveLength(1)
+      const rec = doc.rooms[plan.rooms[0].roomId]
+      expect(rec.technical).toBeFalsy()
+      expect(rec.type).toBe('living')
+      expect(summarizeLevelRooms(doc, plan.rooms).total).toBeCloseTo(25, 2)
+    }
+  })
+
+  it('#10 a project with technical voids is saved as format 4, which older readers refuse', () => {
+    const { res } = build(base([{ id: 'a', type: 'living', rect: [0, 0, 4000, 4000], cutouts: [{ rect: [0, 0, 1500, 1500] }] }]))
+    expect(docFormatVersion(res.doc)).toBe(DOC_VERSION_V4)
+    const raw = JSON.parse(serializeDoc(res.doc))
+    expect(raw.version).toBe(DOC_VERSION_V4)
+    // this app reads it back with the flag
+    expect(Object.values(parseDoc(raw).rooms).filter((r) => r.technical)).toHaveLength(1)
+    // a plan without cutouts keeps the old format
+    expect(docFormatVersion(build(base([{ id: 'a', type: 'living', rect: [0, 0, 4000, 4000] }])).res.doc)).toBe(DOC_VERSION)
+  })
+
+  it('#11 a void left beside a thick continued outline wall is still a named technical void', () => {
+    const cases: [PlanSpec, string][] = [
+      [T(500, [{ id: 'a', type: 'living', polygon: L, cutouts: [{ rect: [2000, 1000, 600, 600], kind: 'shaft' }] }]), 'Шахта'],
+      [base([{ id: 'a', type: 'living', rect: [0, 0, 4000, 3000], cutouts: [{ rect: [0, 0, 600, 1000], kind: 'column' }, { rect: [600, 0, 600, 1000], kind: 'shaft' }] }]), 'Колонна'],
+    ]
+    for (const [spec, name] of cases) {
+      const { res, plan, face } = build(spec)
+      expect(face('a')).toBeDefined()
+      // no face without a record: every void face is a named, technical room
+      for (const f of plan.rooms) expect(res.doc.rooms[f.roomId]).toBeDefined()
+      const tech = Object.values(res.doc.rooms).filter((r) => r.technical)
+      expect(tech.map((r) => r.name)).toContain(name)
+    }
+  })
+
+  it('#13 a cutout whose side crosses a reflex corner is reported as such, not as an open room', () => {
+    const L2 = [[0, 0], [3000, 0], [3000, 2000], [6000, 2000], [6000, 5000], [0, 5000]]
+    for (const cut of [
+      [2400, 2000, 1200, 600],
+      [2700, 1000, 300, 2000],
+    ]) {
+      const codes = errors(base([{ id: 'a', type: 'living', polygon: L2, cutouts: [{ rect: cut }] }])).map((i) => i.code)
+      expect(codes).toContain('CUTOUT_AT_CORNER')
+      expect(codes).not.toContain('ROOM_OPEN')
+    }
+    // the same cutout kept on one side of the corner line builds
+    expect(errors(base([{ id: 'a', type: 'living', polygon: L2, cutouts: [{ rect: [3000, 2000, 600, 600] }] }]))).toEqual([])
   })
 })

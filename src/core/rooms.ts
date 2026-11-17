@@ -332,7 +332,13 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
       winner.set(hit.face, r)
       continue
     }
-    // two records in one face (rooms merged): the one closest to the label point survives
+    // two records in one face (rooms merged): a real room beats a technical void (a cutout whose
+    // walls were removed is floor of the room again, not a shaft the size of the room); otherwise
+    // the one closest to the label point survives
+    if (!r.technical !== !cur.technical) {
+      if (cur.technical) winner.set(hit.face, r)
+      continue
+    }
     const dNew = dist(r.anchor, hit.labelPoint)
     const dCur = dist(cur.anchor, hit.labelPoint)
     if (dNew < dCur - 1e-9 || (Math.abs(dNew - dCur) <= 1e-9 && r.id < cur.id)) winner.set(hit.face, r)

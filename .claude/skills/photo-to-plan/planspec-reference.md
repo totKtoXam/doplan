@@ -102,20 +102,28 @@ File → «План из PlanSpec (JSON)…», and the CLI uses it in `pnpm dp s
   - The floor is the room minus its cutouts (that is the area checked). Cutouts touching the outline
     make a notch; free-standing ones make a hole.
   - A side within 30 mm of the room outline (or of an earlier cutout) is snapped onto it
-    (`CUTOUT_SNAPPED`, info), so a rect read a few mm off still makes a clean notch. After snapping
-    the rect must lie inside the room: `CUTOUT_OUTSIDE` has no further tolerance.
+    (`CUTOUT_SNAPPED`, info), so a rect read a few mm off still makes a clean notch; this includes
+    the line of a reflex (inner) corner of an L-room. After snapping the rect must lie inside the
+    room: `CUTOUT_OUTSIDE` has no further tolerance.
+  - No side may cross the line of a reflex corner (part of it on the outline, part along the floor):
+    `CUTOUT_AT_CORNER`. Keep the cutout on one side of the corner line.
   - Cutouts must not overlap (`CUTOUT_OVERLAP`). An L-shaped shaft is two rectangles side by side,
     touching, not overlapping; each becomes its own void with a wall between them.
   - The compiler builds the cutout walls: sides facing the floor are `wall` thick (default
     `defaults.partitionThickness`; thinned if the cutout is too small); sides on the room outline
     continue the room's own wall, and so does a side in line with the outline wall at a reflex
-    corner (a cutout against the inner corner of an L-room). The void inside is a technical room
-    (`technical: true`, type other) named `name` (default Шахта / Короб / Колонна): whatever its size
-    it is not floor, so it is left out of the room, total and living areas (in the check, in
-    `dp spec validate` and in the app). `kind: "column"` is solid (the walls fill it).
+    corner (a cutout against the inner corner of an L-room) — unless a neighbouring room faces that
+    outline edge: then it is a partition and the cutout side gets the cutout wall. A shaft / box side
+    against a column gets its wall on the shaft's side (the column stays solid to its rect). The
+    void inside is a technical room (`technical: true`, type other) named `name` (default Шахта /
+    Короб / Колонна), however small: whatever its size it is not floor, so it is left out of the room,
+    total and living areas (in the check, in `dp spec validate` and in the app). `kind: "column"` is
+    solid (the walls fill it). A project with technical voids is saved as file format 4 (doplan
+    0.14 and older refuse to open it rather than drop the flag).
   - Rooms must be orthogonal (rect or axis-aligned polygon) to have cutouts.
   - Errors: `CUTOUT_OUTSIDE` (the rect leaves the room), `CUTOUT_OVERLAP`, `CUTOUT_SPLITS_ROOM` (cuts
-    the room in two), `BUILT_SHAPE_MISMATCH` (the built walls do not give the checked floor).
+    the room in two), `CUTOUT_AT_CORNER` (a side crosses a reflex corner line),
+    `BUILT_SHAPE_MISMATCH` (the built walls do not give the checked floor).
 - `technical`: a technical void (shaft / box / column void, type other or storage): not floor, out of
   every total whatever its size; it carries no `labelledArea`. `dp doc spec` writes it for the voids of
   cutouts; do not put it on a real room (a storeroom marked so would drop out of the totals).
@@ -198,6 +206,7 @@ Issues have the shape `{severity, code, message, path?, ids?}`. Errors block `sp
 | TOTAL_AREA_MISMATCH | the sum differs from `labelledTotalArea` (balconies may be counted ×0.3/×0.5 in the label); `source.areaNote` downgrades it |
 | CUTOUT_OUTSIDE | a cutout rect is (partly) outside its room after snapping, or covers the whole room |
 | CUTOUT_OVERLAP | two cutouts overlap: an L-shaped shaft is two touching rectangles |
+| CUTOUT_AT_CORNER | a cutout side runs partly on the outline and partly along the floor (it crosses the line of a reflex corner): move or trim the cutout so each side is wholly on the outline or wholly inside |
 | CUTOUT_SNAPPED | info: a cutout side within 30 mm of the outline or another cutout was moved onto it |
 | BUILT_SHAPE_MISMATCH | the built plan's floor (from the synthesized walls) differs from the checked shape: a wall end poking into the floor, a cutout that did not become a notch / hole, a floor strip swallowed by a wall. Error when the area differs by ≥ 0.05 m², a hole is missing or the outline is off by ≥ 300 mm; a smaller corner notch is a warning. Fix: make a cutout touch the outline exactly or keep it at least a wall thickness away from the outline and other cutouts, split an awkward one into rectangles, simplify the corner. If it persists, it is a compiler limitation: tell the user, `--force` only with their consent |
 | CUTOUT_SPLITS_ROOM | cutouts cut the room into separate parts |

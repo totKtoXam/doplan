@@ -136,7 +136,7 @@ export function StatusBar() {
     t('Общая площадь (балконы ×0,3, лоджии ×0,5): {v} м²', { v: area.total.toFixed(2) }),
     t('Жилая площадь: {v} м²', { v: area.living.toFixed(2) }),
     ...(area.outdoor > 0 ? [t('Балконы и лоджии (фактически): {v} м²', { v: area.outdoor.toFixed(2) })] : []),
-    ...(area.technicalCount > 0 ? [t('Не учтено технических помещений (шахты < 1 м²): {n}', { n: area.technicalCount })] : []),
+    ...(area.technicalCount > 0 ? [t('Не учтено технических помещений (шахты, короба, пустоты вырезов): {n}', { n: area.technicalCount })] : []),
   ].join('\n')
 
   const nameOfItem = (id: string) => {

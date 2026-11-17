@@ -19,6 +19,7 @@ import { usesLayers } from './layers'
 import {
   DOC_VERSION,
   DOC_VERSION_V3,
+  DOC_VERSION_V4,
   DOC_VERSION_VARIANTS,
   VARIANT_COLLECTIONS,
   VARIANT_OPENING_FIELDS,
@@ -155,6 +156,8 @@ function hasElectrical(doc: Doc): boolean {
  * several variants)
  */
 export function docFormatVersion(doc: Doc): number {
+  // technical voids: format 4 (0.13–0.14 open format 3 and would drop the flag on save)
+  if (Object.values(doc.rooms).some((r) => r.technical === true)) return DOC_VERSION_V4
   // layers-panel data or electrical points: format 3 (0.12.0 opens format 2 and would drop them on save)
   if (usesLayers(doc) || hasElectrical(doc)) return DOC_VERSION_V3
   return variantCount(doc) > 1 ? DOC_VERSION_VARIANTS : DOC_VERSION

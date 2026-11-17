@@ -830,6 +830,12 @@ export const DOC_VERSION_VARIANTS = 2
  * doplan 0.12 accepts format 2 and would silently drop this data, so it must refuse the file.
  */
 export const DOC_VERSION_V3 = 3
+/**
+ * Format 4: technical voids (`Room.technical` — the shaft / box / column void of a PlanSpec cutout,
+ * left out of every area total whatever its size). doplan 0.13–0.14 accept format 3 and would drop
+ * the flag on save, counting a 2 m² shaft as floor, so they must refuse the file.
+ */
+export const DOC_VERSION_V4 = 4
 
 export interface Doc {
   version: number

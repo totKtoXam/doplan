@@ -3,7 +3,7 @@ import { createEmptyDoc, defaultLevel } from '@core/defaults'
 import { derivePlan } from '@core/derive'
 import { addRectRoom, normalize, syncRooms } from '@core/ops'
 import type { DerivedPlan, Doc, Id, Underlay } from '@core/types'
-import { fitBounds, levelBelow } from '../bounds'
+import { fitBounds, levelBelow, selectionBounds } from '../bounds'
 import { Camera } from '../view'
 
 function twoLevels(): { doc: Doc; lower: Id; upper: Id } {
@@ -78,6 +78,25 @@ describe('editor2d fitBounds', () => {
     const lv = doc.levelOrder[0]
     const all = deriveAll(doc)
     expect(fitBounds(doc, all, lv, all[lv])).toBeNull()
+  })
+})
+
+describe('editor2d selectionBounds', () => {
+  it('boxes the selected room and wall, ignores refs that are gone, null for nothing drawable', () => {
+    const { doc, lower } = twoLevels()
+    const plan = derivePlan(doc, lower)
+    const roomId = Object.keys(doc.rooms)[0]
+    const room = selectionBounds(doc, plan, [{ kind: 'room', id: roomId }])!
+    // the inner faces of the 6 × 4 m room
+    expect(room.minX).toBeGreaterThanOrEqual(0)
+    expect(room.maxX).toBeLessThanOrEqual(6000)
+    expect(room.maxX - room.minX).toBeGreaterThan(5000)
+    const wallId = Object.keys(doc.walls)[0]
+    const both = selectionBounds(doc, plan, [{ kind: 'room', id: roomId }, { kind: 'wall', id: wallId }, { kind: 'item', id: 'gone' }])!
+    expect(both.minX).toBeLessThanOrEqual(room.minX)
+    expect(both.maxY).toBeGreaterThanOrEqual(room.maxY)
+    expect(selectionBounds(doc, plan, [{ kind: 'item', id: 'gone' }])).toBeNull()
+    expect(selectionBounds(doc, plan, [])).toBeNull()
   })
 })
 

@@ -5,6 +5,7 @@ import { useT } from '@/i18n'
 import { setHandle } from '@/store/handles'
 import type { Editor2DHandle } from '@/contracts'
 import { TextBtn } from './primitives'
+import { SelectionBar } from './SelectionBar'
 import { MeasureChecklist, SurveyPanel } from '@/ui/panels/SurveyPanel'
 import { MarksPanel } from '@/ui/panels/MarksPanel' // ai-chat
 
@@ -70,6 +71,7 @@ export function Viewport2D({ hidden }: { hidden?: boolean }) {
           <SurveyPanel />
           <MarksPanel />
           <MeasureChecklist />
+          <SelectionBar />
         </>
       )}
       {loading && !error && (

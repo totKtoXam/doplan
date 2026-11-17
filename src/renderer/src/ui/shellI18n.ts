@@ -24,6 +24,9 @@ addTranslations('en', {
   // status bar: snaps
   Привязки: 'Snaps',
   'Углы 15°': 'Angles 15°',
+  // floating bar above the selection
+  'Действия с выделенным': 'Selection actions',
+  'Добавить в чат с ИИ': 'Add to the AI chat',
   // project inspector
   'Привязки и шаг сетки — в строке состояния внизу, что показывать на плане и единицы — в меню «Вид» над планом.':
     'Snaps and the grid step are in the status bar below; what the plan shows and the units are in the «View» menu above the plan.',

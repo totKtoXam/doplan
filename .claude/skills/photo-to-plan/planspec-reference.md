@@ -33,6 +33,7 @@ File → «План из PlanSpec (JSON)…», and the CLI uses it in `pnpm dp s
 | `originPx` | px position of mm (0,0); default `[0,0]`. In an mm spec this places the underlay. |
 | `calibration` | `[{ p1:[x,y], p2:[x,y], mm, label? }]`, a printed dimension between two px points. `pnpm dp spec scale --ref … --spec f` appends it. |
 | `labelledTotalArea`, `labelledLivingArea` | m² as printed, used for checks |
+| `areaNote` | why the computed total / living area legitimately differs from the printed one; turns a `TOTAL_AREA_MISMATCH` error into a warning |
 | `toScale` | false for sketches whose drawing is not proportional, so only the numbers count |
 
 ## defaults (mm)
@@ -82,8 +83,30 @@ File → «План из PlanSpec (JSON)…», and the CLI uses it in `pnpm dp s
 
 ## rooms
 ```ts
-{ id, name?, type?, number?, rect? | polygon? | at?, labelledArea?, ceilingHeight?, edgeWall?, balcony?, glazed?, confidence? }
+{ id, name?, type?, number?, rect? | polygon? | at?, labelledArea?, labelledAreaCoef?, areaNote?, cutouts?,
+  ceilingHeight?, edgeWall?, balcony?, glazed?, confidence? }
 ```
+- `labelledArea`: m² as printed.
+- `labelledAreaCoef`: the printed area is clear area × this, in (0, 1]: BTI loggia `0.5`, balcony /
+  terrace `0.3`. The check compares clear × k with the label; the project keeps the clear-area
+  equivalent (label ÷ k). Real depth of such a room = label ÷ k ÷ length.
+- `areaNote`: why the computed area legitimately differs from the label (the plan contradicts itself,
+  a digit is illegible…). An explained `AREA_MISMATCH` is a warning, not an error. Do not use it to
+  hide a missing cutout or step.
+- `cutouts`: shafts, boxes and columns that are not floor:
+  ```ts
+  { rect: [x, y, w, h], kind?: "shaft" | "box" | "column", wall?: mm, name? }
+  ```
+  - `rect` in plan coordinates (spec units), inside the room's rect/polygon: the **outer** footprint
+    as seen from the room, shaft walls included.
+  - The floor is the room minus its cutouts (that is the area checked). Cutouts touching the outline
+    make a notch; free-standing ones make a hole.
+  - The compiler builds the cutout walls: sides facing the floor are `wall` thick (default
+    `defaults.partitionThickness`; thinned if the cutout is too small); sides on the room outline
+    continue the room's own wall. The void inside is a technical room named `name` (default
+    Шахта / Короб / Колонна). `kind: "column"` is solid (the walls fill it).
+  - Rooms must be orthogonal (rect or axis-aligned polygon) to have cutouts.
+  - Errors: `CUTOUT_OUTSIDE` (the rect leaves the room), `CUTOUT_SPLITS_ROOM` (cuts the room in two).
 - `type`: `living`, `bedroom`, `kitchen`, `kitchenLiving`, `bathroom`, `toilet`, `hallway`,
   `corridor`, `balcony`, `loggia`, `wardrobe`, `office`, `kids`, `storage`, `other`.
 - `type` aliases:
@@ -159,8 +182,12 @@ Issues have the shape `{severity, code, message, path?, ids?}`. Errors block `sp
 | ROOM_MERGED | two room labels in one face: a separating gap or wall is missing |
 | ROOM_OVERLAP | rects overlap: a coordinate typo |
 | FACE_UNLABELLED | an enclosed face without a room |
-| AREA_MISMATCH | computed area differs from `labelledArea`: re-check the dimensions |
-| TOTAL_AREA_MISMATCH | the sum differs from `labelledTotalArea` (balconies may be counted ×0.3/×0.5 in the label) |
+| AREA_MISMATCH | computed (× `labelledAreaCoef`) differs from `labelledArea`: missing cutout / step, BTI coefficient, misread number (diagnosis: SKILL.md step 7); `areaNote` downgrades it to a warning |
+| TOTAL_AREA_MISMATCH | the sum differs from `labelledTotalArea` (balconies may be counted ×0.3/×0.5 in the label); `source.areaNote` downgrades it |
+| CUTOUT_OUTSIDE | a cutout rect is (partly) outside its room, or covers the whole room |
+| CUTOUT_SPLITS_ROOM | cutouts cut the room into separate parts |
+| CUTOUT_UNSUPPORTED | cutouts on a non-orthogonal polygon (ignored) or on a room without rect/polygon |
+| CUTOUT_THIN | info: a cutout smaller than two walls; its walls were thinned |
 | NON_ORTHO | a non-orthogonal edge left after snapping |
 | TINY_GAP | a < 40 mm gap became an invisible separator; intended only for open-plan zones |
 | WALL_THICKNESS_ODD | a thickness is far from the standard set |
@@ -180,7 +207,15 @@ Issues have the shape `{severity, code, message, path?, ids?}`. Errors block `sp
 | FIXTURE_NO_POSITION | a fixture without `rect` or `at` |
 | COMPILE_FAILED | an internal error: simplify the offending geometry |
 
-The CLI adds its own area checks:
+The CLI adds its own area checks (on the built plan's rooms):
 - `ROOM_NOT_FOUND`, `ROOMS_SHARE_FACE`, `UNLABELLED_FACE`;
-- `AREA_MISMATCH`: warning above max(0.15 m², 2 %), error above max(0.4 m², 5 %);
+- `TECHNICAL_FACE` (info): shaft voids and other < 1 m² niches without a room — expected;
+- `AREA_MISMATCH`: warning above max(0.15 m², 2 %), error above max(0.4 m², 5 %); an `areaNote` turns
+  the error into a warning;
 - `TOTAL_AREA_MISMATCH`, `LIVING_AREA_MISMATCH`.
+
+## Build gate
+`spec validate` / `spec check` end with `build gate: open` or `build gate: CLOSED`. `spec build`
+refuses (exit 1, no file) while it is closed, i.e. while there is any error — unexplained area
+mismatches above the error threshold included. `--force` builds anyway (tell the user the plan is known
+to be off); `--strict` also refuses on warnings.

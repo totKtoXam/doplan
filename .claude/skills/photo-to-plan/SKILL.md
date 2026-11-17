@@ -84,7 +84,16 @@ Write a list in your notes (`../dopan.projects/.work/<slug>/reading.md`, short):
   Note whether a chain is outer faces, clear interior or axes;
 - every **room**: number, name, area m² (from the plan or the экспликация table), Ж/П columns;
 - total / living area, ceiling height (`h=2,70`, `Высота 2,7 м`), scale note (`М 1:100`);
+- every **shaft, box, column, niche and step in a wall** you see (a small hatched/filled rectangle in
+  a room corner, a wall that is thicker over part of its length): they make the room smaller than its
+  bounding rectangle (step 6);
+- which numbers are **not** dimensions: a flat number near the entrance (`171`), a door width written
+  in the door gap, room numbers. A number with no dimension line or ticks is suspect;
 - what is uncertain or illegible (say so instead of guessing digits).
+
+Write the numbers **exactly as printed** (`1,75` → 1750 mm, `1,3` m² → 1.3). Never re-measure a
+printed number from pixels and never round it to fit your geometry: if px and the number disagree, the
+number wins and the disagreement goes to `notes`.
 
 ### 5. Calibrate the scale
 Pick the **longest reliable printed dimension** (overall size is best) and its two end points in px:
@@ -112,10 +121,29 @@ Write `../dopan.projects/.work/<slug>/draft-01.json`. **Prefer rooms-mode, units
   Alternatively draft directly in `units: "px"` with `source.calibration` and run
   `spec normalize draft.px.json --out draft-01.json` (converts to mm, snaps orthogonal, merges
   near-equal coordinates, rounds to the 10 mm grid, snaps thicknesses).
+- **The room is not its bounding rectangle** when the plan shows a shaft/box/column in it, an
+  L-shape or a step in a wall. Model it, or the area check will (rightly) fail:
+  - shaft / vent box / column in the room → `cutouts: [{ "rect": [x, y, w, h], "kind": "shaft" | "box" | "column", "name"?: "Вентшахта" }]`
+    on the room. `rect` is in plan coordinates, inside the room, the **outer** footprint of the shaft as
+    seen from the room (its walls included). The compiler subtracts it from the floor, builds the shaft
+    walls (`wall`, default `defaults.partitionThickness`; a `column` is solid) and leaves the void
+    as a technical room. Cutouts touching the room outline become notches, free-standing ones holes.
+  - L-shapes and steps (a wall thicker over part of its length, a recess) → `polygon`. Steps are where
+    two rooms' gaps differ along one wall: give each room its own true edge, the compiler builds a wall
+    of the right thickness on each part and joins them.
+  - Rooms on the same side of one straight wall share its line: give their edges the **same**
+    coordinate (a hall and a storeroom both ending at x = 3020). A 20–40 mm difference read off the
+    pixels makes two offset walls that do not meet, and the rooms behind them stay open.
+  - Do not model a shaft as a `fixture` only: fixtures (`riser`, `ventShaft`) are drawn but do **not**
+    reduce the room area.
+- **Loggia / balcony areas** on BTI plans are often printed with the coefficient (loggia ×0.5, balcony
+  ×0.3): a 1.2 × 2.2 m loggia is labelled `1,3`. Then set `labelledAreaCoef: 0.5` (0.3 for a balcony)
+  and keep `labelledArea` as printed. **Recover the real depth from the label**: depth = labelled ÷ k ÷
+  length (1.3 ÷ 0.5 ÷ 2.2 = 1.18 m), never from px. See `reading-plans.md`.
 - Openings: put `at` on the wall centre line, `width` = clear opening; doors get `between`, `opensInto`
   and `hinge` (read the arc); windows get `sill`/`height` only if known (defaults otherwise).
   Entrance door: `entranceDoor`, `between: [room, "outside"]`.
-- Fixtures that define the plan: risers/shafts (`riser`, `ventShaft`), bathtub, shower, toilet,
+- Fixtures that define the plan: risers (`riser`; shafts are `cutouts`, see above), bathtub, shower, toilet,
   washbasin, kitchen sink, stove. Skip decorative furniture unless the user wants it.
 - `source`: `image` (relative to the spec file or absolute), `size` (work.png px), `mmPerPx` and
   `originPx` (px of the spec origin, so the underlay lines up), `labelledTotalArea`,
@@ -130,6 +158,21 @@ Fix every **error** (exit 1). Warnings to take seriously: `AREA_MISMATCH` (room 
 `TOTAL_AREA_MISMATCH`, `ROOM_MERGED` (two rooms not separated: a wall gap is missing),
 `OPENING_OFF_WALL`, `ROOM_UNREACHABLE`, `NO_ENTRANCE`, `TINY_GAP`, `SCALE_INCONSISTENT`.
 Codes are explained in `planspec-reference.md`.
+
+**An area mismatch means you misread the plan.** Do not tweak sizes until the number fits; find why:
+1. computed > label by roughly a shaft/column (0.2–1.5 m²) → a cutout is missing (step 6);
+2. computed > label along one side → a step in a wall, a thicker wall, an L-shape → `polygon`;
+3. outdoor room computed ≈ 2× (or ≈ 3.3×) the label → the label carries the BTI coefficient →
+   `labelledAreaCoef` (the validator suggests it);
+4. one side was measured in px while a printed number exists → use the number;
+5. the printed side lengths themselves multiply to a different area (the plan contradicts itself, a
+   digit is illegible) → keep the printed numbers and explain it in the room's `areaNote`.
+Only (5) — a difference you understand and cannot remove — goes into `areaNote` (`source.areaNote`
+for the total). An explained mismatch is reported as a warning instead of an error.
+
+`spec validate` ends with the **build gate** line: `spec build` refuses a spec with errors, including
+unexplained area mismatches above max(0.4 m², 5 %). `--force` overrides it (say so to the user);
+`--strict` also blocks on warnings.
 
 ### 8. Render + overlay, compare, fix (max 4 rounds)
 ```
@@ -150,6 +193,8 @@ pnpm -s dp spec check ../dopan.projects/.work/<slug>/draft-01.json --out-dir ../
 ```
 pnpm -s dp spec build ../dopan.projects/.work/<slug>/draft-0N.json --out ../dopan.projects/<Name>.doplan --name "<Name>" [--open]
 ```
+Refuses (exit 1, nothing written) while the build gate is closed: fix the errors or explain known area
+differences in `areaNote`; `--force` only when the user agrees to a plan that is known to be off.
 Packs `manifest.json + doc.json + assets/` and embeds the source image as a locked underlay (unless
 `--no-underlay`). `--open` launches the installed app (or the dev build). `doc info <file>` prints
 rooms/areas from the built project; `doc render` re-renders it. Save the `.doplan` in `../dopan.projects/`
@@ -168,8 +213,9 @@ app (the underlay is on its own layer; walls can be dragged). Do not claim accur
 3. **Round**: coordinates and sizes to 10 mm; wall thicknesses to standard values (80, 100, 120, 150,
    160, 180, 200, 250, 300, 380, 400, 510, 640).
 4. **Areas check geometry**: each room's computed area within ~2 % (min 0.15 m²) of the label. Bigger
-   miss → a dimension is misread or a wall gap is wrong. Total area in BTI excludes balconies
-   (or counts them ×0.3 / loggias ×0.5; see `reading-plans.md`).
+   miss → a dimension is misread, a wall gap is wrong, a shaft/step is missing, or the label carries a
+   BTI coefficient (diagnosis in step 7). Total area in BTI excludes balconies (or counts them ×0.3 /
+   loggias ×0.5; see `reading-plans.md`). Never leave a mismatch silently: fix it or `areaNote` it.
 5. **Consistency along chains**: room widths + wall thicknesses must sum to the overall dimension.
    Check every row and column of rooms this way before validating.
 6. **Do not invent**: no doors/windows that are not drawn; no furniture by default. Unknown door swing

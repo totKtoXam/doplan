@@ -16,6 +16,7 @@ export const BOOLEAN_FLAGS = new Set([
   'gray',
   'open',
   'strict',
+  'force',
   'underlay',
   'diff',
   'upscale',

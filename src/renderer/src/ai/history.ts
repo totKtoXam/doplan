@@ -47,7 +47,8 @@ function assistantEntry(m: AiMessage): string {
         const answer = a ? [...a.picked, a.other ?? ''].filter(Boolean).join(', ') : ''
         return `Q: ${q.question}${answer ? ` — A: ${answer}` : ''}`
       })
-      out.push(`[asked the user${p.status === 'answered' ? '' : ` (${p.status})`}]\n${qa.join('\n')}${p.note ? `\nNote: ${p.note}` : ''}`)
+      const quoted = p.quotes?.length ? `\nQuoted:\n${quoteMarkdown(p.quotes).trimEnd()}` : ''
+      out.push(`[asked the user${p.status === 'answered' ? '' : ` (${p.status})`}]\n${qa.join('\n')}${quoted}${p.note ? `\nNote: ${p.note}` : ''}`)
     } else if (p.type === 'notice' && (p.text === 'Остановлено' || p.text === t('Остановлено'))) {
       flushTools()
       out.push('[stopped by the user]')

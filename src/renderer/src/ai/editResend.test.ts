@@ -46,7 +46,9 @@ const fake = vi.hoisted(() => {
 vi.mock('@/store/api', () => ({ api: fake.api }))
 
 const { openProject } = await import('@/actions/project')
-const { addQuote, aiStore, editAndResend, initAi, removeQuote, send, stop } = await import('./store')
+const { uiStore } = await import('@/store/ui')
+await import('./i18n')
+const { addQuote, aiStore, editableText, editAndResend, initAi, removeQuote, send, stop } = await import('./store')
 
 const settle = () => new Promise((r) => setTimeout(r, 10))
 const ev = (runId: string, e: AiRunEvent) => fake.cb.event?.(runId, e)
@@ -261,6 +263,23 @@ describe('edit and send again', () => {
     expect(await editAndResend('u1', 'Построй по нему план')).toBe(true)
     expect(lastRun().images).toEqual([{ mime: 'image/jpeg', data: '/9j/AAA=', name: 'изображение' }])
     stop()
+  })
+
+  it('a picture sent alone opens with an empty edit box, whatever the language was then', async () => {
+    useProvider('api')
+    const lang = uiStore.getState().lang
+    uiStore.setState({ lang: 'en' })
+    aiStore.setState({ images: [IMG] })
+    await turn('', 'I see a plan')
+    const sent = msgs()[msgs().length - 2]
+    expect(textOf(sent)).toBe('(image)')
+    uiStore.setState({ lang: 'ru' })
+    expect(editableText(sent)).toBe('')
+    uiStore.setState({ lang: 'en' })
+    expect(editableText(sent)).toBe('')
+    // the same words typed by the user (no picture) are text to edit
+    expect(editableText({ ...sent, images: undefined })).toBe('(image)')
+    uiStore.setState({ lang })
   })
 
   it('not while a turn runs; Stop ends an edited turn as any other', async () => {

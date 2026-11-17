@@ -168,6 +168,8 @@ export type AiPart =
       status: 'pending' | 'answered' | 'cancelled'
       answers?: AiQuestionAnswer[]
       note?: string
+      /** passages of the chat quoted with the answer */
+      quotes?: string[]
     }
   /** login: the CLI's sign-in expired — the notice offers «Войти» */
   | { type: 'notice'; level: 'info' | 'warning' | 'error'; text: string; login?: AiProviderId }

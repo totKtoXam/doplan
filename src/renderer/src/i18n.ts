@@ -646,6 +646,11 @@ export function useT(): typeof t {
 }
 
 /** Register extra translations at runtime (e.g. from a module that owns many strings). */
+/** `s` is `key` in one of the languages: text stored under a language the UI has since been switched from */
+export function isAnyTranslation(s: string, key: string): boolean {
+  return s === key || Object.values(dictionaries).some((d) => d[key] === s)
+}
+
 export function addTranslations(lang: 'ru' | 'en', entries: Record<string, string>): void {
   Object.assign(dictionaries[lang], entries)
 }

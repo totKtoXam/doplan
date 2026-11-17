@@ -12,14 +12,14 @@ import type { AiChatMeta, AiChatRecord, AiChatSettings, AiChip, AiImage, AiLogin
 import { DEFAULT_AI_SETTINGS, quoteMarkdown } from '@shared/aiChat'
 import { AI_TOOL_TITLES, formatAnswers, isAiToolName, parseToolArgs } from '@shared/aiTools'
 import { ensureAiFolderTrust } from '@/actions/project'
-import { t } from '@/i18n'
+import { isAnyTranslation, t } from '@/i18n'
 import { api } from '@/store/api'
 import { docStore } from '@/store/document'
 import { getMark, marksStore, setMarkNumberFloor } from '@/store/marks'
 import { addProjectHook } from '@/store/projectHooks'
 import { uiStore } from '@/store/ui'
 import { chatTranscript } from './history'
-import { DraftHost, liveHost } from './hosts'
+import { DraftHost, type DraftMark, liveHost } from './hosts'
 import { markSnapshot } from './markSnapshot'
 import type { MarkupShape } from './markup'
 import { chipFor, entityLevel, lookupFor } from './summary'
@@ -127,6 +127,11 @@ const set = (p: Partial<AiState>) => aiStore.setState(p)
 // ───────────── module state (not rendered) ─────────────
 
 let draft: DraftHost | null = null
+/**
+ * user message id → the plan-mode draft as that turn found it, so that editing the message takes back only
+ * what the dropped turns proposed. Kept for the turns of the current draft only.
+ */
+const turnDrafts = new Map<string, { host: DraftHost | null; mark?: DraftMark; changes: number }>()
 const approvals = new Map<string, (yes: boolean) => void>()
 /** open ask_user calls: resolved with the answer, or null (declined / the turn ended) */
 const questions = new Map<string, (a: AskResult) => void>()
@@ -842,6 +847,12 @@ export async function send(raw: string): Promise<void> {
   await runTurn(raw, null)
 }
 
+/** the text of a user message to edit: a picture sent alone has a placeholder (in the language of then) — the edit starts empty */
+export function editableText(m: AiMessage): string {
+  const raw = m.parts.map((p) => (p.type === 'text' ? p.text : '')).join('')
+  return m.images?.length && isAnyTranslation(raw, '(изображение)') ? '' : raw
+}
+
 /**
  * Sends an earlier message of the user again, changed. The chat goes on from there: the messages after
  * it are dropped, and so are the agent sessions and the API history (they remember the old conversation);
@@ -910,8 +921,8 @@ async function runTurn(raw: string, editId: string | null): Promise<boolean> {
   const asst: AiMessage = { id: uid(), role: 'assistant', createdAt: now(), parts: [] }
   const settings = get().settings
   if (editId) {
-    // the plan-mode proposal of the dropped turns goes with them
-    discardDraft()
+    // what the dropped turns proposed in plan mode goes with them; earlier proposals stay
+    cutDraft(editId)
     const chatId = get().chat.id
     // what a stopped turn of the old conversation still reports must not bring its session back
     for (const s of stoppedRuns.values()) if (s.chatId === chatId) s.cut = true
@@ -929,6 +940,9 @@ async function runTurn(raw: string, editId: string | null): Promise<boolean> {
   const history = before.length ? chatTranscript(before) : undefined
   // an empty draft left by an earlier turn was taken from the plan as it was then
   if (settings.planMode && (!draft || draft.empty)) draft = new DraftHost()
+  // a turn of an older draft (or none) is told apart by its record being gone
+  for (const [id, r] of turnDrafts) if (r.host !== draft) turnDrafts.delete(id)
+  turnDrafts.set(userMsg.id, { host: draft, mark: draft?.mark(), changes: get().draftChanges.length })
   partIndex = new Map()
   patchChat((c) => {
     c.messages.push(userMsg, asst)
@@ -1242,7 +1256,7 @@ async function askUser(call: AiToolCall): Promise<void> {
 let askQueue: Promise<void> = Promise.resolve()
 const queuedAsks = new Set<string>()
 
-type AskResult = { answers: AiQuestionAnswer[]; note?: string; chips?: AiChip[]; image?: PendingImage } | null
+type AskResult = { answers: AiQuestionAnswer[]; note?: string; quotes?: string[]; chips?: AiChip[]; image?: PendingImage } | null
 
 async function showQuestion(call: AiToolCall, qs: AiQuestion[]): Promise<void> {
   const setPart = (fn: (p: Extract<AiPart, { type: 'question' }>) => void) =>
@@ -1275,13 +1289,15 @@ async function showQuestion(call: AiToolCall, qs: AiQuestion[]): Promise<void> {
       p.status = 'answered'
       p.answers = res.answers
       if (res.note) p.note = res.note
+      if (res.quotes?.length) p.quotes = res.quotes
     })
     // what was attached in the chat box goes with the answer: the chips as context, the picture as the result's image
     const ctx = res.chips?.length ? `\n\nПользователь приложил к ответу:\n${res.chips.map((c) => `- ${c.kind} ${c.id}: ${c.summary}`.slice(0, 6000)).join('\n')}` : ''
     const pic = res.image ? '\n\nК ответу приложено изображение (ниже).' : ''
+    const quoted = res.quotes?.length ? `\n\nПользователь процитировал из переписки:\n${quoteMarkdown(res.quotes).trimEnd()}` : ''
     api.aiChat.toolResult(call.callId, {
       ok: true,
-      text: formatAnswers(qs, res.answers, res.note) + ctx + pic,
+      text: formatAnswers(qs, res.answers, res.note) + quoted + ctx + pic,
       ...(res.image ? { image: { mime: res.image.mime === 'image/png' ? 'image/png' : 'image/jpeg', data: res.image.data } } : {}),
     })
   }
@@ -1319,24 +1335,26 @@ export function answerQuestion(note?: string | null): void {
   const res = a && questions.get(a.callId)
   if (!a || !res) return
   if (note === null) return res(null)
-  // chips and a picture in the chat box are part of the answer (a tool result carries one picture:
+  // quotes, chips and a picture in the chat box are part of the answer (a tool result carries one picture:
   // the others stay in the box for the next message, and the user is told so)
-  const { chips, images } = get()
+  const { chips, images, quotes } = get()
   const image = images.find((im) => im.mime === 'image/jpeg' || im.mime === 'image/png')
   set({
     chips: [],
+    quotes: [],
     images: image ? images.filter((im) => im !== image) : images,
     status: images.length > (image ? 1 : 0) ? t('К ответу приложено одно изображение, остальные остались в поле ввода') : get().status,
   })
   res({
     answers: a.draft.map((d) => ({ picked: d.picked, ...(d.other?.trim() ? { other: d.other.trim() } : {}) })),
     ...(note?.trim() ? { note: note.trim() } : {}),
+    ...(quotes.length ? { quotes: quotes.map((q) => q.text) } : {}),
     ...(chips.length ? { chips } : {}),
     ...(image ? { image } : {}),
   })
 }
 
-/** something to send: an option picked, a «Другое» text, a note, or chips / a picture in the chat box */
+/** something to send: an option picked, a «Другое» text, a note, or quotes / chips / a picture in the chat box */
 export function hasAnswer(a: AiState['asking'], note = '', attached = false): boolean {
   return attached || !!note.trim() || !!a?.draft.some((d) => d.picked.length || d.other?.trim())
 }
@@ -1357,6 +1375,23 @@ export function applyDraft(): { ok: boolean; stale: boolean } | null {
     void persist()
   }
   return res
+}
+
+/**
+ * Editing user message `msgId` drops the turns from it on: the draft goes back to where that turn found it.
+ * A draft that turn did not find (it started then or later) goes entirely; its proposed parts are all in the
+ * dropped messages, so there is nothing to mark. Nothing changes when the dropped turns proposed nothing.
+ */
+function cutDraft(msgId: string): void {
+  const rec = turnDrafts.get(msgId)
+  if (draft && rec?.host === draft && rec.mark) {
+    draft.rollback(rec.mark)
+    set({ draftCount: draft.count, draftChanges: get().draftChanges.slice(0, rec.changes) })
+    if (draft.empty) draft = null
+  } else if (draft || get().draftCount || get().draftChanges.length) {
+    draft = null
+    set({ draftCount: 0, draftChanges: [] })
+  }
 }
 
 /** drops the plan-mode proposal; true when there was one (the chat changed) */

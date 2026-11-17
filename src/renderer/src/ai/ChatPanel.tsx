@@ -46,6 +46,7 @@ import {
   consumeInsert,
   discardDraft,
   dismissLogin,
+  editableText,
   editAndResend,
   hasAnswer,
   newChat,
@@ -283,7 +284,7 @@ function ApprovalCard({ part }: { part: ToolPart }) {
  */
 function QuestionCard() {
   const asking = useAi((s) => s.asking)
-  const attached = useAi((s) => s.chips.length > 0 || s.images.length > 0)
+  const attached = useAi((s) => s.chips.length > 0 || s.images.length > 0 || s.quotes.length > 0)
   if (!asking) return null
   const ready = hasAnswer(asking, '', attached)
   return (
@@ -395,6 +396,7 @@ function QuestionRecord({ part }: { part: QuestionPart }) {
           )
         })}
       </ul>
+      {part.quotes?.map((q, i) => <QuoteBlock key={i} text={q} className="mt-1" />)}
       {part.note && <div className="mt-0.5 leading-snug text-text">«{part.note}»</div>}
     </div>
   )
@@ -495,10 +497,8 @@ function QuoteBlock({ text, className, children }: { text: string; className?: s
 
 function UserMessage({ m }: { m: AiMessage }) {
   const running = useAi((s) => !!s.running)
-  const raw = m.parts.map((p) => (p.type === 'text' ? p.text : '')).join('')
   const images = m.images?.filter(Boolean) ?? []
-  // a picture sent alone shows a placeholder text: the edit starts empty
-  const text = images.length && (raw === '(изображение)' || raw === t('(изображение)')) ? '' : raw
+  const text = editableText(m)
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState(text)
   const [busy, setBusy] = useState(false)
@@ -1250,7 +1250,7 @@ function Composer() {
   const slash = text.startsWith('/') && !text.includes('\n') ? QUICK_ACTIONS.filter((q) => text.trim() === '/' || [quickCmd(q), q.cmd].some((c) => c.toLowerCase().startsWith(text.trim().toLowerCase()))) : []
   // a question is open: what is sent answers it (the text, the options picked on the card)
   const answering = !!asking
-  const canSend = answering ? hasAnswer(asking, text, chips.length > 0 || images.length > 0) : !running && (!!text.trim() || images.length > 0 || quotes.length > 0)
+  const canSend = answering ? hasAnswer(asking, text, chips.length > 0 || images.length > 0 || quotes.length > 0) : !running && (!!text.trim() || images.length > 0 || quotes.length > 0)
 
   const submit = () => {
     if (!canSend) return

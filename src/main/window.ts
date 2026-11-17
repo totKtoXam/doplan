@@ -114,6 +114,9 @@ export function createMainWindow(): BrowserWindow {
     },
   })
   mainWindow = win
+  // the app has its own menus in the header; the native one (Windows/Linux) stays hidden — Alt does not
+  // bring it back, it is a modifier on the plan — but its accelerators keep working
+  if (process.platform !== 'darwin') win.setMenuBarVisibility(false)
 
   win.once('ready-to-show', () => {
     win.maximize()

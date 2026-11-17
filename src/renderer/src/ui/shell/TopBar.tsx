@@ -13,6 +13,7 @@ import {
   House,
   Image,
   ImagePlus,
+  Info,
   Moon,
   Package,
   Paintbrush,
@@ -100,6 +101,7 @@ export function TopBar() {
     { label: t('Материалы…'), icon: Paintbrush, onSelect: () => dialogStore.getState().open('materialEditor') },
     { label: t('Настройки…'), icon: Settings, onSelect: () => dialogStore.getState().open('settings') },
     { label: t('Проверить обновления…'), icon: RefreshCw, onSelect: () => void checkForUpdatesManually() },
+    { label: t('О программе doplan'), icon: Info, onSelect: () => dialogStore.getState().open('about') },
   ]
 
   const exportMenu = (): MenuEntry[] => [

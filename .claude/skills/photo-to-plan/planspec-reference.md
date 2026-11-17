@@ -112,9 +112,14 @@ File → «План из PlanSpec (JSON)…», and the CLI uses it in `pnpm dp s
   - The compiler builds the cutout walls: sides facing the floor are `wall` thick (default
     `defaults.partitionThickness`; thinned if the cutout is too small); sides on the room outline
     continue the room's own wall, and so does a side in line with the outline wall at a reflex
-    corner (a cutout against the inner corner of an L-room) — unless a neighbouring room faces that
-    outline edge: then it is a partition and the cutout side gets the cutout wall. A shaft / box side
-    against a column gets its wall on the shaft's side (the column stays solid to its rect). The
+    corner (a cutout against the inner corner of an L-room). If a neighbouring room faces that outline
+    edge at the corner, the side continues the wall shared with it instead, of the thickness the gap
+    gives (a partition, a load-bearing wall, an outer wall to a balcony); a gap under 40 mm is no wall
+    and the side gets the cutout wall. A shaft / box side against a column gets its wall on the
+    shaft's side (the column stays solid to its rect). A cutout on an edge shared with a neighbour
+    keeps that shared wall along its whole side. Cutouts touching only at a corner point stay two
+    holes; cutouts sharing part of a side are one hole of the checked floor. The result does not
+    depend on how the plan is turned or mirrored (the tests build every case in 8 orientations). The
     void inside is a technical room (`technical: true`, type other) named `name` (default Шахта /
     Короб / Колонна), however small: whatever its size it is not floor, so it is left out of the room,
     total and living areas (in the check, in `dp spec validate` and in the app). `kind: "column"` is

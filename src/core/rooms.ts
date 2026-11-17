@@ -11,7 +11,7 @@
  * - the inner polygon is built from the mitred wall faces (WallGeom.left / .right), so the area is
  *   measured between finished wall faces; virtual walls contribute their axis.
  */
-import { dist, pointInPolygon, polygonArea, polygonPerimeter, polylabel } from './geom'
+import { dist, pointInPolygon, polygonArea, polygonPerimeter, polylabel, projectOnSegment } from './geom'
 import { hashString } from './ids'
 import type { DerivedRoom, Doc, Id, Room, RoomBoundaryEdge, Vec2, Wall, WallGeom } from './types'
 
@@ -293,12 +293,14 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
     if (ring.length < 3) continue
     const area = Math.abs(polygonArea(ring))
     if (area < 1) continue
-    const probe = ring[0]
+    // the innermost face holding the whole island. Every vertex is tested, not one: an island may
+    // touch the face at a vertex (a shaft at a reflex corner), and a probe on the boundary is a coin
+    // toss that depends on where the ring starts, i.e. on how the plan is turned
     let best: Face | null = null
     for (const f of faces) {
       if (f.cycle.comp === comp) continue
       if (best && f.ringArea >= best.ringArea) continue
-      if (pointInPolygon(probe, f.polygon)) best = f
+      if (ringInside(ring, f.polygon)) best = f
     }
     if (!best) continue
     best.holes.push(ring)
@@ -319,6 +321,14 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
     prepared.push({ face: f, area, labelPoint: polylabel(f.polygon, f.holes) })
   }
   const winner = new Map<Face, Room>()
+  // the closest record of each kind (real room / technical void) per face
+  const mixed = new Map<Face, { real?: Room; tech?: Room }>()
+  const closer = (r: Room, cur: Room | undefined, lp: Vec2): boolean => {
+    if (!cur) return true
+    const dNew = dist(r.anchor, lp)
+    const dCur = dist(cur.anchor, lp)
+    return dNew < dCur - 1e-9 || (Math.abs(dNew - dCur) <= 1e-9 && r.id < cur.id)
+  }
   for (const r of records) {
     if (!r.anchor || !Number.isFinite(r.anchor.x) || !Number.isFinite(r.anchor.y)) continue
     let hit: { face: Face; area: number; labelPoint: Vec2 } | null = null
@@ -327,21 +337,32 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
       if (pointInPolygon(r.anchor, p.face.polygon, p.face.holes)) hit = p
     }
     if (!hit) continue
-    const cur = winner.get(hit.face)
-    if (!cur) {
-      winner.set(hit.face, r)
-      continue
+    // two records in one face: the one closest to the label point survives
+    if (closer(r, winner.get(hit.face), hit.labelPoint)) winner.set(hit.face, r)
+    const m = mixed.get(hit.face) ?? {}
+    if (r.technical) {
+      if (closer(r, m.tech, hit.labelPoint)) m.tech = r
+    } else if (closer(r, m.real, hit.labelPoint)) m.real = r
+    mixed.set(hit.face, m)
+  }
+  // a real room and a technical void in one face. Either the void's walls were moved as an island
+  // into the room's anchor (the room's face is then the one around the island, left without a
+  // record: the void keeps its face, the room takes the one around it), or the void's walls were
+  // removed (no such face: the void is floor of the room again, not a shaft the size of the room)
+  for (const p of prepared) {
+    const m = mixed.get(p.face)
+    if (!m?.real || !m.tech) continue
+    const anchor = m.real.anchor
+    let around: Face | null = null
+    for (const q of prepared) {
+      if (q.face === p.face || winner.has(q.face)) continue
+      if (around && q.face.ringArea >= around.ringArea) continue
+      if (pointInPolygon(anchor, q.face.polygon)) around = q.face
     }
-    // two records in one face (rooms merged): a real room beats a technical void (a cutout whose
-    // walls were removed is floor of the room again, not a shaft the size of the room); otherwise
-    // the one closest to the label point survives
-    if (!r.technical !== !cur.technical) {
-      if (cur.technical) winner.set(hit.face, r)
-      continue
-    }
-    const dNew = dist(r.anchor, hit.labelPoint)
-    const dCur = dist(cur.anchor, hit.labelPoint)
-    if (dNew < dCur - 1e-9 || (Math.abs(dNew - dCur) <= 1e-9 && r.id < cur.id)) winner.set(hit.face, r)
+    if (around) {
+      winner.set(p.face, m.tech)
+      winner.set(around, m.real)
+    } else winner.set(p.face, m.real)
   }
 
   for (const p of prepared) {
@@ -376,4 +397,16 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
 /** true for the temporary ids given to faces that have no Room record */
 export function isAutoRoomId(id: Id): boolean {
   return id.startsWith('auto_')
+}
+
+/** every vertex of `ring` inside `poly` or on its boundary (within 0.5 mm), and at least one strictly inside */
+function ringInside(ring: readonly Vec2[], poly: readonly Vec2[]): boolean {
+  let strict = false
+  for (const p of ring) {
+    const onEdge = poly.some((a, i) => projectOnSegment(p, a, poly[(i + 1) % poly.length]).dist < 0.5)
+    if (onEdge) continue
+    if (!pointInPolygon(p, poly)) return false
+    strict = true
+  }
+  return strict
 }

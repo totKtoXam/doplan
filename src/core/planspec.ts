@@ -1234,7 +1234,15 @@ interface CutVoid {
   /** CCW polygon of the void */
   poly: Vec2[]
   /** wall of the void sides that face the room (tX: left/right sides, tY: top/bottom) */
-  wall: { kind: SpecWallKind; t: number; tX: number; tY: number; cont?: Record<'left' | 'right' | 'top' | 'bottom', boolean> }
+  wall: {
+    kind: SpecWallKind
+    t: number
+    tX: number
+    tY: number
+    cont?: Record<'left' | 'right' | 'top' | 'bottom', boolean>
+    /** the wall a continuing side takes: the wall it shares with a neighbour there (absent: the room's own outline wall) */
+    contWall?: Partial<Record<'left' | 'right' | 'top' | 'bottom', { kind: SpecWallKind; t: number } | null>>
+  }
   /** the room's outline as written: void sides lying on it keep the room's own edge wall */
   base: Vec2[]
   kind: SpecCutoutKind
@@ -1360,8 +1368,10 @@ function roomShapeMm(
   partition = 100,
   /** the room's own outline wall (0: unknown — no side continues it) */
   edgeT = 0,
-  /** the other rooms' outlines: an outline edge one of them faces is a shared partition, not edgeT */
+  /** the other rooms' outlines: an outline edge one of them faces is a shared wall, not edgeT */
   others: (Vec2[] | null)[] = [],
+  /** the wall shared with others[j] across a gap d, as the wall synthesis pairs them */
+  sharedWall: (d: number, j: number) => { kind: SpecWallKind; t: number } | null = () => null,
 ): RoomShape | null {
   const base = roomPolygonMm(r, U, snap)
   if (!base) return null
@@ -1534,7 +1544,9 @@ function roomShapeMm(
   /** a floor-facing side on the line of an outline edge that ends on it (a cutout against the inner
    *  walls of a reflex corner) continues that outline wall: same thickness, same axis. A cutout wall
    *  of its own thickness stood parallel to the outline wall, overlapping it without a junction */
-  const continues = (a: Vec2, b: Vec2, out: Vec2): boolean => {
+  /** false: the side does not continue an outline wall; null: it continues the room's own outline
+   *  wall; else the wall it continues, shared with a neighbour */
+  const continues = (a: Vec2, b: Vec2, out: Vec2): { kind: SpecWallKind; t: number } | null | false => {
     if (!(edgeT > 0)) return false
     const vert = Math.abs(a.x - b.x) < 0.5
     const lo = vert ? Math.min(a.y, b.y) : Math.min(a.x, b.x)
@@ -1548,22 +1560,35 @@ function roomShapeMm(
       if (Math.abs(ehi - lo) > 0.5 && Math.abs(elo - hi) > 0.5) continue
       // the room lies on the same side of that outline edge as the floor of this side
       if (!pointInPoly(vAdd(vMul(vAdd(p, q), 0.5), out), base)) continue
-      // …and no neighbour faces that edge: a shared edge is a partition, which the cutout's own
-      // partition already lines up with
+      // …and the wall of that edge where it meets the side (at the vertex): the room's own outline
+      // wall, or the wall shared with a neighbour facing it there, of the thickness the gap gives (a
+      // partition, a load-bearing wall, an outer wall to a balcony). Only the part at the vertex
+      // counts: a neighbour may face just the far end of the edge
+      const atLo = Math.abs(ehi - lo) <= 0.5
+      const vtx = vert ? ((p.y > q.y) === atLo ? p : q) : (p.x > q.x) === atLo ? p : q
+      const along = vNorm(vSub(vtx === p ? q : p, vtx))
+      const L = vDist(p, q)
       const away = vMul(out, -1)
-      const shared = [0.25, 0.5, 0.75].some((f) => {
-        const o = vAdd(vAdd(p, vMul(vSub(q, p), f)), vMul(away, 0.5))
-        return others.some((poly) => {
-          if (!poly || poly === base) return false
-          if (pointInPoly(o, poly)) return true
-          for (let j = 0; j < poly.length; j++) {
-            const h = lineHit(o, away, poly[j], vSub(poly[(j + 1) % poly.length], poly[j]))
-            if (h && h.mu >= -1e-6 && h.mu <= 1 + 1e-6 && h.lambda >= 0 && h.lambda <= MAX_GAP) return true
+      let best = Infinity
+      let bestJ = -1
+      for (const at of [5, 50, 150]) {
+        const o = vAdd(vAdd(vtx, vMul(along, Math.min(at, L / 2))), vMul(away, 0.5))
+        others.forEach((poly, j) => {
+          if (!poly || poly === base) return
+          if (pointInPoly(o, poly)) {
+            if (best > 0) [best, bestJ] = [0, j]
+            return
           }
-          return false
+          for (let k = 0; k < poly.length; k++) {
+            const h = lineHit(o, away, poly[k], vSub(poly[(k + 1) % poly.length], poly[k]))
+            if (h && h.mu >= -1e-6 && h.mu <= 1 + 1e-6 && h.lambda >= 0 && h.lambda <= MAX_GAP && h.lambda + 0.5 < best) [best, bestJ] = [h.lambda + 0.5, j]
+          }
         })
-      })
-      if (!shared) return true
+      }
+      if (bestJ < 0) return null
+      const w = sharedWall(best, bestJ)
+      // a gap too thin for a wall of its own: the cutout keeps its own partition
+      if (w && w.t > 0) return w
     }
     return false
   }
@@ -1611,24 +1636,27 @@ function roomShapeMm(
       inner.top ||= facesColumn(V(b.x0, b.y0), V(b.x1, b.y0), V(0, -1), k)
       inner.bottom ||= facesColumn(V(b.x0, b.y1), V(b.x1, b.y1), V(0, 1), k)
     }
-    const cont = {
-      left: inner.left && continues(V(b.x0, b.y0), V(b.x0, b.y1), V(-1, 0)),
-      right: inner.right && continues(V(b.x1, b.y0), V(b.x1, b.y1), V(1, 0)),
-      top: inner.top && continues(V(b.x0, b.y0), V(b.x1, b.y0), V(0, -1)),
-      bottom: inner.bottom && continues(V(b.x0, b.y1), V(b.x1, b.y1), V(0, 1)),
+    const contWall = {
+      left: inner.left ? continues(V(b.x0, b.y0), V(b.x0, b.y1), V(-1, 0)) : false,
+      right: inner.right ? continues(V(b.x1, b.y0), V(b.x1, b.y1), V(1, 0)) : false,
+      top: inner.top ? continues(V(b.x0, b.y0), V(b.x1, b.y0), V(0, -1)) : false,
+      bottom: inner.bottom ? continues(V(b.x0, b.y1), V(b.x1, b.y1), V(0, 1)) : false,
     }
+    const cont = { left: contWall.left !== false, right: contWall.right !== false, top: contWall.top !== false, bottom: contWall.bottom !== false }
+    /** the thickness of a continuing side (the room's outline wall or the shared one) */
+    const ct = (side: keyof typeof cont): number => (!cont[side] ? 0 : (contWall[side] || { t: edgeT }).t)
     // the outline wall must fit with room to spare, else the side is an ordinary (thinned) cutout wall
     const W = b.x1 - b.x0
     const H = b.y1 - b.y0
-    if ((Number(cont.left) + Number(cont.right)) * edgeT > W - 40) cont.left = cont.right = false
-    if ((Number(cont.top) + Number(cont.bottom)) * edgeT > H - 40) cont.top = cont.bottom = false
-    const fixedX = (Number(cont.left) + Number(cont.right)) * edgeT
-    const fixedY = (Number(cont.top) + Number(cont.bottom)) * edgeT
+    if (ct('left') + ct('right') > W - 40) cont.left = cont.right = false
+    if (ct('top') + ct('bottom') > H - 40) cont.top = cont.bottom = false
+    const fixedX = ct('left') + ct('right')
+    const fixedY = ct('top') + ct('bottom')
     const nX = Number(inner.left && !cont.left) + Number(inner.right && !cont.right)
     const nY = Number(inner.top && !cont.top) + Number(inner.bottom && !cont.bottom)
     const tX = Math.min(t0, nX ? Math.max(10, (W - fixedX - 40) / nX) : W)
     const tY = Math.min(t0, nY ? Math.max(10, (H - fixedY - 40) / nY) : H)
-    const inset = (side: keyof typeof cont, t: number): number => (cont[side] ? edgeT : inner[side] ? t : 0)
+    const inset = (side: keyof typeof cont, t: number): number => (cont[side] ? ct(side) : inner[side] ? t : 0)
     if (((nX && tX < t0 - 0.5) || (nY && tY < t0 - 0.5)) && t0 < 1e6)
       problems.push({
         severity: 'info',
@@ -1645,7 +1673,14 @@ function roomShapeMm(
     const t = Math.min(tX, tY)
     voids.push({
       poly: ccw([V(v.x0, v.y0), V(v.x1, v.y0), V(v.x1, v.y1), V(v.x0, v.y1)]),
-      wall: { kind: t >= 160 ? 'loadBearing' : 'partition', t, tX, tY, cont },
+      wall: {
+        kind: t >= 160 ? 'loadBearing' : 'partition',
+        t,
+        tX,
+        tY,
+        cont,
+        contWall: Object.fromEntries((['left', 'right', 'top', 'bottom'] as const).filter((sd) => cont[sd] && contWall[sd]).map((sd) => [sd, contWall[sd]])),
+      },
       base,
       kind: c.kind ?? 'shaft',
       index: k,
@@ -1681,6 +1716,9 @@ interface REdge {
   e: Vec2
   n: Vec2
   L: number
+  /** the range along e (from p0) a shared wall may take: [0, L], wider for a void side on the outline */
+  r0: number
+  r1: number
   covered: [number, number][]
   kept: [number, number][]
 }
@@ -1714,6 +1752,19 @@ function roomEdgeWall(r: RoomSpec, D: ResolvedDefaults): { kind: SpecWallKind; t
   return { kind: 'exterior', t: D.exterior, h: D.wallHeight }
 }
 
+/** the kind of the wall two rooms share across a gap d (the wall synthesis pairs their edges so) */
+function sharedWallKind(a: RoomSpec, b: RoomSpec, d: number): SpecWallKind {
+  if (d < 40) return 'separator'
+  if (isOutdoor(a) || isOutdoor(b)) return 'exterior'
+  return d >= 160 ? 'loadBearing' : 'partition'
+}
+
+/** the wall two rooms share across a gap d: kind and thickness as the wall synthesis builds it */
+function sharedWallOf(a: RoomSpec, b: RoomSpec, d: number, stdT: boolean): { kind: SpecWallKind; t: number } {
+  const kind = sharedWallKind(a, b, d)
+  return { kind, t: kind === 'separator' ? 0 : snapThickness(d, stdT) }
+}
+
 function roomsModeSegments(
   rooms: RoomSpec[],
   roomPolys: (Vec2[] | null)[],
@@ -1737,8 +1788,29 @@ function roomsModeSegments(
       const L = vDist(p0, p1)
       if (L < 1) continue
       const e = vNorm(vSub(p1, p0))
+      let r0 = 0
+      let r1 = L
+      // a void side on the host outline stands for the whole side of its cutout there: the void is
+      // inset from the cutout box (a column is mostly its own thick walls, a shaft beside a column has
+      // its partition on its own side), and the outline across those insets is still the room's side.
+      // Kept to the void's extent, a neighbour across the outline found nothing to share the wall with
+      // over the insets and built its own outer wall through the shaft. Only the pairing uses the wider
+      // range: alone, the side builds its wall from its own ends as before
+      if (ri >= nReal) {
+        const { v } = voids[ri - nReal]
+        if (onOutline(p0, p1, v.base)) {
+          const c = v.cut
+          const ts = [V(c.x0, c.y0), V(c.x1, c.y0), V(c.x0, c.y1), V(c.x1, c.y1)].map((p) => vDot(vSub(p, p0), e))
+          const t0 = Math.min(0, ...ts)
+          const t1 = Math.max(L, ...ts)
+          if (onOutline(vAdd(p0, vMul(e, t0)), vAdd(p0, vMul(e, t1)), v.base)) {
+            r0 = t0
+            r1 = t1
+          }
+        }
+      }
       // polygon is algebraically CCW → interior on the algebraic left (-ey, ex) → outward (ey, -ex)
-      edges.push({ room: ri, p0, p1, e, n: V(e.y, -e.x), L, covered: [], kept: [] })
+      edges.push({ room: ri, p0, p1, e, n: V(e.y, -e.x), L, r0, r1, covered: [], kept: [] })
     }
   })
   // a host edge facing into its own cutout box (the sides of a notch) is no wall and pairs with
@@ -1805,10 +1877,10 @@ function roomsModeSegments(
       const d2 = vDot(vSub(B.p1, A.p0), A.n)
       if (Math.abs(d - d2) > 1) continue
       if (d < -1 || d > MAX_GAP) continue
-      const t0 = vDot(vSub(B.p0, A.p0), A.e)
-      const t1 = vDot(vSub(B.p1, A.p0), A.e)
-      const lo = Math.max(0, Math.min(t0, t1))
-      const hi = Math.min(A.L, Math.max(t0, t1))
+      const t0 = vDot(vSub(vAdd(B.p0, vMul(B.e, B.r0)), A.p0), A.e)
+      const t1 = vDot(vSub(vAdd(B.p0, vMul(B.e, B.r1)), A.p0), A.e)
+      const lo = Math.max(A.r0, Math.min(t0, t1))
+      const hi = Math.min(A.r1, Math.max(t0, t1))
       if (hi - lo < 10) continue
       // a cutout wall pairs across a gap only when no floor lies in it: two shafts with a strip of
       // the room between them are two walls, not one thick wall over the floor
@@ -1838,11 +1910,7 @@ function roomsModeSegments(
         B.covered.push([s0, s1])
         const ra = roomAt(A.room)
         const rb = roomAt(B.room)
-        let kind: SpecWallKind
-        if (isOutdoor(ra) || isOutdoor(rb)) kind = d < 40 ? 'separator' : 'exterior'
-        else if (d < 40) kind = 'separator'
-        else if (d >= 160) kind = 'loadBearing'
-        else kind = 'partition'
+        const kind = sharedWallKind(ra, rb, d)
         if (d > 1 && d < 40)
           issues.push({
             severity: 'warning',
@@ -1911,20 +1979,24 @@ function roomsModeSegments(
     list.push(E)
     byRoom.set(E.room, list)
   }
-  /** a void side marked as continuing an outline wall (roomShapeMm: a cutout at a reflex corner) */
-  const continuesOutline = (E: REdge): boolean => {
-    if (E.room < nReal) return false
+  /** the box side of a void edge */
+  const sideOf = (E: REdge): 'left' | 'right' | 'top' | 'bottom' => {
     const { v } = voids[E.room - nReal]
-    const c = v.wall.cont
-    if (!c) return false
     const m = vMul(vAdd(E.p0, E.p1), 0.5)
-    if (Math.abs(E.e.x) > 0.5) return Math.abs(m.y - v.box.y0) < Math.abs(m.y - v.box.y1) ? c.top : c.bottom
-    return Math.abs(m.x - v.box.x0) < Math.abs(m.x - v.box.x1) ? c.left : c.right
+    if (Math.abs(E.e.x) > 0.5) return Math.abs(m.y - v.box.y0) < Math.abs(m.y - v.box.y1) ? 'top' : 'bottom'
+    return Math.abs(m.x - v.box.x0) < Math.abs(m.x - v.box.x1) ? 'left' : 'right'
   }
-  // a void side on the host outline continues the host's own edge wall; the others are the cutout wall
+  /** a void side marked as continuing an outline wall (roomShapeMm: a cutout at a reflex corner) */
+  const continuesOutline = (E: REdge): boolean => E.room >= nReal && !!voids[E.room - nReal].v.wall.cont?.[sideOf(E)]
+  // a void side on the host outline continues the host's own edge wall (a side at a reflex corner:
+  // the wall it continues, maybe shared with a neighbour); the others are the cutout wall
   const ewOf = (E: REdge): { kind: SpecWallKind; t: number; h: number } => {
     if (E.room < nReal) return edgeWallOf(rooms[E.room])
     const { v } = voids[E.room - nReal]
+    if (!onOutline(E.p0, E.p1, v.base) && continuesOutline(E)) {
+      const w = v.wall.contWall?.[sideOf(E)]
+      if (w) return { kind: w.kind, t: w.t, h: D.wallHeight }
+    }
     if (onOutline(E.p0, E.p1, v.base) || continuesOutline(E)) return edgeWallOf(roomAt(E.room))
     const t = Math.abs(E.e.x) > 0.5 ? v.wall.tY : v.wall.tX
     return { kind: t >= 160 ? 'loadBearing' : 'partition', t, h: D.wallHeight }
@@ -2136,6 +2208,15 @@ function mergeCollinear(segs: Seg[], mergeMm: number): Seg[] {
   return out
 }
 
+/**
+ * Order of the corners a free wall end may reach (lower first): a room's wall meets another room
+ * wall before a cutout wall (a shared wall snapped thinner than its gap, 90 → 80 mm, lost to a shaft
+ * partition nearby and went through the floor to it), then the thickest wall, then the nearest.
+ */
+function cornerRank(s: Seg, o: Seg, lambda: number): number {
+  return (!s.cut && o.cut ? 1e9 : 0) - o.t * 1e5 + Math.min(lambda, 1e5 - 1)
+}
+
 function joinEnds(segs: Seg[], mergeMm: number, clipped: Vec2[] = []): void {
   const onAnother = (p: Vec2, self: Seg): boolean =>
     segs.some((o) => o !== self && projectOnSeg(p, o.a, o.b).dist <= 0.5)
@@ -2170,7 +2251,7 @@ function joinEnds(segs: Seg[], mergeMm: number, clipped: Vec2[] = []): void {
               if (!body || h.lambda < body.lambda) body = { lambda: h.lambda, point: h.point }
             } else if (stopped && o.cut) {
               continue
-            } else if (!corner || o.t > corner.t + 0.5 || (Math.abs(o.t - corner.t) <= 0.5 && h.lambda < corner.lambda)) {
+            } else if (!corner || cornerRank(s, o, h.lambda) < cornerRank(s, corner.o, corner.lambda)) {
               corner = { lambda: h.lambda, point: h.point, t: o.t, o, oEnd: h.mu < oL / 2 ? 'a' : 'b', beyond: h.mu < -0.5 || h.mu > oL + 0.5 }
             }
           }
@@ -2457,7 +2538,11 @@ export function compilePlanSpecDetailed(spec: PlanSpec, opts: CompileOptions = {
 
   const polys = spec.rooms.map((r) => roomPolygonMm(r, U, snap))
   const refPoints = spec.rooms.map((r) => roomRefPoint(r, U, snap))
-  const shapes = spec.rooms.map((r, i) => (r.cutouts?.length ? roomShapeMm(r, U, snap, D.partition, roomEdgeWall(r, D).t, polys.filter((_, j) => j !== i)) : null))
+  const shapes = spec.rooms.map((r, i) => {
+    if (!r.cutouts?.length) return null
+    const others = spec.rooms.filter((_, j) => j !== i)
+    return roomShapeMm(r, U, snap, D.partition, roomEdgeWall(r, D).t, polys.filter((_, j) => j !== i), (d, j) => sharedWallOf(r, others[j], d, stdT))
+  })
   // walls follow the real floor outline (notched by cutouts); cutout voids get their own walls
   const wallPolys = polys.map((p, i) => shapes[i]?.outer ?? p)
   const voids = shapes.flatMap((sh, host) => (sh ? sh.voids.map((v) => ({ host, v })) : []))
@@ -2878,14 +2963,41 @@ function boundaryDeviation(a: Vec2[][], b: Vec2[][], skip?: (s: Vec2, side: Vec2
   return worst
 }
 
-/** the number of groups of rings that touch one another (rings sharing a boundary point count once) */
-function touchingGroups(rings: Vec2[][]): number {
+/**
+ * The number of holes of a built face as the checked shape sees them: holes sharing a piece of a side
+ * are one hole (partly adjacent cutouts, each with its own void), and a hole sharing a side with the
+ * outer ring is a notch of the outline (a shaft against a column at the outline). Holes meeting at a
+ * single point stay apart, as the checked shape keeps them.
+ */
+function holeGroups(outer: Vec2[], holes: Vec2[][]): number {
+  const rings = [outer, ...holes]
   const up = rings.map((_, i) => i)
   const find = (i: number): number => (up[i] === i ? i : (up[i] = find(up[i])))
   for (let i = 0; i < rings.length; i++)
-    for (let j = i + 1; j < rings.length; j++)
-      if (rings[i].some((p) => distToPolyBoundary(p, rings[j]) < 1) || rings[j].some((p) => distToPolyBoundary(p, rings[i]) < 1)) up[find(i)] = find(j)
-  return rings.filter((_, i) => find(i) === i).length
+    for (let j = i + 1; j < rings.length; j++) if (sharesSide(rings[i], rings[j])) up[find(i)] = find(j)
+  return rings.filter((_, i) => find(i) === i && find(i) !== find(0)).length
+}
+
+/** two rings share a piece of a side (not just a point: holes meeting at a corner stay two holes) */
+function sharesSide(a: Vec2[], b: Vec2[]): boolean {
+  for (let i = 0; i < a.length; i++) {
+    const p = a[i]
+    const q = a[(i + 1) % a.length]
+    const len = vLen(vSub(q, p))
+    if (len < 1) continue
+    const u = vMul(vSub(q, p), 1 / len)
+    for (let j = 0; j < b.length; j++) {
+      const r = b[j]
+      const s = b[(j + 1) % b.length]
+      // both ends of b's side on a's line, then the overlap of the two along it
+      const off = (x: Vec2) => Math.abs(vCross(u, vSub(x, p)))
+      if (off(r) > 1 || off(s) > 1) continue
+      const t0 = vDot(vSub(r, p), u)
+      const t1 = vDot(vSub(s, p), u)
+      if (Math.min(len, Math.max(t0, t1)) - Math.max(0, Math.min(t0, t1)) > 1) return true
+    }
+  }
+  return false
 }
 
 /** BTI coefficients a printed outdoor-room area may carry (loggia 0.5, balcony / terrace 0.3) */
@@ -2966,7 +3078,12 @@ export function validatePlanSpecDetailed(input: PlanSpec): PlanValidation {
 
   // ── rooms static
   const polys = spec.rooms.map((r) => roomPolygonMm(r, U, spec.snap))
-  const shapes = spec.rooms.map((r, i) => (r.cutouts?.length ? roomShapeMm(r, U, spec.snap, D.partition, roomEdgeWall(r, D).t, polys.filter((_, j) => j !== i)) : null))
+  const stdT = spec.snap?.standardThickness !== false
+  const shapes = spec.rooms.map((r, i) => {
+    if (!r.cutouts?.length) return null
+    const others = spec.rooms.filter((_, j) => j !== i)
+    return roomShapeMm(r, U, spec.snap, D.partition, roomEdgeWall(r, D).t, polys.filter((_, j) => j !== i), (d, j) => sharedWallOf(r, others[j], d, stdT))
+  })
   spec.rooms.forEach((r, i) => {
     const path = `rooms[${i}]`
     for (const p of shapes[i]?.problems ?? []) issues.push({ ...p, path: `${path}.cutouts`, ids: [r.id] })
@@ -3142,7 +3259,7 @@ export function validatePlanSpecDetailed(input: PlanSpec): PlanValidation {
       const floorAt = (p: Vec2) => pointInPoly(p, f.polygon) && !f.holes.some((h) => pointInPoly(p, h))
       const inner = (s: Vec2, side: Vec2) => !floorAt(vAdd(s, vMul(side, 2))) && !floorAt(vAdd(s, vMul(side, -2)))
       const dev = Math.max(boundaryDeviation(got, want, inner), boundaryDeviation(want, got))
-      const nHoles = touchingGroups(f.holes)
+      const nHoles = holeGroups(f.polygon, f.holes)
       if (dev <= BUILT_SHAPE_TOL && nHoles === want.length - 1) return
       const area = (sh ? sh.area : Math.abs(signedArea(polys[i]!))) / 1e6
       const holes = nHoles !== want.length - 1 ? `, вырезов-отверстий ${nHoles} вместо ${want.length - 1}` : ''

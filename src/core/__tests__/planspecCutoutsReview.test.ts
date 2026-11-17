@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { summarizeLevelRooms } from '../area'
 import { derivePlan } from '../derive'
 import { parseDoc, serializeDoc } from '../io'
-import { normalize, removeEntities, syncRooms } from '../ops'
+import { moveNode, normalize, removeEntities, syncRooms } from '../ops'
 import { compilePlanSpecDetailed, docToPlanSpec, parsePlanSpec, validatePlanSpecDetailed, type PlanSpec } from '../planspec'
 import { DOC_VERSION, DOC_VERSION_V4 } from '../types'
 import { docFormatVersion } from '../variants'
@@ -408,5 +408,31 @@ describe('planspec cutouts: review round 2', () => {
     }
     // the same cutout kept on one side of the corner line builds
     expect(errors(base([{ id: 'a', type: 'living', polygon: L2, cutouts: [{ rect: [3000, 2000, 600, 600] }] }]))).toEqual([])
+  })
+})
+
+describe('planspec cutouts: review round 3', () => {
+  it('#8 dragging the walls of an island shaft keeps it technical and the room around it real', () => {
+    for (const d of [0, 700, 800, 900, 1000, 1100]) {
+      const { res } = build({ version: 1, units: 'mm', defaults: { exteriorThickness: 300 }, rooms: [{ id: 'a', type: 'living', rect: [0, 0, 5000, 5000], cutouts: [{ rect: [1000, 1000, 2400, 2400], kind: 'shaft' }] }], openings: [] })
+      const doc = res.doc
+      syncRooms(doc)
+      const inside = (p: { x: number; y: number }) => p.x > 999 && p.x < 3401 && p.y > 999 && p.y < 3401
+      const nodes = new Set<string>()
+      for (const wl of Object.values(doc.walls)) if (inside(doc.nodes[wl.a]) && inside(doc.nodes[wl.b])) nodes.add(wl.a).add(wl.b)
+      expect(nodes.size).toBe(4)
+      // the select tool's drag: nodes move, room anchors stay, the commit normalizes and syncs once
+      for (const id of nodes) moveNode(doc, id, doc.nodes[id].x + d, doc.nodes[id].y + d)
+      normalize(doc)
+      syncRooms(doc)
+      const plan = derivePlan(doc, res.levelId)
+      const sum = summarizeLevelRooms(doc, plan.rooms)
+      expect(sum.total).toBeCloseTo(19.24, 2)
+      const recs = plan.rooms.map((f) => doc.rooms[f.roomId])
+      expect(recs.filter((r) => r?.technical)).toHaveLength(1)
+      // at +700 the room anchor falls inside a moved wall and the record is lost (as before this rule)
+      if (d !== 700) expect(recs.find((r) => !r?.technical)?.type).toBe('living')
+      expect(docFormatVersion(doc)).toBe(DOC_VERSION_V4)
+    }
   })
 })

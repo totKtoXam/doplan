@@ -1,6 +1,6 @@
 import { ArrowDown, ArrowUp, Copy, Eye, EyeOff, FolderCog, Plus, Trash } from 'lucide-react'
 import type { Doc, DocSettings, Id, Level } from '@core/types'
-import { newId, removeEntities } from '@core'
+import { newId, remapAccentFace, remapVoidNodes, removeEntities } from '@core'
 import { removeLevelMarks } from '@/actions/levels'
 import { useDoc } from '@/store/document'
 import { uiStore, useUi } from '@/store/ui'
@@ -44,6 +44,8 @@ function copyStructure(d: Doc, from: Id, to: Id) {
     if (r.levelId !== from) continue
     const id = newId('r')
     d.rooms[id] = { ...JSON.parse(JSON.stringify(r)), id, levelId: to }
+    remapAccentFace(d.rooms[id], wallMap)
+    remapVoidNodes(d.rooms[id], nodeMap)
   }
 }
 

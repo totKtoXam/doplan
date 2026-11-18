@@ -5,13 +5,14 @@
  */
 import { captureElectricAnchors, duplicateElectric, electricOnHiddenWalls, reattachElectrical, restoreElectricAnchors, splitElectricOnWall } from './electrical'
 import { DEFAULT_MATERIALS, OPENING_DEFAULTS, ROOM_TYPE_NAMES, defaultRoom, defaultWallSide } from './defaults'
-import { EPS, dist, projectOnSegment, segIntersect } from './geom'
+import { EPS, dist, pointInPolygon, projectOnSegment, segIntersect } from './geom'
 import { newId } from './ids'
 import { computeWallGeoms } from './joins'
 import { MIN_ROOM_AREA_M2, detectRooms, isAutoRoomId } from './rooms'
 import { inheritVariantFinish, pruneVariants } from './variants'
 import type {
   Asset,
+  DerivedRoom,
   Doc,
   EntityRef,
   FinishZone,
@@ -22,6 +23,7 @@ import type {
   Opening,
   OpeningKind,
   PlanNode,
+  Room,
   Vec2,
   Wall,
   WallSide,
@@ -1035,6 +1037,41 @@ function nextRoomName(doc: Doc, levelId: Id): string {
 }
 
 /**
+ * A technical void cut by a wall stays a void in every part: faces without a record that lie inside
+ * the void's old outline (its remembered nodes, where they are now) inherit it — the record itself
+ * when it found no face, copies of it (same name, type and finishes) for the other parts
+ */
+function splitVoidHeirs(doc: Doc, levelId: Id, derived: DerivedRoom[]): Map<DerivedRoom, Room> {
+  const heirs = new Map<DerivedRoom, Room>()
+  const matched = new Set(derived.map((d) => d.roomId))
+  const free = derived.filter((d) => isAutoRoomId(d.roomId) && d.nodes && d.nodes.length >= 3)
+  if (!free.length) return heirs
+  const onOrIn = (p: Vec2, ring: Vec2[]): boolean => {
+    if (pointInPolygon(p, ring)) return true
+    for (let i = 0; i < ring.length; i++) if (projectOnSegment(p, ring[i], ring[(i + 1) % ring.length]).dist <= 1) return true
+    return false
+  }
+  const ids = Object.keys(doc.rooms).sort()
+  for (const id of ids) {
+    const r = doc.rooms[id]
+    if (r.levelId !== levelId || !r.technical || !r.voidNodes || r.voidNodes.length < 3) continue
+    const ring = r.voidNodes.map((n) => doc.nodes[n]).filter((n) => !!n && n.levelId === levelId)
+    if (ring.length !== r.voidNodes.length) continue
+    const parts = free.filter((d) => !heirs.has(d) && onOrIn(d.labelPoint, ring) && d.nodes!.every((n) => !!doc.nodes[n] && onOrIn(doc.nodes[n], ring)))
+    parts.forEach((d, i) => {
+      if (i === 0 && !matched.has(id)) {
+        heirs.set(d, r)
+        return
+      }
+      const copy: Room = { ...structuredClone(r), id: newId('r'), anchor: { x: d.labelPoint.x, y: d.labelPoint.y } }
+      doc.rooms[copy.id] = copy
+      heirs.set(d, copy)
+    })
+  }
+  return heirs
+}
+
+/**
  * Keeps Room records in sync with the detected faces (anchor-based identity):
  *  - a record whose anchor lies in a face keeps describing that face; its anchor moves to the label point;
  *  - faces without a record get a default record (faces under 0.1 m² are treated as voids);
@@ -1047,8 +1084,9 @@ export function syncRooms(doc: Doc): void {
   for (const levelId of levelIds) {
     if (!doc.levels[levelId]) continue
     const derived = detectRooms(doc, levelId, computeWallGeoms(doc, levelId))
+    const heirs = splitVoidHeirs(doc, levelId, derived)
     for (const d of derived) {
-      const rec = isAutoRoomId(d.roomId) ? undefined : doc.rooms[d.roomId]
+      const rec = isAutoRoomId(d.roomId) ? heirs.get(d) : doc.rooms[d.roomId]
       if (rec) {
         if (!rec.anchor || Math.hypot(rec.anchor.x - d.labelPoint.x, rec.anchor.y - d.labelPoint.y) > 0.01) {
           rec.anchor = { x: d.labelPoint.x, y: d.labelPoint.y }

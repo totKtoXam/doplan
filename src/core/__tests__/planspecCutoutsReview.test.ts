@@ -4,7 +4,9 @@ import { describe, expect, it } from 'vitest'
 import { summarizeLevelRooms } from '../area'
 import { derivePlan } from '../derive'
 import { parseDoc, serializeDoc } from '../io'
-import { addRectRoom, moveNode, moveNodes, normalize, removeEntities, syncRooms } from '../ops'
+import { addRectRoom, addWall, moveNode, moveNodes, normalize, removeEntities, syncRooms } from '../ops'
+import { newId } from '../ids'
+import { remapVoidNodes } from '../rooms'
 import { createEmptyDoc } from '../defaults'
 import { compilePlanSpecDetailed, docToPlanSpec, parsePlanSpec, validatePlanSpecDetailed, type PlanSpec } from '../planspec'
 import { DOC_VERSION, DOC_VERSION_V4 } from '../types'
@@ -577,5 +579,138 @@ describe('planspec cutouts: dp doc spec round trip, review round 4', () => {
     const { back, v } = roundTrip(spec)
     expect(back.defaults?.exteriorThickness).toBe(510)
     expect(v.issues.filter((i) => i.code === 'WALL_THICKNESS_ODD')).toEqual([])
+  })
+})
+
+describe('editor: technical voids copied, pasted and split, night review', () => {
+  type D = ReturnType<typeof createEmptyDoc>
+  /** a 5000×4000 room (200 mm walls) with a `s`×`s` shaft island (100 mm walls) at 500,500 */
+  const roomWithShaft = (s = 1500) => {
+    const doc = createEmptyDoc()
+    const lv = doc.levelOrder[0]
+    addRectRoom(doc, lv, 0, 0, 5000, 4000, { thickness: 200 })
+    addRectRoom(doc, lv, 500, 500, s, s, { thickness: 100 })
+    normalize(doc)
+    syncRooms(doc)
+    const plan = derivePlan(doc, lv)
+    const shaft = plan.rooms.reduce((a, b) => (a.area < b.area ? a : b))
+    doc.rooms[shaft.roomId].technical = true
+    doc.rooms[shaft.roomId].name = 'Шахта'
+    normalize(doc)
+    syncRooms(doc)
+    expect(doc.rooms[shaft.roomId].voidNodes?.length).toBe(4)
+    return { doc, lv, shaftId: shaft.roomId }
+  }
+  /** what the level copy / paste paths do: nodes, walls and room records under new ids, shifted */
+  const copyInto = (src: D, from: string, d: D, to: string, dx: number, dy: number, remap = true) => {
+    const nodeMap = new Map<string, string>()
+    for (const n of Object.values(src.nodes)) {
+      if (n.levelId !== from) continue
+      const id = newId('n')
+      nodeMap.set(n.id, id)
+      d.nodes[id] = { ...n, id, levelId: to, x: n.x + dx, y: n.y + dy }
+    }
+    for (const w of Object.values(src.walls)) {
+      if (w.levelId !== from) continue
+      const id = newId('w')
+      d.walls[id] = structuredClone({ ...w, id, levelId: to, a: nodeMap.get(w.a)!, b: nodeMap.get(w.b)! })
+    }
+    for (const r of Object.values(src.rooms)) {
+      if (r.levelId !== from) continue
+      const id = newId('r')
+      d.rooms[id] = structuredClone({ ...r, id, levelId: to, anchor: { x: r.anchor.x + dx, y: r.anchor.y + dy } })
+      if (remap) remapVoidNodes(d.rooms[id], nodeMap)
+    }
+  }
+  const sum = (doc: D, lv: string) => summarizeLevelRooms(doc, derivePlan(doc, lv).rooms)
+  const commit = (doc: D) => {
+    normalize(doc)
+    syncRooms(doc)
+  }
+
+  it('#1/#9 a level copy keeps the shaft technical on both levels (with or without remapped nodes)', () => {
+    for (const remap of [true, false]) {
+      const { doc, lv } = roomWithShaft()
+      const before = sum(doc, lv)
+      const lv2 = 'lv_copy'
+      doc.levels[lv2] = { ...doc.levels[lv], id: lv2, name: 'Этаж 2' }
+      doc.levelOrder.push(lv2)
+      copyInto(doc, lv, doc, lv2, 0, 0, remap)
+      commit(doc)
+      for (const l of [lv, lv2]) {
+        const s = sum(doc, l)
+        expect(s.technicalCount, `${remap} ${l}`).toBe(1)
+        expect(s.count, `${remap} ${l}`).toBe(1)
+        expect(s.total, `${remap} ${l}`).toBeCloseTo(before.total, 4)
+      }
+    }
+  })
+
+  it('#9/#10 a paste on the same level keeps both shafts technical and the original record', () => {
+    for (const remap of [true, false]) {
+      for (let k = 0; k < 6; k++) {
+        const { doc, lv, shaftId } = roomWithShaft()
+        const before = sum(doc, lv)
+        copyInto(structuredClone(doc), lv, doc, lv, 8000, 0, remap)
+        commit(doc)
+        const s = sum(doc, lv)
+        expect(s.technicalCount, `${remap}`).toBe(2)
+        expect(s.count, `${remap}`).toBe(2)
+        expect(s.total, `${remap}`).toBeCloseTo(2 * before.total, 4)
+        expect(doc.rooms[shaftId]?.technical, `${remap}`).toBe(true)
+        expect(doc.rooms[shaftId].anchor.x).toBeLessThan(5000)
+      }
+    }
+  })
+
+  it('#9 cut and paste (onto the same or another level) keeps the shaft technical', () => {
+    for (const other of [false, true]) {
+      const { doc, lv } = roomWithShaft()
+      const before = sum(doc, lv)
+      const clip = structuredClone(doc)
+      removeEntities(doc, Object.keys(doc.walls).map((id) => ({ kind: 'wall' as const, id })))
+      commit(doc)
+      let dst = lv
+      if (other) {
+        dst = 'lv_other'
+        doc.levels[dst] = { ...doc.levels[lv], id: dst, name: 'Этаж 2' }
+        doc.levelOrder.push(dst)
+      }
+      copyInto(clip, lv, doc, dst, 300, 300)
+      commit(doc)
+      const s = sum(doc, dst)
+      expect(s.technicalCount, `${other}`).toBe(1)
+      expect(s.count, `${other}`).toBe(1)
+      expect(s.total, `${other}`).toBeCloseTo(before.total, 4)
+    }
+  })
+
+  it('#11 a wall splitting the shaft leaves both halves technical', () => {
+    const { doc, lv } = roomWithShaft(1600)
+    const before = sum(doc, lv)
+    expect(before.total).toBeCloseTo(15.35, 2)
+    addWall(doc, lv, { x: 1300, y: 500 }, { x: 1300, y: 2100 }, { thickness: 100 })
+    commit(doc)
+    const s = sum(doc, lv)
+    expect(s.technicalCount).toBe(2)
+    expect(s.count).toBe(1)
+    expect(s.total).toBeCloseTo(before.total, 4)
+    const voids = Object.values(doc.rooms).filter((r) => r.technical)
+    expect(voids.map((r) => r.name)).toEqual(['Шахта', 'Шахта'])
+    // and again, after the split: a drag of the left half keeps it technical
+    commit(doc)
+    expect(sum(doc, lv).technicalCount).toBe(2)
+  })
+
+  it('#11 a split that is undone by removing the wall leaves one void', () => {
+    const { doc, lv } = roomWithShaft(1600)
+    const ids = addWall(doc, lv, { x: 1300, y: 500 }, { x: 1300, y: 2100 }, { thickness: 100 })
+    commit(doc)
+    removeEntities(doc, ids.map((id) => ({ kind: 'wall' as const, id })))
+    commit(doc)
+    const s = sum(doc, lv)
+    expect(s.technicalCount).toBe(1)
+    expect(s.count).toBe(1)
+    expect(s.total).toBeCloseTo(15.35, 2)
   })
 })

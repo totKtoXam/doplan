@@ -333,6 +333,8 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
   const byNodes = new Set<Room>()
   for (const r of records) {
     if (!r.technical || !r.voidNodes?.length) continue
+    // node ids of another level or of walls gone long ago (an old copy): the anchor decides
+    if (!r.voidNodes.some((id) => doc.nodes[id]?.levelId === levelId)) continue
     byNodes.add(r)
     const want = new Set(r.voidNodes)
     let best: { face: Face; area: number; score: number } | null = null
@@ -346,7 +348,10 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
     }
     if (!best || best.score < 0.5) continue
     const cur = claimed.get(best.face)
-    if (!cur || best.score > cur.score + 1e-9 || (Math.abs(best.score - cur.score) <= 1e-9 && r.id < cur.r.id))
+    // two records on one face (a copy pasted over its original): the one whose anchor is in the face
+    const inside = (x: Room) => !!x.anchor && pointInPolygon(x.anchor, best!.face.polygon, best!.face.holes)
+    const tie = !!cur && Math.abs(best.score - cur.score) <= 1e-9
+    if (!cur || best.score > cur.score + 1e-9 || (tie && (inside(r) !== inside(cur.r) ? inside(r) : r.id < cur.r.id)))
       claimed.set(best.face, { r, score: best.score })
   }
   // the closest record of each kind (real room / technical void) per face
@@ -357,8 +362,11 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
     const dCur = dist(cur.anchor, lp)
     return dNew < dCur - 1e-9 || (Math.abs(dNew - dCur) <= 1e-9 && r.id < cur.id)
   }
+  // a void that won no face by its nodes (a copy over its original, a void cut in two) is matched by
+  // its anchor like any record; the faces won by nodes are taken
+  const byNodesWon = new Set([...claimed.values()].map((c) => c.r))
   for (const r of records) {
-    if (byNodes.has(r)) continue
+    if (byNodesWon.has(r)) continue
     if (!r.anchor || !Number.isFinite(r.anchor.x) || !Number.isFinite(r.anchor.y)) continue
     let hit: { face: Face; area: number; labelPoint: Vec2 } | null = null
     for (const p of prepared) {
@@ -443,4 +451,16 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
 /** true for the temporary ids given to faces that have no Room record */
 export function isAutoRoomId(id: Id): boolean {
   return id.startsWith('auto_')
+}
+
+/**
+ * after nodes were copied under new ids (level copy, paste): point a technical void at the copied
+ * nodes, so the copy stays a void and does not take the original's face. Ids that were not copied
+ * are dropped; with none left the record forgets them and is matched by its anchor
+ */
+export function remapVoidNodes(room: Room, nodeMap: ReadonlyMap<Id, Id>): void {
+  if (!room.voidNodes) return
+  const ids = room.voidNodes.map((id) => nodeMap.get(id)).filter((id): id is Id => !!id)
+  if (ids.length) room.voidNodes = ids
+  else delete room.voidNodes
 }

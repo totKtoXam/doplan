@@ -300,11 +300,17 @@ describe('the token for git', () => {
     expect(github.tokenHeaderFits([])).toBe(false)
   })
 
-  it('a remote with its own credentials: no header (gh helper only), and nothing to refresh', async () => {
-    const cred = await github.gitCredentials(['https://user:ghp_x@github.com/other/repo.git'])
+  it('a remote with credentials or a user name of its own: nothing from gh (no header, no helper)', async () => {
+    expect(await github.gitCredentials(['https://user:ghp_x@github.com/other/repo.git'])).toEqual({ config: [], env: {} })
+    expect(await github.gitCredentials(['https://work-acct@github.com/org/repo.git'])).toEqual({ config: [], env: {} })
+    expect(await github.gitCredentials([])).toEqual({ config: [], env: {} })
+  })
+
+  it('gh slow, plain github.com address: its helper alone answers git', async () => {
+    gh.answer = 'slow'
+    const cred = await github.gitCredentials(['https://github.com/anna/flat.git'])
     expect(cred.env).toEqual({})
     expect(cred.config[1]).toBe('credential.https://github.com.helper=')
-    expect(cred.refresh).toBeUndefined()
   })
 
   it('a refused header: refresh drops the token, reads gh again once and hands the new one', async () => {

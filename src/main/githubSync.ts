@@ -46,7 +46,7 @@ import {
   gitRelated,
   gitRemoteHeads,
   gitRemoteUrl,
-  gitRemoteNetUrls,
+  gitRemoteAddresses,
   gitRemoteUrls,
   gitRemoveRemote,
   gitRepoSize,
@@ -94,8 +94,8 @@ async function guard<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /** gh's credentials for the remote of `root` (the token header only when every address git may use is plain https://github.com) */
-async function net(interactive: boolean, root?: string): Promise<GitNet> {
-  const c = await gitCredentials(root ? await gitRemoteNetUrls(root, REMOTE).catch(() => []) : [])
+async function net(interactive: boolean, root?: string, addresses?: string[]): Promise<GitNet> {
+  const c = await gitCredentials(addresses ?? (root ? ((await gitRemoteAddresses(root, REMOTE).catch(() => null))?.effective ?? []) : []))
   return { config: c.config, env: c.env, refresh: c.refresh, interactive }
 }
 
@@ -192,10 +192,12 @@ export async function syncStatus(fetch = false): Promise<GithubSyncStatus> {
   const { root } = r
   // a look nobody asked for goes to github.com only, never to whatever host a received folder names
   // (with several addresses git would fetch from the first and push to all: no look at all then)
-  const urls = fetch ? await gitRemoteUrls(root, REMOTE) : []
+  // one git call: the addresses for this check and for the credentials
+  const addr = fetch ? await gitRemoteAddresses(root, REMOTE) : { urls: [], effective: [] }
+  const urls = addr.urls
   if (urls.length === 1 && parseGithubUrl(stripUrlCredentials(urls[0]))) {
     try {
-      await gitFetch(root, await net(false, root), REMOTE)
+      await gitFetch(root, await net(false, root, addr.effective), REMOTE)
       noteCheck(root)
     } catch (err) {
       noteCheck(root, err)

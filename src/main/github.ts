@@ -406,11 +406,13 @@ export function ghHelperArgs(exe: string): string[] {
 }
 
 /**
- * Credentials for git network commands to `remotes`. With gh signed in: gh's token as a header when
- * the addresses allow it (tokenHeaderFits; no gh started per command), and gh's helper for github.com
- * (the helper list reset first, so no other helper is asked or stores anything) for an address with
- * no header, or when gh did not answer in time. A refused header is read again once (`refresh`).
- * Not signed in: none, the user's own git credential manager answers, as with plain git.
+ * Credentials for git network commands to `remotes` (every address git may use: git.gitRemoteAddresses).
+ * gh signed in and every address plain https://github.com (tokenHeaderFits): gh's token as a header
+ * (no gh started per command) and gh's helper for github.com (the helper list reset first, so no other
+ * helper is asked or stores anything), which answers alone while gh is slow; a refused header is read
+ * again once (`refresh`). Any other address (credentials or a user name of its own, an insteadOf rule
+ * adding them, another host) or not signed in: nothing at all, the user's own credentials and
+ * credential manager answer, as with plain git.
  */
 export async function gitCredentials(remotes: readonly string[] = []): Promise<GitCredentials> {
   const exe = findGh()
@@ -419,9 +421,10 @@ export async function gitCredentials(remotes: readonly string[] = []): Promise<G
 }
 
 function credentialsOf(exe: string, s: TokenState, header: boolean): GitCredentials {
-  if (s.kind === 'none') return { config: [], env: {} }
+  // the user's own account for that address (e.g. user@github.com in GCM): gh must not replace it
+  if (s.kind === 'none' || !header) return { config: [], env: {} }
   const config = ghHelperArgs(exe)
-  if (s.kind !== 'token' || !header) return { config, env: {} }
+  if (s.kind !== 'token') return { config, env: {} }
   return {
     config,
     env: tokenEnv(s.token),

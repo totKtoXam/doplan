@@ -985,39 +985,61 @@ export async function gitRemoteUrls(root: string, remote = 'origin'): Promise<st
   return r.code === 0 ? trimOut(r).split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : []
 }
 
-/** url.<base>.insteadOf / pushInsteadOf rules git applies to addresses (the repository's own too, with `root`) */
-async function urlRewrites(root: string | null): Promise<{ base: string; prefix: string }[]> {
-  const args = ['config', '--get-regexp', '^url\\..*\\.(push)?insteadof$']
-  // the rules network commands see (netTestConfig: tests stand a local folder in for GitHub)
+const URL_RULE = 'url\\..*\\.(push)?insteadof'
+
+/** `git config --get-regexp` (every scope) as key/value pairs, with the flags network commands see */
+async function configMatching(root: string | null, pattern: string): Promise<{ key: string; value: string }[]> {
+  // netTestConfig: tests stand a local folder in for GitHub through an insteadOf rule
   const opts = { allowFail: true, config: [...netTestConfig] }
+  const args = ['config', '--get-regexp', pattern]
   const r = root ? await run(root, args, opts) : await runOutside(args, opts)
   if (r.code !== 0) return []
   return trimOut(r)
     .split(/\r?\n/)
     .flatMap((line) => {
-      const m = /^url\.(.+)\.(?:push)?insteadof\s+(.+)$/i.exec(line.trim())
-      return m ? [{ base: m[1], prefix: m[2] }] : []
+      const m = /^(\S+)\s+(.*)$/.exec(line.trim())
+      return m ? [{ key: m[1], value: m[2].trim() }] : []
     })
 }
 
 /**
- * Every address git may use for `urls`: as written and as any insteadOf / pushInsteadOf rule rewrites
- * them (a rule of the user's own may carry credentials, e.g. a token in the global config). Every
- * matching rule counts, not only the one git would pick: a superset, for deciding what to send along.
+ * `urls` as written and as every insteadOf / pushInsteadOf rule among `entries` rewrites them (a rule
+ * of the user's own may carry credentials, e.g. a token in the global config). Every matching rule
+ * counts, not only the one git would pick: a superset, for deciding what to send along.
  */
-export async function gitEffectiveUrls(root: string | null, urls: readonly string[]): Promise<string[]> {
-  const rules = await urlRewrites(root)
+function rewritten(urls: readonly string[], entries: { key: string; value: string }[]): string[] {
+  const rules = entries.flatMap(({ key, value }) => {
+    const m = /^url\.(.+)\.(?:push)?insteadof$/i.exec(key)
+    return m && value ? [{ base: m[1], prefix: value }] : []
+  })
   const out = new Set(urls)
-  for (const u of urls) for (const r of rules) if (r.prefix && u.startsWith(r.prefix)) out.add(r.base + u.slice(r.prefix.length))
+  for (const u of urls) for (const r of rules) if (u.startsWith(r.prefix)) out.add(r.base + u.slice(r.prefix.length))
   return [...out]
 }
 
+/** every address git may use for `urls` outside any repository (gh-pages pushes): see rewritten() */
+export async function gitEffectiveUrls(root: string | null, urls: readonly string[]): Promise<string[]> {
+  return rewritten(urls, await configMatching(root, `^${URL_RULE}$`))
+}
+
+export interface RemoteAddresses {
+  /** remote.<name>.url as `config --get-all` lists them (the order git uses) */
+  urls: string[]
+  /** every address git may talk to for the remote: url and pushurl entries, rewritten by the rules */
+  effective: string[]
+}
+
 /**
- * Every address of the remote git may talk to, rewritten (gitEffectiveUrls). A folder whose own config
- * has a pushurl or url.* rule never gets here (unsafeRepoConfig): the global rules are what is left.
+ * The remote's addresses from every config scope (a pushurl in the global config too) and the
+ * insteadOf rules, in one git call. A folder whose own config has a pushurl or url.* rule never gets
+ * here (unsafeRepoConfig).
  */
-export async function gitRemoteNetUrls(root: string, remote = 'origin'): Promise<string[]> {
-  return gitEffectiveUrls(root, await gitRemoteUrls(root, remote))
+export async function gitRemoteAddresses(root: string, remote = 'origin'): Promise<RemoteAddresses> {
+  const name = remote.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const entries = await configMatching(root, `^(remote\\.${name}\\.(url|pushurl)|${URL_RULE})$`)
+  const urls = entries.filter((e) => e.key.toLowerCase() === `remote.${remote.toLowerCase()}.url`).map((e) => e.value)
+  const push = entries.filter((e) => e.key.toLowerCase() === `remote.${remote.toLowerCase()}.pushurl`).map((e) => e.value)
+  return { urls, effective: rewritten([...urls, ...push], entries) }
 }
 
 /** the remote's address git fetches from (the first one; `config --get` would give the last) */

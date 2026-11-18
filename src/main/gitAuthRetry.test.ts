@@ -5,7 +5,7 @@
  * A local HTTP server stands in for GitHub and accepts only the newer header.
  */
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -19,8 +19,17 @@ vi.mock('electron', () => ({
   shell: { openExternal: vi.fn() },
 }))
 
-const { findGit, gitEffectiveUrls, gitRemoteHeads, gitRemoteNetUrls, netTestConfig } = await import('./git')
-const { tokenHeaderFits } = await import('./github')
+// the developer's own global git config stays out (gitEnv keeps HOME/USERPROFILE): a home of the test's
+const home = join(base, 'home')
+mkdirSync(home, { recursive: true })
+const savedEnv = { HOME: process.env['HOME'], USERPROFILE: process.env['USERPROFILE'], XDG_CONFIG_HOME: process.env['XDG_CONFIG_HOME'] }
+process.env['HOME'] = home
+process.env['USERPROFILE'] = home
+delete process.env['XDG_CONFIG_HOME']
+const globalConfig = (text: string) => (text ? writeFileSync(join(home, '.gitconfig'), text) : rmSync(join(home, '.gitconfig'), { force: true }))
+
+const { findGit, gitEffectiveUrls, gitRemoteAddresses, gitRemoteHeads, netTestConfig } = await import('./git')
+const { gitCredentials, tokenHeaderFits } = await import('./github')
 const { pushSite } = await import('./pagesGit')
 
 const OLD = 'Basic ' + Buffer.from('x-access-token:old').toString('base64')
@@ -56,6 +65,10 @@ beforeAll(async () => {
 
 afterAll(() => {
   server.close()
+  for (const [k, v] of Object.entries(savedEnv)) {
+    if (v === undefined) delete process.env[k]
+    else process.env[k] = v
+  }
 })
 
 beforeEach(() => {
@@ -66,42 +79,51 @@ beforeEach(() => {
 const creds = (h: string) => ['-c', 'credential.helper=', '-c', `http.extraHeader=Authorization: ${h}`]
 
 // real git processes: slow on a loaded computer
-describe('addresses as git will use them (url.*.insteadOf / pushInsteadOf)', () => {
-  const PAT = 'https://x-access-token:PAT@github.com/'
+describe('addresses as git will use them (the global url.*.insteadOf / pushInsteadOf, pushurl)', { timeout: 60_000 }, () => {
   const plain = 'https://github.com/anna/flat.git'
-  const without = (flag: string) => {
-    const i = netTestConfig.indexOf(flag)
-    if (i > 0) netTestConfig.splice(i - 1, 2)
-  }
-
-  it('a global rule that adds the user\'s own token: no gh header', async () => {
-    const rule = `url.${PAT}.insteadOf=https://github.com/`
-    netTestConfig.push('-c', rule)
-    try {
-      const urls = await gitEffectiveUrls(null, [plain])
-      expect(urls).toContain('https://x-access-token:PAT@github.com/anna/flat.git')
-      expect(tokenHeaderFits(urls)).toBe(false)
-    } finally {
-      without(rule)
-    }
-    expect(tokenHeaderFits(await gitEffectiveUrls(null, [plain]))).toBe(true)
-  })
-
-  it('a global push rule counts for the project remote too', async () => {
-    const root = join(base, 'rules')
+  let root = ''
+  beforeAll(() => {
+    root = join(base, 'rules')
     mkdirSync(root, { recursive: true })
     execFileSync('git', ['init', '-q', root], { windowsHide: true })
     execFileSync('git', ['-C', root, 'remote', 'add', 'origin', plain], { windowsHide: true })
-    expect(tokenHeaderFits(await gitRemoteNetUrls(root))).toBe(true)
-    // a global push rule (a folder's own url.* rules: doplan does not run git there at all)
-    const rule = `url.${PAT}.pushInsteadOf=https://github.com/`
-    netTestConfig.push('-c', rule)
-    try {
-      expect(tokenHeaderFits(await gitRemoteNetUrls(root))).toBe(false)
-    } finally {
-      without(rule)
-    }
-    expect(await gitRemoteNetUrls(root)).toEqual([plain])
+  })
+  beforeEach(() => globalConfig(''))
+  afterAll(() => globalConfig(''))
+
+  it('no rules: the address as written, the header fits', async () => {
+    expect(await gitEffectiveUrls(null, [plain])).toEqual([plain])
+    expect(await gitRemoteAddresses(root)).toEqual({ urls: [plain], effective: [plain] })
+  })
+
+  it("a global rule that adds the user's own token: no gh header (Pages and the project)", async () => {
+    globalConfig('[url "https://x-access-token:PAT@github.com/"]\n\tinsteadOf = https://github.com/\n')
+    const urls = await gitEffectiveUrls(null, [plain])
+    expect(urls).toContain('https://x-access-token:PAT@github.com/anna/flat.git')
+    expect(tokenHeaderFits(urls)).toBe(false)
+    expect(tokenHeaderFits((await gitRemoteAddresses(root)).effective)).toBe(false)
+  })
+
+  it('a global push rule with a user name (an account in the credential manager): no header', async () => {
+    globalConfig('[url "https://work-acct@github.com/"]\n\tpushInsteadOf = https://github.com/\n')
+    const a = await gitRemoteAddresses(root)
+    expect(a.urls).toEqual([plain])
+    expect(a.effective).toContain('https://work-acct@github.com/anna/flat.git')
+    expect(tokenHeaderFits(a.effective)).toBe(false)
+  })
+
+  it('a pushurl with credentials in the global config: no header', async () => {
+    globalConfig('[remote "origin"]\n\tpushurl = https://me:tok@github.com/anna/flat.git\n')
+    const a = await gitRemoteAddresses(root)
+    expect(a.urls).toEqual([plain])
+    expect(a.effective).toEqual([plain, 'https://me:tok@github.com/anna/flat.git'])
+    expect(tokenHeaderFits(a.effective)).toBe(false)
+  })
+
+  it('no header: no helper either — the user’s own credentials answer, gh is not asked', async () => {
+    // whatever gh would say: no flags, no environment for a user-named address
+    expect(await gitCredentials(['https://work-acct@github.com/anna/flat.git'])).toEqual({ config: [], env: {} })
+    expect(await gitCredentials(['https://gitlab.com/anna/flat.git'])).toEqual({ config: [], env: {} })
   })
 })
 

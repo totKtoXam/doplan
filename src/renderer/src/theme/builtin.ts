@@ -2,7 +2,8 @@
  * Built-in themes. They are written the way a VS Code colour theme is (`type` + `colors` with the
  * workbench keys) and go through the same importer as a theme file the user installs, so a theme
  * copied out of a VS Code extension looks the same here. `doplan.*` keys set doplan's own tokens
- * directly; `doplan.plan.*` keys set colours of the 2D plan.
+ * directly; `doplan.plan.*` keys set colours of the 2D plan. `doplan.number` is the theme's colour of
+ * numbers in code (`constant.numeric` of its token colours): the plan draws dimensions in it.
  *
  * The VS Code palettes come from the themes' published colour files (all MIT licensed):
  * VS Code Default (Microsoft), Monokai, Solarized (Ethan Schoonover), Dracula, Nord (Arctic Ice
@@ -21,6 +22,7 @@ export const BUILTIN_THEMES: ThemeSource[] = [
     name: 'Графит',
     type: 'dark',
     colors: {
+      'doplan.number': '#9cc3b5',
       'doplan.bg': '#141311',
       'doplan.panel': '#1c1b18',
       'doplan.panel-2': '#24221f',
@@ -47,6 +49,7 @@ export const BUILTIN_THEMES: ThemeSource[] = [
     name: 'Калька',
     type: 'light',
     colors: {
+      'doplan.number': '#2e6b7a',
       'doplan.bg': '#e6e2da',
       'doplan.panel': '#f5f3ee',
       'doplan.panel-2': '#ece9e2',
@@ -124,6 +127,7 @@ export const BUILTIN_THEMES: ThemeSource[] = [
     type: 'dark',
     author: 'Microsoft',
     colors: {
+      'doplan.number': '#b5cea8',
       'activityBar.background': '#181818',
       'editor.background': '#1f1f1f',
       'sideBar.background': '#181818',
@@ -146,6 +150,7 @@ export const BUILTIN_THEMES: ThemeSource[] = [
     type: 'light',
     author: 'Microsoft',
     colors: {
+      'doplan.number': '#098658',
       'activityBar.background': '#f8f8f8',
       'editor.background': '#ffffff',
       'sideBar.background': '#f8f8f8',
@@ -167,6 +172,7 @@ export const BUILTIN_THEMES: ThemeSource[] = [
     name: 'Monokai',
     type: 'dark',
     colors: {
+      'doplan.number': '#ae81ff',
       'activityBar.background': '#272822',
       'editor.background': '#272822',
       'sideBar.background': '#1e1f1c',
@@ -188,6 +194,7 @@ export const BUILTIN_THEMES: ThemeSource[] = [
     type: 'dark',
     author: 'Ethan Schoonover',
     colors: {
+      'doplan.number': '#d33682',
       'activityBar.background': '#003847',
       'editor.background': '#002b36',
       'sideBar.background': '#00212b',
@@ -208,6 +215,7 @@ export const BUILTIN_THEMES: ThemeSource[] = [
     type: 'light',
     author: 'Ethan Schoonover',
     colors: {
+      'doplan.number': '#d33682',
       'activityBar.background': '#ddd6c1',
       'editor.background': '#fdf6e3',
       'sideBar.background': '#eee8d5',
@@ -227,6 +235,7 @@ export const BUILTIN_THEMES: ThemeSource[] = [
     type: 'dark',
     author: 'Dracula Theme',
     colors: {
+      'doplan.number': '#bd93f9',
       'activityBar.background': '#343746',
       'editor.background': '#282a36',
       'sideBar.background': '#21222c',
@@ -248,6 +257,7 @@ export const BUILTIN_THEMES: ThemeSource[] = [
     type: 'dark',
     author: 'Arctic Ice Studio',
     colors: {
+      'doplan.number': '#b48ead',
       'activityBar.background': '#2e3440',
       'editor.background': '#2e3440',
       'sideBar.background': '#2e3440',
@@ -269,6 +279,7 @@ export const BUILTIN_THEMES: ThemeSource[] = [
     type: 'dark',
     author: 'binaryify',
     colors: {
+      'doplan.number': '#d19a66',
       'activityBar.background': '#282c34',
       'editor.background': '#282c34',
       'sideBar.background': '#21252b',
@@ -290,6 +301,7 @@ export const BUILTIN_THEMES: ThemeSource[] = [
     type: 'dark',
     author: 'GitHub',
     colors: {
+      'doplan.number': '#79c0ff',
       'activityBar.background': '#0d1117',
       'editor.background': '#0d1117',
       'sideBar.background': '#010409',
@@ -312,6 +324,7 @@ export const BUILTIN_THEMES: ThemeSource[] = [
     type: 'light',
     author: 'GitHub',
     colors: {
+      'doplan.number': '#0550ae',
       'activityBar.background': '#ffffff',
       'editor.background': '#ffffff',
       'sideBar.background': '#f6f8fa',
@@ -334,6 +347,7 @@ export const BUILTIN_THEMES: ThemeSource[] = [
     type: 'dark',
     author: 'jdinhify',
     colors: {
+      'doplan.number': '#d3869b',
       'activityBar.background': '#282828',
       'editor.background': '#282828',
       'sideBar.background': '#282828',
@@ -355,6 +369,7 @@ export const BUILTIN_THEMES: ThemeSource[] = [
     type: 'dark',
     author: 'enkia',
     colors: {
+      'doplan.number': '#ff9e64',
       'activityBar.background': '#16161e',
       'editor.background': '#1a1b26',
       'sideBar.background': '#16161e',
@@ -376,6 +391,7 @@ export const BUILTIN_THEMES: ThemeSource[] = [
     type: 'dark',
     author: 'Catppuccin',
     colors: {
+      'doplan.number': '#fab387',
       'activityBar.background': '#11111b',
       'editor.background': '#1e1e2e',
       'sideBar.background': '#181825',
@@ -398,6 +414,7 @@ export const BUILTIN_THEMES: ThemeSource[] = [
     type: 'light',
     author: 'Catppuccin',
     colors: {
+      'doplan.number': '#fe640b',
       'activityBar.background': '#dce0e8',
       'editor.background': '#eff1f5',
       'sideBar.background': '#e6e9ef',

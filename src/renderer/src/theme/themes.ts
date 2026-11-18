@@ -6,6 +6,9 @@
  *
  * Overlays: a theme with `"extends": "<id or name of another theme>"` starts from that theme and
  * changes only the colours it lists.
+ *
+ * Dimensions on the plan take the theme's colour of numbers: "doplan.number", which installing a VS
+ * Code theme file fills from its syntax colours (`tokenColors`, scope `constant.numeric`).
  */
 import { DARK, LIGHT, type Palette } from '@/editor2d/theme'
 import { contrast, flatten, mix, parseColor, readableOn, toNumber, withAlpha } from './color'
@@ -173,6 +176,9 @@ export function themeFromFile(text: string, fileName = 'theme.json'): ThemeSourc
         : 'В файле нет цветов интерфейса (colors)',
     )
   }
+  // the colour of numbers in code → the colour of dimensions on the plan
+  const num = numberColor(o.tokenColors)
+  if (num && !colors['doplan.number']) colors['doplan.number'] = num
   const base = fileName.replace(/\.(json|jsonc)$/i, '').replace(/[-_]color-theme$/i, '')
   const name = typeof o.name === 'string' && o.name.trim() ? o.name.trim() : base
   const t = typeof o.type === 'string' ? o.type.toLowerCase() : ''
@@ -190,6 +196,30 @@ export function themeFromFile(text: string, fileName = 'theme.json'): ThemeSourc
     colors,
     ...(typeof o.author === 'string' ? { author: o.author } : {}),
   }
+}
+
+/**
+ * The colour a VS Code theme gives numbers: the rule for `constant.numeric`, else for a narrower
+ * `constant.numeric.*` scope, else for `constant`; at the same rank a later rule wins, as in VS Code.
+ */
+function numberColor(rules: unknown): string | undefined {
+  if (!Array.isArray(rules)) return undefined
+  let best: string | undefined
+  let rank = 3
+  for (const r of rules as { scope?: unknown; settings?: { foreground?: unknown } }[]) {
+    const fg = r?.settings?.foreground
+    if (typeof fg !== 'string' || !parseColor(fg)) continue
+    const scopes = Array.isArray(r.scope) ? r.scope : typeof r.scope === 'string' ? r.scope.split(',') : []
+    for (const raw of scopes) {
+      const s = String(raw).trim()
+      const k = s === 'constant.numeric' ? 0 : s.startsWith('constant.numeric.') ? 1 : s === 'constant' ? 2 : 3
+      if (k < 3 && k <= rank) {
+        rank = k
+        best = fg
+      }
+    }
+  }
+  return best
 }
 
 /** a theme → the text of a theme file (installable here and readable by VS Code) */
@@ -322,8 +352,21 @@ function planPalette(kind: ThemeKind, ui: UiTokens, colors: Record<string, strin
     p.gridMajor = N(text)
     p.text = N(text)
     p.textMuted = N(mutedPlan)
-    p.dim = N(mix(text, bg, dark ? 0.1 : 0.08))
-    p.dimAuto = N(mix(text, bg, 0.45))
+    // dimensions: in the theme's colour of numbers if it reads on the plan and on the rooms (pulled
+    // toward the text if it does not), else in the text colour
+    const room = dark ? mix(bg, text, 0.07) : mix(bg, '#ffffff', 0.75)
+    const reads = (c: string, min: number) => Math.min(contrast(c, bg), contrast(c, room)) >= min
+    const numRaw = colors['doplan.number']
+    const num = parseColor(numRaw) ? flatten(numRaw, bg) : undefined
+    const dimC = num && [0, 0.25, 0.5].map((t) => mix(num, text, t)).find((c) => reads(c, 3))
+    if (dimC) {
+      p.dim = N(dimC)
+      const faded = mix(dimC, bg, 0.3)
+      p.dimAuto = N(reads(faded, 2.5) ? faded : dimC)
+    } else {
+      p.dim = N(mix(text, bg, dark ? 0.1 : 0.08))
+      p.dimAuto = N(mix(text, bg, 0.45))
+    }
     p.accent = N(ui.accent)
     p.handleStroke = N(ui.accent)
     p.hover = N(mix(ui.accent, dark ? '#ffffff' : bg, 0.35))

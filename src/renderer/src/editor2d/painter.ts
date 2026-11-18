@@ -334,7 +334,17 @@ export class Painter {
     offsetMm: number,
     offsetPx: number,
     label: string,
-    o: { color: number; alpha?: number; size?: number; width?: number; extension?: boolean; bold?: boolean; italic?: boolean },
+    o: {
+      color: number
+      alpha?: number
+      /** of the line and ticks alone (the number keeps `alpha`) */
+      lineAlpha?: number
+      size?: number
+      width?: number
+      extension?: boolean
+      bold?: boolean
+      italic?: boolean
+    },
   ): void {
     const sa = this.S(a)
     const sb = this.S(b)
@@ -361,7 +371,7 @@ export class Painter {
     const ty = (uy - ux) * 4
     g.moveTo(A.x - tx, A.y - ty).lineTo(A.x + tx, A.y + ty)
     g.moveTo(B.x - tx, B.y - ty).lineTo(B.x + tx, B.y + ty)
-    g.stroke({ width, color: o.color, alpha })
+    g.stroke({ width, color: o.color, alpha: o.lineAlpha ?? alpha })
     let ang = Math.atan2(dy, dx)
     if (ang > Math.PI / 2 + 1e-6 || ang <= -Math.PI / 2 + 1e-6) ang += Math.PI
     // "above" the line in the text's own frame

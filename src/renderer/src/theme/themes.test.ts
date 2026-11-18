@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { BUILTIN_THEMES, DEFAULT_DARK_ID, DEFAULT_LIGHT_ID } from './builtin'
-import { contrast, parseColor } from './color'
+import { contrast, fromNumber, parseColor } from './color'
 import { gridKey } from '@/editor2d/layers/grid'
 import { parseJsonc, resolveTheme, themeFromFile, themeKind, themeToFile, UI_TOKENS, type ThemeSource } from './themes'
 
@@ -184,5 +184,42 @@ describe('colour themes', () => {
     // an escaped quote does not end the string
     expect(parseJsonc('{"s":"a \\", , }"}')).toEqual({ s: 'a ", , }' })
     expect(themeFromFile('{"name":"a, }","colors":{"editor.background":"#fff"}}').name).toBe('a, }')
+  })
+
+  it('dimensions take the colour of numbers of each theme and read on the plan', () => {
+    const hex = (n: number) => fromNumber(n).toLowerCase()
+    const seen = new Set<string>()
+    for (const t of BUILTIN_THEMES) {
+      const r = resolveTheme(t, BUILTIN_THEMES)
+      if (t.plan === 'classic') continue
+      const bg = hex(r.plan.bg)
+      expect(contrast(hex(r.plan.dim), bg), t.id).toBeGreaterThanOrEqual(3)
+      expect(contrast(hex(r.plan.dimAuto), bg), t.id).toBeGreaterThanOrEqual(2.5)
+      seen.add(hex(r.plan.dim))
+    }
+    // not one grey for all: the themes differ
+    expect(seen.size).toBeGreaterThanOrEqual(10)
+    const dracula = resolveTheme(BUILTIN_THEMES.find((t) => t.id === 'vscode-dracula')!, BUILTIN_THEMES)
+    expect(hex(dracula.plan.dim)).toBe('#bd93f9')
+  })
+
+  it('a VS Code theme file gives its colour of numbers to the dimensions', () => {
+    const file = (rules: unknown) =>
+      themeFromFile(JSON.stringify({ type: 'dark', colors: { 'editor.background': '#202020' }, tokenColors: rules }))
+    expect(file([{ scope: 'constant.numeric', settings: { foreground: '#ff8800' } }]).colors['doplan.number']).toBe('#ff8800')
+    // a comma list, an array, a narrower scope, and the exact scope wins over 'constant'
+    expect(file([{ scope: 'constant', settings: { foreground: '#111111' } }, { scope: 'string, constant.numeric', settings: { foreground: '#22aa22' } }]).colors['doplan.number']).toBe('#22aa22')
+    expect(file([{ scope: ['constant.numeric.float'], settings: { foreground: '#3344ff' } }]).colors['doplan.number']).toBe('#3344ff')
+    expect(file([{ scope: 'constant', settings: { foreground: '#aa00aa' } }]).colors['doplan.number']).toBe('#aa00aa')
+    expect(file([{ scope: 'string', settings: { foreground: '#aa00aa' } }]).colors['doplan.number']).toBeUndefined()
+    expect(file('nope').colors['doplan.number']).toBeUndefined()
+    // a number colour that does not read on the plan is pulled toward the text; without one: the text colour
+    const dim = (n?: string) => {
+      const t = themeFromFile(JSON.stringify({ type: 'dark', colors: { 'editor.background': '#202020', foreground: '#dddddd', ...(n ? { 'doplan.number': n } : {}) } }))
+      return fromNumber(resolveTheme(t).plan.dim).toLowerCase()
+    }
+    expect(dim('#ff8800')).toBe('#ff8800')
+    expect(contrast(dim('#303030'), '#202020')).toBeGreaterThanOrEqual(3)
+    expect(dim()).not.toBe('#ff8800')
   })
 })

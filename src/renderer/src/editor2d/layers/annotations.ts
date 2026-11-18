@@ -110,6 +110,8 @@ export class AnnotationsLayer {
         p.dimension(`ad:${d.roomId}:${d.key}`, d.a, d.b, d.n, 0, 15, dimLabel(formatLen(d.length, st.units), d.prov), {
           color: isHot ? pal.accent : s.color,
           alpha: isHot ? 1 : s.alpha,
+          // the lines cross whole rooms: quieter than the numbers, which carry the theme's colour
+          lineAlpha: isHot ? 1 : s.alpha * 0.55,
           size: isHot ? 12 : 10.5,
           width: isHot ? 2 : 1,
           bold: isHot,
@@ -186,7 +188,7 @@ export class AnnotationsLayer {
         // raised items: their height above the floor next to the footprint («↑ 150»)
         if (it.elevation > 0.5 && scale >= 0.02) {
           const c = cam.toScreen({ x: box.maxX, y: box.maxY })
-          p.stext(`ie:${id}`, `↑ ${formatLen(it.elevation, st.units)}`, c.x + 4, c.y + 7, { size: 9.5, color: pal.accent, anchorX: 0, bold: true })
+          p.stext(`ie:${id}`, `↑ ${formatLen(it.elevation, st.units)}`, c.x + 4, c.y + 7, { size: 9.5, color: pal.dim, anchorX: 0, bold: true })
         }
         if (bw < 64 || bh < 26 || scale < 0.045) continue
         const asset = ui.getAsset(it.assetId)
@@ -317,13 +319,13 @@ export class AnnotationsLayer {
     const rowH = 17
     const h = rows.length * rowH + 30
     const y0 = cam.height - h - 40
-    p.g.roundRect(x0, y0, 268, h, 6).fill({ color: pal.badgeBg, alpha: 0.82 })
-    p.stext('lg:title', t('Откуда размеры'), x0 + 10, y0 + 14, { size: 11, color: 0xffffff, bold: true, anchorX: 0, anchorY: 0.5 })
+    p.g.roundRect(x0, y0, 268, h, 6).fill({ color: pal.bg, alpha: 0.94 }).stroke({ width: 1, color: pal.textMuted, alpha: 0.35 })
+    p.stext('lg:title', t('Откуда размеры'), x0 + 10, y0 + 14, { size: 11, color: pal.text, bold: true, anchorX: 0, anchorY: 0.5 })
     rows.forEach((r, i) => {
       const y = y0 + 34 + i * rowH
       p.g.moveTo(x0 + 10, y + 2).lineTo(x0 + 58, y + 2).stroke({ width: 1, color: r.color })
       p.stext(`lg:s${i}`, r.sample, x0 + 34, y, { size: 10, color: r.color, italic: r.italic, anchorY: 1 })
-      p.stext(`lg:l${i}`, r.label, x0 + 68, y - 3, { size: 10.5, color: 0xd8dde6, anchorX: 0, anchorY: 0.5 })
+      p.stext(`lg:l${i}`, r.label, x0 + 68, y - 3, { size: 10.5, color: pal.textMuted, anchorX: 0, anchorY: 0.5 })
     })
   }
 

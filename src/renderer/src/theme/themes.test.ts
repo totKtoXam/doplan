@@ -289,4 +289,19 @@ describe('colour themes', () => {
       for (const k of surfaces) expect(contrast(r.ui.muted, r.ui[k]), `${t.id} ${k}`).toBeGreaterThanOrEqual(3)
     }
   })
+
+  it('the text of a warning badge reads on its plate: built-in themes and an installed grey one', () => {
+    const hex = (n: number) => fromNumber(n).toLowerCase()
+    const check = (r: ReturnType<typeof resolveTheme>, id: string) => {
+      expect(contrast(hex(r.plan.warnBadgeText), hex(r.plan.warnBadge)), id).toBeGreaterThanOrEqual(4.5)
+    }
+    for (const t of BUILTIN_THEMES) check(resolveTheme(t, BUILTIN_THEMES), t.id)
+    for (const bg of ['#9e9e9e', '#b0b0b0']) {
+      const grey = themeFromFile(JSON.stringify({ type: 'light', colors: { 'editor.background': bg, 'sideBar.background': '#f3f3f3', 'editorWarning.foreground': '#ffd400' } }))
+      const r = resolveTheme(grey)
+      check(r, bg)
+      // the plate keeps the theme's own warning colour
+      expect(hex(r.plan.warnBadge)).toBe('#ffd400')
+    }
+  })
 })

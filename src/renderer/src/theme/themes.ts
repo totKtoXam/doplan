@@ -434,6 +434,11 @@ function planPalette(kind: ThemeKind, ui: UiTokens, colors: Record<string, strin
     const onPlan = (c: string) => [0, 0.12, 0.24, 0.36, 0.5].map((k) => mix(c, dark ? '#ffffff' : '#000000', k)).find(reads) ?? text
     p.ok = N(onPlan(ui.success))
     p.warn = N(onPlan(ui.warning))
+    // a warning badge is a plate of the theme's warning colour (it need not read on the plan, the
+    // text on it must): the dark ink if it reads, else white, else black (one of them always does)
+    const plate = flatten(ui.warning, bg)
+    p.warnBadge = N(plate)
+    p.warnBadgeText = N(['#1b1300', '#ffffff'].find((c) => contrast(c, plate) >= 4.5) ?? readableOn(plate, '#ffffff', '#000000'))
   }
   // explicit plan colours: "doplan.plan.wall": "#…"
   for (const [k, v] of Object.entries(colors)) {

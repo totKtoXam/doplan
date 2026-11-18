@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { BUILTIN_THEMES, DEFAULT_DARK_ID, DEFAULT_LIGHT_ID } from './builtin'
-import { contrast, fromNumber, parseColor } from './color'
+import { contrast, flatten, fromNumber, parseColor } from './color'
 import { gridKey } from '@/editor2d/layers/grid'
 import { parseJsonc, resolveTheme, themeFromFile, themeKind, themeToFile, UI_TOKENS, type ThemeSource } from './themes'
 
@@ -215,6 +215,11 @@ describe('colour themes', () => {
       const bg = hex(r.plan.bg)
       expect(contrast(hex(r.plan.dim), bg), t.id).toBeGreaterThanOrEqual(3)
       expect(contrast(hex(r.plan.dimAuto), bg), t.id).toBeGreaterThanOrEqual(3)
+      // measured and stale automatic dimensions too
+      expect(contrast(hex(r.plan.ok), bg), `${t.id} ok`).toBeGreaterThanOrEqual(3)
+      expect(contrast(hex(r.plan.warn), bg), `${t.id} warn`).toBeGreaterThanOrEqual(3)
+      // and keep the theme's own colour where it reads already
+      if (contrast(r.ui.success, bg) >= 3) expect(hex(r.plan.ok), t.id).toBe(r.ui.success.toLowerCase())
       seen.add(hex(r.plan.dim))
     }
     // not one grey for all: the themes differ
@@ -282,6 +287,34 @@ describe('colour themes', () => {
     for (const t of BUILTIN_THEMES) {
       const r = resolveTheme(t, BUILTIN_THEMES)
       for (const k of surfaces) expect(contrast(r.ui.muted, r.ui[k]), `${t.id} ${k}`).toBeGreaterThanOrEqual(3)
+    }
+  })
+
+  it('the text of a warning badge reads on its plate: built-in themes and an installed grey one', () => {
+    const hex = (n: number) => fromNumber(n).toLowerCase()
+    const check = (r: ReturnType<typeof resolveTheme>, id: string) => {
+      expect(contrast(hex(r.plan.warnBadgeText), hex(r.plan.warnBadge)), id).toBeGreaterThanOrEqual(4.5)
+    }
+    for (const t of BUILTIN_THEMES) check(resolveTheme(t, BUILTIN_THEMES), t.id)
+    for (const bg of ['#9e9e9e', '#b0b0b0']) {
+      const grey = themeFromFile(JSON.stringify({ type: 'light', colors: { 'editor.background': bg, 'sideBar.background': '#f3f3f3', 'editorWarning.foreground': '#ffd400' } }))
+      const r = resolveTheme(grey)
+      check(r, bg)
+      // the plate keeps the theme's own warning colour
+      expect(hex(r.plan.warnBadge)).toBe('#ffd400')
+    }
+  })
+
+  it('a half-transparent warning colour is laid on the plan, not on the panels', () => {
+    const hex = (n: number) => fromNumber(n).toLowerCase()
+    for (const [type, plan, side] of [['dark', '#101010', '#f0f0f0'], ['light', '#fafafa', '#202020']]) {
+      const th = themeFromFile(JSON.stringify({ type, colors: { 'editor.background': plan, 'sideBar.background': side, 'editorWarning.foreground': '#ffd40080', 'terminal.ansiGreen': '#00c00080' } }))
+      const r = resolveTheme(th)
+      const bg = hex(r.plan.bg)
+      expect(hex(r.plan.warnBadge), type).toBe(flatten('#ffd40080', bg).toLowerCase())
+      expect(contrast(hex(r.plan.warnBadgeText), hex(r.plan.warnBadge)), type).toBeGreaterThanOrEqual(4.5)
+      // the numbers start from the same colour and read on the plan
+      for (const c of [r.plan.warn, r.plan.ok]) expect(contrast(hex(c), bg), type).toBeGreaterThanOrEqual(3)
     }
   })
 })

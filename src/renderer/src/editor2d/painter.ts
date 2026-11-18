@@ -2,7 +2,7 @@
  * Screen-space immediate-mode drawing: one Graphics that is cleared every frame plus a pool of
  * Pixi Text objects (canvas-rasterised at devicePixelRatio, so Cyrillic is always crisp).
  */
-import { Container, type Graphics, Text } from 'pixi.js'
+import { CanvasTextMetrics, Container, type Graphics, Text, TextStyle } from 'pixi.js'
 import type { Vec2 } from '@core/types'
 import type { Camera } from './view'
 import type { Palette } from './theme'
@@ -23,6 +23,20 @@ export interface TextOpts {
   halo?: number
 }
 
+const haloWidth = (raster: number) => Math.max(2, raster * 0.32)
+
+/**
+ * A halo is a stroke, and Pixi pads the texture for it: half its width on each side, and the box grows
+ * by up to its width (raster px). Where the glyphs then sit relative to the anchor, minus where they
+ * sit without it, is what the text is moved back by, so a halo never shifts the text.
+ */
+function haloPadding(raster: number, o: TextOpts): { sw: number; dh: number } {
+  const sw = haloWidth(raster)
+  const plain = CanvasTextMetrics.measureText('0', new TextStyle(textStyle(raster, 0, { ...o, halo: undefined })))
+  const ringed = CanvasTextMetrics.measureText('0', new TextStyle(textStyle(raster, 0, o)))
+  return { sw, dh: ringed.height - plain.height }
+}
+
 function textStyle(raster: number, color: number, o: TextOpts) {
   return {
     fontFamily: FONT,
@@ -31,7 +45,7 @@ function textStyle(raster: number, color: number, o: TextOpts) {
     fontWeight: o.bold ? ('600' as const) : ('400' as const),
     fontStyle: o.italic ? ('italic' as const) : ('normal' as const),
     align: o.align ?? 'left',
-    ...(o.halo !== undefined ? { stroke: { color: o.halo, width: Math.max(2, raster * 0.32), join: 'round' as const } } : {}),
+    ...(o.halo !== undefined ? { stroke: { color: o.halo, width: haloWidth(raster), join: 'round' as const } } : {}),
   }
 }
 
@@ -41,6 +55,8 @@ interface PoolEntry {
   idle: number
   sig: string
   str: string
+  /** the halo's padding of this style, when it has one */
+  pad?: { sw: number; dh: number }
 }
 
 /** rasterisation size: exact for small text, power-of-two buckets for large (scaled down → crisp) */
@@ -75,13 +91,14 @@ export class TextPool {
       })
       text.eventMode = 'none'
       this.container.addChild(text)
-      e = { text, used: true, idle: 0, sig, str }
+      e = { text, used: true, idle: 0, sig, str, pad: o.halo !== undefined ? haloPadding(raster, o) : undefined }
       this.entries.set(key, e)
     } else {
       if (e.sig !== sig) {
         e.text.style = textStyle(raster, color, o)
         e.text.resolution = this.resolution
         e.sig = sig
+        e.pad = o.halo !== undefined ? haloPadding(raster, o) : undefined
       }
       if (e.str !== str) {
         e.text.text = str
@@ -92,12 +109,24 @@ export class TextPool {
     e.idle = 0
     const t = e.text
     t.visible = true
-    t.anchor.set(o.anchorX ?? 0.5, o.anchorY ?? 0.5)
+    const ax = o.anchorX ?? 0.5
+    const ay = o.anchorY ?? 0.5
+    t.anchor.set(ax, ay)
     const rotation = o.rotation ?? 0
     t.rotation = rotation
+    const k = size / raster
+    if (e.pad) {
+      // the glyphs back where they would be without the halo (in the text's own frame, then turned)
+      const sx = (ax * e.pad.sw - e.pad.sw / 2) * k
+      const sy = (ay * e.pad.dh - e.pad.sw / 2) * k
+      const cos = Math.cos(rotation)
+      const sin = Math.sin(rotation)
+      x += sx * cos - sy * sin
+      y += sx * sin + sy * cos
+    }
     if (rotation === 0) t.position.set(Math.round(x), Math.round(y))
     else t.position.set(x, y)
-    t.scale.set(size / raster)
+    t.scale.set(k)
     t.alpha = o.alpha ?? 1
     return t
   }

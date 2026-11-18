@@ -222,4 +222,46 @@ describe('colour themes', () => {
     expect(contrast(dim('#303030'), '#202020')).toBeGreaterThanOrEqual(3)
     expect(dim()).not.toBe('#ff8800')
   })
+
+  it("an overlay's sideBar.background replaces the parent's doplan.panel: the kind is that of the panel used", () => {
+    const all = (x: ThemeSource) => [...BUILTIN_THEMES, x]
+    const light = themeFromFile('{"name":"Light Graphite","extends":"Графит","colors":{"sideBar.background":"#f3f3f3","foreground":"#333333"}}')
+    const r = resolveTheme(light, all(light))
+    expect(r.kind).toBe('light')
+    expect(r.ui.panel).toBe('#f3f3f3')
+    expect(r.ui.text).toBe('#333333')
+    const dark = themeFromFile('{"extends":"doplan-tracing","colors":{"sideBar.background":"#1e1e1e","foreground":"#cccccc"}}')
+    const d = resolveTheme(dark, all(dark))
+    expect(d.kind).toBe('dark')
+    expect(d.ui.panel).toBe('#1e1e1e')
+    expect(contrast(d.ui.text, d.ui.panel)).toBeGreaterThanOrEqual(4.5)
+    // for every built-in parent the kind agrees with the panel actually used
+    for (const p of BUILTIN_THEMES) {
+      for (const [panel, fg] of [['#f3f3f3', '#333333'], ['#1e1e1e', '#cccccc']]) {
+        const o = themeFromFile(JSON.stringify({ extends: p.id, colors: { 'sideBar.background': panel, foreground: fg } }))
+        const x = resolveTheme(o, all(o))
+        expect(x.ui.panel, p.id).toBe(panel)
+        expect(x.kind, p.id).toBe(contrast(panel, '#000000') > contrast(panel, '#ffffff') ? 'light' : 'dark')
+      }
+    }
+    // the overlay's own doplan.panel still wins over its own sideBar.background
+    const both = themeFromFile('{"extends":"Графит","colors":{"doplan.panel":"#202020","sideBar.background":"#fafafa"}}')
+    expect(resolveTheme(both, all(both)).ui.panel).toBe('#202020')
+  })
+
+  it('secondary text reads on every surface, as well as the main text', () => {
+    const cases = [
+      '{"type":"dark","colors":{"sideBar.background":"#1e1e1e","foreground":"#ffffff","activityBar.background":"#555555","descriptionForeground":"#8a8a8a"}}',
+      '{"type":"light","colors":{"sideBar.background":"#f3f3f3","foreground":"#222222","input.background":"#cfcfcf","descriptionForeground":"#8a8a8a"}}',
+    ]
+    const surfaces = ['bg', 'panel', 'panel-2', 'panel-3', 'input'] as const
+    for (const c of cases) {
+      const r = resolveTheme(themeFromFile(c))
+      for (const k of surfaces) expect(contrast(r.ui.muted, r.ui[k]), `${c} ${k}`).toBeGreaterThanOrEqual(3)
+    }
+    for (const t of BUILTIN_THEMES) {
+      const r = resolveTheme(t, BUILTIN_THEMES)
+      for (const k of surfaces) expect(contrast(r.ui.muted, r.ui[k]), `${t.id} ${k}`).toBeGreaterThanOrEqual(3)
+    }
+  })
 })

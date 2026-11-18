@@ -235,6 +235,37 @@ const FALLBACK = {
   light: { panel: '#f8f9fa', text: '#1d2126', accent: '#2f6fe4', danger: '#d93a3a', warning: '#c98a00', success: '#1f9d63' },
 }
 
+/**
+ * doplan's keys and the VS Code keys that set the same colour. Merging an overlay, its VS Code key
+ * replaces the doplan key of the theme below (an overlay of Графит that sets sideBar.background gets
+ * that panel, not Графит's doplan.panel), so the panel used is the one the kind is worked out from.
+ */
+const SAME_AS: Record<string, readonly string[]> = {
+  'doplan.panel': ['sideBar.background'],
+  'doplan.bg': ['activityBar.background', 'titleBar.activeBackground'],
+  'doplan.text': ['foreground', 'sideBar.foreground'],
+  'doplan.muted': ['descriptionForeground'],
+  'doplan.viewport': ['editor.background'],
+  'doplan.accent': ['button.background', 'focusBorder'],
+  'doplan.accent-hover': ['button.hoverBackground'],
+  'doplan.accent-fg': ['button.foreground'],
+  'doplan.input': ['input.background'],
+  'doplan.border': ['sideBar.border', 'panel.border'],
+  'doplan.danger': ['errorForeground', 'editorError.foreground'],
+  'doplan.warning': ['editorWarning.foreground'],
+  'doplan.success': ['terminal.ansiGreen'],
+}
+
+/** the colours of a theme and the ones it extends, the later (the overlay) over the earlier */
+function mergeColors(layers: readonly ThemeSource[]): Record<string, string> {
+  const colors: Record<string, string> = {}
+  for (const l of layers) {
+    for (const [dk, keys] of Object.entries(SAME_AS)) if (!(dk in l.colors) && keys.some((k) => k in l.colors)) delete colors[dk]
+    Object.assign(colors, l.colors)
+  }
+  return colors
+}
+
 /** the theme and the ones it extends, base first; unknown or circular parents are skipped */
 function chain(t: ThemeSource, all: readonly ThemeSource[]): ThemeSource[] {
   const out: ThemeSource[] = [t]
@@ -250,8 +281,7 @@ function chain(t: ThemeSource, all: readonly ThemeSource[]): ThemeSource[] {
 
 export function resolveTheme(t: ThemeSource, all: readonly ThemeSource[] = []): ResolvedTheme {
   const layers = chain(t, all)
-  const colors: Record<string, string> = {}
-  for (const l of layers) Object.assign(colors, l.colors)
+  const colors = mergeColors(layers)
   const kind = themeKind(t, all)
   const dark = kind === 'dark'
   const fb = FALLBACK[kind]
@@ -274,8 +304,16 @@ export function resolveTheme(t: ThemeSource, all: readonly ThemeSource[] = []): 
 
   const bg = surface(solid(get('doplan.bg', 'activityBar.background', 'titleBar.activeBackground')), mix(panel, '#000000', dark ? 0.22 : 0.05))
   const viewport = solid(get('doplan.viewport', 'editor.background')) ?? panel
+  const panel2 = surface(solid(get('doplan.panel-2')), mix(panel, text, 0.045))
+  const panel3 = surface(solid(get('doplan.panel-3')), mix(panel, text, 0.09))
+  // a light field in a dark theme (or the reverse) is dropped
+  const input = surface(solid(get('doplan.input', 'input.background')), dark ? mix(panel, '#000000', 0.18) : '#ffffff')
+  // secondary text (labels, units in number fields) is written on all of them: the theme's colour if it
+  // reads on each, else one drawn toward the text until it does (the text itself always reads)
+  const readsEverywhere = (c: string) => [bg, panel, panel2, panel3, input].every((s) => contrast(c, s) >= 3)
   const mutedC = solid(get('doplan.muted', 'descriptionForeground'))
-  const muted = mutedC && contrast(mutedC, panel) >= 3 ? mutedC : mix(text, panel, 0.38)
+  const muted =
+    mutedC && readsEverywhere(mutedC) ? mutedC : ([0.38, 0.3, 0.22, 0.14, 0.07].map((k) => mix(text, panel, k)).find(readsEverywhere) ?? text)
   const faint = solid(get('doplan.faint')) ?? mix(text, panel, 0.6)
 
   // the accent: the first candidate that stands out from the panels
@@ -302,8 +340,8 @@ export function resolveTheme(t: ThemeSource, all: readonly ThemeSource[] = []): 
   const ui: UiTokens = {
     bg,
     panel,
-    'panel-2': surface(solid(get('doplan.panel-2')), mix(panel, text, 0.045)),
-    'panel-3': surface(solid(get('doplan.panel-3')), mix(panel, text, 0.09)),
+    'panel-2': panel2,
+    'panel-3': panel3,
     border,
     'border-strong': solid(get('doplan.border-strong')) ?? mix(panel, text, 0.2),
     text,
@@ -315,8 +353,7 @@ export function resolveTheme(t: ThemeSource, all: readonly ThemeSource[] = []): 
     'accent-fg': accentFg,
     hover: get('doplan.hover') ?? withAlpha(text, dark ? 0.07 : 0.06),
     active: get('doplan.active') ?? withAlpha(text, dark ? 0.11 : 0.1),
-    // a light field in a dark theme (or the reverse) is dropped
-    input: surface(solid(get('doplan.input', 'input.background')), dark ? mix(panel, '#000000', 0.18) : '#ffffff'),
+    input,
     danger: solid(get('doplan.danger', 'errorForeground', 'editorError.foreground')) ?? fb.danger,
     warning: solid(get('doplan.warning', 'editorWarning.foreground')) ?? fb.warning,
     success: solid(get('doplan.success', 'terminal.ansiGreen', 'gitDecoration.addedResourceForeground')) ?? fb.success,

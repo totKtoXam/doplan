@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createEmptyDoc } from '@core'
+import { addWall, createEmptyDoc } from '@core'
 import type { EntityRef } from '@core/types'
 
 vi.mock('@/store/api', () => {
@@ -12,12 +12,17 @@ const { uiStore } = await import('@/store/ui')
 const { canGroupRotate, groupRotate, ROTATABLE_KINDS } = await import('./edit')
 
 describe('rotating dimensions and labels', () => {
+  let n1 = ''
+  let n2 = ''
   beforeEach(() => {
     const doc = createEmptyDoc('T')
     const levelId = doc.levelOrder[0]
     doc.dimensions.d = { id: 'd', levelId, a: { x: 1000, y: 1000 }, b: { x: 3000, y: 1000 }, offset: 0 }
     doc.labels.l1 = { id: 'l1', levelId, x: 0, y: 0, text: 'a', size: 200 }
     doc.labels.l2 = { id: 'l2', levelId, x: 2000, y: 0, text: 'b', size: 200 }
+    const [w] = addWall(doc, levelId, { x: 1000, y: 500 }, { x: 3000, y: 500 }, { thickness: 200 })
+    n1 = doc.walls[w].a
+    n2 = doc.walls[w].b
     docStore.getState().load(doc, null)
     uiStore.setState({ activeLevelId: levelId })
   })
@@ -57,6 +62,9 @@ describe('rotating dimensions and labels', () => {
     expect(canGroupRotate(doc(), [{ kind: 'dimension', id: 'd' }])).toBe(true)
     expect(canGroupRotate(doc(), [{ kind: 'room', id: 'nope' }])).toBe(false)
     expect(canGroupRotate(doc(), [])).toBe(false)
+    // a lone wall node is one point too; two of them turn about their middle
+    expect(canGroupRotate(doc(), [{ kind: 'node', id: n1 }])).toBe(false)
+    expect(canGroupRotate(doc(), [{ kind: 'node', id: n1 }, { kind: 'node', id: n2 }])).toBe(true)
     // and indeed a single label stays where it was
     select([{ kind: 'label', id: 'l1' }])
     const before = doc()

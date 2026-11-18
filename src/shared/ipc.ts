@@ -12,6 +12,7 @@ import type { Asset, Catalog, Hdri, Material } from '../core/types'
 // ── ai-chat block ──
 import type { AiChatApi } from './aiChat'
 // ── end ai-chat block ──
+import type { GithubApi } from './github'
 import type { UpdatesApi } from './updater'
 import type { AssetFeed } from './feeds'
 
@@ -292,6 +293,9 @@ export interface DoplanApi {
   /** AI chat: providers (Claude Code / Codex / Anthropic API), runs, doc tool bridge, chat storage */
   aiChat: AiChatApi
   // ── end ai-chat block ──
+
+  /** the open project's GitHub repository (gh sign-in, connect, send, get); see src/shared/github.ts */
+  github: GithubApi
 
   /** GitHub Releases updates (electron-updater); see src/shared/updater.ts */
   updates: UpdatesApi

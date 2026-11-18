@@ -50,6 +50,12 @@ export interface FolderManifest {
 let currentRoot: string | null = null
 /** sha256 of plan.json as last read or written by the app, per root (lower-cased) */
 const knownPlanHash = new Map<string, string>()
+/** how many times the app read each folder's plan.json (opened or reloaded), per root (lower-cased) */
+const planReads = new Map<string, number>()
+
+export function planReadCount(root: string): number {
+  return planReads.get(key(root)) ?? 0
+}
 
 export function getProjectRoot(): string | null {
   return currentRoot
@@ -382,6 +388,7 @@ export async function readFolderPlan(root: string): Promise<unknown> {
   }
   const doc = parseJsonText(bytes)
   knownPlanHash.set(key(root), sha256(bytes))
+  planReads.set(key(root), planReadCount(root) + 1)
   return doc
 }
 
@@ -445,8 +452,12 @@ async function writeScaffold(root: string, name: string): Promise<void> {
   await writeIfMissing(join(root, '.gitattributes'), GITATTRIBUTES)
 }
 
-/** writes plan.json, manifest.json and assets/ (missing scaffold files are recreated) */
-export async function writeFolderProject(root: string, doc: unknown): Promise<void> {
+/**
+ * writes plan.json, manifest.json and assets/ (missing scaffold files are recreated). `remember`
+ * false: the screen holds an older read of the folder, so the written plan does not count as "seen"
+ * and the next save from that screen asks first (planChangedOnDisk).
+ */
+export async function writeFolderProject(root: string, doc: unknown, remember = true): Promise<void> {
   const plan = stableStringify(doc)
   const compact = JSON.stringify(doc)
   await ensureDir(root)
@@ -498,7 +509,7 @@ export async function writeFolderProject(root: string, doc: unknown): Promise<vo
   }
   await atomicWrite(join(root, MANIFEST_FILE), stableStringify(manifest))
   await atomicWrite(join(root, PLAN_FILE), plan)
-  knownPlanHash.set(key(root), sha256(plan))
+  if (remember) knownPlanHash.set(key(root), sha256(plan))
 }
 
 /**

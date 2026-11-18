@@ -16,6 +16,7 @@ import { registerProtocolHandlers, registerSchemes } from './protocol'
 import { registerIpc } from './ipc'
 // ── ai-chat block ──
 import { registerAiChat, shutdownAiChat } from './aichat'
+import { registerGithubIpc, shutdownGithub } from './githubSync'
 // ── end ai-chat block ──
 import { getSettings, onSettingsChanged } from './settings'
 import { getUpdateState, initUpdater, onUpdateState, openReleasePage } from './updater'
@@ -120,6 +121,7 @@ if (!gotLock) {
     registerProtocolHandlers()
     registerIpc()
     registerAiChat() // ai-chat
+    registerGithubIpc() // github
     initUpdater()
     await Promise.all([initProjectStore(), ensureLibrary()])
 
@@ -146,6 +148,7 @@ if (!gotLock) {
   // a confirmed close means the user saved or discarded: the crash-recovery snapshot is obsolete
   app.on('will-quit', () => {
     shutdownAiChat() // ai-chat: stop agents, kill their processes
+    shutdownGithub() // github: stop a pending sign-in
     if (!closeWasConfirmed()) return
     try {
       rmSync(join(paths.recovery, 'recovery.json'), { force: true })

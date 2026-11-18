@@ -7,6 +7,7 @@ import type { DoplanApi, MenuCommand } from '../shared/ipc'
 // ── ai-chat block ──
 import type { AiLoginEvent, AiProviderId, AiRunEvent, AiToolCall } from '../shared/aiChat'
 // ── end ai-chat block ──
+import type { GhLoginEvent } from '../shared/github'
 import type { UpdateState } from '../shared/updater'
 import { CH, VERSION_ARG } from '../main/channels'
 import { cleanIpcError } from '../shared/ipcError'
@@ -142,6 +143,22 @@ const api: DoplanApi = {
     onLogin: (cb) => subscribe<[AiProviderId, AiLoginEvent]>(CH.evAiChatLogin, (provider, ev) => cb(provider, ev)),
   },
   // ── end ai-chat block ──
+
+  github: {
+    ghStatus: () => invoke(CH.githubGhStatus),
+    installGh: () => invoke(CH.githubInstallGh),
+    login: () => invoke(CH.githubLogin),
+    loginCancel: () => invoke(CH.githubLoginCancel),
+    onLogin: (cb) => subscribe<[GhLoginEvent]>(CH.evGithubLogin, (ev) => cb(ev)),
+    status: (fetch) => invoke(CH.githubStatus, !!fetch),
+    connect: (url) => invoke(CH.githubConnect, url),
+    create: (name, isPrivate) => invoke(CH.githubCreate, name, isPrivate),
+    push: () => invoke(CH.githubPush),
+    pull: () => invoke(CH.githubPull),
+    resolve: (choice) => invoke(CH.githubResolve, choice),
+    disconnect: () => invoke(CH.githubDisconnect),
+    openPage: (which) => invoke(CH.githubOpenPage, which),
+  },
 
   updates: {
     get: () => invoke(CH.updatesGet),

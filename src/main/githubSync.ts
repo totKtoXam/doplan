@@ -46,6 +46,7 @@ import {
   gitRelated,
   gitRemoteHeads,
   gitRemoteUrl,
+  gitRemoteNetUrls,
   gitRemoteUrls,
   gitRemoveRemote,
   gitRepoSize,
@@ -92,9 +93,9 @@ async function guard<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-/** gh's credentials for the remote of `root` (the token header only for a plain https://github.com address) */
+/** gh's credentials for the remote of `root` (the token header only when every address git may use is plain https://github.com) */
 async function net(interactive: boolean, root?: string): Promise<GitNet> {
-  const c = await gitCredentials(root ? await gitRemoteUrls(root, REMOTE).catch(() => []) : [])
+  const c = await gitCredentials(root ? await gitRemoteNetUrls(root, REMOTE).catch(() => []) : [])
   return { config: c.config, env: c.env, refresh: c.refresh, interactive }
 }
 

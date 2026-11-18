@@ -515,6 +515,9 @@ export function startGhLogin(emit: (ev: GhLoginEvent) => void): void {
     else if (!mine) emit({ type: 'done', ok: false, error: msg('Вход отменён', 'Sign-in cancelled') })
     // gh did not answer the check in time: the sign-in itself may well have worked, do not send the user to sign in again
     else if (st?.slow) emit({ type: 'done', ok: false, error: ghSlowText() })
+    // signed in (gh said so and holds the token, kept in memory) but GitHub did not answer the check:
+    // done — the dialog's next look shows "could not reach GitHub", never "sign in" again
+    else if (code === 0 && st?.offline) emit({ type: 'done', ok: true })
     else emit({ type: 'done', ok: false, error: code === 0 ? ghLoginText() : humanError(out).message })
   })
 }

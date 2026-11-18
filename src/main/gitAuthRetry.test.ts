@@ -19,7 +19,8 @@ vi.mock('electron', () => ({
   shell: { openExternal: vi.fn() },
 }))
 
-const { findGit, gitRemoteHeads, netTestConfig } = await import('./git')
+const { findGit, gitEffectiveUrls, gitRemoteHeads, gitRemoteNetUrls, netTestConfig } = await import('./git')
+const { tokenHeaderFits } = await import('./github')
 const { pushSite } = await import('./pagesGit')
 
 const OLD = 'Basic ' + Buffer.from('x-access-token:old').toString('base64')
@@ -65,6 +66,45 @@ beforeEach(() => {
 const creds = (h: string) => ['-c', 'credential.helper=', '-c', `http.extraHeader=Authorization: ${h}`]
 
 // real git processes: slow on a loaded computer
+describe('addresses as git will use them (url.*.insteadOf / pushInsteadOf)', () => {
+  const PAT = 'https://x-access-token:PAT@github.com/'
+  const plain = 'https://github.com/anna/flat.git'
+  const without = (flag: string) => {
+    const i = netTestConfig.indexOf(flag)
+    if (i > 0) netTestConfig.splice(i - 1, 2)
+  }
+
+  it('a global rule that adds the user\'s own token: no gh header', async () => {
+    const rule = `url.${PAT}.insteadOf=https://github.com/`
+    netTestConfig.push('-c', rule)
+    try {
+      const urls = await gitEffectiveUrls(null, [plain])
+      expect(urls).toContain('https://x-access-token:PAT@github.com/anna/flat.git')
+      expect(tokenHeaderFits(urls)).toBe(false)
+    } finally {
+      without(rule)
+    }
+    expect(tokenHeaderFits(await gitEffectiveUrls(null, [plain]))).toBe(true)
+  })
+
+  it('a global push rule counts for the project remote too', async () => {
+    const root = join(base, 'rules')
+    mkdirSync(root, { recursive: true })
+    execFileSync('git', ['init', '-q', root], { windowsHide: true })
+    execFileSync('git', ['-C', root, 'remote', 'add', 'origin', plain], { windowsHide: true })
+    expect(tokenHeaderFits(await gitRemoteNetUrls(root))).toBe(true)
+    // a global push rule (a folder's own url.* rules: doplan does not run git there at all)
+    const rule = `url.${PAT}.pushInsteadOf=https://github.com/`
+    netTestConfig.push('-c', rule)
+    try {
+      expect(tokenHeaderFits(await gitRemoteNetUrls(root))).toBe(false)
+    } finally {
+      without(rule)
+    }
+    expect(await gitRemoteNetUrls(root)).toEqual([plain])
+  })
+})
+
 describe('a refused token header is read again once', { timeout: 60_000 }, () => {
   it('project sync (git.runNet): the command repeats with the new header and succeeds', async () => {
     expect(await findGit()).toBeTruthy()

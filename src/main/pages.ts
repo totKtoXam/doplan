@@ -60,7 +60,7 @@ import {
 } from '@shared/pagesSite'
 import { CH } from './channels'
 import { atomicWrite, readJson } from './fsutil'
-import { findGit, gitInit, gitPushRef } from './git'
+import { findGit, gitEffectiveUrls, gitInit, gitPushRef } from './git'
 import { ghLoginText, ghMissingText, ghOfflineText, ghSlowText, ghStatus, gitCredentials } from './github'
 import { handleIpc } from './ipc'
 import { buildSite } from './pagesBuild'
@@ -216,9 +216,14 @@ async function gitRunner(): Promise<GitRunner> {
   return { git, hooksDir: hooksDir() }
 }
 
+/** gh's credentials for `remote` as git will reach it (an insteadOf rule of the user's with credentials: no token header) */
+async function credentialsFor(remote: string) {
+  return gitCredentials(await gitEffectiveUrls(null, [remote]).catch(() => []))
+}
+
 /** the runner with gh's credentials for `remote`, read right before the push (after any 401 of the API calls) */
 async function withCredentials(r: GitRunner, remote: string): Promise<GitRunner> {
-  const c = await gitCredentials([remote])
+  const c = await credentialsFor(remote)
   return { ...r, config: c.config, env: c.env, refresh: c.refresh }
 }
 
@@ -332,7 +337,7 @@ async function removeBranch(work: string, ref: RepoRef, expected: string): Promi
   await fsp.mkdir(dir, { recursive: true })
   try {
     await gitInit(dir)
-    await gitPushRef(dir, { ...(await gitCredentials([remoteOf(ref)])), interactive: true }, null, PAGES_BRANCH, { remote: remoteOf(ref), expected })
+    await gitPushRef(dir, { ...(await credentialsFor(remoteOf(ref))), interactive: true }, null, PAGES_BRANCH, { remote: remoteOf(ref), expected })
   } finally {
     await fsp.rm(dir, { recursive: true, force: true }).catch(() => undefined)
   }

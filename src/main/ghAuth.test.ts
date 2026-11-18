@@ -4,6 +4,7 @@
  * token, a 401 reads the token once more, and a gh that did not answer is never "signed out".
  */
 import { execFileSync } from 'node:child_process'
+import { EventEmitter } from 'node:events'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
@@ -30,6 +31,12 @@ vi.mock('node:child_process', async (orig) => {
   const real = (await orig()) as typeof import('node:child_process')
   return {
     ...real,
+    // `gh auth login`: exits at once, as after the code was entered on github.com
+    spawn: () => {
+      const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(), stdin: { write: () => true }, pid: undefined })
+      setTimeout(() => child.emit('close', 0), 5)
+      return child as never
+    },
     execFile: (_exe: string, args: string[], _opts: unknown, cb: (err: unknown, stdout: string, stderr: string) => void) => {
       gh.calls.push(args)
       setTimeout(() => {
@@ -152,6 +159,37 @@ describe('"check again" asks gh again (a sign-in or switch made in a terminal)',
     const again = github.ghStatus(true)
     await first
     expect(await again).toMatchObject({ loggedIn: true })
+  })
+})
+
+describe('signing in from the app', () => {
+  const signIn = () => new Promise<{ ok: boolean; user?: string; error?: string }>((ok) => github.startGhLogin((ev) => ev.type === 'done' && ok(ev)))
+
+  it('signed in: done with the account', async () => {
+    expect(await signIn()).toEqual({ type: 'done', ok: true, user: 'anna' })
+  })
+
+  it('signed in, but GitHub does not answer the check: done (not "sign in"), the token kept', async () => {
+    api.down = true
+    const ev = await signIn()
+    expect(ev).toMatchObject({ ok: true })
+    expect(ev.error).toBeUndefined()
+    // the dialog looks again: "could not check", and the token read after the sign-in is still there
+    expect(await github.ghStatus()).toMatchObject({ loggedIn: false, offline: true })
+    expect(await github.ghToken()).toBe(TOKEN)
+    expect(gh.calls).toHaveLength(1)
+    api.down = false
+    expect(await github.ghStatus()).toMatchObject({ loggedIn: true, user: 'anna' })
+  })
+
+  it('signed in, GitHub answers oddly (503, a rate limit): done too', async () => {
+    api.odd = true
+    expect(await signIn()).toMatchObject({ ok: true })
+  })
+
+  it('gh exits but has no token: "sign in" stays', async () => {
+    gh.answer = 'none'
+    expect(await signIn()).toMatchObject({ ok: false, error: github.ghLoginText() })
   })
 })
 

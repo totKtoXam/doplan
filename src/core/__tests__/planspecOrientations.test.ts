@@ -98,9 +98,11 @@ const SCENARIOS: Record<string, [unknown, number, boolean, boolean?]> = {
   'r4 #10 neighbour shaft past the outline': [sp([{ id: 'a', type: 'living', rect: [0, 0, 3400, 4350] }, { id: 'b', type: 'bedroom', rect: [-500, 4650, 3100, 1700], cutouts: [shaft([-512, 4649, 500, 500])] }], 400), -1, true],
   'r4 #11 column mid-room, two neighbours': [sp([Lr([col([400, 2000, 400, 400])], [[0, 0], [4050, 0], [4050, 1250], [1350, 1250], [1350, 3250], [0, 3250]]), { id: 'b', type: 'kitchen', rect: [-50, -1650, 3100, 1550] }, { id: 'c', type: 'bathroom', rect: [-2850, 0, 2750, 1550] }], 400), 0, true],
   'r4 #11 … 510 mm walls': [sp([R([col([1000, 2000, 400, 400])], [0, 0, 2800, 3750]), { id: 'b', type: 'kitchen', rect: [-250, 3850, 2450, 1950] }, { id: 'c', type: 'bathroom', rect: [-2450, -450, 2350, 3900] }], 510), 0, true],
-  // a neighbour's edge ending inside the gap between two perpendicular 510 mm walls: refused the
-  // same way in every orientation (planspec-reference.md, unsupported junctions)
-  'r4 #12 neighbour edge in a wall gap (refused)': [sp([{ id: 'a', type: 'living', rect: [0, 0, 4850, 3750] }, bedroom('b', [-2800, 300, 2600, 3250]), { id: 'd', type: 'bathroom', rect: [-100, 3950, 3250, 2650] }], 510), -1, false],
+  // a neighbour's edge ending inside the gap between two perpendicular 510 mm walls: the same in every
+  // orientation. The first layout was refused while room a's outline folded over the junction (18.16 m²)
+  // and builds exactly since the fold is cut off; the other is still refused (planspec-reference.md,
+  // unsupported junctions)
+  'r4 #12 neighbour edge in a wall gap (builds exactly)': [sp([{ id: 'a', type: 'living', rect: [0, 0, 4850, 3750] }, bedroom('b', [-2800, 300, 2600, 3250]), { id: 'd', type: 'bathroom', rect: [-100, 3950, 3250, 2650] }], 510), -1, true],
   'r4 #12 … other layout (refused)': [sp([{ id: 'a', type: 'living', rect: [0, 0, 2600, 3350] }, bedroom('b', [-2800, 200, 2700, 1800]), { id: 'd', type: 'bathroom', rect: [100, -3400, 2600, 3300] }], 510), -1, false],
   'r4 #13 column with a wide gap to the neighbour': [sp([Lr([col([1000, 200, 1000, 800])]), nb([2400, 0, 1600, 600])]), 0, true],
   'r4 #15 shaft at a reflex corner, neighbour 95 mm off both ways': [sp([Lr([shaft([1400, 1000, 600, 600])]), nb([2095, 0, 1905, 905])]), 0, true],

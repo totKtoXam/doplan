@@ -157,6 +157,67 @@ function sideRing(cycle: HalfEdge[], geoms: Record<Id, WallGeom>, edges: RoomBou
   return cleanRing(pts)
 }
 
+/** the first proper crossing of two non-adjacent edges of a closed ring: edges i and j (i < j) */
+function firstCrossing(r: readonly Vec2[]): { i: number; j: number; p: Vec2 } | null {
+  const n = r.length
+  for (let i = 0; i < n; i++) {
+    const a = r[i]
+    const b = r[(i + 1) % n]
+    const ex = b.x - a.x
+    const ey = b.y - a.y
+    const le = Math.hypot(ex, ey)
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue
+      const c = r[j]
+      const d = r[(j + 1) % n]
+      const fx = d.x - c.x
+      const fy = d.y - c.y
+      const den = ex * fy - ey * fx
+      if (Math.abs(den) < 1e-9) continue
+      const t = ((c.x - a.x) * fy - (c.y - a.y) * fx) / den
+      const u = ((c.x - a.x) * ey - (c.y - a.y) * ex) / den
+      const lf = Math.hypot(fx, fy)
+      if (t * le <= PT_EPS || (1 - t) * le <= PT_EPS || u * lf <= PT_EPS || (1 - u) * lf <= PT_EPS) continue
+      return { i, j, p: { x: a.x + t * ex, y: a.y + t * ey } }
+    }
+  }
+  return null
+}
+
+/**
+ * A face ring that crosses itself. Four walls whose axes miss each other at a pinwheel junction (offset
+ * by less than their thickness) leave a tiny square of centrelines; one room's cycle runs round three
+ * sides of it, and the mitred faces of those short pieces fold back over the room's corner. The ring is
+ * split at its crossings into simple loops: the loops wound against the face are the fold, wall and not
+ * floor. When exactly one loop runs with the face, it is the room; any other ring is left as it was, and
+ * so is a ring wound against the face on the whole (it was no face before and makes none now).
+ */
+export function untwistRing(ring: Vec2[]): Vec2[] {
+  if (ring.length < 4 || polygonArea(ring) <= 0) return ring
+  const loops: Vec2[][] = []
+  const stack = [ring]
+  let guard = 0
+  while (stack.length) {
+    if (++guard > 64) return ring
+    const r = stack.pop() as Vec2[]
+    const x = r.length >= 4 ? firstCrossing(r) : null
+    if (!x) {
+      loops.push(r)
+      continue
+    }
+    stack.push([x.p, ...r.slice(x.i + 1, x.j + 1)], [x.p, ...r.slice(x.j + 1), ...r.slice(0, x.i + 1)])
+  }
+  if (loops.length === 1) return ring
+  let keep: Vec2[] | null = null
+  for (const l of loops) {
+    const c = cleanRing(l)
+    if (c.length < 3 || polygonArea(c) <= 1) continue
+    if (keep) return ring
+    keep = c
+  }
+  return keep ?? ring
+}
+
 function findRoot(parent: Map<Id, Id>, x: Id): Id {
   let r = x
   for (;;) {
@@ -266,7 +327,7 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
   for (const c of cycles) {
     if (c.area > AREA_EPS) {
       const edges: RoomBoundaryEdge[] = []
-      const polygon = sideRing(c.hes, wallGeoms, edges)
+      const polygon = untwistRing(sideRing(c.hes, wallGeoms, edges))
       const ringArea = polygon.length >= 3 ? polygonArea(polygon) : 0
       if (ringArea <= 0) continue
       const ids = pruneSpurs(c.hes.map((h) => h.from))

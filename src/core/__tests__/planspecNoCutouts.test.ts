@@ -5,13 +5,16 @@
 import { describe, expect, it } from 'vitest'
 import { derivePlan } from '../derive'
 import { compilePlanSpecDetailed, parsePlanSpec, validatePlanSpecDetailed, type PlanSpec } from '../planspec'
+import { polygonArea } from '../geom'
+import { untwistRing } from '../rooms'
 
 type Want = { walls: number; faces: number; areas: Record<string, number>; ok: boolean }
 const TYPES = ['living', 'bedroom', 'kitchen', 'bathroom', 'hall']
 
 /** name, rooms a, b, c… (rect or polygon), exterior thickness, what a56f5f4 built */
 const CASES: [string, (number[] | number[][] | null)[], number, Want][] = [
-  ["three rooms at a building corner, 200 mm gaps (night #6)", [[0,0,4000,3000],[-3200,0,3000,2800],[0,-2800,2900,2600]], 300, {"walls":16,"faces":3,"areas":{"a":12,"b":8.4,"c":7.5394},"ok":true}],
+  // room c is its exact 2900 × 2600: a56f5f4 built 7.5394, its outline folded over the corner (see the pinwheels below)
+  ["three rooms at a building corner, 200 mm gaps (night #6)", [[0,0,4000,3000],[-3200,0,3000,2800],[0,-2800,2900,2600]], 300, {"walls":16,"faces":3,"areas":{"a":12,"b":8.4,"c":7.54},"ok":true}],
   ["… 150 mm gaps", [[0,0,4000,3000],[-3150,0,3000,2800],[0,-2750,2900,2600]], 300, {"walls":16,"faces":3,"areas":{"a":12,"b":8.4,"c":7.54},"ok":true}],
   ["corner seed 100008", [[0,0,3850,2900],[-3150,0,2850,2900],[0,-3100,4050,2900],[-3150,-3100,2850,2900]], 300, {"walls":14,"faces":4,"areas":{"a":11.165,"b":8.265,"c":11.745,"d":8.265},"ok":true}],
   ["corner seed 100009", [[0,0,4350,3300],[-2150,0,1900,3300],[0,-2650,4350,2400],[-2150,-2650,1900,2400]], 380, {"walls":12,"faces":4,"areas":{"a":14.355,"b":6.27,"c":10.44,"d":4.56},"ok":true}],
@@ -53,4 +56,55 @@ describe('planspec without cutouts: built as at a56f5f4', () => {
       expect(validatePlanSpecDetailed(s).ok, 'gate').toBe(want.ok)
     })
   }
+})
+
+// Rooms meeting at a building corner whose walls miss each other by less than their thickness (a
+// pinwheel). Walls stand on their axes, so the axes leave a tiny square at the junction: one room's
+// cycle runs round it and its mitred faces fold back over the room's corner. a56f5f4 closed the square
+// instead (a phantom closed area of 0.025 m²); now the fold is cut off the room's outline. Every room
+// is its exact rect, in every orientation, with no closed area besides the rooms
+const PINWHEELS: [string, number[][], number][] = [
+  ['four rooms, axes 50 mm apart both ways', [[0, 0, 4200, 4050], [-1850, 100, 1550, 4050], [-100, -2050, 4400, 1800], [-1850, -2050, 1550, 1800]], 300],
+  ['four rooms, 510 mm walls', [[0, 0, 2600, 3600], [-2500, 100, 2250, 3800], [-100, -2150, 2700, 1950], [-2500, -2150, 2250, 1950]], 510],
+  ['three rooms, 510 mm walls', [[0, 0, 4950, 4300], [-3100, 0, 2850, 4100], [0, -2650, 4950, 2350]], 510],
+  ['three rooms, a neighbour edge in a wall gap (review 4 #12)', [[0, 0, 4850, 3750], [-2800, 300, 2600, 3250], [-100, 3950, 3250, 2650]], 510],
+]
+/** the rect turned by o quarter turns, mirrored for o ≥ 4 */
+function turnRect(r: number[], o: number): number[] {
+  const f = ([x, y]: number[]): number[] => {
+    const [mx, my] = o >= 4 ? [-x, y] : [x, y]
+    const k = o % 4
+    return k === 0 ? [mx, my] : k === 1 ? [-my, mx] : k === 2 ? [-mx, -my] : [my, -mx]
+  }
+  const [a, b] = [f([r[0], r[1]]), f([r[0] + r[2], r[1] + r[3]])]
+  return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1])]
+}
+
+describe('planspec pinwheel corners: exact rooms in every orientation', () => {
+  for (const [name, rooms, T] of PINWHEELS) {
+    it(name, () => {
+      for (let o = 0; o < 8; o++) {
+        const s = spec(
+          rooms.map((r) => turnRect(r, o)),
+          T,
+        )
+        const res = compilePlanSpecDetailed(s)
+        const faces = derivePlan(res.doc, res.levelId).rooms
+        expect(faces.length, `closed areas, orientation ${o}`).toBe(rooms.length)
+        rooms.forEach((r, i) => {
+          const f = faces.find((x) => x.roomId === res.roomIds['abcde'[i]])
+          expect(f?.area ?? -1, `room ${'abcde'[i]}, orientation ${o}`).toBeCloseTo((r[2] * r[3]) / 1e6, 4)
+        })
+        expect(validatePlanSpecDetailed(s).ok, `gate, orientation ${o}`).toBe(true)
+      }
+    })
+  }
+  it('a self-crossing face ring loses its reversed lobe; a simple ring is kept as it is', () => {
+    const twisted = [{ x: -100, y: 0 }, { x: 4200, y: 0 }, { x: 4200, y: 4050 }, { x: 0, y: 4050 }, { x: 0, y: -250 }, { x: -100, y: -250 }]
+    const out = untwistRing(twisted)
+    expect(polygonArea(out)).toBeCloseTo(4200 * 4050, 6)
+    expect(out).toHaveLength(4)
+    const simple = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }]
+    expect(untwistRing(simple)).toBe(simple)
+  })
 })

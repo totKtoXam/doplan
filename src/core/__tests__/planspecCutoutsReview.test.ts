@@ -188,15 +188,26 @@ describe('planspec cutouts: review findings', () => {
   })
 
   it('a built floor that differs from the checked shape is reported (a corner notch only warns)', () => {
-    // two rows of rooms with offset gaps leave a ≈0.02 m² notch at a junction: a warning, the areas hold
-    const v = validatePlanSpecDetailed(
-      base([
-        { id: 'r0', type: 'bedroom', rect: [0, 0, 2300, 3250] },
-        { id: 'r1', type: 'living', rect: [2500, 0, 2900, 3600] },
-        { id: 's0', type: 'bedroom', rect: [150, 3720, 2050, 2200] },
-        { id: 's1', type: 'bedroom', rect: [2300, 3720, 1500, 2950] },
+    // two rows of rooms with offset gaps: r1's outline used to fold over the junction (10.42 m²); the fold
+    // is cut off now and every room is exact
+    const rows = base([
+      { id: 'r0', type: 'bedroom', rect: [0, 0, 2300, 3250] },
+      { id: 'r1', type: 'living', rect: [2500, 0, 2900, 3600] },
+      { id: 's0', type: 'bedroom', rect: [150, 3720, 2050, 2200] },
+      { id: 's1', type: 'bedroom', rect: [2300, 3720, 1500, 2950] },
+    ])
+    expect(validatePlanSpecDetailed(rows).issues.filter((i) => i.code === 'BUILT_SHAPE_MISMATCH')).toEqual([])
+    const res = compilePlanSpecDetailed(parsePlanSpec(rows))
+    expect(derivePlan(res.doc, res.levelId).rooms.find((f) => f.roomId === res.roomIds.r1)?.area).toBeCloseTo(10.44, 4)
+    // three rooms at a building corner, 380 mm walls: a 30 mm step at the junction (≈0.008 m²) warns
+    const v = validatePlanSpecDetailed({
+      ...base([
+        { id: 'a', type: 'living', rect: [0, 0, 4900, 2800] },
+        { id: 'b', type: 'bedroom', rect: [-2400, 100, 2300, 2600] },
+        { id: 'c', type: 'kitchen', rect: [0, -2370, 4800, 2250] },
       ]),
-    )
+      defaults: { exteriorThickness: 380 },
+    } as PlanSpec)
     const m = v.issues.filter((i) => i.code === 'BUILT_SHAPE_MISMATCH')
     expect(m.length).toBeGreaterThan(0)
     expect(m.every((i) => i.severity === 'warning')).toBe(true)

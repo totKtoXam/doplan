@@ -146,7 +146,7 @@ const api: DoplanApi = {
   // ── end ai-chat block ──
 
   github: {
-    ghStatus: () => invoke(CH.githubGhStatus),
+    ghStatus: (fresh) => invoke(CH.githubGhStatus, !!fresh),
     installGh: () => invoke(CH.githubInstallGh),
     login: () => invoke(CH.githubLogin),
     loginCancel: () => invoke(CH.githubLoginCancel),

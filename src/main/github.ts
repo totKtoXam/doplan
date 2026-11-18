@@ -184,7 +184,7 @@ let tokenRun: Promise<TokenState> | null = null
 let statusCache: GhStatus | null = null
 let statusRun: Promise<GhStatus> | null = null
 /** the signed-in account as GitHub described it (GET /user) */
-let account: { login: string; plan: string | null } | null = null
+let account: { login: string; plan: string | null; token: string } | null = null
 
 export function tokenFrom(r: GhResult): TokenState {
   if (r.timedOut) return { kind: 'slow' }
@@ -296,43 +296,92 @@ export function apiError(res: ApiResponse): GithubError {
   return new GithubError(kind, errorText(kind, lang(), `HTTP ${res.status}${detail ? `: ${detail}` : ''}`.slice(0, 300)))
 }
 
-/** is gh installed and signed in to github.com (kept for the session; `fresh` asks GitHub again, not gh; callers at once share one check) */
-export async function ghStatus(fresh = false): Promise<GhStatus> {
-  if (!fresh && statusCache && statusCache.installed === !!findGh()) return statusCache
-  statusRun ??= checkGh().finally(() => (statusRun = null))
-  return statusRun
+export function ghOfflineText(): string {
+  return msg(
+    'Не удалось связаться с GitHub, чтобы проверить вход. Проверьте подключение к интернету и попробуйте ещё раз: повторный вход не нужен.',
+    'Could not reach GitHub to check the sign-in. Check your internet connection and try again: there is no need to sign in again.',
+  )
 }
 
-async function checkGh(): Promise<GhStatus> {
+let statusFresh = false
+
+/**
+ * Is gh installed and signed in to github.com. Kept for the session; `fresh` (the user's "check
+ * again", "refresh") asks gh again too, one more `gh auth token`, so a sign-in, sign-out or account
+ * switch made in a terminal is seen. Callers at once share one check.
+ */
+export async function ghStatus(fresh = false): Promise<GhStatus> {
+  if (!fresh && statusCache && statusCache.installed === !!findGh()) return statusCache
+  // a fresh question is not answered by a check that started from the remembered token
+  if (statusRun && (statusFresh || !fresh)) return statusRun
+  const run = checkGh(fresh).finally(() => {
+    if (statusRun === run) statusRun = null
+  })
+  statusRun = run
+  statusFresh = fresh
+  return run
+}
+
+async function checkGh(fresh: boolean): Promise<GhStatus> {
   const install = ghInstallHint(process.platform, !!wingetPath())
   if (!findGh()) {
     forgetGhStatus()
     return { installed: false, loggedIn: false, install }
   }
   const prev = statusCache
-  const s = await tokenNow()
+  // fresh: gh's token now (a slow gh keeps the one in memory: readToken never forgets on "no answer")
+  const s = fresh ? await readToken() : await tokenNow()
   // gh did not answer: the last known state, or "slow" — never "signed out", and not remembered
   if (s.kind === 'slow') return prev ?? { installed: true, loggedIn: false, slow: true, install }
-  if (s.kind === 'none') return (statusCache = { installed: true, loggedIn: false, install })
+  if (s.kind === 'none') {
+    account = null
+    return (statusCache = { installed: true, loggedIn: false, install })
+  }
   try {
     const res = await githubApi('GET', 'user', { timeout: 15_000 })
     const j = res.json as { login?: unknown; plan?: { name?: unknown } } | null
     if (res.status === 200 && typeof j?.login === 'string' && /^[A-Za-z0-9-]{1,39}$/.test(j.login)) {
-      account = { login: j.login, plan: typeof j.plan?.name === 'string' ? j.plan.name.toLowerCase() : null }
+      account = { login: j.login, plan: typeof j.plan?.name === 'string' ? j.plan.name.toLowerCase() : null, token: s.token }
       return (statusCache = { installed: true, loggedIn: true, user: j.login, install })
     }
   } catch (err) {
     if (err instanceof GithubError && err.kind === 'ghLogin') return (statusCache = { installed: true, loggedIn: false, install })
     if (err instanceof GithubError && err.kind === 'timeout' && !tokenState) return prev ?? { installed: true, loggedIn: false, slow: true, install }
   }
-  // GitHub out of reach (or an odd answer): gh has a token, so signed in; asked again next time
-  return { installed: true, loggedIn: true, user: account?.login ?? prev?.user, install }
+  // GitHub did not answer (or answered oddly): the sign-in confirmed earlier with this token, or
+  // "could not check" — never "sign in" (a new sign-in would not help); asked again next time
+  if (prev?.loggedIn && prev.user && account?.token === s.token && account.login === prev.user) return prev
+  return { installed: true, loggedIn: false, offline: true, install }
 }
 
 /** what git needs to reach github.com as the gh account: `-c` flags and environment variables */
 export interface GitCredentials {
   config: string[]
   env: Record<string, string>
+  /**
+   * Present when the token went as a header: GitHub refused it (changed since it was read), so gh's
+   * token is read once more for the same command (git.runNet, pagesGit.run). curl sends a header of
+   * its own over anything a credential helper answers, so the helper alone could not recover.
+   */
+  refresh?: () => Promise<Omit<GitCredentials, 'refresh'>>
+}
+
+/**
+ * The token header may go along: every address is https://github.com/… without credentials of its
+ * own (a token clone keeps its own; another host never sees gh's token).
+ */
+export function tokenHeaderFits(urls: readonly string[]): boolean {
+  return (
+    urls.length > 0 &&
+    urls.every((u) => {
+      try {
+        const x = new URL(u)
+        return x.protocol === 'https:' && x.hostname.toLowerCase() === 'github.com' && (x.port === '' || x.port === '443') && !x.username && !x.password
+      } catch {
+        return false
+      }
+    })
+  )
 }
 
 /**
@@ -357,19 +406,32 @@ export function ghHelperArgs(exe: string): string[] {
 }
 
 /**
- * Credentials for git network commands. With gh signed in: gh's token as a header (no gh started per
- * command), and gh's helper as the fallback git asks only when the header is refused (a token changed
- * meanwhile, an older git); the helper list for github.com is reset first, so no other helper is
- * asked or stores anything. Not signed in: none, the user's own git credential manager answers, as
- * with plain git.
+ * Credentials for git network commands to `remotes`. With gh signed in: gh's token as a header when
+ * the addresses allow it (tokenHeaderFits; no gh started per command), and gh's helper for github.com
+ * (the helper list reset first, so no other helper is asked or stores anything) for an address with
+ * no header, or when gh did not answer in time. A refused header is read again once (`refresh`).
+ * Not signed in: none, the user's own git credential manager answers, as with plain git.
  */
-export async function gitCredentials(): Promise<GitCredentials> {
+export async function gitCredentials(remotes: readonly string[] = []): Promise<GitCredentials> {
   const exe = findGh()
   if (!exe) return { config: [], env: {} }
-  const s = await tokenNow()
+  return credentialsOf(exe, await tokenNow(), tokenHeaderFits(remotes))
+}
+
+function credentialsOf(exe: string, s: TokenState, header: boolean): GitCredentials {
   if (s.kind === 'none') return { config: [], env: {} }
-  // gh did not answer in time: its helper may still answer git
-  return { config: ghHelperArgs(exe), env: s.kind === 'token' ? tokenEnv(s.token) : {} }
+  const config = ghHelperArgs(exe)
+  if (s.kind !== 'token' || !header) return { config, env: {} }
+  return {
+    config,
+    env: tokenEnv(s.token),
+    refresh: async () => {
+      // the token in memory is still the refused one: gh is asked again (not when another call already did)
+      if (tokenState?.kind === 'token' && tokenState.token === s.token) forgetGhStatus()
+      const { config: c, env } = credentialsOf(exe, await tokenNow(), header)
+      return { config: c, env }
+    },
+  }
 }
 
 // ───────────── install ─────────────
@@ -518,7 +580,7 @@ export async function setRepoVisibility(owner: string, repo: string, visibility:
  * 'free' Pages works for public ones only.
  */
 export async function accountPlan(): Promise<string | null> {
-  if (!account) await ghStatus(true)
+  if (!account) await ghStatus()
   return account?.plan ?? null
 }
 

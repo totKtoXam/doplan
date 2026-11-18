@@ -8,6 +8,7 @@
 import { execFile } from 'node:child_process'
 import { promises as fsp } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
+import { classifyError } from '../shared/github'
 
 export interface GitRunner {
   /** absolute path of the git executable */
@@ -19,6 +20,8 @@ export interface GitRunner {
   /** extra environment variables (the token header for github.com: github.gitCredentials) */
   env?: Record<string, string>
   timeoutMs?: number
+  /** GitHub refused the sign-in: fresh credentials, the command repeated once (github.gitCredentials) */
+  refresh?: () => Promise<{ config: string[]; env?: Record<string, string> }>
 }
 
 export class PagesGitError extends Error {
@@ -66,7 +69,22 @@ function hardening(r: GitRunner): string[] {
   ]
 }
 
-function run(r: GitRunner, cwd: string, args: string[], extraEnv: Record<string, string> = {}): Promise<string> {
+/** a git command; a refused token (changed since it was read) is read again and the command repeated, once per runner */
+async function run(r: GitRunner, cwd: string, args: string[], extraEnv: Record<string, string> = {}): Promise<string> {
+  try {
+    return await runOnce(r, cwd, args, extraEnv)
+  } catch (err) {
+    const refresh = r.refresh
+    if (!refresh || !(err instanceof PagesGitError) || classifyError(`${err.stderr}\n${err.message}`) !== 'auth') throw err
+    r.refresh = undefined
+    const c = await refresh()
+    r.config = c.config
+    r.env = c.env
+    return runOnce(r, cwd, args, extraEnv)
+  }
+}
+
+function runOnce(r: GitRunner, cwd: string, args: string[], extraEnv: Record<string, string>): Promise<string> {
   return new Promise((ok, fail) => {
     execFile(
       r.git,

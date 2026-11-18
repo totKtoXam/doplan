@@ -242,10 +242,11 @@ function CreateWay() {
   const t = useT()
   const [gh, setGh] = useState<GhStatus | null>(null)
   const [checking, setChecking] = useState(true)
-  const check = async () => {
+  // opening the dialog takes the state doplan knows; a button the user pressed asks gh again
+  const check = async (fresh = false) => {
     setChecking(true)
     try {
-      setGh(await api.github.ghStatus())
+      setGh(await api.github.ghStatus(fresh))
     } finally {
       setChecking(false)
     }
@@ -255,19 +256,23 @@ function CreateWay() {
   }, [])
 
   if (!gh) return <div className="flex items-center gap-2 py-2 text-[var(--muted)]"><Spinner /> {t('Ищу GitHub CLI…')}</div>
-  if (!gh.installed) return <InstallGh gh={gh} checking={checking} recheck={() => void check()} />
+  if (!gh.installed) return <InstallGh gh={gh} checking={checking} recheck={() => void check(true)} />
   // gh did not answer in time: unknown, not "signed out" (a new sign-in would not help)
-  if (gh.slow) return <SlowGh checking={checking} recheck={() => void check()} />
+  if (gh.slow) return <SlowGh checking={checking} recheck={() => void check(true)} />
+  // GitHub did not answer the check: no connection, not "signed out"
+  if (gh.offline) return <SlowGh offline checking={checking} recheck={() => void check(true)} />
   if (!gh.loggedIn) return <LoginGh onDone={() => void check()} />
-  return <CreateRepo user={gh.user ?? ''} onSwitch={() => void check()} />
+  return <CreateRepo user={gh.user ?? ''} onSwitch={() => void check(true)} />
 }
 
-function SlowGh({ checking, recheck }: { checking: boolean; recheck(): void }) {
+function SlowGh({ offline, checking, recheck }: { offline?: boolean; checking: boolean; recheck(): void }) {
   const t = useT()
   return (
     <div className="flex flex-col gap-2">
       <Note>
-        {t('GitHub CLI (gh) долго не отвечает — компьютер сейчас сильно загружен (например, антивирус проверяет файлы). Подождите немного и проверьте снова: повторный вход не нужен.')}
+        {offline
+          ? t('Не удалось связаться с GitHub, чтобы проверить вход. Проверьте подключение к интернету и попробуйте ещё раз: повторный вход не нужен.')
+          : t('GitHub CLI (gh) долго не отвечает — компьютер сейчас сильно загружен (например, антивирус проверяет файлы). Подождите немного и проверьте снова: повторный вход не нужен.')}
       </Note>
       <div className="flex justify-end">
         <Button variant="primary" icon={checking ? <Spinner /> : <RefreshCw size={12} />} disabled={checking} onClick={recheck}>

@@ -66,6 +66,7 @@ import {
   humanError,
   installGh,
   openGithubUrl,
+  repoInfo,
   startGhLogin,
 } from './github'
 import { handleIpc } from './ipc'
@@ -91,9 +92,10 @@ async function guard<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-async function net(interactive: boolean): Promise<GitNet> {
-  const c = await gitCredentials()
-  return { config: c.config, env: c.env, interactive }
+/** gh's credentials for the remote of `root` (the token header only for a plain https://github.com address) */
+async function net(interactive: boolean, root?: string): Promise<GitNet> {
+  const c = await gitCredentials(root ? await gitRemoteUrls(root, REMOTE).catch(() => []) : [])
+  return { config: c.config, env: c.env, refresh: c.refresh, interactive }
 }
 
 // ───────────── which folder ─────────────
@@ -192,7 +194,7 @@ export async function syncStatus(fetch = false): Promise<GithubSyncStatus> {
   const urls = fetch ? await gitRemoteUrls(root, REMOTE) : []
   if (urls.length === 1 && parseGithubUrl(stripUrlCredentials(urls[0]))) {
     try {
-      await gitFetch(root, await net(false), REMOTE)
+      await gitFetch(root, await net(false, root), REMOTE)
       noteCheck(root)
     } catch (err) {
       noteCheck(root, err)
@@ -271,7 +273,7 @@ export function push(): Promise<PushResult> {
       const root = await requireRoot()
       await requireRemote(root)
       await commitPending(root, msg('Отправка на GitHub', 'Sent to GitHub'))
-      return pushLocked(root, await net(true))
+      return pushLocked(root, await net(true, root))
     }),
   )
 }
@@ -323,7 +325,7 @@ export function pull(): Promise<PullResult> {
       const root = await requireRoot()
       await requireRemote(root)
       await commitPending(root, msg('Перед получением изменений с GitHub', 'Before getting changes from GitHub'))
-      return pullLocked(root, await net(true))
+      return pullLocked(root, await net(true, root))
     }),
   )
 }
@@ -367,7 +369,7 @@ export function resolveConflict(choice: ConflictChoice): Promise<ResolveResult> 
       // the same check as push and pull: one address, or nothing is fetched
       await requireRemote(root)
       await commitPending(root, msg('Перед получением изменений с GitHub', 'Before getting changes from GitHub'))
-      const n = await net(true)
+      const n = await net(true, root)
       await gitFetch(root, n, REMOTE)
       noteCheck(root)
       const branch = await targetBranch(root)
@@ -423,7 +425,7 @@ async function connectLocked(url: unknown, opts: ConnectOpts = {}): Promise<Conn
   await gitSetRemote(root, remoteUrlOf(ref), REMOTE)
   let sent = false
   try {
-    const n = await net(true)
+    const n = await net(true, root)
     // just created: certainly empty, one network command less
     const heads = opts.fresh ? { empty: true, head: null, branches: [] } : await gitRemoteHeads(root, n, REMOTE)
     noteCheck(root)
@@ -482,7 +484,7 @@ async function connectLocked(url: unknown, opts: ConnectOpts = {}): Promise<Conn
  * (each may take seconds on a loaded computer): the sign-in state the dialog has just shown, the token
  * for git read while GitHub creates the repository, and no look at the new, empty repository before
  * the first send. The name already taken on the account (an earlier try that GitHub finished after
- * all): that repository is joined when it is empty or holds this very project.
+ * all): that repository is joined when it is empty or holds this very project, and is as private as asked.
  */
 export async function createAndConnect(name: unknown, isPrivate: unknown, onStep: (step: GithubCreateStep) => void = () => undefined): Promise<ConnectResult> {
   if (typeof name !== 'string') throw new Error('name')
@@ -501,6 +503,23 @@ export async function createAndConnect(name: unknown, isPrivate: unknown, onStep
     if (!(err instanceof GithubError) || err.kind !== 'nameTaken' || !owner) throw err
     ref = { owner, repo: name.trim() }
     existing = true
+    // the user's repository of that name is joined only when it is as private (or public) as asked:
+    // a private project never goes into a public repository, nor a public one into a private
+    const want = isPrivate !== false ? 'private' : 'public'
+    const info = await repoInfo(ref.owner, ref.repo)
+    if (info.visibility !== want)
+      throw new GithubError(
+        'nameTaken',
+        want === 'private'
+          ? msg(
+              `Репозиторий с таким именем у вас уже есть (${webUrlOf(ref)}), и он публичный, а вы создаёте приватный: проект туда не отправлен. Придумайте другое имя или сделайте тот репозиторий приватным на GitHub.`,
+              `You already have a repository with this name (${webUrlOf(ref)}) and it is public, while you are creating a private one: the project was not sent there. Choose another name or make that repository private on GitHub.`,
+            )
+          : msg(
+              `Репозиторий с таким именем у вас уже есть (${webUrlOf(ref)}), и он приватный, а вы создаёте публичный: проект туда не отправлен. Придумайте другое имя или сделайте тот репозиторий публичным на GitHub.`,
+              `You already have a repository with this name (${webUrlOf(ref)}) and it is private, while you are creating a public one: the project was not sent there. Choose another name or make that repository public on GitHub.`,
+            ),
+      )
   }
   onStep('send')
   const url = remoteUrlOf({ ...ref, ssh: false })
@@ -531,7 +550,7 @@ export async function openPage(which: unknown): Promise<void> {
 }
 
 export function registerGithubIpc(): void {
-  handleIpc(CH.githubGhStatus, () => ghStatus(true))
+  handleIpc(CH.githubGhStatus, (fresh: unknown) => ghStatus(fresh === true))
   handleIpc(CH.githubInstallGh, () => installGh())
   handleIpc(CH.githubLogin, () => startGhLogin((ev) => sendToRenderer(CH.evGithubLogin, ev)))
   handleIpc(CH.githubLoginCancel, () => cancelGhLogin())

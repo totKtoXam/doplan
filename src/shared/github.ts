@@ -133,6 +133,8 @@ export interface GhStatus {
   install: GhInstallHint
   /** gh did not answer in time (a loaded computer): unknown whether signed in, not "signed out" */
   slow?: boolean
+  /** GitHub did not answer the check (no connection, a timeout, an odd reply): unknown, not "signed out" */
+  offline?: boolean
 }
 
 export type GhLoginEvent =
@@ -246,7 +248,8 @@ export interface ConnectResult {
 
 /** renderer API (window.doplan.github) */
 export interface GithubApi {
-  ghStatus(): Promise<GhStatus>
+  /** `fresh`: the user asked to check again (gh is asked again too, seeing a sign-in made in a terminal) */
+  ghStatus(fresh?: boolean): Promise<GhStatus>
   /** opens a console window running the platform's install command; false where it cannot */
   installGh(): Promise<boolean>
   /** starts `gh auth login --web`; progress arrives through onLogin */

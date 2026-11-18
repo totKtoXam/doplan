@@ -13,6 +13,7 @@ import fsp from 'node:fs/promises'
 import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path'
 import { app } from 'electron'
 import type { UnsafeGitConfig } from '../shared/ipc'
+import { classifyError } from '../shared/github'
 import { msg } from './settings'
 import { entryKind, lstatNoFollowSync, redirectsSync, type EntryKind } from './fsutil'
 
@@ -913,6 +914,8 @@ export interface GitNet {
   interactive: boolean
   /** ms; default 10 minutes for an action the user started, 90 s for a look in the background */
   timeout?: number
+  /** GitHub refused the sign-in: fresh credentials, the command repeated once (github.gitCredentials) */
+  refresh?: () => Promise<{ config: string[]; env?: Record<string, string> }>
 }
 
 /** test hook: extra `-c` flags for network commands (a local repository standing in for GitHub) */
@@ -932,7 +935,25 @@ function netArgs(net: GitNet): string[] {
   ]
 }
 
-function runNet(root: string, args: string[], net: GitNet, opts: RunOpts = {}): Promise<RunResult> {
+/**
+ * A network command. GitHub refusing a token that changed since it was read: the credentials are
+ * read again and the command repeated, once per GitNet (the later commands of the action use them).
+ */
+async function runNet(root: string, args: string[], net: GitNet, opts: RunOpts = {}): Promise<RunResult> {
+  try {
+    return await runNetOnce(root, args, net, opts)
+  } catch (err) {
+    const refresh = net.refresh
+    if (!refresh || !(err instanceof GitError) || classifyError(`${err.stderr}\n${err.message}`) !== 'auth') throw err
+    net.refresh = undefined
+    const c = await refresh()
+    net.config = c.config
+    net.env = c.env
+    return runNetOnce(root, args, net, opts)
+  }
+}
+
+function runNetOnce(root: string, args: string[], net: GitNet, opts: RunOpts): Promise<RunResult> {
   return run(root, args, {
     ...opts,
     config: [...netArgs(net), ...(opts.config ?? [])],

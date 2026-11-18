@@ -61,7 +61,7 @@ import {
 import { CH } from './channels'
 import { atomicWrite, readJson } from './fsutil'
 import { findGit, gitInit, gitPushRef } from './git'
-import { ghLoginText, ghMissingText, ghSlowText, ghStatus, gitCredentials } from './github'
+import { ghLoginText, ghMissingText, ghOfflineText, ghSlowText, ghStatus, gitCredentials } from './github'
 import { handleIpc } from './ipc'
 import { buildSite } from './pagesBuild'
 import { createPublicRepo, disablePages, enablePages, inspectPages, makePublic, openPagesUrl, ownerPlan, repoState } from './pagesGh'
@@ -213,8 +213,13 @@ async function gitRunner(): Promise<GitRunner> {
   const git = await findGit()
   if (!git) throw new Error(msg('Git не найден. Установите Git (https://git-scm.com), чтобы публиковать планы.', 'Git not found. Install Git (https://git-scm.com) to publish plans.'))
   await fsp.mkdir(hooksDir(), { recursive: true })
-  const cred = await gitCredentials()
-  return { git, hooksDir: hooksDir(), config: cred.config, env: cred.env }
+  return { git, hooksDir: hooksDir() }
+}
+
+/** the runner with gh's credentials for `remote`, read right before the push (after any 401 of the API calls) */
+async function withCredentials(r: GitRunner, remote: string): Promise<GitRunner> {
+  const c = await gitCredentials([remote])
+  return { ...r, config: c.config, env: c.env, refresh: c.refresh }
 }
 
 const remoteOf = (ref: RepoRef) => `https://github.com/${ref.owner}/${ref.repo}.git`
@@ -327,7 +332,7 @@ async function removeBranch(work: string, ref: RepoRef, expected: string): Promi
   await fsp.mkdir(dir, { recursive: true })
   try {
     await gitInit(dir)
-    await gitPushRef(dir, { ...(await gitCredentials()), interactive: true }, null, PAGES_BRANCH, { remote: remoteOf(ref), expected })
+    await gitPushRef(dir, { ...(await gitCredentials([remoteOf(ref)])), interactive: true }, null, PAGES_BRANCH, { remote: remoteOf(ref), expected })
   } finally {
     await fsp.rm(dir, { recursive: true, force: true }).catch(() => undefined)
   }
@@ -349,7 +354,7 @@ export async function pagesStatus(q: PagesStatusQuery): Promise<PagesStatus> {
   const docId = String(q?.docId ?? '')
   // independent of each other: asked at once
   const [gh, git, { records, aliases }, ref] = await Promise.all([
-    ghStatus(!!q?.fresh).catch(() => ({ installed: false, loggedIn: false }) as { installed: boolean; loggedIn: boolean; user?: string; slow?: boolean }),
+    ghStatus(!!q?.fresh).catch(() => ({ installed: false, loggedIn: false }) as { installed: boolean; loggedIn: boolean; user?: string; slow?: boolean; offline?: boolean }),
     findGit().then((g) => !!g),
     settleRecord(docId, cleanAliases(q?.aliases), cleanFile(q?.file)),
     projectRepo(),
@@ -433,6 +438,7 @@ export async function publishPlan(req: PagesPublishRequest, emit: (p: PagesProgr
     const gh = await ghStatus()
     if (!gh.installed) throw new Error(ghMissingText())
     if (gh.slow) throw new Error(ghSlowText())
+    if (gh.offline) throw new Error(ghOfflineText())
     if (!gh.loggedIn || !gh.user) throw new Error(ghLoginText())
     const runner = await gitRunner()
     const file = cleanFile(req.file)
@@ -541,7 +547,7 @@ export async function publishPlan(req: PagesPublishRequest, emit: (p: PagesProgr
     // ── push + Pages ──
     emit({ step: 'push' })
     const own = pagesOwnership(insp, pubId, recorded)
-    const sha = await pushSite(runner, siteDir, remoteOf(ref), PAGES_BRANCH, msg('Опубликованный план (doplan)', 'Published plan (doplan)'), insp.branchSha)
+    const sha = await pushSite(await withCredentials(runner, remoteOf(ref)), siteDir, remoteOf(ref), PAGES_BRANCH, msg('Опубликованный план (doplan)', 'Published plan (doplan)'), insp.branchSha)
     emit({ step: 'pages' })
     let url: string
     try {
@@ -611,6 +617,7 @@ export async function unpublishPlan(docId: string): Promise<void> {
     const gh = await ghStatus()
     if (!gh.installed) throw new Error(ghMissingText())
     if (gh.slow) throw new Error(ghSlowText())
+    if (gh.offline) throw new Error(ghOfflineText())
     if (!gh.loggedIn) throw new Error(ghLoginText())
     const st = await repoState(refOf(rec))
     if (st.exists && st.canPush === false && !sameName(rec.owner, gh.user)) throw await noAccess()

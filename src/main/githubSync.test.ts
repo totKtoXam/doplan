@@ -248,6 +248,8 @@ vi.mock('electron', () => ({
 vi.mock('./ipc', () => ({ handleIpc: vi.fn() }))
 vi.mock('./window', () => ({ sendToRenderer: vi.fn(), getMainWindow: () => null }))
 const created: string[] = []
+/** visibility of the test repositories on "GitHub" (private unless listed) */
+const visibility: Record<string, 'public' | 'private'> = {}
 vi.mock('./github', async (orig) => {
   const real = (await orig()) as typeof import('./github')
   return {
@@ -262,6 +264,7 @@ vi.mock('./github', async (orig) => {
       git(join(base, 'remote', 'me'), 'init', '--bare', '--quiet', '--initial-branch=main', `${name}.git`)
       return { owner: 'me', repo: name, ssh: false }
     },
+    repoInfo: async (_owner: string, repo: string) => ({ visibility: visibility[repo] ?? 'private', defaultBranch: 'main', permission: 'ADMIN' }),
   }
 })
 
@@ -725,5 +728,24 @@ describe.skipIf(!hasGit)('project sync', { timeout: 180_000 }, () => {
     useRoot(other)
     await expect(sync.createAndConnect('again', true)).rejects.toThrow(/уже есть|already have/)
     expect(await gitRemoteUrl(other)).toBeNull()
+  })
+
+  it('a taken name of the other visibility is refused before anything is sent (private never lands in public)', async () => {
+    // an empty PUBLIC repository of that name already on the account, a PRIVATE one asked for
+    bare('shown')
+    visibility['shown'] = 'public'
+    const p = await project('Shown')
+    useRoot(p)
+    await expect(sync.createAndConnect('shown', true)).rejects.toMatchObject({ kind: 'nameTaken', message: expect.stringMatching(/публичный|public/) })
+    expect(await gitRemoteUrl(p)).toBeNull()
+    expect(git(join(remotes, 'me', 'shown.git'), 'for-each-ref').trim()).toBe('')
+    // and the other way round: a public project is not put into a private repository
+    bare('hidden')
+    visibility['hidden'] = 'private'
+    await expect(sync.createAndConnect('hidden', false)).rejects.toMatchObject({ kind: 'nameTaken', message: expect.stringMatching(/приватный|private/) })
+    expect(git(join(remotes, 'me', 'hidden.git'), 'for-each-ref').trim()).toBe('')
+    // the same visibility: joined
+    visibility['shown'] = 'private'
+    expect((await sync.createAndConnect('shown', true)).pushed).toBe(true)
   })
 })

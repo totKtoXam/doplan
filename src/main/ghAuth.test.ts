@@ -46,7 +46,7 @@ const github = await import('./github')
 const pagesGh = await import('./pagesGh')
 
 /** GitHub's API as the test describes it: accepts TOKEN2 only after `rotate`, counts requests */
-const api = { requests: [] as { method: string; path: string; auth: string; body?: unknown }[], valid: new Set([TOKEN]), down: false, repos: new Set<string>() }
+const api = { requests: [] as { method: string; path: string; auth: string; body?: unknown }[], valid: new Set([TOKEN]), down: false, odd: false, repos: new Set<string>() }
 function reply(status: number, json?: unknown): Response {
   return new Response(json === undefined ? null : JSON.stringify(json), { status })
 }
@@ -57,7 +57,9 @@ github.setGithubFetch(async (url, init) => {
   const body = init.body ? JSON.parse(String(init.body)) : undefined
   api.requests.push({ method: String(init.method), path, auth, body })
   if (![...api.valid].some((t) => auth === `Bearer ${t}`)) return reply(401, { message: 'Bad credentials' })
-  if (path === 'user') return reply(200, { login: 'anna', plan: { name: 'Free' } })
+  if (api.odd && path === 'user') return reply(503, { message: 'Service Unavailable' })
+  // the account of each token: a switch in a terminal shows as another login
+  if (path === 'user') return reply(200, { login: auth.includes(TOKEN2) ? 'boris' : 'anna', plan: { name: 'Free' } })
   if (init.method === 'POST' && path === 'user/repos') {
     if (api.repos.has(body.name)) return reply(422, { message: 'Repository creation failed.', errors: [{ message: 'name already exists on this account' }] })
     api.repos.add(body.name)
@@ -77,17 +79,18 @@ beforeEach(() => {
   api.requests.length = 0
   api.valid = new Set([TOKEN])
   api.down = false
+  api.odd = false
 })
 
 describe('gh is started once per session', () => {
   it('status, create, credentials for git, repository and Pages checks: one gh start in all', async () => {
-    const st = await github.ghStatus(true)
+    const st = await github.ghStatus()
     expect(st).toMatchObject({ installed: true, loggedIn: true, user: 'anna' })
-    // the dialog asks again: GitHub only, not gh
-    await github.ghStatus(true)
+    // the dialog opens again: the state doplan knows, nothing asked
+    await github.ghStatus()
     const ref = await github.createRepo('flat', true, 'doplan project')
     expect(ref).toEqual({ owner: 'anna', repo: 'flat', ssh: false })
-    const cred = await github.gitCredentials()
+    const cred = await github.gitCredentials(['https://github.com/anna/flat.git'])
     expect(cred.env.GIT_CONFIG_KEY_0).toBe('http.https://github.com/.extraheader')
     expect(await pagesGh.repoState({ owner: 'anna', repo: 'flat' })).toEqual({ exists: true, isPrivate: true, canPush: true })
     expect(await pagesGh.ownerPlan('anna', 'anna')).toBe('free')
@@ -106,6 +109,49 @@ describe('gh is started once per session', () => {
   it('a taken name is "name taken", not a sign-in problem', async () => {
     api.repos.add('taken')
     await expect(github.createRepo('taken', true)).rejects.toMatchObject({ kind: 'nameTaken' })
+  })
+})
+
+describe('"check again" asks gh again (a sign-in or switch made in a terminal)', () => {
+  it("not signed in, then gh auth login in a terminal: the dialog's \"check again\" sees it", async () => {
+    gh.answer = 'none'
+    expect(await github.ghStatus()).toMatchObject({ installed: true, loggedIn: false })
+    gh.answer = 'token'
+    // opening a dialog again uses what doplan knows…
+    expect(await github.ghStatus()).toMatchObject({ loggedIn: false })
+    expect(gh.calls).toHaveLength(1)
+    // …the button asks gh: one more gh start, and the request to GitHub goes out
+    expect(await github.ghStatus(true)).toMatchObject({ loggedIn: true, user: 'anna' })
+    expect(gh.calls).toHaveLength(2)
+    expect(await github.ghToken()).toBe(TOKEN)
+  })
+
+  it('gh auth switch in a terminal: "refresh" shows the other account and git gets its token', async () => {
+    expect(await github.ghStatus()).toMatchObject({ user: 'anna' })
+    api.valid = new Set([TOKEN, TOKEN2])
+    gh.answer = 'token2'
+    expect(await github.ghStatus(true)).toMatchObject({ loggedIn: true, user: 'boris' })
+    const cred = await github.gitCredentials(['https://github.com/boris/flat.git'])
+    expect(Buffer.from(cred.env.GIT_CONFIG_VALUE_0.replace('Authorization: Basic ', ''), 'base64').toString()).toBe(`x-access-token:${TOKEN2}`)
+  })
+
+  it('signed out in a terminal: "check again" says so', async () => {
+    await github.ghStatus()
+    gh.answer = 'none'
+    expect(await github.ghStatus(true)).toMatchObject({ loggedIn: false })
+    expect(await github.ghToken()).toBeNull()
+    expect(await github.gitCredentials(['https://github.com/anna/flat.git'])).toEqual({ config: [], env: {} })
+  })
+
+  it('a check that started from the remembered token does not answer a "check again" asked meanwhile', async () => {
+    gh.answer = 'none'
+    await github.ghStatus()
+    github.forgetGhStatus()
+    const first = github.ghStatus()
+    gh.answer = 'token'
+    const again = github.ghStatus(true)
+    await first
+    expect(await again).toMatchObject({ loggedIn: true })
   })
 })
 
@@ -152,11 +198,28 @@ describe('slow is not "signed out" (the 0.15.0 bug)', () => {
     expect(st.slow || st.loggedIn).toBe(true)
   })
 
-  it('GitHub out of reach: still signed in as far as gh knows, the error says "no connection"', async () => {
+  it('GitHub out of reach after a confirmed sign-in: still signed in, the error says "no connection"', async () => {
     await github.ghStatus(true)
     api.down = true
     expect(await github.ghStatus(true)).toMatchObject({ loggedIn: true, user: 'anna' })
     await expect(github.createRepo('offline', true)).rejects.toMatchObject({ kind: 'offline' })
+  })
+
+  it('GitHub out of reach at the first check: "could not check", not "sign in", and asked again next time', async () => {
+    api.down = true
+    const st = await github.ghStatus()
+    expect(st).toMatchObject({ installed: true, loggedIn: false, offline: true })
+    expect(st.slow).toBeUndefined()
+    // not remembered: the next look asks GitHub again (and not gh)
+    api.down = false
+    expect(await github.ghStatus()).toMatchObject({ loggedIn: true, user: 'anna' })
+    expect(await github.ghStatus()).not.toHaveProperty('offline')
+    expect(gh.calls).toHaveLength(1)
+  })
+
+  it('an odd answer to the check (GitHub 503) is "could not check" too', async () => {
+    api.odd = true
+    expect(await github.ghStatus()).toMatchObject({ loggedIn: false, offline: true })
   })
 })
 
@@ -184,6 +247,39 @@ describe('the token for git', () => {
     expect(args[3]).toContain('if [ "$1" = get ]')
     expect(args[3]).toContain("'C:/Program Files/GitHub CLI/gh.exe' auth git-credential get")
     expect(github.ghHelperArgs("C:\\it's\\gh.exe")).toEqual([])
+  })
+
+  it('the header goes only with plain https://github.com addresses', () => {
+    expect(github.tokenHeaderFits(['https://github.com/anna/flat.git'])).toBe(true)
+    expect(github.tokenHeaderFits(['https://GitHub.com/anna/flat'])).toBe(true)
+    // a token clone keeps its own credentials; another host or ssh never gets gh's token
+    expect(github.tokenHeaderFits(['https://user:ghp_x@github.com/other/repo.git'])).toBe(false)
+    expect(github.tokenHeaderFits(['https://user@github.com/other/repo.git'])).toBe(false)
+    expect(github.tokenHeaderFits(['https://gitlab.com/anna/flat.git'])).toBe(false)
+    expect(github.tokenHeaderFits(['https://github.com.evil.example/anna/flat.git'])).toBe(false)
+    expect(github.tokenHeaderFits(['git@github.com:anna/flat.git'])).toBe(false)
+    expect(github.tokenHeaderFits(['https://github.com/a/b.git', 'https://x:y@github.com/a/b.git'])).toBe(false)
+    expect(github.tokenHeaderFits([])).toBe(false)
+  })
+
+  it('a remote with its own credentials: no header (gh helper only), and nothing to refresh', async () => {
+    const cred = await github.gitCredentials(['https://user:ghp_x@github.com/other/repo.git'])
+    expect(cred.env).toEqual({})
+    expect(cred.config[1]).toBe('credential.https://github.com.helper=')
+    expect(cred.refresh).toBeUndefined()
+  })
+
+  it('a refused header: refresh drops the token, reads gh again once and hands the new one', async () => {
+    const cred = await github.gitCredentials(['https://github.com/anna/flat.git'])
+    expect(cred.refresh).toBeTypeOf('function')
+    gh.answer = 'token2'
+    const next = await cred.refresh!()
+    expect(Buffer.from(next.env.GIT_CONFIG_VALUE_0.replace('Authorization: Basic ', ''), 'base64').toString()).toBe(`x-access-token:${TOKEN2}`)
+    expect(gh.calls).toHaveLength(2)
+    // the token was already read again by someone else (an API 401): no third gh start
+    const again = await cred.refresh!()
+    expect(again.env.GIT_CONFIG_VALUE_0).toBe(next.env.GIT_CONFIG_VALUE_0)
+    expect(gh.calls).toHaveLength(2)
   })
 
   it('not signed in: no header, no helper (the user’s own credential manager answers)', async () => {

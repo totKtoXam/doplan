@@ -72,6 +72,7 @@ vi.mock('./github', () => ({
   ghMissingText: () => 'gh missing',
   ghLoginText: () => 'gh login',
   ghSlowText: () => 'gh slow',
+  ghOfflineText: () => 'gh offline',
   gitCredentials: async () => ({ config: [], env: {} }),
 }))
 vi.mock('./projectFolder', () => ({ getProjectRoot: () => project }))

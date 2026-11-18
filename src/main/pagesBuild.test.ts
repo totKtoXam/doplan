@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { planSite } from '@shared/pagesSite'
 import { buildSite } from './pagesBuild'
-import { deleteRemoteBranch, pushSite } from './pagesGit'
+import { pushSite } from './pagesGit'
 
 let tmp: string
 
@@ -101,7 +101,8 @@ const git = gitExe()
 const gitIn = (dir: string, args: string[]) => execFileSync(git as string, ['-c', 'protocol.file.allow=always', ...args], { cwd: dir, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 'u', GIT_AUTHOR_EMAIL: 'u@x', GIT_COMMITTER_NAME: 'u', GIT_COMMITTER_EMAIL: 'u@x' } })
 
 describe.skipIf(!git)('pushSite', () => {
-  it('force-pushes the site as the only commit of gh-pages and deletes the branch again', async () => {
+  // deleting the branch again: git.gitPushRef with `expected` (githubSync.test)
+  it('force-pushes the site as the only commit of gh-pages', async () => {
     const dir = join(tmp, 'push')
     const bare = join(dir, 'remote.git')
     await fsp.mkdir(bare, { recursive: true })
@@ -129,12 +130,6 @@ describe.skipIf(!git)('pushSite', () => {
     expect(execFileSync(git as string, ['--git-dir', bare, 'show', 'gh-pages:index.html'], { encoding: 'utf8' })).toBe('v2')
     // the site folder keeps no repository of its own
     expect(existsSync(join(site, '.git'))).toBe(false)
-
-    // a head other than the checked one is not deleted
-    await expect(deleteRemoteBranch(runner, join(dir, 'work'), remote, 'gh-pages', first)).rejects.toThrow()
-    expect(await deleteRemoteBranch(runner, join(dir, 'work'), remote, 'gh-pages', sha)).toBe(true)
-    expect(execFileSync(git as string, ['--git-dir', bare, 'branch', '--list'], { encoding: 'utf8' }).trim()).toBe('')
-    expect(await deleteRemoteBranch(runner, join(dir, 'work'), remote, 'gh-pages', sha)).toBe(false)
   }, 60_000)
 
   it('never overwrites a gh-pages branch that appeared after the check (someone else\'s site)', async () => {
@@ -165,6 +160,6 @@ describe.skipIf(!git)('pushSite', () => {
   it('refuses a remote URL with credentials in it, and a malformed expected head', async () => {
     const runner = { git: git as string, hooksDir: tmp }
     await expect(pushSite(runner, join(tmp, 'none'), 'https://user:token@github.com/a/b.git', 'gh-pages', 'x', null)).rejects.toThrow(/credentials/)
-    await expect(deleteRemoteBranch(runner, join(tmp, 'none'), 'https://github.com/a/b.git', 'gh-pages', 'HEAD~1')).rejects.toThrow(/commit id/)
+    await expect(pushSite(runner, join(tmp, 'none2'), 'https://github.com/a/b.git', 'gh-pages', 'x', 'HEAD~1')).rejects.toThrow(/commit id/)
   })
 })

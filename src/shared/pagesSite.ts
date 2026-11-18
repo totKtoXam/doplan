@@ -646,6 +646,8 @@ export interface PagesPublishRequest {
   underlays?: boolean
   /** the document's file (a record of a file renamed or moved on disk follows it) */
   file?: PagesFileRef
+  /** the project folder open when the request was made (null: none); main refuses it for another one */
+  root?: string | null
 }
 
 export interface PagesPublishResult {
@@ -671,6 +673,8 @@ export interface PagesStatusQuery {
   aliases?: string[]
   /** the document's file (a record of a file renamed or moved on disk follows it) */
   file?: PagesFileRef
+  /** the project folder open when the request was made (null: none); main refuses it for another one */
+  root?: string | null
 }
 
 /** window.doplan.pages */

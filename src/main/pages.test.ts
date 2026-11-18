@@ -53,7 +53,26 @@ vi.mock('./paths', () => ({ mainDir: join(base, 'main'), paths: { userData, cata
 vi.mock('./settings', () => ({ msg: (ru: string) => ru }))
 vi.mock('./ipc', () => ({ handleIpc: () => undefined }))
 vi.mock('./window', () => ({ sendToRenderer: () => undefined }))
-vi.mock('./git', () => ({ findGit: async () => 'git' }))
+vi.mock('./git', () => ({
+  findGit: async () => 'git',
+  gitInit: async () => undefined,
+  // only deletes here (the site itself goes up through pagesGit.pushSite)
+  gitPushRef: async (_root: string, _net: unknown, src: string | null, _branch: string, opts: { remote: string; expected?: string }) => {
+    if (src !== null || !opts.expected) throw new Error('pages: a delete with the checked head only')
+    const key = fromRemote(opts.remote)
+    gh.calls.push(`delete ${key}`)
+    const r = repo(key)
+    if (r.branchSha !== opts.expected) throw new Error('stale info')
+    r.branchSha = null
+    r.marker = null
+  },
+}))
+vi.mock('./github', () => ({
+  ghStatus: async () => ({ installed: true, loggedIn: true, user: 'me' }),
+  ghMissingText: () => 'gh missing',
+  ghLoginText: () => 'gh login',
+  gitCredentialArgs: async () => [],
+}))
 vi.mock('./projectFolder', () => ({ getProjectRoot: () => project }))
 vi.mock('./pagesBuild', () => ({
   buildSite: async ({ outDir }: { outDir: string }) => {
@@ -62,10 +81,6 @@ vi.mock('./pagesBuild', () => ({
   },
 }))
 vi.mock('./pagesGh', () => ({
-  ghStatus: async () => ({ installed: true, loggedIn: true, user: 'me' }),
-  ghMissingText: () => 'gh missing',
-  ghLoginText: () => 'gh login',
-  gitCredentialArgs: async () => [],
   openPagesUrl: async () => undefined,
   repoState: async (ref: RepoRef) => {
     const r = gh.repos.get(k(ref))
@@ -113,15 +128,6 @@ vi.mock('./pagesGit', () => ({
     r.branchSha = nextSha()
     r.marker = readFileSync(join(siteDir, '.doplan-pages.json'), 'utf8')
     return r.branchSha
-  },
-  deleteRemoteBranch: async (_r: unknown, _w: string, remote: string, _b: string, expected: string) => {
-    const key = fromRemote(remote)
-    gh.calls.push(`delete ${key}`)
-    const r = repo(key)
-    if (r.branchSha !== expected) throw new Error('stale info')
-    r.branchSha = null
-    r.marker = null
-    return true
   },
 }))
 
@@ -335,6 +341,21 @@ describe('the record follows its document', () => {
     await publishPlan(req({ target: 'separate' }))
     expect(gh.calls.filter((c) => c.startsWith('create'))).toEqual([])
     expect(gh.calls.filter((c) => c.startsWith('push'))).toEqual([`push me/${name}`])
+  })
+
+  it('a request made for another project folder (opened meanwhile) is refused before anything happens', async () => {
+    setOrigin('https://github.com/me/flat.git')
+    gh.repos.set('me/flat', fresh())
+    gh.calls = []
+    const other = join(base, 'another-project')
+    await expect(pagesStatus({ docId: 'doc1', contentHash: 'h1', name: 'Flat', root: other })).rejects.toThrow(/другой проект/)
+    await expect(publishPlan(req({ root: other }))).rejects.toThrow(/другой проект/)
+    await expect(publishPlan(req({ root: null }))).rejects.toThrow(/другой проект/)
+    expect(gh.calls).toEqual([])
+    expect((await status()).record).toBeNull()
+    // the same folder, however it is spelled, is this project
+    const res = await publishPlan(req({ root: `${project}${process.platform === 'win32' ? '\\' : '/'}` }))
+    expect(res.record).toMatchObject({ owner: 'me', repo: 'flat' })
   })
 
   it("a clone of someone else's project: their site of the same document is not taken as the user's", async () => {

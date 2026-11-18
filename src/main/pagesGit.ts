@@ -3,7 +3,7 @@
  * branch, force-pushed: the branch never keeps old versions of the plan, and the project's history is
  * not touched). The repository is a fresh one inside the site folder, created for each push. No
  * Electron imports: the git executable and folders come in as arguments (tests push to a local bare
- * repository).
+ * repository). Deleting the branch again is git.gitPushRef with the head checked to be doplan's.
  */
 import { execFile } from 'node:child_process'
 import { promises as fsp } from 'node:fs'
@@ -102,6 +102,7 @@ function checkRemote(remote: string): void {
  */
 export async function pushSite(r: GitRunner, siteDir: string, remote: string, branch: string, message: string, expected: string | null): Promise<string> {
   checkRemote(remote)
+  const expect = lease(expected)
   const { args, env: e } = repoArgs(siteDir)
   await fsp.rm(join(siteDir, '.git'), { recursive: true, force: true })
   // no template: nothing from the user's init.templateDir (hooks) lands in the repository
@@ -110,7 +111,7 @@ export async function pushSite(r: GitRunner, siteDir: string, remote: string, br
     await run(r, siteDir, [...args, 'add', '-A', '--', '.'], e)
     await run(r, siteDir, [...args, 'commit', '-q', '--no-verify', '-m', message], e)
     const sha = (await run(r, siteDir, [...args, 'rev-parse', 'HEAD'], e)).trim()
-    await run(r, siteDir, [...args, 'push', `--force-with-lease=refs/heads/${branch}:${lease(expected)}`, '--quiet', '--no-verify', remote, `HEAD:refs/heads/${branch}`], e)
+    await run(r, siteDir, [...args, 'push', `--force-with-lease=refs/heads/${branch}:${expect}`, '--quiet', '--no-verify', remote, `HEAD:refs/heads/${branch}`], e)
     return sha
   } finally {
     await fsp.rm(join(siteDir, '.git'), { recursive: true, force: true })
@@ -122,26 +123,3 @@ const lease = (sha: string | null): string => {
   return sha ?? ''
 }
 
-/**
- * Deletes `branch` on `remote` if its head is still `expected` (the one checked to be doplan's);
- * resolves false when it was not there.
- */
-export async function deleteRemoteBranch(r: GitRunner, workDir: string, remote: string, branch: string, expected: string): Promise<boolean> {
-  const sha = lease(expected)
-  checkRemote(remote)
-  await fsp.rm(workDir, { recursive: true, force: true })
-  await fsp.mkdir(workDir, { recursive: true })
-  const { args, env: e } = repoArgs(workDir)
-  try {
-    await run(r, workDir, ['init', '-q', '--template=', resolve(workDir)], e)
-    const heads = await run(r, workDir, [...args, 'ls-remote', '--heads', remote, `refs/heads/${branch}`], e)
-    if (!heads.trim()) return false
-    await run(r, workDir, [...args, 'push', `--force-with-lease=refs/heads/${branch}:${sha}`, '--quiet', '--no-verify', remote, `:refs/heads/${branch}`], e)
-    return true
-  } catch (err) {
-    if (err instanceof PagesGitError && /remote ref does not exist|unable to delete .*: remote ref/i.test(err.stderr)) return false
-    throw err
-  } finally {
-    await fsp.rm(workDir, { recursive: true, force: true })
-  }
-}

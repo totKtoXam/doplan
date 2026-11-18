@@ -65,6 +65,9 @@ function current(gen: Generation): boolean {
   return now.root === gen.root && now.loadId === gen.loadId
 }
 
+/** the project on screen is still the one of `gen` (an answer from main may be about another one) */
+export { current as isCurrentGeneration }
+
 /** an answer about a project no longer on screen: forget it, show the open one's own state */
 function dropped(): void {
   void refreshGithub(false)

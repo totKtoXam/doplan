@@ -22,6 +22,7 @@ import {
 import { addTranslations, useT } from '@/i18n'
 import { api } from '@/store/api'
 import { useDoc } from '@/store/document'
+import { generation, isCurrentGeneration } from '@/store/github'
 import { movedKeys } from '@/store/pagesKeys'
 import { confirmDialog, toast } from '@/store/notify'
 import { uiStore } from '@/store/ui'
@@ -143,6 +144,8 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
   const t = useT()
   const doc = useDoc((s) => s.doc)
   const filePath = useDoc((s) => s.filePath)
+  // a new load (another project, a reload, a version) asks main again
+  const loadId = useDoc((s) => s.loadId)
   const [status, setStatus] = useState<PagesStatus | null>(null)
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState<PagesProgress['step'] | 'unpublish' | null>(null)
@@ -165,17 +168,21 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
 
   const refresh = useCallback(
     async (fresh = false) => {
+      // the project generation the answer is for: one about a project no longer open is dropped
+      const gen = generation()
       setLoading(true)
       setError(null)
       try {
-        setStatus(await api.pages.status({ docId: key, aliases, contentHash: hash, name: doc.meta.name, fresh, ...(fileRef ? { file: fileRef } : {}) }))
+        const st = await api.pages.status({ docId: key, aliases, contentHash: hash, name: doc.meta.name, fresh, root: gen.root, ...(fileRef ? { file: fileRef } : {}) })
+        if (isCurrentGeneration(gen)) setStatus(st)
       } catch (e) {
-        setError((e as Error).message)
+        if (isCurrentGeneration(gen)) setError((e as Error).message)
       } finally {
         setLoading(false)
       }
     },
-    [key, aliases, hash, doc.meta.name, fileRef],
+    // loadId: a new load is asked about again
+    [key, aliases, hash, doc.meta.name, fileRef, loadId],
   )
 
   useEffect(() => {
@@ -202,6 +209,8 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
 
   const publish = async () => {
     if (!content || !status) return
+    // what main publishes is this project's plan: an answer after another one opened is not shown on it
+    const gen = generation()
     const target = record ? (record.separate ? 'separate' : 'project') : projectUsable ? 'project' : 'separate'
     const privateChoice: PagesPrivateChoice | undefined = recordStuck
       ? recordTarget?.exists
@@ -217,7 +226,7 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
         t('Все файлы проекта и вся история его версий станут видны всем в интернете. Вернуть приватность можно в настройках репозитория на GitHub, но копии могут остаться у других.'),
         { ok: t('Сделать публичным'), cancel: t('Отмена'), danger: true },
       )
-      if (!ok) return
+      if (!ok || !isCurrentGeneration(gen)) return
     }
     setBusy('build')
     setError(null)
@@ -231,12 +240,14 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
         ...(privateChoice ? { privateChoice } : {}),
         aliases,
         underlays: withUnderlays,
+        root: gen.root,
         ...(fileRef ? { file: fileRef } : {}),
       })
+      if (!isCurrentGeneration(gen)) return
       setResult(res)
       await refresh()
     } catch (e) {
-      setError((e as Error).message)
+      if (isCurrentGeneration(gen)) setError((e as Error).message)
     } finally {
       setBusy(null)
     }

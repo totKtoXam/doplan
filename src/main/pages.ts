@@ -23,7 +23,7 @@
  */
 import { randomBytes } from 'node:crypto'
 import { promises as fsp } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { app } from 'electron'
 import {
   canPublishInto,
@@ -60,24 +60,12 @@ import {
 } from '@shared/pagesSite'
 import { CH } from './channels'
 import { atomicWrite, readJson } from './fsutil'
-import { findGit } from './git'
+import { findGit, gitInit, gitPushRef } from './git'
+import { ghLoginText, ghMissingText, ghStatus, gitCredentialArgs } from './github'
 import { handleIpc } from './ipc'
 import { buildSite } from './pagesBuild'
-import {
-  createPublicRepo,
-  disablePages,
-  enablePages,
-  ghLoginText,
-  ghMissingText,
-  ghStatus,
-  gitCredentialArgs,
-  inspectPages,
-  makePublic,
-  openPagesUrl,
-  ownerPlan,
-  repoState,
-} from './pagesGh'
-import { deleteRemoteBranch, pushSite, type GitRunner } from './pagesGit'
+import { createPublicRepo, disablePages, enablePages, inspectPages, makePublic, openPagesUrl, ownerPlan, repoState } from './pagesGh'
+import { pushSite, type GitRunner } from './pagesGit'
 import { mainDir, paths } from './paths'
 import { getProjectRoot } from './projectFolder'
 import { msg } from './settings'
@@ -195,6 +183,23 @@ async function projectRepo(): Promise<RepoRef | null> {
   }
 }
 
+const samePath = (a: string, b: string) => {
+  const x = resolve(a)
+  const y = resolve(b)
+  return process.platform === 'win32' ? x.toLowerCase() === y.toLowerCase() : x === y
+}
+
+/**
+ * The request was made for the project folder open now. Another project opened meanwhile has another
+ * repository: an answer about it, or a publication into it, would belong to the wrong plan.
+ */
+function checkProject(root: unknown): void {
+  if (root === undefined) return
+  const now = getProjectRoot()
+  const same = root === null ? now === null : typeof root === 'string' && !!now && samePath(root, now)
+  if (!same) throw new Error(msg('Открыт другой проект: откройте окно публикации заново.', 'Another project is open: open the publish window again.'))
+}
+
 /** out/viewer of this build (packaged into the app) */
 function viewerDir(): string {
   return join(mainDir, '..', 'viewer')
@@ -310,18 +315,35 @@ function foreignError(ref: RepoRef, own: { branch: Ownership; site: Ownership },
 const chooseError = () =>
   new Error(msg('Репозиторий приватный: выберите, сделать его публичным или публиковать отдельно.', 'The repository is private: choose to make it public or to publish separately.'))
 
+/**
+ * Deletes the gh-pages branch of `ref` if its head is still `expected` (the one checked to be doplan's).
+ * git runs in an empty repository of doplan's own: the open project folder is not involved.
+ */
+async function removeBranch(work: string, ref: RepoRef, expected: string): Promise<void> {
+  const dir = join(work, 'branch')
+  await fsp.rm(dir, { recursive: true, force: true })
+  await fsp.mkdir(dir, { recursive: true })
+  try {
+    await gitInit(dir)
+    await gitPushRef(dir, { config: await gitCredentialArgs(), interactive: true }, null, PAGES_BRANCH, { remote: remoteOf(ref), expected })
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true }).catch(() => undefined)
+  }
+}
+
 /** turns off doplan's own Pages site and deletes doplan's own gh-pages branch; anything else stays */
-async function takeDown(runner: GitRunner, work: string, ref: RepoRef, pubId: string | undefined): Promise<void> {
+async function takeDown(work: string, ref: RepoRef, pubId: string | undefined): Promise<void> {
   if (!(await repoState(ref)).exists) return
   const insp = await inspectPages(ref)
   const own = pagesOwnership(insp, pubId, true)
   if (own.site === 'ours') await disablePages(ref)
-  if (own.branch === 'ours' && insp.branchSha) await deleteRemoteBranch(runner, join(work, 'unpublish'), remoteOf(ref), PAGES_BRANCH, insp.branchSha)
+  if (own.branch === 'ours' && insp.branchSha) await removeBranch(work, ref, insp.branchSha)
 }
 
 // ───────────── status ─────────────
 
 export async function pagesStatus(q: PagesStatusQuery): Promise<PagesStatus> {
+  checkProject(q?.root)
   const docId = String(q?.docId ?? '')
   const gh = await ghStatus(!!q?.fresh).catch(() => ({ installed: false, loggedIn: false }) as { installed: boolean; loggedIn: boolean; user?: string })
   const git = !!(await findGit())
@@ -388,7 +410,8 @@ function checkRequest(req: PagesPublishRequest): void {
     (req.privateChoice === undefined || req.privateChoice === 'makePublic' || req.privateChoice === 'separate') &&
     (req.aliases === undefined || Array.isArray(req.aliases)) &&
     (req.underlays === undefined || typeof req.underlays === 'boolean') &&
-    (req.file === undefined || !!cleanFile(req.file))
+    (req.file === undefined || !!cleanFile(req.file)) &&
+    (req.root === undefined || req.root === null || typeof req.root === 'string')
   if (!ok) throw new Error('pages: bad publish request')
 }
 
@@ -396,6 +419,7 @@ const mb = (b: number) => `${(b / 1024 ** 2).toFixed(1)} MB`
 
 export async function publishPlan(req: PagesPublishRequest, emit: (p: PagesProgress) => void = () => undefined): Promise<PagesPublishResult> {
   checkRequest(req)
+  checkProject(req.root)
   if (busy) throw new Error(msg('Публикация уже идёт', 'Publishing is already running'))
   busy = true
   const work = workDir(req.docId)
@@ -517,7 +541,7 @@ export async function publishPlan(req: PagesPublishRequest, emit: (p: PagesProgr
       url = await enablePages(ref, own.site === 'ours' ? insp.pages : null)
     } catch (e) {
       // Pages refused (an owner plan without Pages for private repositories…): take the new branch back
-      if (insp.branchSha === null) await deleteRemoteBranch(runner, join(work, 'cleanup'), remoteOf(ref), PAGES_BRANCH, sha).catch(() => false)
+      if (insp.branchSha === null) await removeBranch(work, ref, sha).catch(() => undefined)
       throw e
     }
 
@@ -536,7 +560,7 @@ export async function publishPlan(req: PagesPublishRequest, emit: (p: PagesProgr
     for (const a of aliases) if (a !== req.docId) delete latest[a]
     latest[req.docId] = record
     await saveRecords(latest)
-    if (moveFrom && prev) await takeDown(runner, work, moveFrom, prev.pubId).catch(() => undefined)
+    if (moveFrom && prev) await takeDown(work, moveFrom, prev.pubId).catch(() => undefined)
     emit({ step: 'done' })
     return { record, bytes: built.bytes, files: built.files, missing: built.missing }
   } finally {
@@ -583,7 +607,7 @@ export async function unpublishPlan(docId: string): Promise<void> {
     const st = await repoState(refOf(rec))
     if (st.exists && st.canPush === false && !sameName(rec.owner, gh.user)) throw await noAccess()
     try {
-      await takeDown(await gitRunner(), workDir(docId), refOf(rec), rec.pubId)
+      await takeDown(workDir(docId), refOf(rec), rec.pubId)
     } catch (e) {
       const m = (e as Error).message
       if (/HTTP 403|\b403\b|permission|denied/i.test(m)) throw await noAccess(m)

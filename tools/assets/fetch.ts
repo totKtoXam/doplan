@@ -26,6 +26,7 @@ import { ALL_EXTENSIONS } from '@gltf-transform/extensions'
 import { getBounds, metalRough, prune, textureCompress } from '@gltf-transform/functions'
 import { gltfExtents, implausibleSize, sizeFromGltf, type GltfJson } from './sizes'
 import { optimizeTextures } from './optimize'
+import { khronosCredits, parseLicence } from './licence'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..', '..')
@@ -336,11 +337,6 @@ async function loadAcgMeta(ids: string[]): Promise<void> {
 }
 
 // ───────────────────────────── models ─────────────────────────────
-function parseLicence(l: string): { licence: string; author?: string } {
-  const m = /^(CC0-1\.0|CC-BY-4\.0)\s*\((.*)\)\s*$/.exec(l)
-  if (m) return { licence: m[1] === 'CC0-1.0' ? 'CC0' : m[1], author: m[2] }
-  return { licence: l.startsWith('CC0') ? 'CC0' : l }
-}
 function modelPrefix(id: string): string {
   const p = id.slice(0, id.indexOf(':'))
   return p === 'ph' ? 'ph' : p === 'khr' ? 'khr' : p === 'kaykit' ? 'kk' : p
@@ -645,10 +641,11 @@ Machine-readable per-entry licence/author fields are in \`catalog.json\`.
 ## Khronos glTF-Sample-Assets (https://github.com/KhronosGroup/glTF-Sample-Assets)
 - Per-model licences. The script only accepts CC0 and CC-BY-4.0.
 - **CC0** (bundled): SheenChair, GlassVaseFlowers.
-- **CC-BY-4.0** (on-demand only, attribution REQUIRED when downloaded and used; author is stored in the catalog \`author\` field):
-  GlamVelvetSofa, SheenWoodLeatherSofa, ChairDamaskPurplegold, CommercialRefrigerator, AnisotropyBarnLamp,
-  IridescenceLamp, GlassHurricaneCandleHolder, DiffuseTransmissionPlant, LightsPunctualLamp.
-  The app must list them in its credits screen with owner and artist (see \`author\`).
+- **CC-BY-4.0** (on-demand only, attribution REQUIRED when downloaded and used; the app shows the author from the catalog
+  \`author\` field). Some models combine CC-BY parts with CC0 parts: the CC0 authors are marked "(CC0)". Generated from the
+  catalog:
+
+@@KHRONOS@@
 
 ## KayKit Furniture Bits (https://github.com/KayKit-Game-Assets/KayKit-Furniture-Bits-1.0)
 - Licence: **CC0 1.0**. Stylised low-poly, on-demand only.
@@ -674,7 +671,7 @@ function licensesMd(assets: Asset[], mf: Manifest): string {
     .filter((a) => a.source?.includes('sketchfab.com'))
     .sort((a, b) => (a.nameRu ?? a.name).localeCompare(b.nameRu ?? b.name, 'ru'))
     .map((a) => `- ${a.nameRu ?? a.name}: "${a.name}" by ${a.author ?? 'unknown'}, ${a.source}, ${a.licence}${fixed.has(a.id) ? ' (modified: repaired for doplan)' : ''}`)
-  return LICENSES_MD.replace('@@SKETCHFAB@@', rows.join('\n') || '- (none)')
+  return LICENSES_MD.replace('@@KHRONOS@@', khronosCredits(assets).join('\n') || '- (none)').replace('@@SKETCHFAB@@', rows.join('\n') || '- (none)')
 }
 
 // ───────────────────────────── main ─────────────────────────────

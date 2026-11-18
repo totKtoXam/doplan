@@ -144,6 +144,10 @@ addTranslations('en', {
   Стоп: 'Stop',
   Остановить: 'Stop',
   'Отправить (Enter)': 'Send (Enter)',
+  Цитировать: 'Quote',
+  'Изменить сообщение': 'Edit message',
+  'Изменить и отправить заново': 'Edit and send again',
+  'Ответы после этого сообщения будут заменены': 'Replies after this message will be replaced',
   'Чем помочь с планом?': 'How can I help with the plan?',
   '«добавь стену от n_… до n_…», «поставь холодильник на кухне». Правки видны сразу и отменяются Ctrl+Z.':
     '“add a wall from n_… to n_…”, “put a fridge in the kitchen”. Edits show right away and undo with Ctrl+Z.',

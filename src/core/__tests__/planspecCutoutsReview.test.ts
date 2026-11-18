@@ -4,7 +4,8 @@ import { describe, expect, it } from 'vitest'
 import { summarizeLevelRooms } from '../area'
 import { derivePlan } from '../derive'
 import { parseDoc, serializeDoc } from '../io'
-import { moveNode, normalize, removeEntities, syncRooms } from '../ops'
+import { addRectRoom, moveNode, moveNodes, normalize, removeEntities, syncRooms } from '../ops'
+import { createEmptyDoc } from '../defaults'
 import { compilePlanSpecDetailed, docToPlanSpec, parsePlanSpec, validatePlanSpecDetailed, type PlanSpec } from '../planspec'
 import { DOC_VERSION, DOC_VERSION_V4 } from '../types'
 import { docFormatVersion } from '../variants'
@@ -325,15 +326,16 @@ describe('planspec cutouts: review round 2', () => {
     }
   })
 
-  it('#7 two partly touching shafts mid-room: no false hole-count error, both voids are shafts', () => {
+  it('#7 two partly touching shafts mid-room: no false hole-count error, one shaft of their union', () => {
     const spec = base([{ id: 'a', type: 'living', rect: [0, 0, 4000, 3000], cutouts: [{ rect: [1000, 1000, 500, 500] }, { rect: [1500, 1200, 500, 500] }] }])
     const v = validatePlanSpecDetailed(spec)
     expect(v.issues.filter((i) => i.code === 'BUILT_SHAPE_MISMATCH')).toEqual([])
     expect(v.ok).toBe(true)
     const { res, face } = build(spec)
     expect(face('a')?.area).toBeCloseTo(11.5, 2)
+    // touching cutouts of one kind are one cutout (no wall between them): one L-shaped shaft
     const shafts = Object.values(res.doc.rooms).filter((r) => r.technical)
-    expect(shafts).toHaveLength(2)
+    expect(shafts).toHaveLength(1)
     expect(shafts.every((r) => r.name === 'Шахта' && r.type === 'other')).toBe(true)
   })
 
@@ -434,5 +436,146 @@ describe('planspec cutouts: review round 3', () => {
       if (d !== 700) expect(recs.find((r) => !r?.technical)?.type).toBe('living')
       expect(docFormatVersion(doc)).toBe(DOC_VERSION_V4)
     }
+  })
+})
+
+describe('editor: technical voids and islands, review round 4', () => {
+  /** a 5000×4000 room (200 mm walls) with a 1500×1500 island (100 mm walls) at 500,500 marked technical */
+  const roomWithShaft = () => {
+    const doc = createEmptyDoc()
+    const lv = doc.levelOrder[0]
+    addRectRoom(doc, lv, 0, 0, 5000, 4000, { thickness: 200 })
+    const islandWalls = addRectRoom(doc, lv, 500, 500, 1500, 1500, { thickness: 100 })
+    normalize(doc)
+    syncRooms(doc)
+    const plan = derivePlan(doc, lv)
+    const shaft = plan.rooms.find((f) => Math.abs(f.area - 1.96) < 0.01)!
+    const room = plan.rooms.find((f) => Math.abs(f.area - 15.68) < 0.01)!
+    doc.rooms[shaft.roomId].technical = true
+    Object.assign(doc.rooms[room.roomId], { type: 'living', name: 'Гостиная' })
+    normalize(doc)
+    syncRooms(doc)
+    const nodes = new Set<string>()
+    for (const id of islandWalls) nodes.add(doc.walls[id].a).add(doc.walls[id].b)
+    return { doc, lv, nodes, roomAnchor: { ...doc.rooms[room.roomId].anchor }, shaftAnchor: { ...doc.rooms[shaft.roomId].anchor } }
+  }
+  const dragAndCommit = (doc: ReturnType<typeof createEmptyDoc>, nodes: Set<string>, dx: number, dy: number) => {
+    moveNodes(doc, new Map([...nodes].map((id) => [id, { x: doc.nodes[id].x + dx, y: doc.nodes[id].y + dy }])))
+    normalize(doc)
+    syncRooms(doc)
+  }
+
+  it('#17 dragging the shaft island onto the room label keeps the room real and the shaft technical', () => {
+    const { doc, lv, nodes, roomAnchor, shaftAnchor } = roomWithShaft()
+    dragAndCommit(doc, nodes, roomAnchor.x - shaftAnchor.x, roomAnchor.y - shaftAnchor.y)
+    const plan = derivePlan(doc, lv)
+    const sum = summarizeLevelRooms(doc, plan.rooms)
+    expect(sum.total).toBeCloseTo(15.68, 2)
+    expect(sum.technicalCount).toBe(1)
+    const big = plan.rooms.find((f) => Math.abs(f.area - 15.68) < 0.01)!
+    expect(doc.rooms[big.roomId].name).toBe('Гостиная')
+    expect(doc.rooms[big.roomId].technical).toBeFalsy()
+  })
+
+  it('#18 a drag of any size keeps the technical flag (and the area total)', () => {
+    for (const [dx, dy] of [[0, 1700], [1700, 0], [2400, 1700], [800, 800], [-300, 1500], [2000, 0]]) {
+      const { doc, lv, nodes } = roomWithShaft()
+      dragAndCommit(doc, nodes, dx, dy)
+      const plan = derivePlan(doc, lv)
+      const sum = summarizeLevelRooms(doc, plan.rooms)
+      expect(sum.total, `${dx},${dy}`).toBeCloseTo(15.68, 2)
+      expect(sum.technicalCount, `${dx},${dy}`).toBe(1)
+      expect(sum.count, `${dx},${dy}`).toBe(1)
+    }
+  })
+
+  it('#18 removing the shaft walls returns the floor to the room (no room-sized shaft)', () => {
+    const { doc, lv, nodes } = roomWithShaft()
+    const ids = Object.values(doc.walls).filter((w) => nodes.has(w.a) || nodes.has(w.b)).map((w) => ({ kind: 'wall' as const, id: w.id }))
+    removeEntities(doc, ids)
+    normalize(doc)
+    syncRooms(doc)
+    const sum = summarizeLevelRooms(doc, derivePlan(doc, lv).rooms)
+    expect(sum.technicalCount).toBe(0)
+    expect(sum.total).toBeCloseTo(4.8 * 3.8, 2)
+  })
+
+  it('#17/#18 the void nodes survive a save and load', () => {
+    const { doc, lv, nodes, roomAnchor, shaftAnchor } = roomWithShaft()
+    const again = parseDoc(serializeDoc(doc))
+    dragAndCommit(again, nodes, roomAnchor.x - shaftAnchor.x, roomAnchor.y - shaftAnchor.y)
+    const sum = summarizeLevelRooms(again, derivePlan(again, lv).rooms)
+    expect(sum.total).toBeCloseTo(15.68, 2)
+    expect(sum.technicalCount).toBe(1)
+  })
+
+  it('#19 an island whose wall overlaps the room wall is still a hole of the room, on every side', () => {
+    for (const off of [50, 100, 120, 140]) {
+      for (const side of ['left', 'right', 'top', 'bottom'] as const) {
+        const doc = createEmptyDoc()
+        const lv = doc.levelOrder[0]
+        addRectRoom(doc, lv, 0, 0, 5000, 4000, { thickness: 200 })
+        const at = { left: [off, 1500], right: [5000 - off - 800, 1500], top: [2000, off], bottom: [2000, 4000 - off - 800] }[side]
+        addRectRoom(doc, lv, at[0], at[1], 800, 800, { thickness: 100 })
+        normalize(doc)
+        const plan = derivePlan(doc, lv)
+        const room = plan.rooms.reduce((a, b) => (a.area > b.area ? a : b))
+        expect(room.holes, `${side} ${off}`).toHaveLength(1)
+        // 4.8 × 3.8 minus the box footprint (900 × 900, as before the overlap rule)
+        expect(room.area, `${side} ${off}`).toBeCloseTo(18.24 - 0.81, 2)
+      }
+    }
+  })
+})
+
+describe('planspec cutouts: dp doc spec round trip, review round 4', () => {
+  const W = [{ type: 'window', at: [2000, 3150], width: 1200 }]
+  const roundTrip = (spec: PlanSpec) => {
+    const first = build(spec)
+    const back = docToPlanSpec(first.res.doc, first.res.levelId)
+    const again = build(back)
+    const total = (b: ReturnType<typeof build>) => summarizeLevelRooms(b.res.doc, b.plan.rooms).total
+    const tech = (b: ReturnType<typeof build>) => b.plan.rooms.filter((f) => b.res.doc.rooms[f.roomId]?.technical).length
+    return { back, v: validatePlanSpecDetailed(back), first, again, total, tech }
+  }
+
+  it('#6 a floor strip between two cutouts on one wall stays floor after the round trip', () => {
+    const cases: [unknown[], number][] = [
+      [[{ rect: [0, 600, 1300, 1100] }, { rect: [0, 2150, 1300, 850], kind: 'box' }], 9.47],
+      [[{ rect: [0, 0, 600, 600], kind: 'shaft' }, { rect: [0, 1000, 600, 600], kind: 'shaft' }], 11.28],
+    ]
+    for (const [cutouts, area] of cases) {
+      const spec = base([{ id: 'a', type: 'living', rect: [0, 0, 4000, 3000], labelledArea: area, cutouts }], { openings: [{ type: 'entranceDoor', at: [4150, 2000], width: 900 }, ...W] })
+      const { back, v, first, again, total, tech } = roundTrip(spec)
+      expect(back.walls!.some((w) => w.cutout)).toBe(true)
+      expect(v.ok).toBe(true)
+      expect(v.issues.filter((i) => i.severity !== 'info')).toEqual([])
+      expect(total(again)).toBeCloseTo(total(first), 2)
+      expect(total(again)).toBeCloseTo(area, 2)
+      expect(again.plan.rooms).toHaveLength(first.plan.rooms.length)
+      expect(tech(again)).toBe(2)
+    }
+  })
+
+  it('#7 the round trip of a column raises no WALL_THICKNESS_ODD (dp spec build --strict takes it)', () => {
+    const cases: unknown[][] = [
+      [{ rect: [0, 0, 600, 1000], kind: 'column' }, { rect: [600, 0, 600, 600], kind: 'shaft' }],
+      [{ rect: [0, 0, 600, 1000], kind: 'column' }, { rect: [600, 200, 600, 600], kind: 'shaft' }],
+      [{ rect: [0, 0, 600, 1000], kind: 'column' }, { rect: [600, 0, 600, 1000], kind: 'shaft' }],
+      [{ rect: [1500, 1200, 600, 600], kind: 'column' }],
+    ]
+    for (const cutouts of cases) {
+      const spec = base([{ id: 'a', type: 'living', rect: [0, 0, 4000, 3000], cutouts }], { openings: [{ type: 'entranceDoor', at: [4150, 2000], width: 900 }, ...W] })
+      const { v, first, again, total } = roundTrip(spec)
+      expect(v.issues.filter((i) => i.severity !== 'info')).toEqual([])
+      expect(total(again)).toBeCloseTo(total(first), 2)
+    }
+  })
+
+  it('the exported spec keeps the exterior thickness of a 510 mm project', () => {
+    const spec = { ...base([{ id: 'a', type: 'living', rect: [0, 0, 4000, 3000], cutouts: [{ rect: [3600, 1000, 400, 500], kind: 'column' }] }]), defaults: { exteriorThickness: 510 } } as PlanSpec
+    const { back, v } = roundTrip(spec)
+    expect(back.defaults?.exteriorThickness).toBe(510)
+    expect(v.issues.filter((i) => i.code === 'WALL_THICKNESS_ODD')).toEqual([])
   })
 })

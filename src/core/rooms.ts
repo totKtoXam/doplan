@@ -11,7 +11,7 @@
  * - the inner polygon is built from the mitred wall faces (WallGeom.left / .right), so the area is
  *   measured between finished wall faces; virtual walls contribute their axis.
  */
-import { dist, pointInPolygon, polygonArea, polygonPerimeter, polylabel, projectOnSegment } from './geom'
+import { dist, pointInPolygon, polygonArea, polygonPerimeter, polylabel } from './geom'
 import { hashString } from './ids'
 import type { DerivedRoom, Doc, Id, Room, RoomBoundaryEdge, Vec2, Wall, WallGeom } from './types'
 
@@ -181,6 +181,7 @@ interface Face {
   holeArea: number
   edges: RoomBoundaryEdge[]
   centerline: Vec2[]
+  nodeIds: Id[]
   nodeKey: string
 }
 
@@ -277,6 +278,7 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
         holeArea: 0,
         edges,
         centerline: ids.map((id) => ({ x: doc.nodes[id].x, y: doc.nodes[id].y })),
+        nodeIds: ids,
         nodeKey: ids.slice().sort().join('|'),
       })
     } else {
@@ -293,14 +295,16 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
     if (ring.length < 3) continue
     const area = Math.abs(polygonArea(ring))
     if (area < 1) continue
-    // the innermost face holding the whole island. Every vertex is tested, not one: an island may
-    // touch the face at a vertex (a shaft at a reflex corner), and a probe on the boundary is a coin
-    // toss that depends on where the ring starts, i.e. on how the plan is turned
+    // the innermost face whose centreline loop holds every node of the island. The centrelines, not
+    // the wall faces: an island's wall may overlap the room's wall (a box set against it) or touch a
+    // reflex corner a snapped wall moved by a few mm, and its nodes still lie well inside the loop,
+    // whichever way the plan is turned
+    const pts = c.hes.map((h) => doc.nodes[h.from])
     let best: Face | null = null
     for (const f of faces) {
       if (f.cycle.comp === comp) continue
       if (best && f.ringArea >= best.ringArea) continue
-      if (ringInside(ring, f.polygon)) best = f
+      if (f.centerline.length >= 3 && pts.every((p) => pointInPolygon(p, f.centerline))) best = f
     }
     if (!best) continue
     best.holes.push(ring)
@@ -321,6 +325,30 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
     prepared.push({ face: f, area, labelPoint: polylabel(f.polygon, f.holes) })
   }
   const winner = new Map<Face, Room>()
+  // technical voids follow their walls: a void record knows the nodes of its face (syncRooms) and
+  // takes the face sharing most of them (Jaccard ≥ ½), wherever the walls were dragged and wherever
+  // its anchor was left. A void none of whose faces is left (its walls removed) takes no face: the
+  // void is floor of the room again, not a shaft the size of the room
+  const claimed = new Map<Face, { r: Room; score: number }>()
+  const byNodes = new Set<Room>()
+  for (const r of records) {
+    if (!r.technical || !r.voidNodes?.length) continue
+    byNodes.add(r)
+    const want = new Set(r.voidNodes)
+    let best: { face: Face; area: number; score: number } | null = null
+    for (const p of prepared) {
+      let common = 0
+      for (const id of p.face.nodeIds) if (want.has(id)) common++
+      if (!common) continue
+      const score = common / (want.size + new Set(p.face.nodeIds).size - common)
+      if (!best || score > best.score + 1e-9 || (Math.abs(score - best.score) <= 1e-9 && p.area < best.area))
+        best = { face: p.face, area: p.area, score }
+    }
+    if (!best || best.score < 0.5) continue
+    const cur = claimed.get(best.face)
+    if (!cur || best.score > cur.score + 1e-9 || (Math.abs(best.score - cur.score) <= 1e-9 && r.id < cur.r.id))
+      claimed.set(best.face, { r, score: best.score })
+  }
   // the closest record of each kind (real room / technical void) per face
   const mixed = new Map<Face, { real?: Room; tech?: Room }>()
   const closer = (r: Room, cur: Room | undefined, lp: Vec2): boolean => {
@@ -330,12 +358,27 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
     return dNew < dCur - 1e-9 || (Math.abs(dNew - dCur) <= 1e-9 && r.id < cur.id)
   }
   for (const r of records) {
+    if (byNodes.has(r)) continue
     if (!r.anchor || !Number.isFinite(r.anchor.x) || !Number.isFinite(r.anchor.y)) continue
     let hit: { face: Face; area: number; labelPoint: Vec2 } | null = null
     for (const p of prepared) {
+      if (claimed.has(p.face)) continue
       if (hit && p.area >= hit.area) continue
       if (pointInPolygon(r.anchor, p.face.polygon, p.face.holes)) hit = p
     }
+    // the anchor inside a void that follows its walls (the void was dragged onto the room's label):
+    // the room keeps the smallest free face around the anchor, the one around the void
+    if (!hit)
+      for (const p of prepared) {
+        if (claimed.has(p.face) || (hit && p.area >= hit.area)) continue
+        if (pointInPolygon(r.anchor, p.face.polygon)) hit = p
+      }
+    // (a void at the outline dragged over the anchor has no face around it: the nearest free label)
+    if (!hit && prepared.some((p) => claimed.has(p.face) && pointInPolygon(r.anchor, p.face.polygon, p.face.holes)))
+      for (const p of prepared) {
+        if (claimed.has(p.face)) continue
+        if (!hit || dist(p.labelPoint, r.anchor) < dist(hit.labelPoint, r.anchor)) hit = p
+      }
     if (!hit) continue
     // two records in one face: the one closest to the label point survives
     if (closer(r, winner.get(hit.face), hit.labelPoint)) winner.set(hit.face, r)
@@ -345,7 +388,8 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
     } else if (closer(r, m.real, hit.labelPoint)) m.real = r
     mixed.set(hit.face, m)
   }
-  // a real room and a technical void in one face. Either the void's walls were moved as an island
+  // a real room and a technical void (one that does not know its nodes yet) in one face. Either the
+  // void's walls were moved as an island
   // into the room's anchor (the room's face is then the one around the island, left without a
   // record: the void keeps its face, the room takes the one around it), or the void's walls were
   // removed (no such face: the void is floor of the room again, not a shaft the size of the room)
@@ -355,7 +399,7 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
     const anchor = m.real.anchor
     let around: Face | null = null
     for (const q of prepared) {
-      if (q.face === p.face || winner.has(q.face)) continue
+      if (q.face === p.face || winner.has(q.face) || claimed.has(q.face)) continue
       if (around && q.face.ringArea >= around.ringArea) continue
       if (pointInPolygon(anchor, q.face.polygon)) around = q.face
     }
@@ -364,6 +408,7 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
       winner.set(around, m.real)
     } else winner.set(p.face, m.real)
   }
+  for (const [face, c] of claimed) winner.set(face, c.r)
 
   for (const p of prepared) {
     const f = p.face
@@ -385,6 +430,7 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
       polygon: f.polygon,
       holes: f.holes,
       centerline: f.centerline,
+      nodes: f.nodeIds,
       edges: f.edges,
       area: p.area / 1e6,
       perimeter: perimeter / 1000,
@@ -397,16 +443,4 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
 /** true for the temporary ids given to faces that have no Room record */
 export function isAutoRoomId(id: Id): boolean {
   return id.startsWith('auto_')
-}
-
-/** every vertex of `ring` inside `poly` or on its boundary (within 0.5 mm), and at least one strictly inside */
-function ringInside(ring: readonly Vec2[], poly: readonly Vec2[]): boolean {
-  let strict = false
-  for (const p of ring) {
-    const onEdge = poly.some((a, i) => projectOnSegment(p, a, poly[(i + 1) % poly.length]).dist < 0.5)
-    if (onEdge) continue
-    if (!pointInPolygon(p, poly)) return false
-    strict = true
-  }
-  return strict
 }

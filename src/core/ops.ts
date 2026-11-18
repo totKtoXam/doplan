@@ -1053,6 +1053,10 @@ export function syncRooms(doc: Doc): void {
         if (!rec.anchor || Math.hypot(rec.anchor.x - d.labelPoint.x, rec.anchor.y - d.labelPoint.y) > 0.01) {
           rec.anchor = { x: d.labelPoint.x, y: d.labelPoint.y }
         }
+        // a technical void remembers the nodes of its face, to follow its walls when they are dragged
+        if (rec.technical && d.nodes?.length) {
+          if (rec.voidNodes?.join('|') !== d.nodes.join('|')) rec.voidNodes = d.nodes.slice()
+        } else if (rec.voidNodes) delete rec.voidNodes
         keep.add(rec.id)
         continue
       }

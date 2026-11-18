@@ -71,7 +71,9 @@ File → «План из PlanSpec (JSON)…», and the CLI uses it in `pnpm dp s
   which makes the edge wall `glass`.
 
 ### Walls-mode
-- `walls: [{ id, path:[[x,y],…], closed?, align?, thickness?, kind?, height?, confidence? }]`.
+- `walls: [{ id, path:[[x,y],…], closed?, align?, thickness?, kind?, height?, confidence?, cutout? }]`.
+- `cutout: true` (written by `dp doc spec`): a wall around a shaft / box / column void. It is never
+  joined with a collinear wall across a strip of floor and may be thicker than the outer walls.
 - The path is the centre line. With `closed: true`, `align: "inner" | "outer"` means the path is the
   inner or outer **face** of the loop instead (`WALL_ALIGN_OPEN` if it is used on an open path).
 - Rooms are then just labels: `{ id, name, type, at:[x,y], labelledArea }`, a point inside each
@@ -106,32 +108,50 @@ File → «План из PlanSpec (JSON)…», and the CLI uses it in `pnpm dp s
     the line of a reflex (inner) corner of an L-room. After snapping the rect must lie inside the
     room: `CUTOUT_OUTSIDE` has no further tolerance.
   - No side may cross the line of a reflex corner (part of it on the outline, part along the floor):
-    `CUTOUT_AT_CORNER`. Keep the cutout on one side of the corner line.
+    `CUTOUT_AT_CORNER`. Keep the cutout on one side of the corner line. The check looks at the
+    union of touching cutouts of one kind, so splitting such a cutout into two touching rects is
+    refused the same way.
   - Cutouts must not overlap (`CUTOUT_OVERLAP`). An L-shaped shaft is two rectangles side by side,
-    touching, not overlapping; each becomes its own void with a wall between them.
+    touching, not overlapping.
+  - Touching cutouts of the same kind are one cutout: one void, no wall between them. Between
+    cutouts of different kinds the wall is built inside the stronger one (column > box > shaft): a
+    shaft beside a column keeps its whole rect as void, the column is solid anyway.
   - The compiler builds the cutout walls: sides facing the floor are `wall` thick (default
     `defaults.partitionThickness`; thinned if the cutout is too small); sides on the room outline
     continue the room's own wall, and so does a side in line with the outline wall at a reflex
     corner (a cutout against the inner corner of an L-room). If a neighbouring room faces that outline
     edge at the corner, the side continues the wall shared with it instead, of the thickness the gap
     gives (a partition, a load-bearing wall, an outer wall to a balcony); a gap under 40 mm is no wall
-    and the side gets the cutout wall. A shaft / box side against a column gets its wall on the
-    shaft's side (the column stays solid to its rect). A cutout on an edge shared with a neighbour
-    keeps that shared wall along its whole side. Cutouts touching only at a corner point stay two
-    holes; cutouts sharing part of a side are one hole of the checked floor. The result does not
-    depend on how the plan is turned or mirrored (the tests build every case in 8 orientations). The
-    void inside is a technical room (`technical: true`, type other) named `name` (default Шахта /
-    Короб / Колонна), however small: whatever its size it is not floor, so it is left out of the room,
-    total and living areas (in the check, in `dp spec validate` and in the app). `kind: "column"` is
-    solid (the walls fill it). A project with technical voids is saved as file format 4 (doplan
-    0.14 and older refuse to open it rather than drop the flag).
+    and the side gets the cutout wall. A cutout on an edge shared with a neighbour keeps that shared
+    wall along its whole side. Cutouts touching only at a corner point stay two holes; cutouts
+    sharing part of a side are one hole of the checked floor. The result does not depend on how the
+    plan is turned or mirrored, nor on the order of the cutouts (the tests build every review case in
+    8 orientations with the cutout misread by ±10 / ±20 mm, plus random plans). The void inside is a
+    technical room (`technical: true`, type other) named `name` (default Шахта / Короб / Колонна),
+    however small: whatever its size it is not floor, so it is left out of the room, total and living
+    areas (in the check, in `dp spec validate` and in the app). `kind: "column"` is solid: its walls
+    fill it, up to 640 mm thick each; a wider column keeps a small «Колонна» void inside. A project
+    with technical voids is saved as file format 4 (doplan 0.14 and older refuse to open it rather
+    than drop the flag).
+  - Not supported (refused by validate, the same in every orientation): a cutout side crossing a
+    reflex corner line (`CUTOUT_AT_CORNER`); and, with or without cutouts, a neighbour's edge that
+    ends inside the gap between two perpendicular walls of ~500 mm and more
+    (`BUILT_SHAPE_MISMATCH`): line the edge up with the wall face or the other room's corner.
   - Rooms must be orthogonal (rect or axis-aligned polygon) to have cutouts.
   - Errors: `CUTOUT_OUTSIDE` (the rect leaves the room), `CUTOUT_OVERLAP`, `CUTOUT_SPLITS_ROOM` (cuts
     the room in two), `CUTOUT_AT_CORNER` (a side crosses a reflex corner line),
     `BUILT_SHAPE_MISMATCH` (the built walls do not give the checked floor).
 - `technical`: a technical void (shaft / box / column void, type other or storage): not floor, out of
   every total whatever its size; it carries no `labelledArea`. `dp doc spec` writes it for the voids of
-  cutouts; do not put it on a real room (a storeroom marked so would drop out of the totals).
+  cutouts; do not put it on a real room (a storeroom marked so would drop out of the totals). In the
+  app a void keeps its mark by its walls (the file stores the void's wall nodes, `voidNodes`), not by a
+  point: dragging a shaft anywhere, even over the room's label, keeps it technical; deleting its walls
+  removes it. A free-standing shaft / column is a hole of the innermost room around it.
+- Round trip (`dp doc spec` → `dp spec build`): the walls around voids are written with
+  `cutout: true` and `defaults.exteriorThickness` is the thickness of most of the outline, so the
+  rebuild gives the same rooms, voids and areas without `WALL_THICKNESS_ODD` for columns. Rooms that
+  stand farther apart than the outer wall is thick still come back with a thicker inner wall, and the
+  round trip warns `WALL_THICKNESS_ODD` for it (the plan has such a wall).
 - `type`: `living`, `bedroom`, `kitchen`, `kitchenLiving`, `bathroom`, `toilet`, `hallway`,
   `corridor`, `balcony`, `loggia`, `wardrobe`, `office`, `kids`, `storage`, `other`.
 - `type` aliases:
@@ -220,7 +240,7 @@ Issues have the shape `{severity, code, message, path?, ids?}`. Errors block `sp
 | NON_ORTHO | a non-orthogonal edge left after snapping |
 | TINY_GAP | a < 40 mm gap became an invisible separator; intended only for open-plan zones |
 | WALL_THICKNESS_ODD | a thickness is far from the standard set |
-| DANGLING_WALL | a wall end touches nothing |
+| DANGLING_WALL | a wall end touches nothing (an end inside another wall's body counts as joined) |
 | WALL_ALIGN_OPEN | inner/outer align used on an open path |
 | OPENING_NO_POSITION | an opening without `at`, `wall` or `room` |
 | OPENING_BAD_REF | unknown wall or room id |

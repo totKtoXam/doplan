@@ -299,6 +299,12 @@ export interface Room extends LayerFlags {
    * out of every area total whatever its size, as long as the type stays non-specific (other / storage)
    */
   technical?: boolean
+  /**
+   * technical voids only: the nodes of the void's face as last seen (kept by syncRooms). A void
+   * record follows its walls by these nodes, not by its anchor, so dragging the void's walls never
+   * hands its role to the room around it or loses it
+   */
+  voidNodes?: Id[]
   /** design layer: style the room was dressed in (core/styles) */
   design?: RoomDesign
 }
@@ -995,6 +1001,8 @@ export interface DerivedRoom {
   holes: Vec2[][]
   /** centreline polygon (through nodes) */
   centerline: Vec2[]
+  /** the nodes of the centreline polygon */
+  nodes?: Id[]
   edges: RoomBoundaryEdge[]
   /** m² measured by inner faces */
   area: number

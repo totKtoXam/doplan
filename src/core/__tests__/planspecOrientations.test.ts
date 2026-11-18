@@ -1,4 +1,4 @@
-// Orientation battery for cutouts in rooms-mode PlanSpec: every case from the three cutout reviews
+// Orientation battery for cutouts in rooms-mode PlanSpec: every case from the four cutout reviews
 // is built in 8 orientations (4 turns × mirror) and with the cutout misread by ±10 / ±20 mm. The
 // outcome (gate, error codes, built areas, holes, technical voids) must not depend on how the plan is
 // turned, and at the exact position each room must be built with the area of the same plan without
@@ -29,8 +29,8 @@ const bedroom = (id: string, rect: number[]) => ({ id, type: 'bedroom', rect })
 const col = (rect: number[]) => ({ rect, kind: 'column' })
 const shaft = (rect: number[]) => ({ rect, kind: 'shaft' })
 
-/** name → [spec, index of the cutout of room a that gets misread (-1: none), the gate opens] */
-const SCENARIOS: Record<string, [unknown, number, boolean]> = {
+/** name → [spec, index of the cutout of room a that gets misread (-1: none), the gate opens, skip the area check] */
+const SCENARIOS: Record<string, [unknown, number, boolean, boolean?]> = {
   // review 1
   'r1 corner column': [sp([R([col([0, 2500, 500, 500])]), bedroom('b', [0, 3100, 4000, 3000])]), 0, true],
   'r1 loggia column': [sp([{ id: 'a', type: 'living', rect: [0, 0, 4000, 3000] }, { id: 'l', type: 'loggia', rect: [0, 3300, 4000, 1000], edgeWall: { kind: 'parapet' }, cutouts: [col([0, 3800, 500, 500])] }]), -1, true],
@@ -71,6 +71,40 @@ const SCENARIOS: Record<string, [unknown, number, boolean]> = {
   'r3 #6 balcony in the notch': [sp([Lr([{ rect: [1400, 400, 600, 600] }]), { id: 'b', type: 'balcony', rect: [2510, 0, 1490, 490], edgeWall: { kind: 'railing', thickness: 100, height: 1100 } }], 510), 0, true],
   'r3 #7 column and shaft on a shared edge': [sp([R([col([0, 0, 600, 1000]), shaft([600, 0, 600, 600])]), bedroom('b', [0, -3100, 4000, 3000])]), -1, true],
   'r3 #7 … 200 mm gap, 510 mm walls': [sp([R([col([0, 0, 600, 1000]), shaft([600, 0, 600, 600])]), bedroom('b', [0, -3200, 4000, 3000])], 510), -1, true],
+  // review 4
+  'r4 #1 neighbour in the notch misread (+10, +10)': [sp([Lr([{ rect: [1400, 400, 600, 600] }]), nb([2190, 0, 1810, 810])]), 0, true],
+  'r4 #1 … (−10, −10)': [sp([Lr([{ rect: [1400, 400, 600, 600] }]), nb([2210, 0, 1790, 790])]), 0, true],
+  'r4 #1 … (0, +10)': [sp([Lr([{ rect: [1400, 400, 600, 600] }]), nb([2200, 0, 1800, 810])]), 0, true],
+  'r4 #1 … (−10, +10)': [sp([Lr([{ rect: [1400, 400, 600, 600] }]), nb([2210, 0, 1790, 810])]), 0, true],
+  'r4 #1 … column': [sp([Lr([col([1400, 400, 600, 600])]), nb([2190, 0, 1810, 810])]), 0, true],
+  'r4 #2 shaft at a reflex corner, 91 mm gap': [sp([Lr([shaft([1400, 1000, 600, 600])]), nb([2091, 0, 1909, 900])]), 0, true],
+  'r4 #2 … 95 mm gap': [sp([Lr([shaft([1400, 1000, 600, 600])]), nb([2095, 0, 1905, 900])]), 0, true],
+  'r4 #2 … 97 mm gap': [sp([Lr([shaft([1400, 1000, 600, 600])]), nb([2097, 0, 1903, 900])]), 0, true],
+  'r4 #3 column at the middle of a column side': [sp([R([col([0, 0, 600, 1000]), col([600, 200, 600, 600])])]), 1, true],
+  'r4 #4 column and shaft, neighbour shifted 10 mm': [sp([R([col([0, 0, 600, 1000]), shaft([600, 0, 600, 600])]), bedroom('b', [10, -3100, 4000, 3000])]), -1, true],
+  'r4 #4 … 20 mm': [sp([R([col([0, 0, 600, 1000]), shaft([600, 0, 600, 600])]), bedroom('b', [20, -3100, 4000, 3000])]), -1, true],
+  // the neighbour overlaps the room by 10 mm: the built areas follow the overlap, not the drawn rects
+  'r4 #4 … (−10, −10)': [sp([R([col([0, 0, 600, 1000]), shaft([600, 0, 600, 600])]), bedroom('b', [-10, -3110, 4000, 3000])]), -1, true, true],
+  'r4 #4 column alone, neighbour shifted 10 mm': [sp([R([col([0, 0, 600, 1000])]), bedroom('b', [10, -3100, 4000, 3000])]), 0, true],
+  'r4 #5 shaft along a reflex edge': [sp([Lr([shaft([1400, 500, 600, 500])]), nb([2100, 0, 1900, 400])]), 0, true],
+  'r4 #8 shaft and column under a reflex corner (400/600)': [sp([Lr([shaft([1400, 1000, 600, 400]), col([2000, 1000, 600, 600])]), nb([2200, 0, 1800, 800])]), -1, true],
+  'r4 #8 … (400/800)': [sp([Lr([shaft([1400, 1000, 600, 400]), col([2000, 1000, 600, 800])]), nb([2200, 0, 1800, 800])]), -1, true],
+  'r4 #8 … (600/800)': [sp([Lr([shaft([1400, 1000, 600, 600]), col([2000, 1000, 600, 800])]), nb([2200, 0, 1800, 800])]), -1, true],
+  'r4 #8 column and shaft under a reflex corner': [sp([Lr([col([1400, 1000, 600, 600]), shaft([2000, 1000, 600, 600])]), nb([2200, 0, 1800, 800])]), -1, true],
+  'r4 #9 two shafts across a reflex corner line (refused)': [sp([Lr([shaft([1400, 1000, 600, 600]), shaft([2000, 1000, 600, 600])])]), -1, false],
+  'r4 #9 … unequal (refused)': [sp([Lr([shaft([1400, 1000, 600, 600]), shaft([2000, 1000, 600, 800])])]), -1, false],
+  'r4 #9 two columns (refused)': [sp([Lr([col([1400, 1000, 600, 600]), col([2000, 1000, 600, 600])])]), -1, false],
+  'r4 #9 two shafts, neighbour in the notch (refused)': [sp([Lr([shaft([1400, 1000, 600, 600]), shaft([2000, 1000, 600, 600])]), nb([2200, 0, 1800, 800])]), -1, false],
+  'r4 #10 neighbour shaft past the outline': [sp([{ id: 'a', type: 'living', rect: [0, 0, 3400, 4350] }, { id: 'b', type: 'bedroom', rect: [-500, 4650, 3100, 1700], cutouts: [shaft([-512, 4649, 500, 500])] }], 400), -1, true],
+  'r4 #11 column mid-room, two neighbours': [sp([Lr([col([400, 2000, 400, 400])], [[0, 0], [4050, 0], [4050, 1250], [1350, 1250], [1350, 3250], [0, 3250]]), { id: 'b', type: 'kitchen', rect: [-50, -1650, 3100, 1550] }, { id: 'c', type: 'bathroom', rect: [-2850, 0, 2750, 1550] }], 400), 0, true],
+  'r4 #11 … 510 mm walls': [sp([R([col([1000, 2000, 400, 400])], [0, 0, 2800, 3750]), { id: 'b', type: 'kitchen', rect: [-250, 3850, 2450, 1950] }, { id: 'c', type: 'bathroom', rect: [-2450, -450, 2350, 3900] }], 510), 0, true],
+  // a neighbour's edge ending inside the gap between two perpendicular 510 mm walls: refused the
+  // same way in every orientation (planspec-reference.md, unsupported junctions)
+  'r4 #12 neighbour edge in a wall gap (refused)': [sp([{ id: 'a', type: 'living', rect: [0, 0, 4850, 3750] }, bedroom('b', [-2800, 300, 2600, 3250]), { id: 'd', type: 'bathroom', rect: [-100, 3950, 3250, 2650] }], 510), -1, false],
+  'r4 #12 … other layout (refused)': [sp([{ id: 'a', type: 'living', rect: [0, 0, 2600, 3350] }, bedroom('b', [-2800, 200, 2700, 1800]), { id: 'd', type: 'bathroom', rect: [100, -3400, 2600, 3300] }], 510), -1, false],
+  'r4 #13 column with a wide gap to the neighbour': [sp([Lr([col([1000, 200, 1000, 800])]), nb([2400, 0, 1600, 600])]), 0, true],
+  'r4 #15 shaft at a reflex corner, neighbour 95 mm off both ways': [sp([Lr([shaft([1400, 1000, 600, 600])]), nb([2095, 0, 1905, 905])]), 0, true],
+  'r4 #16 column and neighbour shaft across a 510 mm wall': [sp([R([col([3600, 1000, 400, 500])]), { id: 'b', type: 'bedroom', rect: [4200, 0, 3000, 3000], cutouts: [shaft([4200, 700, 400, 500])] }], 510), 0, true],
 }
 
 const turn = (o: number) => (p: P): P => {
@@ -172,7 +206,7 @@ function expectedAreas(spec: SpecLike): Record<string, number> {
 const MISREADS = [-20, -10, 0, 10, 20]
 
 describe('planspec cutouts: the same in every orientation', () => {
-  for (const [name, [spec, k, opens]] of Object.entries(SCENARIOS)) {
+  for (const [name, [spec, k, opens, noArea]] of Object.entries(SCENARIOS)) {
     it(name, { timeout: 60_000 }, () => {
       const shifts = k >= 0 ? MISREADS.flatMap((dx) => MISREADS.map((dy) => [dx, dy])) : [[0, 0]]
       for (const [dx, dy] of shifts) {
@@ -180,7 +214,7 @@ describe('planspec cutouts: the same in every orientation', () => {
         const at = `misread (${dx}, ${dy})`
         for (let o = 1; o < 8; o++) if (!same(outs[0], outs[o])) expect(outs[o], `${at}, orientation ${o}`).toEqual(outs[0])
         expect(outs[0].ok, `${at}: gate`).toBe(opens)
-        if (dx === 0 && dy === 0 && opens) {
+        if (dx === 0 && dy === 0 && opens && !noArea) {
           const want = expectedAreas(turned(spec, 0))
           for (const id of Object.keys(want)) expect(outs[0].area[id], `room ${id}`).toBeCloseTo(want[id], 2)
         }

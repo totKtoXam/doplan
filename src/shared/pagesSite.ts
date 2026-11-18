@@ -3,20 +3,20 @@
  *
  * A plan folder is self-contained:
  *   index.html, viewer/…       the read-only viewer build (out/viewer), a copy per plan
- *   plan.json                  the document, every doplan-asset:// URL rewritten to ./assets/…
- *   catalog.json               only the catalog entries the plan uses (builtin ones excluded)
- *   site.json                  title, publish time, content hash, app version
+ *   view-plan.json             the document, every doplan-asset:// URL rewritten to ./assets/…
+ *   view-catalog.json          only the catalog entries the plan uses (builtin ones excluded)
+ *   view-site.json             title, publish time, content hash, app version
  *   assets/c/…  assets/l/…  assets/p/…   files of the bundled pack, the user library, the project
  *
  * Pure functions only (shared by main, renderer and tests); copying and pushing live in main.
  */
 
-export const SITE_FILES = { plan: 'plan.json', catalog: 'catalog.json', site: 'site.json' } as const
+export const SITE_FILES = { plan: 'view-plan.json', catalog: 'view-catalog.json', site: 'view-site.json' } as const
 
 /** GitHub Pages limits: a published site ≤ 1 GB, a single file in a git push ≤ 100 MB */
 export const PAGES_LIMITS = { siteBytes: 1024 ** 3, fileBytes: 100 * 1024 ** 2 } as const
 
-/** prefix of rewritten URLs inside plan.json / catalog.json; the viewer resolves it against the page */
+/** prefix of rewritten URLs inside view-plan.json / view-catalog.json; the viewer resolves it against the page */
 export const SITE_URL_PREFIX = './assets/'
 
 const ASSET_URL = /^doplan-asset:\/\/(catalog|library|project)\/([^?#]*)/
@@ -108,9 +108,9 @@ export interface CatalogLike {
 }
 
 export interface SiteContent {
-  /** plan.json */
+  /** view-plan.json */
   doc: unknown
-  /** catalog.json (used, non-builtin entries) */
+  /** view-catalog.json (used, non-builtin entries) */
   catalog: { version: number; materials: unknown[]; assets: unknown[]; hdris: unknown[] }
   /** files to copy, de-duplicated by destination */
   files: SiteFile[]
@@ -297,7 +297,7 @@ export function viewerQuery(p: ViewerParams): string {
   return s ? `?${s}` : ''
 }
 
-/** site.json */
+/** view-site.json */
 export interface SiteInfo {
   title: string
   publishedAt: string

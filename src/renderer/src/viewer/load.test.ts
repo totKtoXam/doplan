@@ -9,10 +9,10 @@ describe('viewer site loading', () => {
     expect(v).toEqual({ a: 'https://me.github.io/flat/assets/c/x%20y.glb', b: ['https://me.github.io/flat/assets/p/u.png', 'oak', 'https://x.org/a.hdr'] })
   })
 
-  it('loads plan.json (required) and the optional catalog.json / site.json', async () => {
+  it('loads view-plan.json (required) and the optional view-catalog.json / view-site.json', async () => {
     const files: Record<string, unknown> = {
-      'https://me.github.io/flat/plan.json': { meta: { name: 'P' }, underlay: './assets/p/u.png' },
-      'https://me.github.io/flat/site.json': { title: 'P', publishedAt: 'x', contentHash: 'h', app: 'a' },
+      'https://me.github.io/flat/view-plan.json': { meta: { name: 'P' }, underlay: './assets/p/u.png' },
+      'https://me.github.io/flat/view-site.json': { title: 'P', publishedAt: 'x', contentHash: 'h', app: 'a' },
     }
     const fetchFn = async (url: string) => ({ ok: url in files, status: url in files ? 200 : 404, json: async () => files[url] })
     const site = await loadSite(base, fetchFn)
@@ -20,7 +20,7 @@ describe('viewer site loading', () => {
     expect(site.catalog).toEqual({})
     expect(site.info?.title).toBe('P')
 
-    delete files['https://me.github.io/flat/plan.json']
+    delete files['https://me.github.io/flat/view-plan.json']
     await expect(loadSite(base, fetchFn)).rejects.toThrow(/plan\.json: HTTP 404/)
   })
 })

@@ -1,5 +1,5 @@
 /**
- * Entry of the published plan viewer (viewer.html → out/viewer): loads plan.json / catalog.json
+ * Entry of the published plan viewer (viewer.html → out/viewer): loads view-plan.json / view-catalog.json
  * from the page's folder and shows the plan read-only in 2D and 3D. No Electron: `@/store/api`
  * installs its browser fallback.
  */

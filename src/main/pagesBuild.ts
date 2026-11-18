@@ -1,6 +1,6 @@
 /**
  * Writes the static site of one published plan into a folder (see shared/pagesSite for the layout):
- * the viewer build, plan.json / catalog.json / site.json and every asset file the plan uses, with the
+ * the viewer build, view-plan.json / view-catalog.json / view-site.json and every asset file the plan uses, with the
  * buffers and textures of .gltf models. No Electron imports: the roots come in as arguments (tests).
  */
 import { promises as fsp } from 'node:fs'

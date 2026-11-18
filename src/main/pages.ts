@@ -1,7 +1,7 @@
 /**
  * "Publish for viewing": a read-only copy of the plan on GitHub Pages.
  *
- * The site (the viewer build + plan.json / catalog.json / site.json + the asset files the plan uses,
+ * The site (the viewer build + view-plan.json / view-catalog.json / view-site.json + the asset files the plan uses,
  * see shared/pagesSite) is built in userData/pages/<id>/site and pushed as the only commit of the
  * orphan `gh-pages` branch of the project's GitHub repository (force-push: the branch never keeps old
  * versions, the project history is untouched); Pages is turned on for that branch. A private project

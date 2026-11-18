@@ -1,5 +1,5 @@
 /**
- * Loading a published plan: plan.json, catalog.json and site.json next to the viewer page.
+ * Loading a published plan: view-plan.json, view-catalog.json and view-site.json next to the viewer page.
  * Relative asset URLs (`./assets/…`) are resolved against the page so the renderer's loaders
  * (which treat bare paths as the bundled catalog) get absolute https URLs.
  */

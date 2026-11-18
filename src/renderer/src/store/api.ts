@@ -13,7 +13,7 @@ import { ghInstallHint, type GithubSyncStatus } from '@shared/github'
 const webSync: GithubSyncStatus = { state: 'unavailable', reason: 'GitHub sync is available in the doplan desktop app', ahead: 0, behind: 0 }
 
 /** version shown by the web build (no Electron); keep in step with package.json */
-const WEB_VERSION = '0.14.1-web'
+const WEB_VERSION = '0.15.0-web'
 
 const SETTINGS_KEY = 'doplan.settings'
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { BUILTIN_THEMES, DEFAULT_DARK_ID, DEFAULT_LIGHT_ID } from './builtin'
-import { contrast, fromNumber, parseColor } from './color'
+import { contrast, flatten, fromNumber, parseColor } from './color'
 import { gridKey } from '@/editor2d/layers/grid'
 import { parseJsonc, resolveTheme, themeFromFile, themeKind, themeToFile, UI_TOKENS, type ThemeSource } from './themes'
 
@@ -302,6 +302,19 @@ describe('colour themes', () => {
       check(r, bg)
       // the plate keeps the theme's own warning colour
       expect(hex(r.plan.warnBadge)).toBe('#ffd400')
+    }
+  })
+
+  it('a half-transparent warning colour is laid on the plan, not on the panels', () => {
+    const hex = (n: number) => fromNumber(n).toLowerCase()
+    for (const [type, plan, side] of [['dark', '#101010', '#f0f0f0'], ['light', '#fafafa', '#202020']]) {
+      const th = themeFromFile(JSON.stringify({ type, colors: { 'editor.background': plan, 'sideBar.background': side, 'editorWarning.foreground': '#ffd40080', 'terminal.ansiGreen': '#00c00080' } }))
+      const r = resolveTheme(th)
+      const bg = hex(r.plan.bg)
+      expect(hex(r.plan.warnBadge), type).toBe(flatten('#ffd40080', bg).toLowerCase())
+      expect(contrast(hex(r.plan.warnBadgeText), hex(r.plan.warnBadge)), type).toBeGreaterThanOrEqual(4.5)
+      // the numbers start from the same colour and read on the plan
+      for (const c of [r.plan.warn, r.plan.ok]) expect(contrast(hex(c), bg), type).toBeGreaterThanOrEqual(3)
     }
   })
 })

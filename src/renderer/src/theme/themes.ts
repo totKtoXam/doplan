@@ -432,11 +432,19 @@ function planPalette(kind: ThemeKind, ui: UiTokens, colors: Record<string, strin
     // measured and stale dimension numbers sit on the same halo as the others: the theme's colour,
     // darkened (lightened on a dark plan) until it reads
     const onPlan = (c: string) => [0, 0.12, 0.24, 0.36, 0.5].map((k) => mix(c, dark ? '#ffffff' : '#000000', k)).find(reads) ?? text
-    p.ok = N(onPlan(ui.success))
-    p.warn = N(onPlan(ui.warning))
+    // the theme's own colour laid on the plan: the interface's one is already laid on the panels, so a
+    // half-transparent one would come out in the panel's shade (as doplan.number above)
+    const onBg = (fallback: string, ...keys: string[]) => {
+      const k = keys.find((x) => parseColor(colors[x]))
+      return k ? flatten(colors[k], bg) : fallback
+    }
+    const success = onBg(ui.success, 'doplan.success', 'terminal.ansiGreen', 'gitDecoration.addedResourceForeground')
+    const warning = onBg(ui.warning, 'doplan.warning', 'editorWarning.foreground')
+    p.ok = N(onPlan(success))
+    p.warn = N(onPlan(warning))
     // a warning badge is a plate of the theme's warning colour (it need not read on the plan, the
     // text on it must): the dark ink if it reads, else white, else black (one of them always does)
-    const plate = flatten(ui.warning, bg)
+    const plate = warning
     p.warnBadge = N(plate)
     p.warnBadgeText = N(['#1b1300', '#ffffff'].find((c) => contrast(c, plate) >= 4.5) ?? readableOn(plate, '#ffffff', '#000000'))
   }

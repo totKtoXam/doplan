@@ -185,10 +185,14 @@ export class AnnotationsLayer {
             .lineTo(lx + 6.5, ly + 3)
             .stroke({ width: 1.2, color: pal.textMuted })
         }
-        // raised items: their height above the floor next to the footprint («↑ 150»)
+        // raised items: their height above the floor next to the footprint («↑ 150»). It often falls on a
+        // wall (a wall cabinet), so it sits on a plate of the plan colour: the dimension colour reads on it
         if (it.elevation > 0.5 && scale >= 0.02) {
           const c = cam.toScreen({ x: box.maxX, y: box.maxY })
-          p.stext(`ie:${id}`, `↑ ${formatLen(it.elevation, st.units)}`, c.x + 4, c.y + 7, { size: 9.5, color: pal.dim, anchorX: 0, bold: true })
+          const x = c.x + 4
+          const y = c.y + 7
+          const tx = p.stext(`ie:${id}`, `↑ ${formatLen(it.elevation, st.units)}`, x + 3, y, { size: 9.5, color: pal.dim, anchorX: 0, bold: true })
+          p.g.roundRect(Math.round(x), Math.round(y - 7), Math.ceil(tx.width) + 6, 14, 3).fill({ color: pal.bg, alpha: 0.9 })
         }
         if (bw < 64 || bh < 26 || scale < 0.045) continue
         const asset = ui.getAsset(it.assetId)

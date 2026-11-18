@@ -16,6 +16,8 @@ addTranslations('en', {
   'Электроточек пока нет': 'No electrical points yet',
   'Щёлкните у стены — точка встанет на её грань. Alt — без привязки.': 'Click near a wall: the point sticks to its face. Alt: no snapping.',
   'Щёлкните на плане, чтобы поставить.': 'Click on the plan to place it.',
+  'В 3D — щелчок по стене, потолку или полу; в прогулке — по прицелу. PgUp/PgDn — высота, [ ] — тип, +/− — посты.':
+    'In 3D: click a wall, the ceiling or the floor; in walk mode: aim with the crosshair. PgUp/PgDn height, [ ] type, +/− posts.',
   'щёлкните у стены — точка встанет на её грань · Alt — без привязки · Esc — закончить':
     'click near a wall: the point sticks to its face · Alt: no snapping · Esc: finish',
   'щёлкните, чтобы поставить · Esc — закончить': 'click to place · Esc: finish',

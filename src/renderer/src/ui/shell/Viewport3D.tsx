@@ -6,6 +6,7 @@ import {
   Footprints,
   LampCeiling,
   LoaderCircle,
+  MousePointer2,
   Orbit,
   Pause,
   RefreshCw,
@@ -26,6 +27,7 @@ import { pathTracingDone, uiStore, useUi } from '@/store/ui'
 import type { Engine3DHandle } from '@/contracts'
 import { prefs3dStore, usePrefs3d, type DenoiseMode, type TraceMode } from '@/view3d/prefs'
 import { useStatus3d } from '@/view3d/status'
+import { useWalkPrefs, walkPrefs } from '@/store/walkPrefs'
 import { IconBtn, MiniSelect, Segmented, TextBtn } from './primitives'
 import { WalkLockHint } from './WalkLockHint'
 import { Ai3DMenu } from '@/ai' // ai-chat
@@ -36,6 +38,7 @@ const PT_TARGETS = [64, 256, 1024, 4096]
 const DENOISE_NAMES: Record<DenoiseMode, string> = { auto: 'Шумодав: авто', on: 'Шумодав: вкл', off: 'Шумодав: выкл' }
 
 addTranslations('en', {
+  'Захватывать курсор в режиме от первого лица (M)': 'Capture the mouse in first-person mode (M)',
   Выкл: 'Off',
   Вручную: 'Manual',
   Авто: 'Auto',
@@ -62,6 +65,7 @@ function publishBackendPref(pref: 'webgpu' | 'webgl'): void {
 function Overlay({ engine, hidden }: { engine: Engine3DHandle; hidden?: boolean }) {
   const t = useT()
   const cameraMode = useUi((s) => s.cameraMode)
+  const captureMouse = useWalkPrefs((s) => s.captureMouse)
   const pt = useUi((s) => s.pathTracing)
   const hasSel = useUi((s) => s.selection.length > 0)
   const quality = useDoc((s) => s.doc.render.quality)
@@ -133,6 +137,15 @@ function Overlay({ engine, hidden }: { engine: Engine3DHandle; hidden?: boolean 
             { value: 'top', label: <><Scan size={12} />{t('Сверху')}</>, title: t('Вид сверху') },
           ]}
         />
+        {cameraMode === 'walk' && (
+          <IconBtn
+            icon={MousePointer2}
+            size="sm"
+            label={t('Захватывать курсор в режиме от первого лица (M)')}
+            active={captureMouse}
+            onClick={() => walkPrefs.getState().setCaptureMouse(!captureMouse)}
+          />
+        )}
         <IconBtn icon={SquareDashed} size="sm" label={t('Срез стен')} active={cutaway} onClick={() => toggleRender('wallCutaway', 'Срез стен')} />
         <IconBtn icon={LampCeiling} size="sm" label={t('Потолок')} active={ceiling} onClick={() => toggleRender('ceilingVisible', 'Потолок')} />
         <IconBtn icon={Focus} size="sm" label={t('К выбранному')} disabled={!hasSel} onClick={() => engine.focusSelection()} />

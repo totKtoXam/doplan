@@ -16,6 +16,7 @@ import type { Id, OpeningKind } from '@core/types'
 import type { CameraControls, EngineContext } from '@/contracts'
 import { docStore } from '@/store/document'
 import { uiStore } from '@/store/ui'
+import { walkPrefs } from '@/store/walkPrefs'
 import { getShared, type ControlsInternals } from './quality'
 import { installLockGuard } from './lockGuard'
 import { setWalkKick, walkPointerLocked, walkStick } from './walkInput'
@@ -595,6 +596,16 @@ export function createControls(ctx: EngineContext): CameraControlsEx {
   const WALK_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft', 'ShiftRight'])
 
   const onKeyDown = (e: KeyboardEvent): void => {
+    // M: capture the mouse on click or keep the cursor free (store/walkPrefs)
+    if (e.code === 'KeyM' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat && !isEditable(e.target) && keysActive()) {
+      e.preventDefault()
+      e.stopPropagation()
+      const on = !walkPrefs.getState().captureMouse
+      walkPrefs.getState().setCaptureMouse(on)
+      if (on && pointerInside) requestLock()
+      ctx.invalidate()
+      return
+    }
     if (!WALK_KEYS.has(e.code) || e.ctrlKey || e.metaKey || e.altKey) return
     if (isEditable(e.target) || !keysActive()) return
     keys.add(e.code)
@@ -669,8 +680,10 @@ export function createControls(ctx: EngineContext): CameraControlsEx {
     } catch {
       /* not captured */
     }
-    // a plain click (no drag) in walk mode captures the mouse; Esc gives it back (browser default)
+    // a plain click (no drag) in walk mode captures the mouse; Esc gives it back (browser default).
+    // Not when the user keeps the cursor free (store/walkPrefs): then a click selects / places.
     if (
+      walkPrefs.getState().captureMouse &&
       click &&
       click.id === e.pointerId &&
       e.type === 'pointerup' &&

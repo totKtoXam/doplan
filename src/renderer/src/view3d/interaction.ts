@@ -47,6 +47,7 @@ import { uiStore } from '@/store/ui'
 import { t } from '@/i18n'
 import { getShared } from './quality'
 import { walkPointerLocked } from './walkInput'
+import { createElectricPlace } from './electricPlace'
 import { type HandleSpec, ResizeHandles, worldPerPixel } from './resizeHandles'
 
 const DEG = Math.PI / 180
@@ -1572,9 +1573,39 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
     return tool !== 'item' && tool !== 'paint' && tool !== 'eyedropper' && tool !== 'erase'
   }
 
+  // electric points: the «Электроточка» tool and moving points (view3d/electricPlace) see the pointer first
+  const electric = createElectricPlace({
+    ctx,
+    raycaster,
+    setRay,
+    levelId,
+    setHint,
+    setCursor,
+    lockControls,
+    wallShown: (id) => entityVisible({ kind: 'wall', id }),
+    pickElectric() {
+      const hit = pick()
+      const ref = hit?.ref
+      if (!hit || ref?.kind !== 'electric' || !editable(docStore.getState().doc, ref)) return null
+      return { id: ref.id, point: hit.point }
+    },
+    walkMode: () => controls.mode === 'walk' || uiStore.getState().cameraMode === 'walk',
+  })
+
   const onPointerDown = (e: PointerEvent): void => {
+    if (disposed || shared.stillBusy) return
+    if (electric.pointerDown(e)) {
+      down = null
+      pending = null
+      try {
+        canvas.focus({ preventScroll: true })
+      } catch {
+        /* focus is a nicety */
+      }
+      return
+    }
     // a captured mouse (walk mode Pointer Lock) only turns the view
-    if (disposed || shared.stillBusy || walkPointerLocked(canvas)) return
+    if (walkPointerLocked(canvas)) return
     try {
       canvas.focus({ preventScroll: true })
     } catch {
@@ -1700,7 +1731,12 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
   }
 
   const onPointerMove = (e: PointerEvent): void => {
-    if (disposed || shared.stillBusy || walkPointerLocked(canvas)) return
+    if (disposed || shared.stillBusy) return
+    if (electric.pointerMove(e)) {
+      if (hoverHit) setHover(null)
+      return
+    }
+    if (walkPointerLocked(canvas)) return
     lastMove = e
     lastPointer = e
     if (!frame) frame = requestAnimationFrame(processMove)
@@ -1708,6 +1744,11 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
 
   const onPointerUp = (e: PointerEvent): void => {
     if (disposed) return
+    if (electric.pointerUp(e)) {
+      down = null
+      pending = null
+      return
+    }
     try {
       canvas.releasePointerCapture(e.pointerId)
     } catch {
@@ -1748,6 +1789,7 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
   const onPointerLeave = (): void => {
     pointerInside = false
     lastPointer = null
+    electric.pointerLeave()
     if (!drag) {
       setHover(null)
       hideGhost()
@@ -1981,6 +2023,7 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
     dispose() {
       if (disposed) return
       if (drag) endDrag(false)
+      electric.dispose()
       disposed = true
       if (frame) cancelAnimationFrame(frame)
       lockControls(false)

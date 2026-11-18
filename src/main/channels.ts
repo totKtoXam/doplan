@@ -69,6 +69,22 @@ export const CH = {
   evAiChatToolCancel: 'ev:aiChatToolCancel',
   // ── end ai-chat block ──
 
+  // ── github block ──
+  githubGhStatus: 'github:ghStatus',
+  githubInstallGh: 'github:installGh',
+  githubLogin: 'github:login',
+  githubLoginCancel: 'github:loginCancel',
+  evGithubLogin: 'ev:githubLogin',
+  githubStatus: 'github:status',
+  githubConnect: 'github:connect',
+  githubCreate: 'github:create',
+  githubPush: 'github:push',
+  githubPull: 'github:pull',
+  githubResolve: 'github:resolve',
+  githubDisconnect: 'github:disconnect',
+  githubOpenPage: 'github:openPage',
+  // ── end github block ──
+
   updatesGet: 'updates:get',
   updatesCheck: 'updates:check',
   updatesInstall: 'updates:install',

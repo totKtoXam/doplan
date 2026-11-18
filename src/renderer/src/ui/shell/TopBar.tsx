@@ -7,6 +7,7 @@ import {
   Camera,
   ChevronDown,
   ClipboardList,
+  Cloud,
   Columns2,
   Download,
   FilePlus,
@@ -35,6 +36,8 @@ import { dialogStore } from '@/store/dialogs'
 import { useDoc } from '@/store/document'
 import { uiStore, useUi } from '@/store/ui'
 import { checkForUpdatesManually } from '@/store/updates'
+import { openGithubDialog } from '@/store/github'
+import { GithubButton } from '@/ui/github/GithubButton'
 import type { ViewMode } from '@/contracts'
 import { AppLogo } from './AppLogo'
 import { DropdownMenu, IconBtn, type MenuEntry, Segmented, Sep, TextBtn, Tip } from './primitives'
@@ -94,6 +97,7 @@ export function TopBar() {
     { label: t('Сохранить как…'), kbd: 'Ctrl+Shift+S', onSelect: () => void actions.saveProject(true) },
     { label: t('История версий…'), icon: History, kbd: 'Ctrl+Shift+H', onSelect: () => void actions.openHistory() },
     { label: t('Инструкции для ИИ…'), icon: Bot, onSelect: () => void actions.openInstructions() },
+    { label: t('GitHub…'), icon: Cloud, onSelect: openGithubDialog },
     { type: 'separator' },
     { type: 'header', label: t('Импорт') },
     { label: t('План из PlanSpec (JSON)…'), onSelect: () => void actions.importPlanSpec() },
@@ -167,6 +171,7 @@ export function TopBar() {
       </div>
 
       <div className="flex items-center gap-1 [-webkit-app-region:no-drag]">
+        <GithubButton />
         <Segmented value={mode} options={viewOptions} onChange={(m) => uiStore.getState().setMode(m)} />
         <Sep />
         <TextBtn variant="ghost" onClick={() => actions.planFromPhoto()} title={t('Распознать план по фото или скану')}>

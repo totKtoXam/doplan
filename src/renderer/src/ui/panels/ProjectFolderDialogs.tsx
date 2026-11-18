@@ -26,6 +26,7 @@ import { finishCreateDialog, openCreateDialog, projectStore, useProject } from '
 import { useUi } from '@/store/ui'
 import { Button, Dialog, Input, Row, Section, Spinner } from '@/ui/kit'
 import { errorText } from './common/catalog'
+import { GithubFolderRow } from '@/ui/github/GithubFolderRow'
 
 /** parent folder chosen earlier in this session (main grants access only to folders picked in its dialog) */
 let lastParent: string | null = null
@@ -573,6 +574,7 @@ export function ProjectFolderSection() {
               {t('Показать')}
             </Button>
           </div>
+          <GithubFolderRow />
         </div>
       ) : (
         <div className="flex flex-col gap-1.5">

@@ -956,15 +956,22 @@ export async function gitCurrentBranch(root: string): Promise<string | null> {
   return r.code === 0 ? trimOut(r) || null : null
 }
 
+/** every address of the remote, in the order git uses them (fetch takes the first, push goes to all) */
+export async function gitRemoteUrls(root: string, remote = 'origin'): Promise<string[]> {
+  const r = await run(root, ['config', '--get-all', `remote.${remote}.url`], { allowFail: true })
+  return r.code === 0 ? trimOut(r).split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : []
+}
+
+/** the remote's address git fetches from (the first one; `config --get` would give the last) */
 export async function gitRemoteUrl(root: string, remote = 'origin'): Promise<string | null> {
-  const r = await run(root, ['config', '--get', `remote.${remote}.url`], { allowFail: true })
-  return r.code === 0 ? trimOut(r) || null : null
+  return (await gitRemoteUrls(root, remote))[0] ?? null
 }
 
 /** adds the remote or changes its address */
 export async function gitSetRemote(root: string, url: string, remote = 'origin'): Promise<void> {
   if (/^-|[\0\r\n]/.test(url)) throw new Error(msg('Недопустимый адрес репозитория', 'Invalid repository address'))
-  if (await gitRemoteUrl(root, remote)) await run(root, ['remote', 'set-url', remote, url])
+  // one address afterwards, even where the folder had several (set-url refuses to choose among them)
+  if (await gitRemoteUrl(root, remote)) await run(root, ['config', '--replace-all', `remote.${remote}.url`, url])
   else await run(root, ['remote', 'add', remote, url])
 }
 

@@ -275,6 +275,7 @@ export type SyncErrorCode =
   | 'rejected'
   | 'protectedBranch'
   | 'emailPrivacy'
+  | 'secretFound'
   | 'refused'
   | 'tooLarge'
   | 'timeout'
@@ -287,6 +288,8 @@ export function classifyError(text: string): SyncErrorCode {
   if (/GH001|exceeds GitHub's file size limit|Large files detected|pack exceeds maximum allowed size|this exceeds GitHub/i.test(s)) return 'tooLarge'
   // GitHub itself refused the versions (rules of the repository): getting changes would not help
   if (/GH007|push would publish a private email|private email address/i.test(s)) return 'emailPrivacy'
+  // push protection reports itself as GH013 too: a secret in the versions, not a protected branch
+  if (/PUSH PROTECTION|Push cannot contain secrets|unblock-secret|secret scanning/i.test(s)) return 'secretFound'
   if (/GH006|GH013|Protected branch|protected branch hook declined|Repository rule violations|rule violations found/i.test(s)) return 'protectedBranch'
   if (/\[remote rejected\]|hook declined/i.test(s)) return 'refused'
   // only "GitHub has versions you do not": a bare "failed to push some refs" says nothing about why
@@ -325,6 +328,8 @@ export function errorText(code: SyncErrorCode, lang: 'ru' | 'en', detail = ''): 
       'Ветка на GitHub защищена правилами репозитория, и отправлять в неё напрямую нельзя. Владелец может снять защиту в настройках репозитория (Settings → Branches или Rules).',
     emailPrivacy:
       'GitHub не принял версии: в них указан ваш адрес почты, а в настройках GitHub включено его скрытие. Укажите в Git адрес вида …@users.noreply.github.com (он есть в GitHub → Settings → Emails) либо снимите там «Block command line pushes that expose my email».',
+    secretFound:
+      'GitHub не принял версии: в них найден секрет (пароль, токен или ключ доступа). Уберите его из файла и смените сам секрет; если он уже попал в сохранённые версии, а вы уверены, что это не настоящий секрет, — разрешите его на GitHub по ссылке.',
     refused: 'GitHub отказался принять версии.',
     tooLarge: 'GitHub не принял слишком большой файл (лимит — 100 МБ на файл). Уменьшите или удалите большую модель либо подложку.',
     timeout: 'GitHub слишком долго не отвечает. Попробуйте ещё раз чуть позже.',
@@ -341,13 +346,23 @@ export function errorText(code: SyncErrorCode, lang: 'ru' | 'en', detail = ''): 
       'The branch on GitHub is protected by the repository rules and cannot be pushed to directly. Its owner can lift the protection in the repository settings (Settings → Branches or Rules).',
     emailPrivacy:
       'GitHub refused the versions: they carry your email address, and your GitHub settings keep it private. Set an …@users.noreply.github.com address in Git (see GitHub → Settings → Emails) or untick “Block command line pushes that expose my email” there.',
+    secretFound:
+      'GitHub refused the versions: a secret (password, token or access key) was found in them. Remove it from the file and change the secret itself; if it is already in the saved versions and you are sure it is not a real secret, allow it on GitHub through the link.',
     refused: 'GitHub refused the versions.',
     tooLarge: 'GitHub refused a file that is too large (the limit is 100 MB per file). Make the large model or underlay smaller, or remove it.',
     timeout: 'GitHub takes too long to answer. Try again a little later.',
     unknown: 'Could not reach GitHub.',
   }
   const text = (lang === 'en' ? en : ru)[code]
-  return (code === 'unknown' || code === 'refused') && detail ? `${text} ${detail}` : text
+  return (code === 'unknown' || code === 'refused' || code === 'secretFound') && detail ? `${text} ${detail}` : text
+}
+
+/** where push protection found secrets (file:line) and its link to allow one, from git's output */
+export function secretScanDetail(text: string): string {
+  const s = String(text ?? '')
+  const paths = [...new Set([...s.matchAll(/path:\s*(\S+)/gi)].map((m) => m[1]))].slice(0, 5)
+  const link = /https:\/\/github\.com\/[^\s'"<>]+unblock-secret[^\s'"<>]*/i.exec(s)?.[0]
+  return [paths.length ? paths.join(', ') : '', link ?? ''].filter(Boolean).join(' — ')
 }
 
 /** the most telling line of a git/gh error output (fatal:/error:/remote: lines first) */

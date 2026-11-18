@@ -16,6 +16,7 @@ import {
   classifyError,
   errorText,
   firstErrorLine,
+  secretScanDetail,
   ghInstallHint,
   type GhLoginEvent,
   type GhStatus,
@@ -135,7 +136,7 @@ export function ghLoginText(): string {
 /** a gh/git failure as a GithubError with plain words */
 export function humanError(output: string): GithubError {
   const kind = classifyError(output)
-  return new GithubError(kind, errorText(kind, lang(), firstErrorLine(output)))
+  return new GithubError(kind, errorText(kind, lang(), kind === 'secretFound' ? secretScanDetail(output) : firstErrorLine(output)))
 }
 
 // ───────────── status ─────────────

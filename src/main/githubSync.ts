@@ -45,6 +45,7 @@ import {
   gitRelated,
   gitRemoteHeads,
   gitRemoteUrl,
+  gitRemoteUrls,
   gitRemoveRemote,
   gitRepoSize,
   gitSetRemote,
@@ -119,6 +120,20 @@ async function requireRoot(): Promise<string> {
   return r.root
 }
 
+/** the project's one GitHub address for a send or a get; several addresses (git would use them all) are refused */
+async function requireRemote(root: string): Promise<string> {
+  const urls = await gitRemoteUrls(root, REMOTE).catch(() => [])
+  if (!urls.length) throw new Error(msg('Проект не подключён к GitHub', 'The project is not connected to GitHub'))
+  if (urls.length > 1)
+    throw new Error(
+      msg(
+        'У подключения проекта несколько адресов (remote.origin.url в .git/config), и неясно, куда отправлять. Отключите проект от GitHub и подключите заново по одной ссылке.',
+        'The project connection has several addresses (remote.origin.url in .git/config), so it is unclear where to send. Disconnect the project from GitHub and connect it again by one link.',
+      ),
+    )
+  return urls[0]
+}
+
 /** commits whatever is not committed yet (creating the repository in a new folder); a merge left by a crash is dropped first */
 async function commitPending(root: string, message: string): Promise<void> {
   if ((await folderTrust(root)).git === 'trusted') await gitMergeAbort(root)
@@ -170,8 +185,9 @@ export async function syncStatus(fetch = false): Promise<GithubSyncStatus> {
   if (!r.repo) return { state: 'disconnected', ahead: 0, behind: 0 }
   const { root } = r
   // a look nobody asked for goes to github.com only, never to whatever host a received folder names
-  const url = fetch ? await gitRemoteUrl(root, REMOTE) : null
-  if (url && parseGithubUrl(stripUrlCredentials(url))) {
+  // (with several addresses git would fetch from the first and push to all: no look at all then)
+  const urls = fetch ? await gitRemoteUrls(root, REMOTE) : []
+  if (urls.length === 1 && parseGithubUrl(stripUrlCredentials(urls[0]))) {
     try {
       await gitFetch(root, await net(false), REMOTE)
       noteCheck(root)
@@ -250,7 +266,7 @@ export function push(): Promise<PushResult> {
   return exclusive(() =>
     guard(async () => {
       const root = await requireRoot()
-      if (!(await gitRemoteUrl(root, REMOTE).catch(() => null))) throw new Error(msg('Проект не подключён к GitHub', 'The project is not connected to GitHub'))
+      await requireRemote(root)
       await commitPending(root, msg('Отправка на GitHub', 'Sent to GitHub'))
       return pushLocked(root, await net(true))
     }),
@@ -302,7 +318,7 @@ export function pull(): Promise<PullResult> {
   return exclusive(() =>
     guard(async () => {
       const root = await requireRoot()
-      if (!(await gitRemoteUrl(root, REMOTE).catch(() => null))) throw new Error(msg('Проект не подключён к GitHub', 'The project is not connected to GitHub'))
+      await requireRemote(root)
       await commitPending(root, msg('Перед получением изменений с GitHub', 'Before getting changes from GitHub'))
       return pullLocked(root, await net(true))
     }),
@@ -460,12 +476,13 @@ export function disconnect(): Promise<GithubSyncStatus> {
   )
 }
 
-async function openPage(which: unknown): Promise<void> {
+export async function openPage(which: unknown): Promise<void> {
   if (which === 'device') return openGithubUrl('https://github.com/login/device')
   if (which === 'install') return openGithubUrl((await ghStatus()).install.url)
   const root = await requireRoot()
   const url = await gitRemoteUrl(root, REMOTE)
-  const ref = url ? parseGithubUrl(url) : null
+  // the same address the status shows (a token clone's token dropped), so its button always works
+  const ref = url ? parseGithubUrl(stripUrlCredentials(url)) : null
   if (!ref) throw new Error(msg('Проект не подключён к GitHub', 'The project is not connected to GitHub'))
   await openGithubUrl(webUrlOf(ref))
 }

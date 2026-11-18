@@ -18,6 +18,7 @@ import {
   remoteUrlOf,
   repoNameFromProject,
   sizeCheck,
+  secretScanDetail,
   stripUrlCredentials,
   webUrlOf,
   firstErrorLine,
@@ -127,7 +128,31 @@ describe('gh output', () => {
   })
 })
 
+const PUSH_PROTECTION = [
+  'remote: error: GH013: Repository rule violations found for refs/heads/main.',
+  'remote: - GITHUB PUSH PROTECTION',
+  'remote:   Resolve the following violations before pushing again',
+  'remote:   - Push cannot contain secrets',
+  'remote:     —— GitHub Personal Access Token ——',
+  'remote:      locations:',
+  'remote:        - commit: 0123abcd',
+  'remote:          path: AGENTS.md:3',
+  'remote:      (?) To push, remove secret from commit(s) or follow this URL to allow the secret.',
+  'remote:      https://github.com/me/flat/security/secret-scanning/unblock-secret/2abcDEF',
+  ' ! [remote rejected] main -> main (push declined due to repository rule violations)',
+  "error: failed to push some refs to 'https://github.com/me/flat.git'",
+].join('\n')
+
 describe('errors in plain words', () => {
+  it('names the file with a secret and the link to allow it (push protection)', () => {
+    const detail = secretScanDetail(PUSH_PROTECTION)
+    expect(detail).toBe('AGENTS.md:3 — https://github.com/me/flat/security/secret-scanning/unblock-secret/2abcDEF')
+    const text = errorText('secretFound', 'ru', detail)
+    expect(text).toMatch(/секрет/)
+    expect(text).toContain('unblock-secret')
+    expect(text).not.toMatch(/защищена/)
+  })
+
   it.each([
     ['fatal: unable to access \'https://github.com/a/b.git/\': Could not resolve host: github.com', 'offline'],
     ['fatal: unable to access \'https://github.com/a/b.git/\': Failed to connect to github.com port 443 after 21 ms: Couldn\'t connect to server', 'offline'],
@@ -155,6 +180,7 @@ describe('errors in plain words', () => {
     [' ! [remote rejected] main -> main (failed to update ref)\nerror: failed to push some refs to \'file:///x\'', 'refused'],
     ['error: failed to push some refs to \'https://github.com/a/b.git\'', 'unknown'],
     ['git fetch: timeout, no answer within 90 s', 'timeout'],
+    [PUSH_PROTECTION, 'secretFound'],
     ['remote: error: GH001: Large files detected. You may want to try Git Large File Storage', 'tooLarge'],
     ['something else entirely', 'unknown'],
   ])('%s → %s', (text, code) => {
@@ -222,7 +248,7 @@ const { createRepoArgs } = await import('./github')
 const { withSyncLock } = await import('./syncLock')
 const { saveProject } = await import('./project')
 const { grantPath } = await import('./access')
-const { createFolderProject, setProjectRoot, trustFolder, writeFolderProject } = await import('./projectFolder')
+const { createFolderProject, getProjectRoot, setProjectRoot, trustFolder, writeFolderProject } = await import('./projectFolder')
 const sync = await import('./githubSync')
 
 const remotes = join(base, 'remote')
@@ -541,6 +567,59 @@ describe.skipIf(!hasGit)('project sync', { timeout: 180_000 }, () => {
       for (const s of sockets) s.destroy()
       server.close()
     }
+  })
+
+  it('a save that waited does not take over from a project opened meanwhile', async () => {
+    const a = await project('Wa')
+    const b = await project('Wb')
+    grantPath(a)
+    useRoot(a)
+    let release!: () => void
+    const held = withSyncLock(() => new Promise<void>((r) => (release = r)))
+    const saving = saveProject({ ...plan(a), notes: 'late' }, a, { overwrite: true })
+    await new Promise((r) => setTimeout(r, 300)) // the save is queued behind the lock
+    useRoot(b) // the user opened B while A's save waited
+    release()
+    await held
+    await saving
+    expect(plan(a).notes).toBe('late')
+    expect(getProjectRoot()).toBe(b)
+  })
+
+  it('opens the page of a token clone from the address the status shows', async () => {
+    const url = bare('tok2')
+    const a = await project('T2')
+    useRoot(a)
+    await sync.connect(url)
+    git(a, 'remote', 'set-url', 'origin', 'https://user:ghp_SECRET@github.com/me/tok2.git')
+    const { shell } = await import('electron')
+    vi.mocked(shell.openExternal).mockClear()
+    expect((await sync.syncStatus()).remote?.webUrl).toBe('https://github.com/me/tok2')
+    await sync.openPage('repo')
+    expect(shell.openExternal).toHaveBeenCalledWith('https://github.com/me/tok2')
+  })
+
+  it('with several origin addresses: no look in the background, no send, the first one shown', async () => {
+    const url = bare('multi')
+    const a = await project('M')
+    useRoot(a)
+    await sync.connect(url)
+    git(join(remotes, 'me'), 'init', '--bare', '--quiet', '--initial-branch=main', 'evil.git')
+    netTestConfig.push('-c', `url.${pathToFileURL(remotes).href}/.insteadOf=https://evil.example/`)
+    // git fetches from the first address: here another host, put before the GitHub one
+    git(a, 'config', '--replace-all', 'remote.origin.url', 'https://evil.example/me/evil.git')
+    git(a, 'config', '--add', 'remote.origin.url', 'https://github.com/me/multi.git')
+    const before = (await sync.syncStatus()).checkedAt
+    const st = await sync.syncStatus(true)
+    expect(st.checkedAt).toBe(before)
+    expect(st.remote?.url).toBe('https://evil.example/me/evil.git')
+    expect(st.remote?.owner).toBeUndefined()
+    await expect(sync.push()).rejects.toThrow(/несколько адресов|several addresses/)
+    await expect(sync.pull()).rejects.toThrow(/несколько адресов|several addresses/)
+    expect(git(join(remotes, 'me', 'evil.git'), 'for-each-ref').trim()).toBe('')
+    // connecting again leaves one address
+    await sync.connect(url)
+    expect(git(a, 'config', '--get-all', 'remote.origin.url').trim()).toBe('https://github.com/me/multi.git')
   })
 
   it('makes a save wait while a GitHub action works on the folder', async () => {

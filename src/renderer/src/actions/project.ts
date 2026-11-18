@@ -438,8 +438,12 @@ export async function saveProject(saveAs = false, opts?: { message?: string; ove
 
   try {
     const id = saveId(doc, filePath, false)
+    // the save may wait (behind a GitHub send): edits made meanwhile are not in the file
+    const at = historyPosition()
     const res = await api.project.save(withId(doc, id), filePath, { message, overwrite: opts?.overwrite })
     if (!res) return false
+    // another project was opened while it waited: the written folder is not the one on screen
+    if (otherFileOpen(filePath)) return false
     if (res.externalChange) {
       const choice = await choiceDialog(
         t('plan.json изменён вне doplan'),
@@ -454,10 +458,11 @@ export async function saveProject(saveAs = false, opts?: { message?: string; ove
       if (choice === 'reload') await openProject(filePath, { skipConfirm: true, reload: ps.viewing ? 'version' : 'disk' })
       return false
     }
-    docStore.getState().markSaved(res.path, id)
-    projectStore.setState((s) => ({ commitMarker: historyPosition(), viewing: null, historyRev: s.historyRev + 1 }))
+    docStore.getState().markSaved(res.path, id, at)
+    projectStore.setState((s) => ({ commitMarker: at, viewing: null, historyRev: s.historyRev + 1 }))
     await runProjectHooks('saved', false)
-    void api.project.clearRecovery().catch(() => {})
+    // edits made while the save waited keep their recovery snapshot
+    if (!docStore.getState().dirty) void api.project.clearRecovery().catch(() => {})
     refreshRecent()
     if (res.commitError) toast(t('Сохранено, но версия не записана: {err}', { err: res.commitError }), 'warning', 7000)
     else if (res.commit) toast(t('Сохранено · версия «{msg}»', { msg: message }), 'success')

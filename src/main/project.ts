@@ -293,11 +293,14 @@ async function saveFolder(dir: string, doc: unknown, opts: ProjectSaveOptions): 
   // only an existing doplan project folder is written here; new folders are made by create()
   const root = await folderRootOf(dir)
   if (!root || !samePath(root, dir)) throw new Error(notProjectFolder())
+  const openBefore = getProjectRoot()
   // never in the middle of a GitHub action: it may be merging into this very folder (syncLock)
   return withSyncLock(async () => {
     if (!opts.overwrite && (await planChangedOnDisk(root))) return { path: root, externalChange: true }
     await writeFolderProject(root, doc)
-    setProjectRoot(root)
+    // another project opened while this save waited stays the open one
+    const openNow = getProjectRoot()
+    if (openNow === openBefore || (openNow && openBefore && samePath(openNow, openBefore))) setProjectRoot(root)
     await addRecent(root, docName(doc))
     try {
       const commit = await commitFolder(root, opts.message ?? msg('Сохранение', 'Save'))

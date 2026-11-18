@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { BUILTIN_THEMES, DEFAULT_DARK_ID, DEFAULT_LIGHT_ID } from './builtin'
 import { contrast, parseColor } from './color'
 import { gridKey } from '@/editor2d/layers/grid'
-import { parseJsonc, resolveTheme, themeFromFile, themeToFile, UI_TOKENS } from './themes'
+import { parseJsonc, resolveTheme, themeFromFile, themeKind, themeToFile, UI_TOKENS, type ThemeSource } from './themes'
 
 describe('colour themes', () => {
   it('has at least ten VS Code themes besides its own, with unique ids', () => {
@@ -57,7 +57,9 @@ describe('colour themes', () => {
   it('guesses the kind from the background and names the theme after the file', () => {
     const t = themeFromFile('{"colors":{"editor.background":"#101010"}}', 'night_owl.json')
     expect(t.name).toBe('night_owl')
-    expect(t.type).toBe('dark')
+    expect(t.type).toBeUndefined()
+    expect(themeKind(t)).toBe('dark')
+    expect(themeKind(themeFromFile('{"colors":{"editor.background":"#fdfdfd"}}'))).toBe('light')
   })
 
   it('explains files that are not themes', () => {
@@ -89,16 +91,45 @@ describe('colour themes', () => {
   })
 
   it('an overlay without "type" takes the kind of the theme it extends', () => {
-    const light = themeFromFile('{"name":"My Light","extends":"Light Modern","colors":{"button.background":"#cc0000"}}', 'x.json', BUILTIN_THEMES)
-    expect(light.type).toBe('light')
-    const r = resolveTheme(light, [...BUILTIN_THEMES, light])
+    const all = (...t: ThemeSource[]) => [...BUILTIN_THEMES, ...t]
+    const light = themeFromFile('{"name":"My Light","extends":"Light Modern","colors":{"button.background":"#cc0000"}}')
+    const r = resolveTheme(light, all(light))
     expect(r.kind).toBe('light')
     expect(r.ui.accent).toBe('#cc0000')
-    // by id too, and its own background still decides
-    expect(themeFromFile('{"extends":"vscode-dracula","colors":{}}', 'd.json', BUILTIN_THEMES).type).toBe('dark')
-    expect(themeFromFile('{"extends":"Dracula","colors":{"sideBar.background":"#fafafa"}}', 'd.json', BUILTIN_THEMES).type).toBe('light')
-    // an unknown parent: dark, as before
-    expect(themeFromFile('{"extends":"Nope","colors":{}}', 'n.json', BUILTIN_THEMES).type).toBe('dark')
+    // by id too; its own panel colour decides; an unknown parent: dark
+    const byId = themeFromFile('{"extends":"vscode-dracula","colors":{}}')
+    expect(themeKind(byId, all(byId))).toBe('dark')
+    const ownPanel = themeFromFile('{"extends":"Dracula","colors":{"sideBar.background":"#fafafa"}}')
+    expect(themeKind(ownPanel, all(ownPanel))).toBe('light')
+    expect(themeKind(themeFromFile('{"extends":"Nope","colors":{}}'), BUILTIN_THEMES)).toBe('dark')
+  })
+
+  it('a plan background alone does not change the kind of an overlay: the panels come from the parent', () => {
+    const white = themeFromFile('{"name":"Dark White Plan","extends":"Dark Modern","colors":{"editor.background":"#ffffff"}}')
+    const r = resolveTheme(white, [...BUILTIN_THEMES, white])
+    expect(r.kind).toBe('dark')
+    expect(r.ui.viewport).toBe('#ffffff')
+    const black = themeFromFile('{"extends":"Light Modern","colors":{"editor.background":"#1e1e1e"}}')
+    expect(resolveTheme(black, [...BUILTIN_THEMES, black]).kind).toBe('light')
+  })
+
+  it('the kind of an overlay follows its parent: reinstalled with another kind, or installed after it', () => {
+    const child = themeFromFile('{"name":"Child","extends":"Base","colors":{"button.background":"#cc0000"}}')
+    const darkBase = themeFromFile('{"name":"Base","type":"dark","colors":{"sideBar.background":"#202020"}}')
+    const lightBase = themeFromFile('{"name":"Base","type":"light","colors":{"sideBar.background":"#fafafa","editor.background":"#ffffff"}}')
+    expect(resolveTheme(child, [...BUILTIN_THEMES, darkBase, child]).kind).toBe('dark')
+    const r = resolveTheme(child, [...BUILTIN_THEMES, lightBase, child])
+    expect(r.kind).toBe('light')
+    expect(r.ui.hover).toBe(resolveTheme(lightBase, [...BUILTIN_THEMES, lightBase]).ui.hover)
+    // the child alone (parent not installed yet) is dark; once the parent comes, it is light
+    expect(themeKind(child, BUILTIN_THEMES)).toBe('dark')
+    expect(themeKind(child, [lightBase])).toBe('light')
+    // a saved overlay keeps no frozen kind
+    expect(JSON.parse(themeToFile(child)).type).toBeUndefined()
+    // circular overlays end
+    const x = themeFromFile('{"name":"X","extends":"Y","colors":{}}')
+    const y = themeFromFile('{"name":"Y","extends":"X","colors":{}}')
+    expect(themeKind(x, [x, y])).toBe('dark')
   })
 
   it('the plan is readable on a viewport of the other kind', () => {
@@ -114,16 +145,31 @@ describe('colour themes', () => {
     expect(r.ui.text).toBe('#cccccc')
   })
 
-  it('text fields keep readable text: a light field in a dark theme falls back to the dark one', () => {
-    const r = resolveTheme(themeFromFile('{"type":"dark","colors":{"sideBar.background":"#1e1e1e","input.background":"#f0f0f0"}}'))
-    expect(contrast(r.ui.text, r.ui.input)).toBeGreaterThanOrEqual(4.5)
+  it('every surface the text is written on keeps it readable', () => {
+    const cases = [
+      '{"type":"dark","colors":{"sideBar.background":"#1e1e1e","input.background":"#f0f0f0"}}',
+      '{"type":"light","colors":{"sideBar.background":"#f3f3f3","activityBar.background":"#2c2c2c","foreground":"#333333"}}',
+      '{"type":"dark","colors":{"sideBar.background":"#1e1e1e","activityBar.background":"#f0f0f0","foreground":"#cccccc"}}',
+      '{"type":"light","colors":{"sideBar.background":"#f3f3f3","titleBar.activeBackground":"#3c3c3c"}}',
+      '{"type":"dark","colors":{"sideBar.background":"#1e1e1e","doplan.panel-2":"#eeeeee","doplan.panel-3":"#dddddd"}}',
+    ]
+    const surfaces = ['bg', 'panel', 'panel-2', 'panel-3', 'input'] as const
+    for (const c of cases) {
+      const r = resolveTheme(themeFromFile(c))
+      for (const k of surfaces) expect(contrast(r.ui.text, r.ui[k]), `${c} ${k}`).toBeGreaterThanOrEqual(4.5)
+    }
+    // the same for every built-in theme
+    for (const t of BUILTIN_THEMES) {
+      const r = resolveTheme(t, BUILTIN_THEMES)
+      for (const k of surfaces) expect(contrast(r.ui.text, r.ui[k]), `${t.id} ${k}`).toBeGreaterThanOrEqual(4.5)
+    }
     const ok = resolveTheme(themeFromFile('{"type":"dark","colors":{"sideBar.background":"#1e1e1e","input.background":"#3c3c3c"}}'))
     expect(ok.ui.input).toBe('#3c3c3c')
   })
 
   it('the grid is redrawn when a theme changes its lines but keeps the background', () => {
     const base = BUILTIN_THEMES.find((t) => t.name === 'Dark Modern')!
-    const amber = themeFromFile('{"name":"Amber","type":"dark","extends":"Dark Modern","colors":{"foreground":"#ffb000"}}', 'a.json', BUILTIN_THEMES)
+    const amber = themeFromFile('{"name":"Amber","type":"dark","extends":"Dark Modern","colors":{"foreground":"#ffb000"}}')
     const a = resolveTheme(base, BUILTIN_THEMES).plan
     const b = resolveTheme(amber, [...BUILTIN_THEMES, amber]).plan
     expect(b.bg).toBe(a.bg)

@@ -8,7 +8,7 @@ import { useStore } from 'zustand'
 import { setActivePalette } from '@/editor2d/theme'
 import { uiStore } from '@/store/ui'
 import { BUILTIN_THEMES, DEFAULT_DARK_ID, DEFAULT_LIGHT_ID } from './builtin'
-import { resolveTheme, UI_TOKENS, type ResolvedTheme, type ThemeKind, type ThemeSource } from './themes'
+import { resolveTheme, themeKind, UI_TOKENS, type ResolvedTheme, type ThemeKind, type ThemeSource } from './themes'
 
 const KEY = 'doplan.themes'
 
@@ -52,6 +52,24 @@ function resolve(id: string, custom: ThemeSource[]): ResolvedTheme {
   return resolveTheme(t, all)
 }
 
+const DEFAULT_OF: Record<ThemeKind, string> = { dark: DEFAULT_DARK_ID, light: DEFAULT_LIGHT_ID }
+
+/** the kind of a theme among these installed ones (an overlay's kind follows its parent) */
+function kindIn(id: string, custom: ThemeSource[]): ThemeKind | undefined {
+  const t = find(id, custom)
+  return t ? themeKind(t, allOf(custom)) : undefined
+}
+
+/**
+ * The preferred dark and light themes after the installed themes changed: one that is gone or now of
+ * the other kind (reinstalled with another "type", or an overlay whose parent changed) gives way to
+ * the default; the theme in use is the preferred one of its kind.
+ */
+function settle(p: Record<ThemeKind, string>, custom: ThemeSource[], resolved: ResolvedTheme): Record<ThemeKind, string> {
+  const keep = (kind: ThemeKind) => (kindIn(p[kind], custom) === kind ? p[kind] : DEFAULT_OF[kind])
+  return { dark: keep('dark'), light: keep('light'), [resolved.kind]: resolved.id }
+}
+
 const saved = load()
 
 export const themeStore = createStore<ThemeState>()((set, get) => ({
@@ -61,29 +79,22 @@ export const themeStore = createStore<ThemeState>()((set, get) => ({
   select(id) {
     const t = find(id, get().custom)
     if (!t) return
-    set({ activeId: id, preferred: { ...get().preferred, [t.type]: id }, resolved: resolve(id, get().custom) })
+    const resolved = resolve(id, get().custom)
+    set({ activeId: id, preferred: { ...get().preferred, [resolved.kind]: id }, resolved })
   },
   install(themes) {
     const ids = new Set(themes.map((t) => t.id))
     const custom = [...get().custom.filter((t) => !ids.has(t.id)), ...themes]
-    // a reinstalled theme may have changed its kind: it can no longer be the preferred theme of the old one
-    const p = get().preferred
-    const keeps = (kind: ThemeKind) => find(p[kind], custom)?.type === kind
     const resolved = resolve(get().activeId, custom)
-    const preferred = {
-      dark: keeps('dark') ? p.dark : DEFAULT_DARK_ID,
-      light: keeps('light') ? p.light : DEFAULT_LIGHT_ID,
-      // the theme in use stays the preferred one of its (maybe new) kind
-      [resolved.kind]: resolved.id,
-    }
-    set({ custom, preferred, resolved })
+    set({ custom, preferred: settle(get().preferred, custom, resolved), resolved })
   },
   remove(id) {
-    const custom = get().custom.filter((t) => t.id !== id)
     const s = get()
-    const activeId = s.activeId === id ? s.preferred[s.resolved.kind] === id ? (s.resolved.kind === 'dark' ? DEFAULT_DARK_ID : DEFAULT_LIGHT_ID) : s.preferred[s.resolved.kind] : s.activeId
-    const preferred = { dark: s.preferred.dark === id ? DEFAULT_DARK_ID : s.preferred.dark, light: s.preferred.light === id ? DEFAULT_LIGHT_ID : s.preferred.light }
-    set({ custom, activeId, preferred, resolved: resolve(activeId, custom) })
+    const custom = s.custom.filter((t) => t.id !== id)
+    // removing the theme in use falls back to the default of its kind
+    const activeId = s.activeId === id || !find(s.activeId, custom) ? DEFAULT_OF[s.resolved.kind] : s.activeId
+    const resolved = resolve(activeId, custom)
+    set({ custom, activeId, preferred: settle(s.preferred, custom, resolved), resolved })
   },
 }))
 
@@ -116,5 +127,7 @@ themeStore.subscribe((s, prev) => {
 uiStore.subscribe((s, prev) => {
   if (s.theme === prev.theme) return
   const t = themeStore.getState()
-  if (t.resolved.kind !== s.theme) t.select(t.preferred[s.theme])
+  if (t.resolved.kind === s.theme) return
+  const id = t.preferred[s.theme]
+  t.select(kindIn(id, t.custom) === s.theme ? id : DEFAULT_OF[s.theme])
 })

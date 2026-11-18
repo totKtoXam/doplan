@@ -15,7 +15,7 @@ const { themeFromFile } = await import('./themes')
 const { DEFAULT_DARK_ID } = await import('./builtin')
 
 const installFile = (text: string) => {
-  const t = themeFromFile(text, 'Foo.json', themeStore.getState().all())
+  const t = themeFromFile(text, 'Foo.json')
   themeStore.getState().install([t])
   themeStore.getState().select(t.id)
   return t
@@ -47,6 +47,36 @@ describe('theme store', () => {
     expect(s.resolved.kind).toBe('dark')
     expect(s.preferred.dark).toBe('custom-bar')
     expect(s.preferred.light).not.toBe('custom-bar')
+    expect(uiStore.getState().theme).toBe('dark')
+  })
+
+  it('an overlay of a reinstalled parent changes kind with it, and the toggle still lands on its kind', () => {
+    installFile('{"name":"Base","type":"dark","colors":{"sideBar.background":"#202020"}}')
+    installFile('{"name":"Child","extends":"Base","colors":{"button.background":"#cc0000"}}')
+    expect(themeStore.getState().resolved.kind).toBe('dark')
+    expect(themeStore.getState().preferred.dark).toBe('custom-child')
+    // the parent comes back light: the child in use is light now and no longer the preferred dark one
+    themeStore.getState().install([themeFromFile('{"name":"Base","type":"light","colors":{"sideBar.background":"#fafafa"}}')])
+    const s = themeStore.getState()
+    expect(s.activeId).toBe('custom-child')
+    expect(s.resolved.kind).toBe('light')
+    expect(s.preferred.light).toBe('custom-child')
+    expect(s.preferred.dark).toBe(DEFAULT_DARK_ID)
+    uiStore.getState().setTheme('dark')
+    expect(themeStore.getState().resolved.kind).toBe('dark')
+    expect(uiStore.getState().theme).toBe('dark')
+  })
+
+  it('removing the parent of the theme in use keeps the toggle consistent', () => {
+    installFile('{"name":"P","type":"light","colors":{"sideBar.background":"#fafafa"}}')
+    installFile('{"name":"Q","extends":"P","colors":{"button.background":"#cc0000"}}')
+    expect(themeStore.getState().resolved.kind).toBe('light')
+    themeStore.getState().remove('custom-p')
+    const s = themeStore.getState()
+    // Q without its parent is dark (no colours of its own)
+    expect(s.resolved.kind).toBe('dark')
+    expect(s.preferred.dark).toBe('custom-q')
+    expect(s.preferred.light).not.toBe('custom-q')
     expect(uiStore.getState().theme).toBe('dark')
   })
 })

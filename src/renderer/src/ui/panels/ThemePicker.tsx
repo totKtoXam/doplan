@@ -51,8 +51,7 @@ export function ThemePicker() {
     const errors: string[] = []
     for (const f of Array.from(files)) {
       try {
-        // an overlay may extend a theme installed before or one from the same batch
-        ok.push(themeFromFile(await f.text(), f.name, [...themeStore.getState().all(), ...ok]))
+        ok.push(themeFromFile(await f.text(), f.name))
       } catch (e) {
         errors.push(`${f.name}: ${e instanceof ThemeFileError ? t(e.message) : String(e)}`)
       }
@@ -80,7 +79,7 @@ export function ThemePicker() {
   const group = (kind: ThemeKind) => (
     <div className="grid grid-cols-3 gap-1.5">
       {all
-        .filter((s) => s.type === kind)
+        .filter((s) => resolved.get(s.id)!.kind === kind)
         .map((s) => {
           const r = resolved.get(s.id)!
           const on = s.id === activeId

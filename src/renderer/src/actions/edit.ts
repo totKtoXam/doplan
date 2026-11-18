@@ -74,6 +74,32 @@ function rot(p: Vec2, c: Vec2, cos: number, sin: number): Vec2 {
 /** the kinds groupRotate turns; openings and rooms follow their walls, underlays stay put */
 export const ROTATABLE_KINDS: ReadonlySet<EntityRef['kind']> = new Set(['wall', 'node', 'item', 'light', 'electric', 'dimension', 'label'])
 
+/**
+ * Whether groupRotate would change anything: some unlocked object of a kind it turns, and not just
+ * one point without a direction of its own (a single label, or a light without rotation, turns about
+ * itself and stays as it was).
+ */
+export function canGroupRotate(doc: Doc, refs: readonly EntityRef[]): boolean {
+  const free = unlockedRefs(doc, refs as EntityRef[]).filter((r) => ROTATABLE_KINDS.has(r.kind))
+  const points = new Set<string>()
+  for (const r of free) {
+    if (r.kind === 'label') {
+      const l = doc.labels[r.id]
+      if (l) points.add(`${l.x},${l.y}`)
+    } else if (r.kind === 'light') {
+      const l = doc.lights[r.id]
+      if (!l) continue
+      if (l.rotation !== undefined) return true
+      points.add(`${l.x},${l.y}`)
+    } else if (r.kind === 'item') {
+      if (doc.items[r.id] && !doc.items[r.id].locked) return true
+    } else {
+      return true
+    }
+  }
+  return points.size > 1
+}
+
 /** Rotates the selection by `deg` (clockwise on the plan) around its common centre. */
 export function groupRotate(deg: number): void {
   const doc = currentDoc()

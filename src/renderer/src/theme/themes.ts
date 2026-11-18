@@ -45,7 +45,11 @@ export type UiTokens = Record<UiToken, string>
 export interface ThemeSource {
   id: string
   name: string
-  type: ThemeKind
+  /**
+   * dark or light as the file says; a file without it (an overlay, mostly) gets its kind when it is
+   * resolved — see `themeKind` — so it follows its parent when the parent is reinstalled
+   */
+  type?: ThemeKind
   /** id or name of the theme this one changes */
   extends?: string
   colors: Record<string, string>
@@ -121,12 +125,31 @@ export function findTheme(key: string, all: readonly ThemeSource[]): ThemeSource
   return all.find((p) => p.id.toLowerCase() === k) ?? all.find((p) => p.name.toLowerCase() === k)
 }
 
+const kindOfColour = (c: string): ThemeKind => (contrast(c, '#000000') > contrast(c, '#ffffff') ? 'light' : 'dark')
+
+/**
+ * Dark or light, worked out whenever the theme is resolved (never frozen at install): the file's
+ * "type"; else its own panel colour; else the kind of the theme it extends; else its plan
+ * background (editor.background — for an overlay only the plan's, the panels are the parent's);
+ * else dark.
+ */
+export function themeKind(t: ThemeSource, all: readonly ThemeSource[] = [], seen: ThemeSource[] = []): ThemeKind {
+  if (t.type) return t.type
+  const own = (k: string) => (parseColor(t.colors[k]) ? t.colors[k] : undefined)
+  const panel = own('doplan.panel') ?? own('sideBar.background')
+  if (panel) return kindOfColour(panel)
+  const parent = t.extends ? findTheme(t.extends, all) : undefined
+  if (parent && parent !== t && !seen.includes(parent) && seen.length < 8) return themeKind(parent, all, [...seen, t])
+  const editor = own('editor.background')
+  return editor ? kindOfColour(editor) : 'dark'
+}
+
 /**
  * A theme file (VS Code colour theme or a doplan theme, which is the same format) → a theme.
- * `fileName` names the theme when the file has no `name`; `all` are the themes an overlay may
- * extend: a file without "type" takes the kind of its parent unless it sets its own background.
+ * `fileName` names the theme when the file has no `name`. A file without "type" stays without it:
+ * its kind is worked out against the installed themes (`themeKind`).
  */
-export function themeFromFile(text: string, fileName = 'theme.json', all: readonly ThemeSource[] = []): ThemeSource {
+export function themeFromFile(text: string, fileName = 'theme.json'): ThemeSource {
   let json: unknown
   try {
     json = parseJsonc(text)
@@ -153,20 +176,16 @@ export function themeFromFile(text: string, fileName = 'theme.json', all: readon
   const base = fileName.replace(/\.(json|jsonc)$/i, '').replace(/[-_]color-theme$/i, '')
   const name = typeof o.name === 'string' && o.name.trim() ? o.name.trim() : base
   const t = typeof o.type === 'string' ? o.type.toLowerCase() : ''
-  const type: ThemeKind =
+  const type: ThemeKind | undefined =
     t === 'light' || t === 'hc-light' || t === 'hclight' || t === 'vs'
       ? 'light'
       : t === 'dark' || t === 'hc' || t === 'hc-black' || t === 'hcdark' || t === 'vs-dark'
         ? 'dark'
-        : (() => {
-            const bg = colors['doplan.panel'] ?? colors['sideBar.background'] ?? colors['editor.background']
-            if (bg && parseColor(bg)) return contrast(bg, '#000000') > contrast(bg, '#ffffff') ? 'light' : 'dark'
-            return (ext && findTheme(ext, all)?.type) || 'dark'
-          })()
+        : undefined
   return {
     id: `custom-${slug(name)}`,
     name,
-    type,
+    ...(type ? { type } : {}),
     ...(ext ? { extends: ext } : {}),
     colors,
     ...(typeof o.author === 'string' ? { author: o.author } : {}),
@@ -175,7 +194,7 @@ export function themeFromFile(text: string, fileName = 'theme.json', all: readon
 
 /** a theme → the text of a theme file (installable here and readable by VS Code) */
 export function themeToFile(t: ThemeSource): string {
-  return JSON.stringify({ name: t.name, type: t.type, ...(t.extends ? { extends: t.extends } : {}), colors: t.colors }, null, 2)
+  return JSON.stringify({ name: t.name, ...(t.type ? { type: t.type } : {}), ...(t.extends ? { extends: t.extends } : {}), colors: t.colors }, null, 2)
 }
 
 // ───────────── resolving ─────────────
@@ -203,7 +222,7 @@ export function resolveTheme(t: ThemeSource, all: readonly ThemeSource[] = []): 
   const layers = chain(t, all)
   const colors: Record<string, string> = {}
   for (const l of layers) Object.assign(colors, l.colors)
-  const kind = t.type
+  const kind = themeKind(t, all)
   const dark = kind === 'dark'
   const fb = FALLBACK[kind]
   const get = (...keys: string[]): string | undefined => {
@@ -216,7 +235,14 @@ export function resolveTheme(t: ThemeSource, all: readonly ThemeSource[] = []): 
   let text = solid(get('doplan.text', 'foreground', 'sideBar.foreground', 'editor.foreground')) ?? fb.text
   if (contrast(text, panel) < 4.5) text = readableOn(panel, '#eeeeee', '#1a1a1a')
 
-  const bg = solid(get('doplan.bg', 'activityBar.background', 'titleBar.activeBackground')) ?? mix(panel, '#000000', dark ? 0.22 : 0.05)
+  /**
+   * a surface the interface text is written on (window background, tooltips, number fields, inputs,
+   * panel shades): the theme's colour if the text reads on it, else the derived one, else the panel
+   */
+  const surface = (v: string | undefined, derived: string): string =>
+    v && contrast(text, v) >= 4.5 ? v : contrast(text, derived) >= 4.5 ? derived : panel
+
+  const bg = surface(solid(get('doplan.bg', 'activityBar.background', 'titleBar.activeBackground')), mix(panel, '#000000', dark ? 0.22 : 0.05))
   const viewport = solid(get('doplan.viewport', 'editor.background')) ?? panel
   const mutedC = solid(get('doplan.muted', 'descriptionForeground'))
   const muted = mutedC && contrast(mutedC, panel) >= 3 ? mutedC : mix(text, panel, 0.38)
@@ -246,8 +272,8 @@ export function resolveTheme(t: ThemeSource, all: readonly ThemeSource[] = []): 
   const ui: UiTokens = {
     bg,
     panel,
-    'panel-2': solid(get('doplan.panel-2')) ?? mix(panel, text, 0.045),
-    'panel-3': solid(get('doplan.panel-3')) ?? mix(panel, text, 0.09),
+    'panel-2': surface(solid(get('doplan.panel-2')), mix(panel, text, 0.045)),
+    'panel-3': surface(solid(get('doplan.panel-3')), mix(panel, text, 0.09)),
     border,
     'border-strong': solid(get('doplan.border-strong')) ?? mix(panel, text, 0.2),
     text,
@@ -259,12 +285,8 @@ export function resolveTheme(t: ThemeSource, all: readonly ThemeSource[] = []): 
     'accent-fg': accentFg,
     hover: get('doplan.hover') ?? withAlpha(text, dark ? 0.07 : 0.06),
     active: get('doplan.active') ?? withAlpha(text, dark ? 0.11 : 0.1),
-    input: (() => {
-      const fallback = dark ? mix(panel, '#000000', 0.18) : '#ffffff'
-      const v = solid(get('doplan.input', 'input.background'))
-      // the fields show the interface text: a light field in a dark theme (or the reverse) is dropped
-      return v && contrast(text, v) >= 4.5 ? v : fallback
-    })(),
+    // a light field in a dark theme (or the reverse) is dropped
+    input: surface(solid(get('doplan.input', 'input.background')), dark ? mix(panel, '#000000', 0.18) : '#ffffff'),
     danger: solid(get('doplan.danger', 'errorForeground', 'editorError.foreground')) ?? fb.danger,
     warning: solid(get('doplan.warning', 'editorWarning.foreground')) ?? fb.warning,
     success: solid(get('doplan.success', 'terminal.ansiGreen', 'gitDecoration.addedResourceForeground')) ?? fb.success,

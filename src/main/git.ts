@@ -148,7 +148,7 @@ function noLazyFetchArgs(): string[] {
   return major > 2 || (major === 2 && minor >= 45) ? ['--no-lazy-fetch'] : []
 }
 
-class GitError extends Error {
+export class GitError extends Error {
   constructor(
     message: string,
     readonly code: number | null,
@@ -161,16 +161,17 @@ class GitError extends Error {
 interface RunOpts {
   /** extra `-c` flags placed before the command */
   config?: string[]
-  input?: string
+  input?: string | Buffer
   binary?: boolean
   /** do not throw on a non-zero exit code */
   allowFail?: boolean
-}
-
-interface SpawnOpts extends RunOpts {
+  /** ms; default 2 minutes */
+  timeout?: number
   /** added to the (GIT_*-free) environment */
   env?: Record<string, string>
 }
+
+type SpawnOpts = RunOpts
 
 type RunResult = { code: number; out: Buffer; err: string }
 
@@ -182,7 +183,7 @@ type RunResult = { code: number; out: Buffer; err: string }
 async function run(root: string, args: string[], opts: RunOpts = {}): Promise<RunResult> {
   const init = args[0] === 'init'
   await assertRepoSafe(root, init)
-  return spawnGit(root, init ? args : [...repoArgs(root), ...args], { ...opts, env: ceilingEnv(root) })
+  return spawnGit(root, init ? args : [...repoArgs(root), ...args], { ...opts, env: { ...opts.env, ...ceilingEnv(root) } })
 }
 
 /**
@@ -209,6 +210,7 @@ async function spawnGit(cwd: string, args: string[], opts: SpawnOpts = {}): Prom
   const exe = await findGit()
   if (!exe) throw new Error(msg('Git не найден. Установите Git (https://git-scm.com), чтобы вести историю версий.', 'Git not found. Install Git (https://git-scm.com) to keep the version history.'))
   const fullArgs = [...noLazyFetchArgs(), ...hardeningArgs(), ...(opts.config ?? []), ...args]
+  const timeout = opts.timeout ?? 120000
   return new Promise((resolve, reject) => {
     const child = execFile(
       exe,
@@ -218,22 +220,33 @@ async function spawnGit(cwd: string, args: string[], opts: SpawnOpts = {}): Prom
         windowsHide: true,
         encoding: 'buffer',
         maxBuffer: 1024 * 1024 * 1024,
-        timeout: 120000,
+        timeout,
         env: { ...gitEnv(), ...opts.env },
       },
       (error, stdout, stderr) => {
         const code = error ? (typeof (error as { code?: unknown }).code === 'number' ? ((error as { code: number }).code as number) : 1) : 0
         const err = Buffer.from(stderr ?? '').toString('utf8').trim()
+        // the command itself, not --git-dir=…: messages name it without the folder path
+        const cmd = args.find((a) => !a.startsWith('-')) ?? 'git'
+        // killed on its timeout (a server that accepts the connection and never answers): no exit code
+        // of git's own, so even allowFail callers get the failure, worded so it reads as a timeout
+        const overflow = (error as { code?: unknown } | null)?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
+        if (error && !overflow && (error.killed || error.signal)) {
+          reject(new GitError(`git ${cmd}: timeout, no answer within ${Math.round(timeout / 1000)} s`, code, err))
+          return
+        }
         if (error && !opts.allowFail) {
-          const first = err.split('\n').find((l) => /^(fatal|error):/.test(l)) ?? err.split('\n')[0] ?? error.message
-          reject(new GitError(`git ${args[0]}: ${first || error.message}`, code, err))
+          const first = err.split('\n').find((l) => /^(fatal|error):/.test(l)) ?? err.split('\n')[0] ?? ''
+          // never error.message: it is the whole command line with its paths and -c flags
+          const why = typeof (error as { code?: unknown }).code === 'string' ? String((error as { code: string }).code) : `exit code ${code}`
+          reject(new GitError(`git ${cmd}: ${first || why}`, code, err))
           return
         }
         resolve({ code, out: Buffer.from(stdout ?? ''), err })
       },
     )
     if (opts.input !== undefined) {
-      child.stdin?.end(Buffer.from(opts.input, 'utf8'))
+      child.stdin?.end(typeof opts.input === 'string' ? Buffer.from(opts.input, 'utf8') : opts.input)
     } else {
       child.stdin?.end()
     }
@@ -886,4 +899,325 @@ export async function gitListDir(root: string, sha: string, dir: string): Promis
 export async function gitHead(root: string): Promise<string | null> {
   const r = await run(root, ['rev-parse', '--verify', '--quiet', 'HEAD'], { allowFail: true })
   return r.code === 0 ? r.out.toString('utf8').trim() : null
+}
+
+// ───────────── remotes (GitHub sync, see githubSync.ts) ─────────────
+
+/** how git reaches a remote */
+export interface GitNet {
+  /** `-c` flags placed before the command (the credential helper: github.gitCredentialArgs) */
+  config: string[]
+  /** an action the user started: the user's own credential manager may show its sign-in window */
+  interactive: boolean
+  /** ms; default 10 minutes for an action the user started, 90 s for a look in the background */
+  timeout?: number
+}
+
+/** test hook: extra `-c` flags for network commands (a local repository standing in for GitHub) */
+export const netTestConfig: string[] = []
+
+/**
+ * Network commands lift `protocol.allow=never` for https and ssh only (file, ext, git… stay off), and
+ * ssh never waits for a passphrase or host-key question nobody would see.
+ */
+function netArgs(net: GitNet): string[] {
+  return [
+    '-c', 'protocol.https.allow=always',
+    '-c', 'protocol.ssh.allow=always',
+    '-c', 'core.sshCommand=ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new',
+    ...net.config,
+    ...netTestConfig,
+  ]
+}
+
+function runNet(root: string, args: string[], net: GitNet, opts: RunOpts = {}): Promise<RunResult> {
+  return run(root, args, {
+    ...opts,
+    config: [...netArgs(net), ...(opts.config ?? [])],
+    // a sign-in window of the user's credential manager only for an action the user started
+    env: { GCM_INTERACTIVE: net.interactive ? 'auto' : 'never' },
+    timeout: opts.timeout ?? net.timeout ?? (net.interactive ? 10 * 60_000 : 90_000),
+  })
+}
+
+/**
+ * Commands that write the work tree from another commit (merge, read-tree): a link in the incoming
+ * tree becomes a plain file (doplan refuses links in a project folder), NTFS/HFS-special paths are
+ * refused, the repository's filter drivers stay off, and a commit always has an author.
+ */
+async function checkoutConfig(root: string): Promise<string[]> {
+  return ['-c', 'core.symlinks=false', '-c', 'core.protectNTFS=true', '-c', 'core.protectHFS=true', ...(await filterOffArgs(root)), ...(await identityArgs(root))]
+}
+
+const trimOut = (r: RunResult) => r.out.toString('utf8').trim()
+
+export async function gitCurrentBranch(root: string): Promise<string | null> {
+  const r = await run(root, ['symbolic-ref', '--quiet', '--short', 'HEAD'], { allowFail: true })
+  return r.code === 0 ? trimOut(r) || null : null
+}
+
+/** every address of the remote, in the order git uses them (fetch takes the first, push goes to all) */
+export async function gitRemoteUrls(root: string, remote = 'origin'): Promise<string[]> {
+  const r = await run(root, ['config', '--get-all', `remote.${remote}.url`], { allowFail: true })
+  return r.code === 0 ? trimOut(r).split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : []
+}
+
+/** the remote's address git fetches from (the first one; `config --get` would give the last) */
+export async function gitRemoteUrl(root: string, remote = 'origin'): Promise<string | null> {
+  return (await gitRemoteUrls(root, remote))[0] ?? null
+}
+
+/** adds the remote or changes its address */
+export async function gitSetRemote(root: string, url: string, remote = 'origin'): Promise<void> {
+  if (/^-|[\0\r\n]/.test(url)) throw new Error(msg('Недопустимый адрес репозитория', 'Invalid repository address'))
+  // one address afterwards, even where the folder had several (set-url refuses to choose among them)
+  if (await gitRemoteUrl(root, remote)) await run(root, ['config', '--replace-all', `remote.${remote}.url`, url])
+  else await run(root, ['remote', 'add', remote, url])
+}
+
+/** removes the remote together with its remote-tracking branches and the upstream of local branches */
+export async function gitRemoveRemote(root: string, remote = 'origin'): Promise<void> {
+  if (await gitRemoteUrl(root, remote)) await run(root, ['remote', 'remove', remote])
+}
+
+/** the remote branch the current branch goes to (branch.<b>.merge), without refs/heads/ */
+export async function gitUpstreamBranch(root: string): Promise<string | null> {
+  const b = await gitCurrentBranch(root)
+  if (!b) return null
+  const r = await run(root, ['config', '--get', `branch.${b}.merge`], { allowFail: true })
+  const ref = r.code === 0 ? trimOut(r) : ''
+  return ref.startsWith('refs/heads/') ? ref.slice('refs/heads/'.length) : null
+}
+
+/** sets the upstream of the current branch without a network round trip */
+export async function gitSetUpstream(root: string, branch: string, remote = 'origin'): Promise<void> {
+  const b = await gitCurrentBranch(root)
+  if (!b) return
+  await run(root, ['config', `branch.${b}.remote`, remote])
+  await run(root, ['config', `branch.${b}.merge`, `refs/heads/${branch}`])
+}
+
+export interface RemoteHeads {
+  /** the remote has no branches at all (a new, empty repository) */
+  empty: boolean
+  /** its default branch (HEAD), or null */
+  head: string | null
+  branches: string[]
+}
+
+/** what the remote has, without fetching (`ls-remote --symref`) */
+export async function gitRemoteHeads(root: string, net: GitNet, remote = 'origin'): Promise<RemoteHeads> {
+  const out = trimOut(await runNet(root, ['ls-remote', '--symref', remote], net))
+  let head: string | null = null
+  const branches: string[] = []
+  for (const line of out.split(/\r?\n/)) {
+    const sym = /^ref:\s*refs\/heads\/(\S+)\s+HEAD$/.exec(line)
+    if (sym) head = sym[1]
+    const br = /^[0-9a-f]{40,64}\s+refs\/heads\/(\S+)$/.exec(line)
+    if (br) branches.push(br[1])
+  }
+  if (head && !branches.includes(head)) head = null
+  const fallback = branches.includes('main') ? 'main' : branches.includes('master') ? 'master' : (branches[0] ?? null)
+  return { empty: branches.length === 0, head: head ?? fallback, branches }
+}
+
+/** fetches the remote's branches into refs/remotes/<remote>/ (no tags: a tag of the same name here would make it fail) */
+export async function gitFetch(root: string, net: GitNet, remote = 'origin'): Promise<void> {
+  await runNet(root, ['fetch', '--no-tags', '--prune', '--quiet', remote, `+refs/heads/*:refs/remotes/${remote}/*`], net)
+}
+
+export async function gitRefExists(root: string, ref: string): Promise<boolean> {
+  return (await run(root, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { allowFail: true })).code === 0
+}
+
+/** commits HEAD has that `ref` has not (ahead), and the other way round (behind) */
+export async function gitAheadBehind(root: string, ref: string): Promise<{ ahead: number; behind: number }> {
+  const out = trimOut(await run(root, ['rev-list', '--left-right', '--count', `HEAD...${ref}`]))
+  const [a, b] = out.split(/\s+/).map(Number)
+  return { ahead: a || 0, behind: b || 0 }
+}
+
+export async function gitCommitCount(root: string): Promise<number> {
+  if (!(await gitHead(root))) return 0
+  return Number(trimOut(await run(root, ['rev-list', '--count', 'HEAD']))) || 0
+}
+
+/** HEAD and `ref` share history */
+export async function gitRelated(root: string, ref: string): Promise<boolean> {
+  return (await run(root, ['merge-base', 'HEAD', ref], { allowFail: true })).code === 0
+}
+
+/** sends the current branch to `branch` on the remote and makes it the upstream; annotated tags of sent versions go along */
+export async function gitPush(root: string, net: GitNet, branch: string, remote = 'origin'): Promise<void> {
+  await runNet(root, ['push', '--follow-tags', '--set-upstream', remote, `HEAD:refs/heads/${branch}`], net)
+}
+
+/** a branch name doplan may send to (no options, no ref syntax tricks) */
+export function isSafeBranchName(name: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$/.test(name) && !/\.\.|\/\/|\/$|\.lock$|\.$|@\{/.test(name)
+}
+
+/**
+ * Sends a commit (sha or local ref) to `branch` on the remote without touching the upstream or tags;
+ * `force` replaces whatever the branch had (e.g. a generated one-commit gh-pages branch).
+ * `src` null deletes the branch on the remote (a branch already gone is fine); the branch the project
+ * itself syncs with is never deleted this way.
+ */
+export async function gitPushRef(root: string, net: GitNet, src: string | null, branch: string, opts: { force?: boolean; remote?: string } = {}): Promise<void> {
+  if (!isSafeBranchName(branch)) throw new Error(msg('Недопустимое имя ветки', 'Invalid branch name'))
+  const remote = opts.remote ?? 'origin'
+  if (src === null) {
+    if (branch === (await gitUpstreamBranch(root))) throw new Error(msg('Эту ветку проект использует для синхронизации — её нельзя удалить', 'The project syncs with this branch: it cannot be deleted'))
+    try {
+      await runNet(root, ['push', '--quiet', remote, `:refs/heads/${branch}`], net)
+    } catch (err) {
+      if (!(err instanceof GitError && /remote ref does not exist|unable to delete .*: remote ref/i.test(`${err.stderr}\n${err.message}`))) throw err
+    }
+    return
+  }
+  if (!/^[0-9a-f]{40,64}$/.test(src) && !(isSafeBranchName(src.replace(/^refs\/(heads|tags)\//, '')) && /^(refs\/(heads|tags)\/|HEAD$|[A-Za-z0-9])/.test(src)))
+    throw new Error(msg('Недопустимая ссылка', 'Invalid reference'))
+  await runNet(root, ['push', '--quiet', remote, `${opts.force ? '+' : ''}${src}:refs/heads/${branch}`], net)
+}
+
+/**
+ * Writes a commit with no parent made of exactly `files` (paths with `/`), without touching the work
+ * tree, the index or any branch; resolves with its sha. Used for generated branches such as gh-pages.
+ */
+export async function gitOrphanCommit(root: string, files: { path: string; data: Buffer | string }[], message: string): Promise<string> {
+  // nested trees from the leaves up
+  type Dir = { files: Map<string, string>; dirs: Map<string, Dir> }
+  const top: Dir = { files: new Map(), dirs: new Map() }
+  for (const f of files) {
+    const parts = f.path.split('/')
+    if (!parts.length || parts.some((p) => !p || p === '.' || p === '..' || p.toLowerCase() === '.git' || /[\0\n\r\t]/.test(p)))
+      throw new Error(msg(`Недопустимый путь файла: ${f.path}`, `Invalid file path: ${f.path}`))
+    let d = top
+    for (const p of parts.slice(0, -1)) {
+      let next = d.dirs.get(p)
+      if (!next) d.dirs.set(p, (next = { files: new Map(), dirs: new Map() }))
+      d = next
+    }
+    const data = typeof f.data === 'string' ? Buffer.from(f.data, 'utf8') : f.data
+    d.files.set(parts[parts.length - 1], trimOut(await run(root, ['hash-object', '-w', '--no-filters', '--stdin'], { input: data })))
+  }
+  const writeTree = async (d: Dir): Promise<string> => {
+    const lines: string[] = []
+    for (const [name, sha] of d.files) lines.push(`100644 blob ${sha}\t${name}`)
+    for (const [name, sub] of d.dirs) lines.push(`040000 tree ${await writeTree(sub)}\t${name}`)
+    return trimOut(await run(root, ['mktree', '-z'], { input: lines.map((l) => `${l}\0`).join('') }))
+  }
+  const tree = await writeTree(top)
+  return trimOut(await run(root, [...(await identityArgs(root)), 'commit-tree', tree, '-F', '-'], { input: `${message.trim() || 'doplan'}\n` }))
+}
+
+export async function gitFastForward(root: string, ref: string): Promise<void> {
+  await run(root, ['merge', '--ff-only', '--quiet', ref], { config: await checkoutConfig(root) })
+}
+
+/** files left unmerged by a stopped merge */
+async function unmergedFiles(root: string): Promise<string[]> {
+  const r = await run(root, ['diff', '--name-only', '--diff-filter=U', '-z', '--no-ext-diff', '--no-textconv'], { allowFail: true })
+  return r.out.toString('utf8').split('\0').filter(Boolean)
+}
+
+const mergeInProgress = (root: string) => !!lstatOrNull(join(root, '.git', 'MERGE_HEAD'))
+
+export async function gitMergeAbort(root: string): Promise<void> {
+  if (mergeInProgress(root)) await run(root, ['merge', '--abort'], { allowFail: true, config: await checkoutConfig(root) })
+}
+
+/**
+ * Starts merging `ref` into HEAD without committing. `conflicts` empty: the merged files are in the
+ * work tree and the index, to be checked and then committed (gitMergeCommit) or dropped (gitMergeAbort).
+ * Otherwise the merge has been aborted and the folder is as before.
+ */
+export async function gitMergeStart(root: string, ref: string, opts: { allowUnrelated?: boolean; favourOurs?: boolean } = {}): Promise<{ conflicts: string[] }> {
+  const args = ['merge', '--no-ff', '--no-commit', '--quiet']
+  if (opts.allowUnrelated) args.push('--allow-unrelated-histories')
+  if (opts.favourOurs) args.push('-X', 'ours')
+  const r = await run(root, [...args, ref], { allowFail: true, config: await checkoutConfig(root) })
+  if (r.code === 0) return { conflicts: [] }
+  const conflicts = await unmergedFiles(root)
+  await gitMergeAbort(root)
+  if (!conflicts.length) throw new GitError(`git merge: ${r.err.split('\n')[0] || 'failed'}`, r.code, r.err)
+  return { conflicts }
+}
+
+/** commits a merge gitMergeStart left uncommitted */
+export async function gitMergeCommit(root: string, message: string): Promise<string> {
+  await run(root, ['commit', '--quiet', '--no-verify', '-F', '-'], { input: `${message}\n`, config: await checkoutConfig(root) })
+  return trimOut(await run(root, ['rev-parse', 'HEAD']))
+}
+
+/** records `ref` as merged while keeping this side's files exactly (strategy ours) */
+export async function gitMergeKeepOurs(root: string, ref: string, message: string): Promise<string> {
+  await run(root, ['merge', '--no-ff', '--quiet', '--allow-unrelated-histories', '-s', 'ours', '-m', message, ref], { config: await checkoutConfig(root) })
+  return trimOut(await run(root, ['rev-parse', 'HEAD']))
+}
+
+/** records `ref` as merged with its files replacing this side's (this side stays in the history) */
+export async function gitMergeTakeTheirs(root: string, ref: string, message: string): Promise<string> {
+  const config = await checkoutConfig(root)
+  await run(root, ['merge', '--no-ff', '--no-commit', '--quiet', '--allow-unrelated-histories', '-s', 'ours', ref], { config })
+  try {
+    await run(root, ['read-tree', '--reset', '-u', ref], { config })
+  } catch (err) {
+    await gitMergeAbort(root)
+    throw err
+  }
+  return gitMergeCommit(root, message)
+}
+
+export interface TreeFile {
+  path: string
+  mode: string
+  sha: string
+  size: number
+}
+
+/** the files of a commit (regular files only: no links, no submodules) */
+export async function gitTreeFiles(root: string, ref: string): Promise<TreeFile[]> {
+  const r = await run(root, ['ls-tree', '-r', '-l', '-z', '--full-tree', ref])
+  const files: TreeFile[] = []
+  for (const rec of r.out.toString('utf8').split('\0')) {
+    const m = /^(\d{6}) blob ([0-9a-f]{40,64})\s+(\d+)\t([\s\S]+)$/.exec(rec)
+    if (m && (m[1] === '100644' || m[1] === '100755')) files.push({ mode: m[1], sha: m[2], size: Number(m[3]), path: m[4] })
+  }
+  return files
+}
+
+export async function gitBlob(root: string, sha: string): Promise<Buffer> {
+  if (!/^[0-9a-f]{40,64}$/.test(sha)) throw new Error(msg('Некорректный объект', 'Invalid object'))
+  return (await run(root, ['cat-file', 'blob', sha], { binary: true })).out
+}
+
+/** the files (blobs) of the commits the remote does not have yet, with their sizes */
+export async function gitUnpushedFiles(root: string, remote = 'origin'): Promise<{ path: string; size: number }[]> {
+  if (!(await gitHead(root))) return []
+  const list = trimOut(await run(root, ['rev-list', '--objects', 'HEAD', '--not', `--remotes=${remote}`]))
+  const pathOf = new Map<string, string>()
+  for (const line of list.split(/\r?\n/)) {
+    const sp = line.indexOf(' ')
+    if (sp > 0) pathOf.set(line.slice(0, sp), line.slice(sp + 1))
+  }
+  if (!pathOf.size) return []
+  const check = trimOut(await run(root, ['cat-file', '--batch-check=%(objectname) %(objecttype) %(objectsize)'], { input: `${[...pathOf.keys()].join('\n')}\n` }))
+  const out: { path: string; size: number }[] = []
+  for (const line of check.split(/\r?\n/)) {
+    const [sha, type, size] = line.split(' ')
+    if (type === 'blob') out.push({ path: pathOf.get(sha) ?? sha, size: Number(size) || 0 })
+  }
+  return out
+}
+
+/** bytes the repository's objects take on disk */
+export async function gitRepoSize(root: string): Promise<number> {
+  const out = trimOut(await run(root, ['count-objects', '-v'], { allowFail: true }))
+  let kib = 0
+  for (const line of out.split(/\r?\n/)) {
+    const m = /^(size|size-pack):\s*(\d+)$/.exec(line.trim())
+    if (m) kib += Number(m[2])
+  }
+  return kib * 1024
 }

@@ -3,7 +3,7 @@
  * browser tab (no Electron): settings live in localStorage, saves become downloads,
  * everything else resolves to a harmless "nothing happened" value.
  */
-import type { AppSettings, DoplanApi, FileFilter, MenuCommand } from '@shared/ipc'
+import type { AppSettings, DoplanApi, FileFilter, MenuCommand, WindowCommand } from '@shared/ipc'
 import { DEFAULT_AI_SETTINGS } from '@shared/aiChat'
 import { releasePageUrl } from '@shared/updater'
 import { DEFAULT_FEEDS } from '@shared/feeds'
@@ -319,6 +319,10 @@ function createFallbackApi(): DoplanApi {
     window: {
       setTitle(title: string, dirty: boolean) {
         document.title = `${dirty ? '• ' : ''}${title} — doplan`
+      },
+      command(cmd: WindowCommand) {
+        if (cmd === 'reload') location.reload()
+        else if (cmd === 'fullscreen') void (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => {})
       },
       onMenu: noopUnsub as (cb: (cmd: MenuCommand) => void) => () => void,
       onCloseRequest: noopUnsub,

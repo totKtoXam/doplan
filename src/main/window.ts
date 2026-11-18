@@ -34,6 +34,16 @@ export function isTrustedUrl(url: string | undefined | null): boolean {
   }
 }
 
+/** «Вид» menu of the header: full screen; reload and devtools only in a dev run, as in the native menu */
+export function runWindowCommand(cmd: unknown): void {
+  const win = mainWindow
+  if (!win || win.isDestroyed()) return
+  if (cmd === 'fullscreen') win.setFullScreen(!win.isFullScreen())
+  else if (app.isPackaged) return
+  else if (cmd === 'reload') win.webContents.reload()
+  else if (cmd === 'devtools') win.webContents.toggleDevTools()
+}
+
 export function getMainWindow(): BrowserWindow | null {
   return mainWindow && !mainWindow.isDestroyed() ? mainWindow : null
 }

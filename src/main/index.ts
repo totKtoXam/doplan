@@ -9,7 +9,7 @@ import * as nodeModule from 'node:module'
 import { app, BrowserWindow, session } from 'electron'
 import { grantPath } from './access'
 import { ensureLibrary } from './catalog'
-import { buildMenu } from './menu'
+import { buildMenu, showTextContextMenu } from './menu'
 import { paths } from './paths'
 import { initProjectStore, projectFileFromArgv } from './project'
 import { registerProtocolHandlers, registerSchemes } from './protocol'
@@ -112,6 +112,7 @@ if (!gotLock) {
 
   app.on('web-contents-created', (_e, wc) => {
     wc.on('will-attach-webview', (ev) => ev.preventDefault())
+    wc.on('context-menu', (_ev, params) => showTextContextMenu(wc, params))
   })
 
   app.whenReady().then(async () => {

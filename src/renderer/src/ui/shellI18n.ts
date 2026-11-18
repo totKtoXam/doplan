@@ -31,7 +31,6 @@ addTranslations('en', {
     'Click on the plan to place nodes; while drawing, type a number for the segment length. Esc finishes. Thickness and height are in the tool bar above the plan.',
   // tool bar: «Вид» menu
   Вид: 'View',
-  'Что показывать на плане, единицы': 'What the plan shows, units',
   'На плане': 'On the plan',
   'Размеры мебели (Ш×Г)': 'Furniture sizes (W×D)',
   Миллиметры: 'Millimetres',
@@ -46,4 +45,15 @@ addTranslations('en', {
   // project inspector
   'Привязки и шаг сетки — в строке состояния внизу, что показывать на плане и единицы — в меню «Вид» над планом.':
     'Snaps and the grid step are in the status bar below; what the plan shows and the units are in the «View» menu above the plan.',
+  // grid step typed by hand
+  'Другое…': 'Other…',
+  'Шаг сетки, мм': 'Grid step, mm',
+  'Шаг сетки: число в мм, или с единицами — «25 см», «0,5 м». Enter — применить, Esc — отмена':
+    'Grid step: a number in mm, or with a unit — «25 cm», «0.5 m». Enter applies, Esc cancels',
+  // «Вид»: the window items of the hidden native menu
+  'Окно программы': 'App window',
+  'Во весь экран': 'Full screen',
+  Перезагрузить: 'Reload',
+  'Инструменты разработчика': 'Developer tools',
+  'Что показывать на плане, единицы, окно': 'What the plan shows, units, window',
 })

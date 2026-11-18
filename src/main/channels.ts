@@ -78,6 +78,7 @@ export const CH = {
   // renderer → main (fire and forget)
   windowSetTitle: 'window:setTitle',
   windowConfirmClose: 'window:confirmClose',
+  windowCommand: 'window:command',
 
   // main → renderer events
   evMenu: 'ev:menu',

@@ -66,7 +66,17 @@ export const themeStore = createStore<ThemeState>()((set, get) => ({
   install(themes) {
     const ids = new Set(themes.map((t) => t.id))
     const custom = [...get().custom.filter((t) => !ids.has(t.id)), ...themes]
-    set({ custom, resolved: resolve(get().activeId, custom) })
+    // a reinstalled theme may have changed its kind: it can no longer be the preferred theme of the old one
+    const p = get().preferred
+    const keeps = (kind: ThemeKind) => find(p[kind], custom)?.type === kind
+    const resolved = resolve(get().activeId, custom)
+    const preferred = {
+      dark: keeps('dark') ? p.dark : DEFAULT_DARK_ID,
+      light: keeps('light') ? p.light : DEFAULT_LIGHT_ID,
+      // the theme in use stays the preferred one of its (maybe new) kind
+      [resolved.kind]: resolved.id,
+    }
+    set({ custom, preferred, resolved })
   },
   remove(id) {
     const custom = get().custom.filter((t) => t.id !== id)

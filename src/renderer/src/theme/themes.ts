@@ -93,12 +93,16 @@ export function parseJsonc(text: string): unknown {
       while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) i++
       i += 2
     } else {
+      if (c === '}' || c === ']') {
+        // a trailing comma before } or ]: comments are already gone, only white space can follow it
+        let j = out.length - 1
+        while (j >= 0 && /\s/.test(out[j])) j--
+        if (out[j] === ',') out = out.slice(0, j) + out.slice(j + 1)
+      }
       out += c
       i++
     }
   }
-  // trailing commas before } or ]
-  out = out.replace(/,(\s*[}\]])/g, '$1')
   return JSON.parse(out.replace(/^﻿/, ''))
 }
 
@@ -111,11 +115,18 @@ const slug = (s: string) =>
     .replace(/^-+|-+$/g, '')
     .slice(0, 48) || 'theme'
 
+/** a theme by id or name (case-insensitive) */
+export function findTheme(key: string, all: readonly ThemeSource[]): ThemeSource | undefined {
+  const k = key.toLowerCase()
+  return all.find((p) => p.id.toLowerCase() === k) ?? all.find((p) => p.name.toLowerCase() === k)
+}
+
 /**
  * A theme file (VS Code colour theme or a doplan theme, which is the same format) → a theme.
- * `fileName` names the theme when the file has no `name`.
+ * `fileName` names the theme when the file has no `name`; `all` are the themes an overlay may
+ * extend: a file without "type" takes the kind of its parent unless it sets its own background.
  */
-export function themeFromFile(text: string, fileName = 'theme.json'): ThemeSource {
+export function themeFromFile(text: string, fileName = 'theme.json', all: readonly ThemeSource[] = []): ThemeSource {
   let json: unknown
   try {
     json = parseJsonc(text)
@@ -148,8 +159,9 @@ export function themeFromFile(text: string, fileName = 'theme.json'): ThemeSourc
       : t === 'dark' || t === 'hc' || t === 'hc-black' || t === 'hcdark' || t === 'vs-dark'
         ? 'dark'
         : (() => {
-            const bg = colors['editor.background'] ?? colors['sideBar.background'] ?? colors['doplan.panel']
-            return bg && parseColor(bg) && contrast(bg, '#000000') > contrast(bg, '#ffffff') ? 'light' : 'dark'
+            const bg = colors['doplan.panel'] ?? colors['sideBar.background'] ?? colors['editor.background']
+            if (bg && parseColor(bg)) return contrast(bg, '#000000') > contrast(bg, '#ffffff') ? 'light' : 'dark'
+            return (ext && findTheme(ext, all)?.type) || 'dark'
           })()
   return {
     id: `custom-${slug(name)}`,
@@ -179,8 +191,7 @@ function chain(t: ThemeSource, all: readonly ThemeSource[]): ThemeSource[] {
   const out: ThemeSource[] = [t]
   let cur = t
   while (cur.extends && out.length < 8) {
-    const key = cur.extends.toLowerCase()
-    const parent = all.find((p) => p.id.toLowerCase() === key || p.name.toLowerCase() === key)
+    const parent = findTheme(cur.extends, all)
     if (!parent || out.includes(parent)) break
     out.unshift(parent)
     cur = parent
@@ -248,7 +259,12 @@ export function resolveTheme(t: ThemeSource, all: readonly ThemeSource[] = []): 
     'accent-fg': accentFg,
     hover: get('doplan.hover') ?? withAlpha(text, dark ? 0.07 : 0.06),
     active: get('doplan.active') ?? withAlpha(text, dark ? 0.11 : 0.1),
-    input: solid(get('doplan.input', 'input.background')) ?? (dark ? mix(panel, '#000000', 0.18) : '#ffffff'),
+    input: (() => {
+      const fallback = dark ? mix(panel, '#000000', 0.18) : '#ffffff'
+      const v = solid(get('doplan.input', 'input.background'))
+      // the fields show the interface text: a light field in a dark theme (or the reverse) is dropped
+      return v && contrast(text, v) >= 4.5 ? v : fallback
+    })(),
     danger: solid(get('doplan.danger', 'errorForeground', 'editorError.foreground')) ?? fb.danger,
     warning: solid(get('doplan.warning', 'editorWarning.foreground')) ?? fb.warning,
     success: solid(get('doplan.success', 'terminal.ansiGreen', 'gitDecoration.addedResourceForeground')) ?? fb.success,
@@ -262,14 +278,20 @@ export function resolveTheme(t: ThemeSource, all: readonly ThemeSource[] = []): 
   return { id: t.id, name: t.name, kind, ui, plan: planPalette(kind, ui, colors, classic) }
 }
 
-/** the 2D plan palette in the colours of the interface */
+/**
+ * The 2D plan palette in the colours of the interface. The plan is drawn on the viewport colour
+ * (editor.background), which may be light in a dark theme or the reverse: then the plan is built as a
+ * plan of that other kind, and its text is made readable on the viewport.
+ */
 function planPalette(kind: ThemeKind, ui: UiTokens, colors: Record<string, string>, classic: boolean): Palette {
-  const base = kind === 'dark' ? DARK : LIGHT
+  const bg = ui.viewport
+  const planKind: ThemeKind = classic ? kind : contrast(bg, '#000000') > contrast(bg, '#ffffff') ? 'light' : 'dark'
+  const base = planKind === 'dark' ? DARK : LIGHT
   const p: Palette = { ...base }
   if (!classic) {
-    const dark = kind === 'dark'
-    const bg = ui.viewport
-    const text = ui.text
+    const dark = planKind === 'dark'
+    const text = contrast(ui.text, bg) >= 4.5 ? ui.text : readableOn(bg, '#eeeeee', '#1a1a1a')
+    const mutedPlan = contrast(ui.muted, bg) >= 3 ? ui.muted : mix(text, bg, 0.38)
     const N = toNumber
     p.bg = N(bg)
     p.gap = dark ? N(bg) : N(mix(bg, '#ffffff', 0.7))
@@ -277,7 +299,7 @@ function planPalette(kind: ThemeKind, ui: UiTokens, colors: Record<string, strin
     p.gridMinor = N(text)
     p.gridMajor = N(text)
     p.text = N(text)
-    p.textMuted = N(ui.muted)
+    p.textMuted = N(mutedPlan)
     p.dim = N(mix(text, bg, dark ? 0.1 : 0.08))
     p.dimAuto = N(mix(text, bg, 0.45))
     p.accent = N(ui.accent)
@@ -289,13 +311,13 @@ function planPalette(kind: ThemeKind, ui: UiTokens, colors: Record<string, strin
     p.parapet = N(mix(text, bg, dark ? 0.6 : 0.72))
     p.virtual = N(mix(text, bg, dark ? 0.4 : 0.5))
     p.opening = N(dark ? mix(text, '#ffffff', 0.25) : text)
-    p.itemFill = N(ui.muted)
+    p.itemFill = N(mutedPlan)
     p.itemStroke = N(mix(text, bg, dark ? 0.28 : 0.25))
     p.itemSketch = N(mix(text, bg, 0.4))
     const badge = dark ? mix(bg, '#000000', 0.45) : mix(text, '#000000', 0.2)
     p.badgeBg = N(badge)
     p.badgeText = N(readableOn(badge))
-    p.lightOff = N(ui.muted)
+    p.lightOff = N(mutedPlan)
     p.underlayFrame = N(mix(text, bg, 0.5))
     p.danger = N(ui.danger)
     p.ok = N(ui.success)

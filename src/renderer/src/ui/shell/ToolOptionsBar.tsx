@@ -1,8 +1,9 @@
-import { Armchair, ChevronDown, Eye, Hash, Info, ListChecks, Ruler, RulerDimensionLine } from 'lucide-react'
+import { Armchair, Bug, ChevronDown, Eye, Hash, Info, ListChecks, Maximize, RefreshCw, Ruler, RulerDimensionLine } from 'lucide-react'
 import { useEffect } from 'react'
 import type { DocSettings, OpeningKind, WallKind } from '@core/types'
 import { useT } from '@/i18n'
 import { docStore, useDoc } from '@/store/document'
+import { api } from '@/store/api'
 import { uiStore, useUi } from '@/store/ui'
 import { accuracyStore, useAccuracy } from '@/store/accuracy'
 import { DropdownMenu, IconBtn, MiniNumber, MiniSelect, Sep, type MenuEntry } from './primitives'
@@ -101,6 +102,15 @@ export function ToolOptionsBar() {
     { type: 'separator' },
     { type: 'header', label: t('Единицы') },
     ...(['mm', 'cm', 'm'] as const).map((u): MenuEntry => ({ label: t(u === 'mm' ? 'Миллиметры' : u === 'cm' ? 'Сантиметры' : 'Метры'), checked: settings.units === u, onSelect: () => setSetting('units', u) })),
+    { type: 'separator' },
+    { type: 'header', label: t('Окно программы') },
+    { label: t('Во весь экран'), icon: Maximize, kbd: 'F11', onSelect: () => api.window.command('fullscreen') },
+    ...(import.meta.env.DEV
+      ? ([
+          { label: t('Перезагрузить'), icon: RefreshCw, kbd: 'Ctrl+R', onSelect: () => api.window.command('reload') },
+          { label: t('Инструменты разработчика'), icon: Bug, kbd: 'Ctrl+Shift+I', onSelect: () => api.window.command('devtools') },
+        ] satisfies MenuEntry[])
+      : []),
   ]
 
   return (
@@ -204,7 +214,7 @@ export function ToolOptionsBar() {
             type="button"
             onClick={toggle}
             aria-expanded={open}
-            title={t('Что показывать на плане, единицы')}
+            title={t('Что показывать на плане, единицы, окно')}
             className={`flex h-6 shrink-0 items-center gap-1 rounded-md px-2 ${open ? 'bg-accent-soft text-accent' : 'text-muted hover:bg-hover hover:text-text'}`}
           >
             <Eye size={13} strokeWidth={1.75} />

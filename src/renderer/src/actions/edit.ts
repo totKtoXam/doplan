@@ -71,6 +71,9 @@ function rot(p: Vec2, c: Vec2, cos: number, sin: number): Vec2 {
   return { x: c.x + dx * cos - dy * sin, y: c.y + dx * sin + dy * cos }
 }
 
+/** the kinds groupRotate turns; openings and rooms follow their walls, underlays stay put */
+export const ROTATABLE_KINDS: ReadonlySet<EntityRef['kind']> = new Set(['wall', 'node', 'item', 'light', 'electric', 'dimension', 'label'])
+
 /** Rotates the selection by `deg` (clockwise on the plan) around its common centre. */
 export function groupRotate(deg: number): void {
   const doc = currentDoc()

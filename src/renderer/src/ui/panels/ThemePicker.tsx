@@ -51,7 +51,8 @@ export function ThemePicker() {
     const errors: string[] = []
     for (const f of Array.from(files)) {
       try {
-        ok.push(themeFromFile(await f.text(), f.name))
+        // an overlay may extend a theme installed before or one from the same batch
+        ok.push(themeFromFile(await f.text(), f.name, [...themeStore.getState().all(), ...ok]))
       } catch (e) {
         errors.push(`${f.name}: ${e instanceof ThemeFileError ? t(e.message) : String(e)}`)
       }

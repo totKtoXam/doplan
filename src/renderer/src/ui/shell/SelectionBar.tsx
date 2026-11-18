@@ -7,6 +7,7 @@ import { CopyPlus, MessageSquarePlus, RotateCw, Trash } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { selectionBounds } from '@/editor2d/bounds'
 import { actions } from '@/actions'
+import { ROTATABLE_KINDS } from '@/actions/edit'
 import { addSelectionToChat } from '@/ai'
 import { useT } from '@/i18n'
 import { docStore } from '@/store/document'
@@ -15,7 +16,6 @@ import { uiStore, useUi } from '@/store/ui'
 import { IconBtn } from './primitives'
 import '@/ui/shellI18n'
 
-const ROTATABLE = new Set(['wall', 'node', 'item', 'light', 'electric'])
 /** gap between the selection box and the bar, px */
 const GAP = 10
 
@@ -24,7 +24,7 @@ export function SelectionBar() {
   const bar = useRef<HTMLDivElement>(null)
   const count = useUi((s) => s.selection.length)
   const tool = useUi((s) => s.tool)
-  const canRotate = useUi((s) => s.selection.some((r) => ROTATABLE.has(r.kind)))
+  const canRotate = useUi((s) => s.selection.some((r) => ROTATABLE_KINDS.has(r.kind)))
   const [pressed, setPressed] = useState(false)
 
   // dragging an object or a frame: the bar would only get in the way

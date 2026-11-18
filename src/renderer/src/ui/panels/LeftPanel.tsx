@@ -1,68 +1,48 @@
-import { useState } from 'react'
-import { BrickWall, Lightbulb, Palette, Plug, Sofa, SwatchBook } from 'lucide-react'
+import { X } from 'lucide-react'
 import { useT } from '@/i18n'
-import { cn, ScrollArea, TabPanel, Tabs } from '@/ui/kit'
+import { useLayout } from '@/store/layout'
+import { uiStore } from '@/store/ui'
+import { cn, ScrollArea } from '@/ui/kit'
+import { sectionDef } from '@/ui/shell/ActivityBar'
+import { IconBtn } from '@/ui/shell/primitives'
 import { ConstructionTab } from './left/ConstructionTab'
 import { FurnitureTab } from './left/FurnitureTab'
 import { MaterialsTab } from './left/MaterialsTab'
 import { LightsTab } from './left/LightsTab'
 import { ElectricTab } from './left/ElectricTab'
 import { StyleTab } from './left/StyleTab'
+import { LayersPanel } from './layers/LayersPanel'
 import '@/ui/electricI18n'
+import '@/ui/shellI18n'
 
-type LeftTab = 'build' | 'furniture' | 'materials' | 'style' | 'lights' | 'electric'
-
-const TAB_KEY = 'doplan.leftTab'
-
-function readTab(): LeftTab {
-  try {
-    const v = localStorage.getItem(TAB_KEY)
-    if (v === 'build' || v === 'furniture' || v === 'materials' || v === 'style' || v === 'lights' || v === 'electric') return v
-  } catch {
-    /* ignore */
-  }
-  return 'build'
-}
-
-/** left dock: construction tools, furniture catalogue, materials, interior styles, lights, electrical points */
+/**
+ * Left dock: the section picked in the activity bar — construction, furniture catalogue, materials,
+ * interior styles, lights, electrical points or the objects (layers) tree. One section at a time.
+ */
 export function LeftPanel({ className }: { className?: string }) {
   const t = useT()
-  const [tab, setTabState] = useState<LeftTab>(readTab)
-  const setTab = (v: LeftTab) => {
-    setTabState(v)
-    try {
-      localStorage.setItem(TAB_KEY, v)
-    } catch {
-      /* ignore */
-    }
-  }
-  const idBase = 'leftpanel'
+  const section = useLayout((s) => s.section)
+  const def = sectionDef(section)
   return (
-    <aside className={cn('flex h-full min-h-0 w-full flex-col bg-[var(--panel)] text-[var(--text)]', className)} aria-label={t('Каталог')}>
-      <Tabs<LeftTab>
-        idBase={idBase}
-        value={tab}
-        onChange={setTab}
-        aria-label={t('Разделы каталога')}
-        items={[
-          { id: 'build', label: t('Конструкции'), icon: <BrickWall />, title: t('Стены, помещения, двери и окна') },
-          { id: 'furniture', label: t('Мебель'), icon: <Sofa /> },
-          { id: 'materials', label: t('Материалы'), icon: <Palette /> },
-          { id: 'style', label: t('Стиль'), icon: <SwatchBook />, title: t('Стили интерьера') },
-          { id: 'lights', label: t('Свет'), icon: <Lightbulb /> },
-          { id: 'electric', label: t('Электрика'), icon: <Plug />, title: t('Розетки, выключатели, слаботочка') },
-        ]}
-      />
-      <ScrollArea className="flex-1">
-        <TabPanel idBase={idBase} id={tab}>
-          {tab === 'build' && <ConstructionTab />}
-          {tab === 'furniture' && <FurnitureTab />}
-          {tab === 'materials' && <MaterialsTab />}
-          {tab === 'style' && <StyleTab />}
-          {tab === 'lights' && <LightsTab />}
-          {tab === 'electric' && <ElectricTab />}
-        </TabPanel>
-      </ScrollArea>
+    <aside className={cn('flex h-full min-h-0 w-full flex-col bg-[var(--panel)] text-[var(--text)]', className)} aria-label={t(def.title)}>
+      <header className="flex h-8 shrink-0 items-center gap-2 border-b border-[var(--border)] pr-0.5 pl-3">
+        <h2 className="min-w-0 flex-1 truncate text-xs font-semibold" title={t(def.title)}>
+          {t(def.heading)}
+        </h2>
+        <IconBtn icon={X} size="sm" label={t('Скрыть панель')} onClick={() => uiStore.setState({ leftPanelOpen: false })} />
+      </header>
+      {section === 'objects' ? (
+        <LayersPanel className="min-h-0 flex-1" />
+      ) : (
+        <ScrollArea className="flex-1">
+          {section === 'build' && <ConstructionTab />}
+          {section === 'furniture' && <FurnitureTab />}
+          {section === 'materials' && <MaterialsTab />}
+          {section === 'style' && <StyleTab />}
+          {section === 'lights' && <LightsTab />}
+          {section === 'electric' && <ElectricTab />}
+        </ScrollArea>
+      )}
     </aside>
   )
 }

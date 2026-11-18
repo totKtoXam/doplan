@@ -179,6 +179,7 @@ const api: DoplanApi = {
 
   window: {
     setTitle: (title, dirty) => ipcRenderer.send(CH.windowSetTitle, title, dirty),
+    command: (cmd) => ipcRenderer.send(CH.windowCommand, cmd),
     onMenu: (cb) => subscribe<[MenuCommand]>(CH.evMenu, (cmd) => cb(cmd)),
     onCloseRequest: (cb) => {
       const l = () => cb()

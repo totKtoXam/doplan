@@ -144,7 +144,15 @@ export const LIGHT: Palette = {
   underlayFrame: 0x8a919d,
 }
 
+/** the plan palette of the colour theme in use (theme/store.ts sets it) */
+let active: { kind: 'dark' | 'light'; palette: Palette } | null = null
+
+export function setActivePalette(kind: 'dark' | 'light', palette: Palette): void {
+  active = { kind, palette }
+}
+
 export function paletteFor(theme: 'dark' | 'light'): Palette {
+  if (active && active.kind === theme) return active.palette
   return theme === 'light' ? LIGHT : DARK
 }
 

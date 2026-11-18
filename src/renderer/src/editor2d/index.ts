@@ -42,6 +42,7 @@ import { WallsLayer } from './layers/walls'
 import { Painter, TextPool } from './painter'
 import { snapshotPng } from './snapshot'
 import { paletteFor, type Palette } from './theme'
+import { themeStore } from '@/theme/store'
 import { createTools, type Tool } from './tools'
 import { Camera } from './view'
 
@@ -323,6 +324,11 @@ export const createEditor2D: CreateEditor2D = async (container: HTMLElement): Pr
     requestRender()
   })
 
+  // another theme of the same kind changes the palette without changing uiStore.theme
+  const unsubTheme = themeStore.subscribe((s, prev) => {
+    if (s.resolved !== prev.resolved) requestRender()
+  })
+
   const unsubUi = uiStore.subscribe((s, prev) => {
     if (s.tool !== prev.tool) switchTool(s.tool)
     if (
@@ -390,6 +396,7 @@ export const createEditor2D: CreateEditor2D = async (container: HTMLElement): Pr
       ro.disconnect()
       unsubDoc()
       unsubUi()
+      unsubTheme()
       unsubAccuracy()
       unsubMarks()
       try {

@@ -16,7 +16,7 @@ export interface PanelSpec {
 }
 
 export const PANELS = {
-  /** left dock: catalogue (construction, furniture, materials, styles, lights) */
+  /** left dock: the section picked in the activity bar (construction, furniture, …, objects) */
   left: { defaultSize: 300, minSize: 220, maxSize: 640 },
   /** right dock: «Свойства | ИИ» */
   right: { defaultSize: 320, minSize: 260, maxSize: 900 },
@@ -41,7 +41,15 @@ export interface BoxSize {
 /** stored box sizes are checked against these bounds when read back */
 const BOX_BOUNDS = { min: 80, max: 6000 }
 
+/** sections of the left panel, picked in the activity bar */
+export const LEFT_SECTIONS = ['build', 'furniture', 'materials', 'style', 'lights', 'electric', 'objects'] as const
+export type LeftSection = (typeof LEFT_SECTIONS)[number]
+
 interface LayoutState {
+  /** the section shown in the left panel */
+  section: LeftSection
+  /** shows a section (and opens the left panel) */
+  setSection(section: LeftSection): void
   sizes: Record<PanelId, number>
   setSize(id: PanelId, size: number): void
   boxes: Record<string, BoxSize>
@@ -57,6 +65,7 @@ interface Saved {
   rightOpen?: unknown
   split?: unknown
   boxes?: unknown
+  section?: unknown
 }
 
 function read(): Saved {
@@ -102,7 +111,28 @@ function initialBoxes(): Record<string, BoxSize> {
   return out
 }
 
+function isSection(v: unknown): v is LeftSection {
+  return typeof v === 'string' && (LEFT_SECTIONS as readonly string[]).includes(v)
+}
+
+function initialSection(): LeftSection {
+  if (isSection(saved.section)) return saved.section
+  // before the activity bar the left panel had tabs, remembered under their own key
+  try {
+    const old = globalThis.localStorage?.getItem('doplan.leftTab')
+    if (isSection(old)) return old
+  } catch {
+    /* no storage */
+  }
+  return 'build'
+}
+
 export const layoutStore = createStore<LayoutState>()((set) => ({
+  section: initialSection(),
+  setSection: (section) => {
+    set({ section })
+    if (!uiStore.getState().leftPanelOpen) uiStore.setState({ leftPanelOpen: true })
+  },
   sizes: initialSizes(),
   setSize: (id, size) => {
     const p = PANELS[id]
@@ -161,7 +191,7 @@ function save(): void {
     try {
       globalThis.localStorage?.setItem(
         KEY,
-        JSON.stringify({ sizes: layoutStore.getState().sizes, boxes: layoutStore.getState().boxes, leftOpen: ui.leftPanelOpen, rightOpen: ui.rightPanelOpen, split: ui.splitRatio }),
+        JSON.stringify({ sizes: layoutStore.getState().sizes, boxes: layoutStore.getState().boxes, section: layoutStore.getState().section, leftOpen: ui.leftPanelOpen, rightOpen: ui.rightPanelOpen, split: ui.splitRatio }),
       )
     } catch {
       /* private mode / quota: keep in memory */

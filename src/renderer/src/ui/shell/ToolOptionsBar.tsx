@@ -1,12 +1,14 @@
-import { Grid3x3, Magnet, Ruler, Armchair, Hash, Info, ListChecks } from 'lucide-react'
+import { Armchair, Bug, ChevronDown, Eye, Hash, Info, ListChecks, Maximize, RefreshCw, Ruler, RulerDimensionLine } from 'lucide-react'
 import { useEffect } from 'react'
 import type { DocSettings, OpeningKind, WallKind } from '@core/types'
 import { useT } from '@/i18n'
 import { docStore, useDoc } from '@/store/document'
+import { api } from '@/store/api'
 import { uiStore, useUi } from '@/store/ui'
 import { accuracyStore, useAccuracy } from '@/store/accuracy'
-import { MiniNumber, MiniSelect, MiniToggle, Sep } from './primitives'
-import { toolDef } from './ToolRail'
+import { DropdownMenu, IconBtn, MiniNumber, MiniSelect, Sep, type MenuEntry } from './primitives'
+import { activateTool, PLAN_ONLY_TOOLS, toolDef, TOOLS } from './tools'
+import '@/ui/shellI18n'
 
 const DOOR_KINDS: OpeningKind[] = ['door', 'doubleDoor', 'slidingDoor', 'entranceDoor', 'arch', 'opening']
 const WINDOW_KINDS: OpeningKind[] = ['window', 'frenchWindow', 'balconyDoor', 'balconyBlock']
@@ -41,9 +43,7 @@ const WALL_KIND_PRESET: Record<WallKind, { thickness?: number; height?: number }
   virtual: { thickness: 0 },
 }
 
-const GRID_SIZES = [10, 50, 100, 250, 500, 1000]
-
-function setSetting<K extends keyof DocSettings>(key: K, value: DocSettings[K]) {
+export function setSetting<K extends keyof DocSettings>(key: K, value: DocSettings[K]) {
   docStore.getState().transact(
     'Настройки плана',
     (d) => {
@@ -53,6 +53,11 @@ function setSetting<K extends keyof DocSettings>(key: K, value: DocSettings[K]) 
   )
 }
 
+/**
+ * The tool bar above the plan: the "verb" tools (select, pan, measure, paint, …), the name and
+ * options of the active tool, and the «Вид» menu with the display toggles of the plan and the units.
+ * Snaps live in the status bar; the tools that place things are started from the left sections.
+ */
 export function ToolOptionsBar() {
   const t = useT()
   const tool = useUi((s) => s.tool)
@@ -66,6 +71,7 @@ export function ToolOptionsBar() {
   const getAsset = useUi((s) => s.getAsset)
   const lang = useUi((s) => s.lang)
   const settings = useDoc((s) => s.doc.settings)
+  const mode = useUi((s) => s.mode)
   const legend = useAccuracy((s) => s.legend)
   const checklist = useAccuracy((s) => s.checklist)
   // project-local materials/assets may change
@@ -84,9 +90,56 @@ export function ToolOptionsBar() {
   const placing = placingAssetId ? getAsset(placingAssetId) : undefined
   const nameOf = (o: { name: string; nameRu?: string } | undefined) => (o ? (lang === 'ru' ? (o.nameRu ?? o.name) : o.name) : '')
 
+  const planOnly = mode === '3d'
+  const viewItems = (): MenuEntry[] => [
+    { type: 'header', label: t('На плане') },
+    { label: t('Размеры'), icon: Ruler, checked: settings.showDimensions, keepOpen: true, disabled: planOnly, onSelect: () => setSetting('showDimensions', !settings.showDimensions) },
+    { label: t('Размеры мебели (Ш×Г)'), icon: RulerDimensionLine, checked: settings.showItemSizes, keepOpen: true, disabled: planOnly, onSelect: () => setSetting('showItemSizes', !settings.showItemSizes) },
+    { label: t('Площади комнат'), icon: Hash, checked: settings.showAreas, keepOpen: true, disabled: planOnly, onSelect: () => setSetting('showAreas', !settings.showAreas) },
+    { label: t('Мебель на плане'), icon: Armchair, checked: settings.showFurniture2d, keepOpen: true, disabled: planOnly, onSelect: () => setSetting('showFurniture2d', !settings.showFurniture2d) },
+    { label: t('Легенда: откуда размеры'), icon: Info, checked: legend, keepOpen: true, disabled: planOnly, onSelect: () => accuracyStore.getState().setLegend(!legend) },
+    { label: t('Чек-лист обмера'), icon: ListChecks, checked: checklist, keepOpen: true, onSelect: () => accuracyStore.getState().setChecklist(!checklist) },
+    { type: 'separator' },
+    { type: 'header', label: t('Единицы') },
+    ...(['mm', 'cm', 'm'] as const).map((u): MenuEntry => ({ label: t(u === 'mm' ? 'Миллиметры' : u === 'cm' ? 'Сантиметры' : 'Метры'), checked: settings.units === u, onSelect: () => setSetting('units', u) })),
+    { type: 'separator' },
+    { type: 'header', label: t('Окно программы') },
+    { label: t('Во весь экран'), icon: Maximize, kbd: 'F11', onSelect: () => api.window.command('fullscreen') },
+    ...(import.meta.env.DEV
+      ? ([
+          { label: t('Перезагрузить'), icon: RefreshCw, kbd: 'Ctrl+R', onSelect: () => api.window.command('reload') },
+          { label: t('Инструменты разработчика'), icon: Bug, kbd: 'Ctrl+Shift+I', onSelect: () => api.window.command('devtools') },
+        ] satisfies MenuEntry[])
+      : []),
+  ]
+
   return (
-    <div className="flex h-9 shrink-0 items-center gap-1.5 overflow-x-auto border-b border-border bg-panel px-2 text-[11px]">
-      <span className="shrink-0 pr-1 font-semibold text-text">{def ? t(def.label) : tool === 'item' ? t('Расстановка') : t(tool)}</span>
+    <div className="flex h-9 shrink-0 items-center gap-1.5 overflow-x-auto border-b border-border bg-panel px-1.5 text-[11px]">
+      <div className="flex shrink-0 items-center gap-0.5" role="toolbar" aria-label={t('Инструменты')}>
+        {TOOLS.map((d, i) =>
+          d === 'sep' ? (
+            <div key={`sep${i}`} className="mx-1 h-4 w-px bg-border" />
+          ) : d.place !== 'bar' ? null : (
+            <IconBtn
+              key={d.id}
+              icon={d.icon}
+              size="sm"
+              label={t(d.label)}
+              kbd={d.key}
+              active={tool === d.id}
+              disabled={planOnly && PLAN_ONLY_TOOLS.has(d.id)}
+              onClick={() => activateTool(d.id, t)}
+            />
+          ),
+        )}
+      </div>
+      {/* a tool of the bar is already lit up there; name the others (started from a section) */}
+      {(def?.place !== 'bar' || tool === 'paint') && (
+        <>
+          <Sep />
+          <span className="shrink-0 px-1 font-semibold text-text">{def ? t(def.label) : tool === 'item' ? t('Расстановка') : t(tool)}</span>
+        </>
+      )}
 
       {(tool === 'wall' || tool === 'room') && (
         <>
@@ -126,7 +179,6 @@ export function ToolOptionsBar() {
 
       {tool === 'paint' && (
         <>
-          <Sep />
           {paintMat ? (
             <span className="flex shrink-0 items-center gap-1.5">
               <span className="h-4 w-4 rounded border border-border-strong" style={{ background: paintFinish?.tint ?? paintMat.color }} />
@@ -154,32 +206,22 @@ export function ToolOptionsBar() {
 
       <div className="flex-1" />
 
-      <Magnet size={13} className="shrink-0 text-muted" />
-      <MiniToggle label={<><Grid3x3 size={12} />{t('Сетка')}</>} title={t('Привязка к сетке')} checked={settings.snapGrid} onChange={(v) => setSetting('snapGrid', v)} />
-      <MiniToggle label={t('Объекты')} title={t('Привязка к стенам и узлам')} checked={settings.snapObjects} onChange={(v) => setSetting('snapObjects', v)} />
-      <MiniToggle label={t('Углы')} title={t('Привязка к углам 15°')} checked={settings.snapAngle} onChange={(v) => setSetting('snapAngle', v)} />
-      <MiniSelect
-        title={t('Шаг сетки')}
-        value={settings.gridMm}
-        options={GRID_SIZES.map((g) => ({ value: g, label: g >= 1000 ? `${g / 1000} ${t('м')}` : g >= 100 ? `${g / 10} ${t('см')}` : `${g} ${t('мм')}` }))}
-        onChange={(v) => setSetting('gridMm', v)}
-      />
-      <Sep />
-      <MiniToggle label={<Ruler size={12} />} title={t('Размеры')} checked={settings.showDimensions} onChange={(v) => setSetting('showDimensions', v)} />
-      <MiniToggle label={t('W×D')} title={t('Размеры мебели')} checked={settings.showItemSizes} onChange={(v) => setSetting('showItemSizes', v)} />
-      <MiniToggle label={<Info size={12} />} title={t('Легенда: откуда размеры')} checked={legend} onChange={(v) => accuracyStore.getState().setLegend(v)} />
-      <MiniToggle label={<ListChecks size={12} />} title={t('Чек-лист обмера')} checked={checklist} onChange={(v) => accuracyStore.getState().setChecklist(v)} />
-      <MiniToggle label={<Hash size={12} />} title={t('Площади комнат')} checked={settings.showAreas} onChange={(v) => setSetting('showAreas', v)} />
-      <MiniToggle label={<Armchair size={12} />} title={t('Мебель на плане')} checked={settings.showFurniture2d} onChange={(v) => setSetting('showFurniture2d', v)} />
-      <MiniSelect
-        title={t('Единицы')}
-        value={settings.units}
-        options={[
-          { value: 'mm', label: t('мм') },
-          { value: 'cm', label: t('см') },
-          { value: 'm', label: t('м') },
-        ]}
-        onChange={(v) => setSetting('units', v)}
+      <DropdownMenu
+        align="right"
+        items={viewItems}
+        trigger={({ open, toggle }) => (
+          <button
+            type="button"
+            onClick={toggle}
+            aria-expanded={open}
+            title={t('Что показывать на плане, единицы, окно')}
+            className={`flex h-6 shrink-0 items-center gap-1 rounded-md px-2 ${open ? 'bg-accent-soft text-accent' : 'text-muted hover:bg-hover hover:text-text'}`}
+          >
+            <Eye size={13} strokeWidth={1.75} />
+            {t('Вид')}
+            <ChevronDown size={12} />
+          </button>
+        )}
       />
     </div>
   )

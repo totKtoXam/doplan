@@ -9,13 +9,12 @@ import {
   ClipboardList,
   Cloud,
   Columns2,
-  Download,
   FilePlus,
   FolderOpen,
   House,
   Image,
   ImagePlus,
-  Languages,
+  Info,
   Moon,
   Package,
   Paintbrush,
@@ -24,7 +23,7 @@ import {
   Save,
   ScanLine,
   Settings,
-  Sparkles,
+  Aperture,
   Square,
   Sun,
   Undo2,
@@ -78,7 +77,6 @@ export function TopBar() {
   const filePath = useDoc((s) => s.filePath)
   const mode = useUi((s) => s.mode)
   const theme = useUi((s) => s.theme)
-  const lang = useUi((s) => s.lang)
   const recent = useUi((s) => s.appSettings?.recent ?? [])
 
   const fileMenu = (): MenuEntry[] => [
@@ -108,6 +106,7 @@ export function TopBar() {
     { label: t('Материалы…'), icon: Paintbrush, onSelect: () => dialogStore.getState().open('materialEditor') },
     { label: t('Настройки…'), icon: Settings, onSelect: () => dialogStore.getState().open('settings') },
     { label: t('Проверить обновления…'), icon: RefreshCw, onSelect: () => void checkForUpdatesManually() },
+    { label: t('О программе doplan'), icon: Info, onSelect: () => dialogStore.getState().open('about') },
   ]
 
   const exportMenu = (): MenuEntry[] => [
@@ -120,7 +119,7 @@ export function TopBar() {
     { type: 'header', label: '3D' },
     { label: t('Модель GLB'), icon: Box, onSelect: () => void actions.exportGlb() },
     { label: t('Снимок 3D-вида'), icon: Camera, onSelect: () => void actions.snapshot3d() },
-    { label: t('Рендер…'), icon: Sparkles, onSelect: () => dialogStore.getState().open('render') },
+    { label: t('Рендер…'), icon: Aperture, onSelect: () => dialogStore.getState().open('render') },
     { type: 'separator' },
     { label: t('Смета материалов…'), icon: ClipboardList, onSelect: () => dialogStore.getState().open('bom') },
     { type: 'separator' },
@@ -176,27 +175,17 @@ export function TopBar() {
         <Sep />
         <TextBtn variant="ghost" onClick={() => actions.planFromPhoto()} title={t('Распознать план по фото или скану')}>
           <ScanLine size={14} />
-          <span className="hidden xl:inline">{t('Фото → план')}</span>
+          <span className="hidden xl:inline">{t('План по фото')}</span>
         </TextBtn>
         <TextBtn variant="ghost" onClick={() => dialogStore.getState().open('bom')} title={t('Смета материалов')}>
           <ClipboardList size={14} />
           <span className="hidden xl:inline">{t('Смета')}</span>
         </TextBtn>
         <TextBtn variant="primary" onClick={() => dialogStore.getState().open('render')}>
-          <Sparkles size={14} />
+          <Aperture size={14} />
           {t('Рендер')}
         </TextBtn>
-        <DropdownMenu
-          align="right"
-          items={exportMenu}
-          trigger={({ toggle }) => <IconBtn icon={Download} label={t('Экспорт')} onClick={toggle} />}
-        />
         <Sep />
-        <IconBtn
-          icon={Languages}
-          label={lang === 'ru' ? 'English' : 'Русский'}
-          onClick={() => uiStore.getState().setLang(lang === 'ru' ? 'en' : 'ru')}
-        />
         <IconBtn
           icon={theme === 'dark' ? Sun : Moon}
           label={theme === 'dark' ? t('Светлая тема') : t('Тёмная тема')}

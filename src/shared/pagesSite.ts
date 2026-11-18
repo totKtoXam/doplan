@@ -6,6 +6,7 @@
  *   view-plan.json             the document, every doplan-asset:// URL rewritten to ./assets/…
  *   view-catalog.json          only the catalog entries the plan uses (builtin ones excluded)
  *   view-site.json             title, publish time, content hash, app version
+ *   .doplan-pages.json         marker: this branch is a doplan publication (its id), see pagesOwnership
  *   assets/c/…  assets/l/…  assets/p/…   files of the bundled pack, the user library, the project
  *
  * Pure functions only (shared by main, renderer and tests); copying and pushing live in main.
@@ -163,6 +164,66 @@ export function planSite(doc: unknown, catalog: CatalogLike, builtinIds: Readonl
   }
 }
 
+// ───────────── what of the document goes public ─────────────
+
+export interface ViewDocOptions {
+  /** publish the visible underlays (plan scans: BTI pages often carry the address); off by default */
+  underlays: boolean
+}
+
+type Obj = Record<string, unknown>
+const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v)
+
+/** the underlays that are shown on the plan */
+export function visibleUnderlayCount(doc: unknown): number {
+  const u = isObj(doc) && isObj(doc.underlays) ? doc.underlays : {}
+  return Object.values(u).filter((x) => isObj(x) && x.visible !== false && typeof x.src === 'string' && x.src).length
+}
+
+/**
+ * The part of the document the viewer needs, for a public site: no file identity or dates, no hidden
+ * underlays (and no visible ones unless asked), no pencil annotations, no traced-plan data, no price
+ * list or products, no electrician comments or measurement notes, no inactive furnishing variants.
+ * AI chats and the edit history live outside the document and never get here.
+ */
+export function viewDoc(doc: unknown, opts: ViewDocOptions): unknown {
+  if (!isObj(doc)) return doc
+  const out: Obj = { ...doc }
+  const meta = isObj(doc.meta) ? doc.meta : {}
+  out.meta = { name: typeof meta.name === 'string' ? meta.name : '', app: 'doplan' }
+  const underlays: Obj = {}
+  if (opts.underlays && isObj(doc.underlays))
+    for (const [id, u] of Object.entries(doc.underlays)) if (isObj(u) && u.visible !== false) underlays[id] = u
+  out.underlays = underlays
+  for (const k of ['annotations', 'source', 'variants']) delete out[k]
+  if (isObj(doc.design)) {
+    const styleId = doc.design.styleId
+    if (typeof styleId === 'string') out.design = { styleId }
+    else delete out.design
+  }
+  const without = (rec: unknown, drop: (v: Obj) => Obj): unknown => {
+    if (!isObj(rec)) return rec
+    const o: Obj = {}
+    for (const [id, v] of Object.entries(rec)) o[id] = isObj(v) ? drop(v) : v
+    return o
+  }
+  out.materials = without(doc.materials, ({ product: _p, ...rest }) => rest)
+  out.assets = without(doc.assets, ({ product: _p, ...rest }) => rest)
+  if (doc.electrical !== undefined) out.electrical = without(doc.electrical, ({ comment: _c, ...rest }) => rest)
+  out.walls = without(doc.walls, (w) => {
+    if (!isObj(w.dims)) return w
+    const dims: Obj = {}
+    for (const [side, p] of Object.entries(w.dims)) {
+      if (isObj(p)) {
+        const { note: _n, ...rest } = p
+        dims[side] = rest
+      } else dims[side] = p
+    }
+    return { ...w, dims }
+  })
+  return out
+}
+
 /** relative file URIs a .gltf (JSON) depends on: buffers and images, data: URIs excluded */
 export function gltfDependencies(json: unknown): string[] {
   const out: string[] = []
@@ -211,6 +272,18 @@ export function hashString(str: string, seed = 0): string {
   h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909)
   h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909)
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(14, '0')
+}
+
+/**
+ * Keys of the publication record of a document. A file from before project ids has none until its
+ * first save: until then it is keyed by its creation time, which a rename does not change, and once
+ * the id is there the record moves over to it (migrateRecordKey with these aliases). `name:` is the
+ * key the first builds of this feature used.
+ */
+export function publicationKeys(meta: { id?: string; name: string; createdAt: string }): { key: string; aliases: string[] } {
+  const created = `created:${hashString(meta.createdAt || meta.name)}`
+  const key = meta.id ?? created
+  return { key, aliases: [created, `name:${hashString(`${meta.name}|${meta.createdAt}`)}`].filter((a) => a !== key) }
 }
 
 /** canonical JSON (sorted keys) so equal documents hash equally whatever the key order */
@@ -361,6 +434,93 @@ export function viewRepoName(base: string): string {
 /** the branch that holds the published site (orphan, one commit, force-pushed) */
 export const PAGES_BRANCH = 'gh-pages'
 
+/** `<base>-view`, then `<base>-view-2`, `-3`… when the name is taken by a repository doplan did not make */
+export function viewRepoCandidate(base: string, n: number): string {
+  return n <= 1 ? viewRepoName(base) : `${viewRepoName(base)}-${n}`
+}
+
+/**
+ * Marker file in the root of a published branch: doplan made this branch, for this publication. A
+ * gh-pages branch without it (a docs site, an old Pages site) is someone else's and is never pushed
+ * over or deleted.
+ */
+export const PAGES_MARKER = '.doplan-pages.json'
+
+export function pagesMarker(pubId: string): string {
+  return `${JSON.stringify({ doplan: 'pages', id: pubId })}\n`
+}
+
+/** the publication id in a marker file, or null */
+export function markerId(text: string | null | undefined): string | null {
+  if (!text) return null
+  try {
+    const m = JSON.parse(text) as unknown
+    return isObj(m) && m.doplan === 'pages' && typeof m.id === 'string' && m.id ? m.id : null
+  } catch {
+    return null
+  }
+}
+
+/** a repository's GitHub Pages setup (GET repos/o/r/pages) */
+export interface PagesConfig {
+  /** 'legacy' (from a branch) or 'workflow' (GitHub Actions) */
+  buildType?: string
+  branch?: string
+  path?: string
+  url?: string
+}
+
+/** what a repository has before doplan touches it */
+export interface PagesInspection {
+  /** head of the gh-pages branch, null when there is none */
+  branchSha: string | null
+  /** text of the marker file on that branch, null when it has none */
+  marker: string | null
+  pages: PagesConfig | null
+}
+
+export type Ownership = 'none' | 'ours' | 'foreign'
+
+/**
+ * Whose the gh-pages branch and the Pages site of a repository are. The branch is ours only with our
+ * marker (this publication's id). The site is ours when it serves that branch from its root as a
+ * classic branch site; with `recorded` (the app remembers publishing there) also when the branch has
+ * gone meanwhile. Anything else is someone else's: doplan neither pushes over it, nor re-points it,
+ * nor deletes it.
+ */
+export function pagesOwnership(i: PagesInspection, pubId: string | undefined, recorded: boolean): { branch: Ownership; site: Ownership } {
+  const branch: Ownership = i.branchSha === null ? 'none' : pubId && markerId(i.marker) === pubId ? 'ours' : 'foreign'
+  let site: Ownership = 'none'
+  if (i.pages) {
+    const servesBranch = i.pages.buildType !== 'workflow' && i.pages.branch === PAGES_BRANCH && (i.pages.path ?? '/') === '/'
+    site = servesBranch && (branch === 'ours' || (recorded && branch === 'none')) ? 'ours' : 'foreign'
+  }
+  return { branch, site }
+}
+
+export const canPublishInto = (o: { branch: Ownership; site: Ownership }): boolean => o.branch !== 'foreign' && o.site !== 'foreign'
+
+/**
+ * A private repository can have Pages only on a paid plan of the account that OWNS it (an
+ * organisation's plan for an organisation repository). An unknown plan counts as free.
+ */
+export function pagesNeedsChoice(isPrivate: boolean, ownerPlan: string | undefined): boolean {
+  return isPrivate && (ownerPlan ?? 'free').toLowerCase() === 'free'
+}
+
+/**
+ * Moves a record kept under an older key of the same document (a file without an id gets one on its
+ * first save) to `docId`; true when something moved.
+ */
+export function migrateRecordKey<T>(records: Record<string, T>, docId: string, aliases: readonly string[] | undefined): boolean {
+  if (records[docId] || !aliases) return false
+  const from = aliases.find((a) => a && a !== docId && records[a])
+  if (!from) return false
+  records[docId] = records[from]
+  delete records[from]
+  return true
+}
+
 /** a published plan, remembered by the app per document id */
 export interface PagesRecord {
   owner: string
@@ -370,6 +530,10 @@ export interface PagesRecord {
   publishedAt: string
   /** the site lives in a repository of its own (`…-view`), not in the project's */
   separate: boolean
+  /** id written into the branch marker (PAGES_MARKER) */
+  pubId?: string
+  /** the visible underlays were published */
+  underlays?: boolean
 }
 
 export type PagesTargetKind = 'project' | 'separate'
@@ -383,6 +547,8 @@ export interface PagesTarget {
   isPrivate: boolean
   /** a private repository on GitHub Free cannot have Pages: the user has to choose */
   needsChoice: boolean
+  /** the repository already has a gh-pages branch or a Pages site doplan did not make */
+  occupied?: 'branch' | 'site'
 }
 
 export interface PagesStatus {
@@ -395,7 +561,8 @@ export interface PagesStatus {
   project: PagesTarget | null
   /** the name a separate public repository would get */
   separateName: string
-  plan?: string
+  /** the repository of the record as it is now (gone, turned private on a free plan…) */
+  recordTarget?: PagesTarget | null
 }
 
 /** how to deal with a private project repository on GitHub Free */
@@ -409,6 +576,10 @@ export interface PagesPublishRequest {
   target: PagesTargetKind
   /** given for a private project repository on GitHub Free */
   privateChoice?: PagesPrivateChoice
+  /** older keys of this document (see migrateRecordKey) */
+  aliases?: string[]
+  /** the visible underlays are in the content */
+  underlays?: boolean
 }
 
 export interface PagesPublishResult {
@@ -430,6 +601,8 @@ export interface PagesStatusQuery {
   name: string
   /** ask GitHub again instead of the cached sign-in state */
   fresh?: boolean
+  /** older keys of this document (see migrateRecordKey) */
+  aliases?: string[]
 }
 
 /** window.doplan.pages */

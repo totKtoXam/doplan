@@ -12,3 +12,12 @@ export function isViewOnly(): boolean {
 export function setViewOnly(value: boolean): void {
   viewOnly = value
 }
+
+/**
+ * The tool Esc switches the 2D editor to, or null to stay: the editor goes back to Select, a
+ * view-only plan keeps its Pan tool (Select would show selection outlines and rename prompts).
+ */
+export function toolAfterEscape(toolId: string, viewOnly: boolean = isViewOnly()): 'select' | null {
+  if (viewOnly) return null
+  return toolId !== 'select' ? 'select' : null
+}

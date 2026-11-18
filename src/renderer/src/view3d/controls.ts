@@ -17,6 +17,7 @@ import type { CameraControls, EngineContext } from '@/contracts'
 import { docStore } from '@/store/document'
 import { uiStore } from '@/store/ui'
 import { getShared, type ControlsInternals } from './quality'
+import { installLockGuard } from './lockGuard'
 import { setWalkKick, walkPointerLocked, walkStick } from './walkInput'
 
 export type CameraMode = 'orbit' | 'walk' | 'top'
@@ -699,8 +700,16 @@ export function createControls(ctx: EngineContext): CameraControlsEx {
       /* already gone */
     }
   }
+  // while the lock is held: released when the view is hidden (2D), the window blurs or a dialog opens
+  let stopGuard: (() => void) | null = null
   const onLockChange = (): void => {
-    if (!walkPointerLocked(canvas)) keys.clear()
+    if (walkPointerLocked(canvas)) {
+      stopGuard ??= installLockGuard(canvas, releaseLock)
+    } else {
+      stopGuard?.()
+      stopGuard = null
+      keys.clear()
+    }
     ctx.invalidate()
   }
   const onWheel = (e: WheelEvent): void => {
@@ -732,6 +741,15 @@ export function createControls(ctx: EngineContext): CameraControlsEx {
   document.addEventListener('pointerlockchange', onLockChange)
   const kick = (): void => ctx.invalidate()
   setWalkKick(kick)
+
+  // switching the layout (keys 1/2/3, Ctrl+1/2/3 in the menu) never leaves the mouse captured
+  let lastLayout = uiStore.getState().mode
+  const unsubUi = uiStore.subscribe((state) => {
+    if (state.mode !== lastLayout) {
+      lastLayout = state.mode
+      releaseLock()
+    }
+  })
 
   let lastCutaway = docStore.getState().doc.render.wallCutaway
   const unsubDoc = docStore.subscribe((state) => {
@@ -772,6 +790,7 @@ export function createControls(ctx: EngineContext): CameraControlsEx {
         looking = false
         lockClick = null
         keys.clear()
+        releaseLock()
       }
       orbit.enabled = value && mode !== 'walk' && transition === null
     },
@@ -779,6 +798,9 @@ export function createControls(ctx: EngineContext): CameraControlsEx {
       if (disposed) return
       disposed = true
       unsubDoc()
+      unsubUi()
+      stopGuard?.()
+      stopGuard = null
       releaseLock()
       document.removeEventListener('pointerlockchange', onLockChange)
       setWalkKick(null)

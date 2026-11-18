@@ -1,0 +1,283 @@
+/**
+ * The publish / update / unpublish flow against a fake GitHub (gh and git mocked): doplan only ever
+ * touches a gh-pages branch with its own marker and a Pages site serving it, updates go to the
+ * recorded repository, the Pages rule follows the repository owner's plan, a failed Pages switch takes
+ * the new branch back, and a record follows its document when the file gets an id.
+ */
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { PagesConfig, PagesPublishRequest, RepoRef } from '@shared/pagesSite'
+import { markerId } from '@shared/pagesSite'
+
+const base = mkdtempSync(join(tmpdir(), 'doplan-pages-flow-'))
+const userData = join(base, 'userData')
+const project = join(base, 'project')
+mkdirSync(join(base, 'viewer'), { recursive: true })
+writeFileSync(join(base, 'viewer', 'viewer.html'), '<!doctype html>')
+mkdirSync(join(project, '.git'), { recursive: true })
+
+interface FakeRepo {
+  private: boolean
+  branchSha: string | null
+  marker: string | null
+  pages: PagesConfig | null
+}
+
+const gh = {
+  repos: new Map<string, FakeRepo>(),
+  userPlan: 'free' as string | undefined,
+  orgPlans: {} as Record<string, string | undefined>,
+  failEnable: false,
+  calls: [] as string[],
+  seq: 0,
+}
+const k = (r: RepoRef) => `${r.owner}/${r.repo}`
+const fromRemote = (url: string) => /github\.com\/(.+)\.git$/.exec(url)?.[1] ?? url
+const repo = (key: string) => {
+  const r = gh.repos.get(key)
+  if (!r) throw new Error(`no repo ${key}`)
+  return r
+}
+const fresh = (over: Partial<FakeRepo> = {}): FakeRepo => ({ private: false, branchSha: null, marker: null, pages: null, ...over })
+const nextSha = () => (++gh.seq).toString(16).padStart(40, '0')
+
+vi.mock('electron', () => ({ app: { getPath: () => userData, getVersion: () => '0.0.0-test' } }))
+vi.mock('./paths', () => ({ mainDir: join(base, 'main'), paths: { userData, catalogRoot: join(base, 'c'), library: join(base, 'l'), projectAssets: join(base, 'p') } }))
+vi.mock('./settings', () => ({ msg: (ru: string) => ru }))
+vi.mock('./ipc', () => ({ handleIpc: () => undefined }))
+vi.mock('./window', () => ({ sendToRenderer: () => undefined }))
+vi.mock('./git', () => ({ findGit: async () => 'git' }))
+vi.mock('./projectFolder', () => ({ getProjectRoot: () => project }))
+vi.mock('./pagesBuild', () => ({
+  buildSite: async ({ outDir }: { outDir: string }) => {
+    mkdirSync(outDir, { recursive: true })
+    return { bytes: 10, files: 3, missing: [], tooLarge: [] }
+  },
+}))
+vi.mock('./pagesGh', () => ({
+  ghStatus: async () => ({ installed: true, loggedIn: true, user: 'me' }),
+  ghMissingText: () => 'gh missing',
+  ghLoginText: () => 'gh login',
+  gitCredentialArgs: async () => [],
+  openPagesUrl: async () => undefined,
+  repoState: async (ref: RepoRef) => {
+    const r = gh.repos.get(k(ref))
+    return r ? { exists: true, isPrivate: r.private } : { exists: false, isPrivate: false }
+  },
+  ownerPlan: async (owner: string, login: string | undefined) => (owner === login ? gh.userPlan : gh.orgPlans[owner]),
+  inspectPages: async (ref: RepoRef) => {
+    const r = repo(k(ref))
+    return { branchSha: r.branchSha, marker: r.branchSha ? r.marker : null, pages: r.pages }
+  },
+  makePublic: async (ref: RepoRef) => {
+    gh.calls.push(`public ${k(ref)}`)
+    repo(k(ref)).private = false
+  },
+  createPublicRepo: async (name: string) => {
+    gh.calls.push(`create me/${name}`)
+    gh.repos.set(`me/${name}`, fresh())
+    return { owner: 'me', repo: name }
+  },
+  enablePages: async (ref: RepoRef, current: PagesConfig | null) => {
+    gh.calls.push(`pages ${k(ref)} ${current ? 'keep' : 'new'}`)
+    if (gh.failEnable) throw new Error('HTTP 422: plan does not support Pages')
+    const r = repo(k(ref))
+    if (!current) r.pages = { buildType: 'legacy', branch: 'gh-pages', path: '/', url: `https://${ref.owner}.github.io/${ref.repo}/` }
+    return r.pages?.url ?? ''
+  },
+  disablePages: async (ref: RepoRef) => {
+    gh.calls.push(`nopages ${k(ref)}`)
+    repo(k(ref)).pages = null
+    return true
+  },
+}))
+vi.mock('./pagesGit', () => ({
+  pushSite: async (_r: unknown, siteDir: string, remote: string, _b: string, _m: string, expected: string | null) => {
+    const key = fromRemote(remote)
+    gh.calls.push(`push ${key}`)
+    const r = repo(key)
+    if (r.branchSha !== expected) throw new Error('stale info')
+    r.branchSha = nextSha()
+    r.marker = readFileSync(join(siteDir, '.doplan-pages.json'), 'utf8')
+    return r.branchSha
+  },
+  deleteRemoteBranch: async (_r: unknown, _w: string, remote: string, _b: string, expected: string) => {
+    const key = fromRemote(remote)
+    gh.calls.push(`delete ${key}`)
+    const r = repo(key)
+    if (r.branchSha !== expected) throw new Error('stale info')
+    r.branchSha = null
+    r.marker = null
+    return true
+  },
+}))
+
+const { pagesStatus, publishPlan, unpublishPlan } = await import('./pages')
+
+const setOrigin = (url: string | null) =>
+  writeFileSync(join(project, '.git', 'config'), url ? `[core]\n\tbare = false\n[remote "origin"]\n\turl = ${url}\n` : '[core]\n\tbare = false\n')
+
+function req(over: Partial<PagesPublishRequest> = {}): PagesPublishRequest {
+  return {
+    docId: 'doc1',
+    content: { doc: {}, catalog: { version: 1, materials: [], assets: [], hdris: [] }, files: [], notDownloaded: [] },
+    info: { title: 'Flat', publishedAt: '2026-01-01T00:00:00.000Z', contentHash: 'h1', app: 'doplan test' },
+    target: 'project',
+    ...over,
+  }
+}
+
+const status = (docId = 'doc1', aliases?: string[]) => pagesStatus({ docId, contentHash: 'h1', name: 'Flat', ...(aliases ? { aliases } : {}) })
+
+beforeEach(() => {
+  gh.repos.clear()
+  gh.calls = []
+  gh.userPlan = 'free'
+  gh.orgPlans = {}
+  gh.failEnable = false
+  rmSync(join(userData, 'pages.json'), { force: true })
+  setOrigin('https://github.com/me/flat.git')
+})
+
+describe('publishing never takes over what doplan did not make', () => {
+  it('leaves a foreign gh-pages branch alone and offers a separate repository; a taken -view name gets a number', async () => {
+    gh.repos.set('me/flat', fresh({ branchSha: 'f'.repeat(40), marker: null }))
+    gh.repos.set('me/flat-view', fresh()) // someone's repository with that name
+    const st = await status()
+    expect(st.project?.occupied).toBe('branch')
+    expect(st.separateName).toBe('flat-view-2')
+
+    await expect(publishPlan(req())).rejects.toThrow(/gh-pages/)
+    expect(gh.calls).toEqual([])
+
+    const res = await publishPlan(req({ target: 'separate' }))
+    expect(res.record).toMatchObject({ owner: 'me', repo: 'flat-view-2', separate: true })
+    expect(gh.calls).toEqual(['create me/flat-view-2', 'push me/flat-view-2', 'pages me/flat-view-2 new'])
+    expect(repo('me/flat').branchSha).toBe('f'.repeat(40))
+    expect(repo('me/flat-view').branchSha).toBeNull()
+  })
+
+  it('does not re-point or turn off a Pages site of the repository (main:/docs, Actions)', async () => {
+    for (const pages of [
+      { buildType: 'legacy', branch: 'main', path: '/docs', url: 'https://me.github.io/flat/' },
+      { buildType: 'workflow', url: 'https://me.github.io/flat/' },
+    ]) {
+      gh.repos.set('me/flat', fresh({ pages }))
+      gh.calls = []
+      expect((await status()).project?.occupied).toBe('site')
+      await expect(publishPlan(req())).rejects.toThrow(/GitHub Pages/)
+      expect(gh.calls).toEqual([])
+      expect(repo('me/flat').pages).toEqual(pages)
+    }
+  })
+
+  it('publishes with its marker, keeps its own site on update and unpublishes only its own', async () => {
+    gh.repos.set('me/flat', fresh())
+    const first = await publishPlan(req())
+    expect(markerId(repo('me/flat').marker)).toBe(first.record.pubId)
+    const again = await publishPlan(req())
+    expect(again.record.pubId).toBe(first.record.pubId)
+    expect(gh.calls).toEqual(['push me/flat', 'pages me/flat new', 'push me/flat', 'pages me/flat keep'])
+
+    await unpublishPlan('doc1')
+    expect(gh.calls.slice(4)).toEqual(['nopages me/flat', 'delete me/flat'])
+    expect((await status()).record).toBeNull()
+
+    // published again, then someone replaced the branch with their own: unpublish leaves both alone
+    await publishPlan(req())
+    const r = repo('me/flat')
+    r.branchSha = 'e'.repeat(40)
+    r.marker = null
+    gh.calls = []
+    await unpublishPlan('doc1')
+    expect(gh.calls).toEqual([])
+    expect(r.branchSha).toBe('e'.repeat(40))
+    expect(r.pages).not.toBeNull()
+  })
+})
+
+describe('updates go to the recorded repository', () => {
+  it('pushes to the recorded repository after the origin moved, and unpublishes there', async () => {
+    gh.repos.set('a/flat', fresh())
+    gh.repos.set('b/flat2', fresh())
+    setOrigin('https://github.com/a/flat.git')
+    await publishPlan(req())
+    setOrigin('git@github.com:b/flat2.git')
+    const res = await publishPlan(req())
+    expect(res.record).toMatchObject({ owner: 'a', repo: 'flat' })
+    expect(gh.calls.filter((c) => c.startsWith('push'))).toEqual(['push a/flat', 'push a/flat'])
+    await unpublishPlan('doc1')
+    expect(repo('a/flat').branchSha).toBeNull()
+    expect(repo('b/flat2').branchSha).toBeNull()
+    expect(gh.calls.some((c) => c.includes('b/flat2'))).toBe(false)
+  })
+
+  it('offers the choice again when the recorded repository turned private on Free, and moves to a separate one', async () => {
+    gh.repos.set('me/flat', fresh())
+    await publishPlan(req())
+    repo('me/flat').private = true
+    const st = await status()
+    expect(st.recordTarget?.needsChoice).toBe(true)
+    await expect(publishPlan(req())).rejects.toThrow(/приватный/)
+
+    gh.calls = []
+    const res = await publishPlan(req({ privateChoice: 'separate' }))
+    expect(res.record).toMatchObject({ owner: 'me', repo: 'flat-view', separate: true })
+    // the old site in the now private repository is taken down
+    expect(gh.calls).toEqual(['create me/flat-view', 'push me/flat-view', 'pages me/flat-view new', 'nopages me/flat', 'delete me/flat'])
+    expect((await status()).record?.repo).toBe('flat-view')
+  })
+
+  it('makes the recorded repository public again only when asked to', async () => {
+    gh.repos.set('me/flat', fresh())
+    await publishPlan(req())
+    repo('me/flat').private = true
+    gh.calls = []
+    await publishPlan(req({ privateChoice: 'makePublic' }))
+    expect(gh.calls).toEqual(['public me/flat', 'push me/flat', 'pages me/flat keep'])
+  })
+})
+
+describe('the Pages rule follows the repository owner', () => {
+  it('asks about a private organisation repository even when the user pays, and does not push', async () => {
+    setOrigin('https://github.com/acme/plans.git')
+    gh.repos.set('acme/plans', fresh({ private: true }))
+    gh.userPlan = 'pro'
+    expect((await status()).project).toMatchObject({ isPrivate: true, needsChoice: true })
+    await expect(publishPlan(req())).rejects.toThrow(/приватный/)
+    expect(gh.calls).toEqual([])
+
+    gh.orgPlans.acme = 'team'
+    expect((await status()).project?.needsChoice).toBe(false)
+    await publishPlan(req())
+    expect(gh.calls).toEqual(['push acme/plans', 'pages acme/plans new'])
+  })
+
+  it('takes a new branch back when GitHub refuses Pages, and saves no record', async () => {
+    gh.repos.set('me/flat', fresh())
+    gh.failEnable = true
+    await expect(publishPlan(req())).rejects.toThrow(/422/)
+    expect(gh.calls).toEqual(['push me/flat', 'pages me/flat new', 'delete me/flat'])
+    expect(repo('me/flat').branchSha).toBeNull()
+    expect((await status()).record).toBeNull()
+  })
+})
+
+describe('the record follows its document', () => {
+  it('finds a record kept under the creation-time key once the file has an id, and reuses its repository', async () => {
+    setOrigin(null)
+    await publishPlan(req({ docId: 'created:abc', target: 'separate' }))
+    expect(gh.calls[0]).toMatch(/^create me\/flat-[0-9a-f]{6}-view$/)
+    const name = gh.calls[0].slice('create me/'.length)
+
+    expect((await status('p_newid')).record).toBeNull()
+    const st = await status('p_newid', ['created:abc'])
+    expect(st.record?.repo).toBe(name)
+    gh.calls = []
+    await publishPlan(req({ docId: 'p_newid', aliases: ['created:abc'], target: 'separate' }))
+    expect(gh.calls).toEqual([`push me/${name}`, `pages me/${name} keep`])
+    expect((await status('created:abc')).record).toBeNull()
+  })
+})

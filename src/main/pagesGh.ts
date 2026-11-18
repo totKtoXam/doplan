@@ -9,8 +9,8 @@ import { execFile } from 'node:child_process'
 import { mkdirSync, statSync } from 'node:fs'
 import { delimiter, isAbsolute, join } from 'node:path'
 import { app, shell } from 'electron'
-import type { RepoRef } from '@shared/pagesSite'
-import { isValidRepoName, PAGES_BRANCH, pagesUrlOf } from '@shared/pagesSite'
+import type { PagesConfig, PagesInspection, RepoRef } from '@shared/pagesSite'
+import { isValidRepoName, PAGES_BRANCH, PAGES_MARKER, pagesUrlOf } from '@shared/pagesSite'
 import { msg } from './settings'
 
 const isFile = (p: string) => {
@@ -167,6 +167,17 @@ export async function userPlan(): Promise<string | undefined> {
   return name || undefined
 }
 
+/**
+ * The plan of the account that owns the repository: the user's own for their repositories, the
+ * organisation's for an organisation's (GitHub shows it to its owners only). undefined when unknown.
+ */
+export async function ownerPlan(owner: string, login: string | undefined): Promise<string | undefined> {
+  if (login && owner.toLowerCase() === login.toLowerCase()) return userPlan()
+  const r = await runGh(['api', `orgs/${owner}`, '--jq', '.plan.name // empty'], 20_000)
+  const name = r.code === 0 ? r.stdout.trim().toLowerCase() : ''
+  return name || undefined
+}
+
 export async function makePublic(ref: RepoRef): Promise<void> {
   const r = await runGh(['repo', 'edit', `${ref.owner}/${ref.repo}`, '--visibility', 'public', '--accept-visibility-change-consequences'], 60_000)
   if (r.code !== 0) throw ghError(r, msg('Не удалось сделать репозиторий публичным', 'Could not make the repository public'))
@@ -185,24 +196,56 @@ export async function createPublicRepo(name: string, description: string): Promi
 
 // ───────────── Pages ─────────────
 
-/** turns Pages on for the gh-pages branch (or points it there); resolves with the site address */
-export async function enablePages(ref: RepoRef): Promise<string> {
-  const api = `repos/${ref.owner}/${ref.repo}/pages`
-  const source = ['-f', `source[branch]=${PAGES_BRANCH}`, '-f', 'source[path]=/']
-  const cur = await runGh(['api', api], 30_000)
-  let res: GhResult
-  if (cur.code !== 0 && /HTTP 404|Not Found/i.test(cur.stderr)) {
-    res = await runGh(['api', '-X', 'POST', api, ...source], 30_000)
-  } else if (cur.code !== 0) {
-    throw ghError(cur, msg('Не удалось прочитать настройки Pages', 'Could not read the Pages settings'))
-  } else {
-    res = await runGh(['api', '-X', 'PUT', api, ...source], 30_000)
+const notFound = (r: GhResult) => /HTTP 404|Not Found/i.test(r.stderr)
+
+const siteUrl = (ref: RepoRef, url: string | undefined) => (url && /^https:\/\//.test(url) ? (url.endsWith('/') ? url : `${url}/`) : pagesUrlOf(ref))
+
+/** the Pages setup of a repository, null when Pages are off */
+export async function pagesConfig(ref: RepoRef): Promise<PagesConfig | null> {
+  const r = await runGh(['api', `repos/${ref.owner}/${ref.repo}/pages`], 30_000)
+  if (r.code !== 0) {
+    if (notFound(r)) return null
+    throw ghError(r, msg('Не удалось прочитать настройки Pages', 'Could not read the Pages settings'))
   }
+  let j: { build_type?: unknown; source?: { branch?: unknown; path?: unknown }; html_url?: unknown }
+  try {
+    j = JSON.parse(r.stdout) as typeof j
+  } catch {
+    throw new Error(msg('GitHub вернул непонятные настройки Pages', 'GitHub returned unreadable Pages settings'))
+  }
+  const s = (v: unknown) => (typeof v === 'string' ? v : undefined)
+  return { buildType: s(j.build_type), branch: s(j.source?.branch), path: s(j.source?.path), url: s(j.html_url) }
+}
+
+/** what the repository has in the way of a gh-pages branch, its doplan marker and a Pages site */
+export async function inspectPages(ref: RepoRef): Promise<PagesInspection> {
+  const base = `repos/${ref.owner}/${ref.repo}`
+  const head = await runGh(['api', `${base}/git/ref/heads/${PAGES_BRANCH}`, '--jq', '.object.sha'], 30_000)
+  let branchSha: string | null = null
+  if (head.code === 0) branchSha = head.stdout.trim() || null
+  // 409: an empty repository (no branches at all)
+  else if (!notFound(head) && !/HTTP 409/i.test(head.stderr)) throw ghError(head, msg('Не удалось прочитать ветку gh-pages', 'Could not read the gh-pages branch'))
+  let marker: string | null = null
+  if (branchSha) {
+    const m = await runGh(['api', '-H', 'Accept: application/vnd.github.raw', `${base}/contents/${PAGES_MARKER}?ref=${branchSha}`], 30_000)
+    if (m.code === 0) marker = m.stdout.slice(0, 4096)
+    else if (!notFound(m)) throw ghError(m, msg('Не удалось прочитать ветку gh-pages', 'Could not read the gh-pages branch'))
+  }
+  return { branchSha, marker, pages: await pagesConfig(ref) }
+}
+
+/**
+ * Turns Pages on for the gh-pages branch when they are off (`current` null); a site that is already
+ * there (doplan's own, see pagesOwnership) is left as it is. Resolves with the site address.
+ */
+export async function enablePages(ref: RepoRef, current: PagesConfig | null): Promise<string> {
+  if (current) return siteUrl(ref, current.url)
+  const api = `repos/${ref.owner}/${ref.repo}/pages`
+  const res = await runGh(['api', '-X', 'POST', api, '-f', `source[branch]=${PAGES_BRANCH}`, '-f', 'source[path]=/'], 30_000)
   // a POST that races GitHub turning Pages on by itself after the push: 409 means "already on"
   if (res.code !== 0 && !/HTTP 409|already exists/i.test(res.stderr)) throw ghError(res, msg('Не удалось включить GitHub Pages', 'Could not turn on GitHub Pages'))
   const after = await runGh(['api', api, '--jq', '.html_url'], 30_000)
-  const url = after.code === 0 ? after.stdout.trim() : ''
-  return /^https:\/\//.test(url) ? (url.endsWith('/') ? url : `${url}/`) : pagesUrlOf(ref)
+  return siteUrl(ref, after.code === 0 ? after.stdout.trim() : undefined)
 }
 
 /** turns Pages off; resolves false when they were not on */

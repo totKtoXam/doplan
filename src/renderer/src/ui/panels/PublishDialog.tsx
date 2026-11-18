@@ -2,12 +2,23 @@
  * «Опубликовать для просмотра»: a read-only copy of the plan on GitHub Pages (2D plan + 3D with
  * orbit / walk / top), a link to share, its state (published / outdated → update) and «Снять с
  * публикации». The work is done in main (src/main/pages.ts); the site content is taken from the
- * document and the catalogue here (shared/pagesSite.planSite).
+ * document and the catalogue here: only what the viewer shows (shared/pagesSite.viewDoc), the
+ * underlays only when the user ticks them in.
  */
 import { Check, Copy, ExternalLink, Globe, RefreshCw, TriangleExclamationPoint } from 'lucide-react'
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import { builtinCatalog } from '@core'
-import { docContentHash, hashString, planSite, type PagesPrivateChoice, type PagesProgress, type PagesPublishResult, type PagesStatus } from '@shared/pagesSite'
+import {
+  docContentHash,
+  planSite,
+  publicationKeys,
+  viewDoc,
+  visibleUnderlayCount,
+  type PagesPrivateChoice,
+  type PagesProgress,
+  type PagesPublishResult,
+  type PagesStatus,
+} from '@shared/pagesSite'
 import { addTranslations, useT } from '@/i18n'
 import { api } from '@/store/api'
 import { useDoc } from '@/store/document'
@@ -63,17 +74,24 @@ addTranslations('en', {
     'All project files and the whole version history become visible to everyone on the internet. You can make it private again in the repository settings on GitHub, but others may keep copies.',
   'Сделать публичным': 'Make public',
   'Снять план с публикации?': 'Unpublish the plan?',
-  'Сайт перестанет открываться по ссылке. Ветка gh-pages будет удалена.': 'The link stops working. The gh-pages branch is deleted.',
+  'Сайт перестанет открываться по ссылке. Ветка gh-pages, созданная doplan, будет удалена.': 'The link stops working. The gh-pages branch doplan made is deleted.',
+  'В репозитории {r} уже есть ветка gh-pages, которую сделал не doplan. Её не тронем: сайт пойдёт в отдельный публичный репозиторий {s}.':
+    'Repository {r} already has a gh-pages branch doplan did not make. It stays as it is: the site goes into a separate public repository {s}.',
+  'У репозитория {r} уже есть свой сайт GitHub Pages. Его не тронем: план пойдёт в отдельный публичный репозиторий {s}.':
+    'Repository {r} already has a GitHub Pages site of its own. It stays as it is: the plan goes into a separate public repository {s}.',
+  'Репозиторий {r} стал приватным, а на бесплатном тарифе GitHub Pages работает только у публичных. Как поступить?':
+    'Repository {r} became private, and on the free GitHub plan Pages works only for public ones. What to do?',
+  'Репозиторий {r} не найден на GitHub. План можно опубликовать в отдельный публичный репозиторий {s}.':
+    'Repository {r} was not found on GitHub. The plan can be published into a separate public repository {s}.',
+  'Показать подложку': 'Include the underlay',
+  'Подложка — это скан или фото исходного плана. На планах БТИ часто есть адрес, кадастровый номер и имена: всё это увидят все, у кого есть ссылка.':
+    'The underlay is a scan or photo of the source plan. BTI plans often show the address, the cadastral number and names: everyone with the link sees all of it.',
+  'Скрытые подложки, карандашные пометки, цены и заметки не публикуются.': 'Hidden underlays, pencil marks, prices and notes are not published.',
   'Репозиторий {r} останется — удалить его можно на GitHub.': 'Repository {r} stays; you can delete it on GitHub.',
   Снять: 'Unpublish',
   'Снято с публикации': 'Unpublished',
   'Публикация доступна в настольном приложении.': 'Publishing works in the desktop app.',
 })
-
-/** id that keys the publication record of this document */
-function docKey(doc: { meta: { id?: string; name: string; createdAt: string } }): string {
-  return doc.meta.id ?? `name:${hashString(`${doc.meta.name}|${doc.meta.createdAt}`)}`
-}
 
 /** catalogue entries every viewer has as they are (not overridden by a pack or the library) */
 function builtinIds(): Set<string> {
@@ -127,24 +145,29 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<PagesPublishResult | null>(null)
   const [choice, setChoice] = useState<PagesPrivateChoice>('separate')
+  const [underlays, setUnderlays] = useState(false)
 
-  const key = docKey(doc)
-  const hash = useMemo(() => docContentHash(doc), [doc])
-  const content = useMemo(() => (open ? planSite(doc, uiStore.getState().catalog, builtinIds()) : null), [open, doc])
+  const { key, aliases } = publicationKeys(doc.meta)
+  const aliasKey = aliases.join('|')
+  const underlayCount = visibleUnderlayCount(doc)
+  const withUnderlays = underlays && underlayCount > 0
+  const shown = useMemo(() => viewDoc(doc, { underlays: withUnderlays }), [doc, withUnderlays])
+  const hash = useMemo(() => docContentHash(shown), [shown])
+  const content = useMemo(() => (open ? planSite(shown, uiStore.getState().catalog, builtinIds()) : null), [open, shown])
 
   const refresh = useCallback(
     async (fresh = false) => {
       setLoading(true)
       setError(null)
       try {
-        setStatus(await api.pages.status({ docId: key, contentHash: hash, name: doc.meta.name, fresh }))
+        setStatus(await api.pages.status({ docId: key, aliases: aliasKey.split('|'), contentHash: hash, name: doc.meta.name, fresh }))
       } catch (e) {
         setError((e as Error).message)
       } finally {
         setLoading(false)
       }
     },
-    [key, hash, doc.meta.name],
+    [key, aliasKey, hash, doc.meta.name],
   )
 
   useEffect(() => {
@@ -157,15 +180,30 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
   const ghReady = !!status && status.gh.installed && status.gh.loggedIn && status.git
   const record = status?.record ?? null
   const project = status?.project ?? null
-  const projectUsable = !!project && project.exists
+  const projectUsable = !!project && project.exists && !project.occupied
   const separateRef = `${status?.gh.user ?? '…'}/${status?.separateName ?? ''}`
+  const recordTarget = status?.recordTarget ?? null
+  // the project repository of a publication turned private on a free plan, or is gone
+  const recordStuck = !!record && !record.separate && !!recordTarget && (recordTarget.needsChoice || !recordTarget.exists)
+  const choiceRef = recordStuck ? recordTarget?.ref : project?.ref
+  const recordUnderlays = record?.underlays ?? false
+
+  useEffect(() => {
+    if (open) setUnderlays(recordUnderlays)
+  }, [open, recordUnderlays])
 
   const publish = async () => {
     if (!content || !status) return
     const target = record ? (record.separate ? 'separate' : 'project') : projectUsable ? 'project' : 'separate'
-    const privateChoice = !record && target === 'project' && project?.needsChoice ? choice : undefined
+    const privateChoice: PagesPrivateChoice | undefined = recordStuck
+      ? recordTarget?.exists
+        ? choice
+        : 'separate'
+      : !record && target === 'project' && project?.needsChoice
+        ? choice
+        : undefined
     if (privateChoice === 'makePublic') {
-      const r = `${project?.ref.owner}/${project?.ref.repo}`
+      const r = `${choiceRef?.owner}/${choiceRef?.repo}`
       const ok = await confirmDialog(
         t('Сделать {r} публичным?', { r }),
         t('Все файлы проекта и вся история его версий станут видны всем в интернете. Вернуть приватность можно в настройках репозитория на GitHub, но копии могут остаться у других.'),
@@ -183,6 +221,8 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
         info: { title: doc.meta.name, publishedAt: new Date().toISOString(), contentHash: hash, app: `doplan ${api.version}` },
         target: privateChoice === 'separate' ? 'separate' : target,
         ...(privateChoice ? { privateChoice } : {}),
+        aliases,
+        underlays: withUnderlays,
       })
       setResult(res)
       await refresh()
@@ -195,7 +235,7 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
 
   const unpublish = async () => {
     if (!record) return
-    const lines = [t('Сайт перестанет открываться по ссылке. Ветка gh-pages будет удалена.')]
+    const lines = [t('Сайт перестанет открываться по ссылке. Ветка gh-pages, созданная doplan, будет удалена.')]
     if (record.separate) lines.push(t('Репозиторий {r} останется — удалить его можно на GitHub.', { r: `${record.owner}/${record.repo}` }))
     if (!(await confirmDialog(t('Снять план с публикации?'), lines.join('\n'), { ok: t('Снять'), cancel: t('Отмена'), danger: true }))) return
     setBusy('unpublish')
@@ -311,9 +351,39 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
           </div>
         )}
 
+        {recordStuck && ghReady && recordTarget && (
+          <div className="flex flex-col gap-2">
+            {recordTarget.exists ? (
+              <>
+                <div>{t('Репозиторий {r} стал приватным, а на бесплатном тарифе GitHub Pages работает только у публичных. Как поступить?', { r: `${recordTarget.ref.owner}/${recordTarget.ref.repo}` })}</div>
+                <Choice checked={choice === 'separate'} onSelect={() => setChoice('separate')} title={t('Отдельный публичный репозиторий')}>
+                  {t('Будет создан {r}: в нём только сайт для просмотра, сам проект останется приватным.', { r: `${status?.gh.user ?? '…'}/${recordTarget.ref.repo}-view` })}
+                </Choice>
+                <Choice checked={choice === 'makePublic'} onSelect={() => setChoice('makePublic')} title={t('Сделать репозиторий проекта публичным')}>
+                  {t('Все файлы проекта и вся его история станут видны всем.')}
+                </Choice>
+              </>
+            ) : (
+              <Note kind="warn">
+                {t('Репозиторий {r} не найден на GitHub. План можно опубликовать в отдельный публичный репозиторий {s}.', {
+                  r: `${recordTarget.ref.owner}/${recordTarget.ref.repo}`,
+                  s: `${status?.gh.user ?? '…'}/${recordTarget.ref.repo}-view`,
+                })}
+              </Note>
+            )}
+          </div>
+        )}
+
         {!record && ghReady && status && (
           <div className="flex flex-col gap-2">
             <div className="text-[11px] font-semibold tracking-wide text-[var(--muted)] uppercase">{t('Где будет сайт')}</div>
+            {project?.occupied && (
+              <Note kind="warn">
+                {project.occupied === 'branch'
+                  ? t('В репозитории {r} уже есть ветка gh-pages, которую сделал не doplan. Её не тронем: сайт пойдёт в отдельный публичный репозиторий {s}.', { r: `${project.ref.owner}/${project.ref.repo}`, s: separateRef })
+                  : t('У репозитория {r} уже есть свой сайт GitHub Pages. Его не тронем: план пойдёт в отдельный публичный репозиторий {s}.', { r: `${project.ref.owner}/${project.ref.repo}`, s: separateRef })}
+              </Note>
+            )}
             {projectUsable && project && !project.needsChoice && (
               <div>{t('Ветка gh-pages репозитория {r} (одним коммитом, история проекта не меняется).', { r: `${project.ref.owner}/${project.ref.repo}` })}</div>
             )}
@@ -328,13 +398,23 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
                 </Choice>
               </>
             )}
-            {!projectUsable && <div>{t('У проекта нет репозитория на GitHub, поэтому сайт пойдёт в отдельный публичный репозиторий {r}.', { r: separateRef })}</div>}
+            {!projectUsable && !project?.occupied && <div>{t('У проекта нет репозитория на GitHub, поэтому сайт пойдёт в отдельный публичный репозиторий {r}.', { r: separateRef })}</div>}
           </div>
         )}
 
         {ghReady && content && (
           <>
             <div className="text-[var(--muted)]">{t('В плане {n} файлов моделей и текстур.', { n: content.files.length })}</div>
+            {underlayCount > 0 && (
+              <label className="flex cursor-pointer items-start gap-2">
+                <input type="checkbox" className="mt-0.5" checked={underlays} disabled={!!busy} onChange={(e) => setUnderlays(e.currentTarget.checked)} />
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span className="font-medium">{t('Показать подложку')}</span>
+                  {underlays && <span className="text-[var(--warning)]">{t('Подложка — это скан или фото исходного плана. На планах БТИ часто есть адрес, кадастровый номер и имена: всё это увидят все, у кого есть ссылка.')}</span>}
+                </span>
+              </label>
+            )}
+            <div className="text-[var(--muted)]">{t('Скрытые подложки, карандашные пометки, цены и заметки не публикуются.')}</div>
             {content.notDownloaded.length > 0 && (
               <Note kind="warn">{t('Не скачаны и не попадут на сайт: {list}. Скачайте их в каталоге, чтобы зрители их увидели.', { list: content.notDownloaded.slice(0, 8).join(', ') })}</Note>
             )}

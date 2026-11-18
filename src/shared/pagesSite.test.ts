@@ -13,6 +13,16 @@ import {
   siteUrlOf,
   viewerQuery,
   viewRepoName,
+  canPublishInto,
+  markerId,
+  migrateRecordKey,
+  pagesMarker,
+  pagesNeedsChoice,
+  pagesOwnership,
+  publicationKeys,
+  viewDoc,
+  viewRepoCandidate,
+  visibleUnderlayCount,
 } from './pagesSite'
 
 describe('siteFileOf', () => {
@@ -126,5 +136,119 @@ describe('GitHub repositories', () => {
     expect(pagesUrlOf({ owner: 'me', repo: 'me.github.io' })).toBe('https://me.github.io/')
     expect(viewRepoName('flat')).toBe('flat-view')
     expect(viewRepoName('  ')).toBe('plan-view')
+  })
+})
+
+describe('what of the document goes public (viewDoc)', () => {
+  const doc = {
+    version: 3,
+    meta: { name: 'Flat', id: 'p_secretid', createdAt: '2020-01-01', modifiedAt: '2020-02-02', app: 'doplan' },
+    walls: { w: { id: 'w', dims: { left: { source: 'tape', note: 'measured by Ivan', value: 3000 } } } },
+    underlays: {
+      shown: { id: 'shown', src: 'doplan-asset://project/plan.png', visible: true },
+      hidden: { id: 'hidden', src: 'doplan-asset://project/bti.png', visible: false },
+      inline: { id: 'inline', src: 'data:image/png;base64,AAAA', visible: false },
+    },
+    annotations: { a: { id: 'a', points: [] } },
+    source: { kind: 'bti', labelledTotalArea: 54 },
+    design: { styleId: 'loft', currency: 'KZT', priceList: { oak: { price: 100 } } },
+    materials: { m: { id: 'm', color: '#fff', product: { vendor: 'shop', price: 5 } } },
+    assets: { x: { id: 'x', src: 'doplan-asset://project/x.glb', product: { price: 9 } } },
+    electrical: { e: { id: 'e', kind: 'socket', comment: 'fridge, circuit 3' } },
+    variants: { activeId: 'v1', order: ['v1', 'v2'], records: { v2: { stash: { collections: { items: { i: { assetId: 'secret-sofa' } } } } } } },
+    items: { i: { id: 'i', assetId: 'sofa' } },
+  }
+
+  it('drops hidden underlays, annotations, traced-plan data, prices, notes, ids and inactive variants', () => {
+    const v = viewDoc(doc, { underlays: false }) as typeof doc & Record<string, unknown>
+    expect(v.meta).toEqual({ name: 'Flat', app: 'doplan' })
+    expect(v.underlays).toEqual({})
+    for (const k of ['annotations', 'source', 'variants']) expect(v[k]).toBeUndefined()
+    expect(v.design).toEqual({ styleId: 'loft' })
+    expect(v.materials.m.product).toBeUndefined()
+    expect(v.materials.m.color).toBe('#fff')
+    expect(v.assets.x.product).toBeUndefined()
+    expect(v.electrical.e).toEqual({ id: 'e', kind: 'socket' })
+    expect(v.walls.w.dims.left).toEqual({ source: 'tape', value: 3000 })
+    expect(v.items).toEqual(doc.items)
+    // the document itself is untouched
+    expect(doc.underlays.hidden.src).toBe('doplan-asset://project/bti.png')
+    expect(doc.walls.w.dims.left.note).toBe('measured by Ivan')
+
+    const files = planSite(v, { materials: [], assets: [], hdris: [] }).files.map((f) => f.path)
+    expect(files).toEqual(['assets/p/x.glb'])
+    expect(JSON.stringify(v)).not.toMatch(/bti\.png|secret|Ivan|fridge|KZT/)
+  })
+
+  it('publishes only the visible underlays, and only when asked', () => {
+    expect(visibleUnderlayCount(doc)).toBe(1)
+    const v = viewDoc(doc, { underlays: true }) as { underlays: Record<string, unknown> }
+    expect(Object.keys(v.underlays)).toEqual(['shown'])
+    const files = planSite(v, { materials: [], assets: [], hdris: [] }).files.map((f) => f.path)
+    expect(files).toContain('assets/p/plan.png')
+    expect(files).not.toContain('assets/p/bti.png')
+  })
+})
+
+describe('whose a gh-pages branch and a Pages site are', () => {
+  const sha = 'a'.repeat(40)
+  const site = { buildType: 'legacy', branch: 'gh-pages', path: '/' }
+
+  it('reads only doplan markers', () => {
+    expect(markerId(pagesMarker('pub1'))).toBe('pub1')
+    for (const t of [null, '', 'docs', '{"id":"pub1"}', '{"doplan":"other","id":"pub1"}', '{"doplan":"pages","id":""}']) expect(markerId(t)).toBeNull()
+  })
+
+  it('is ours only with our marker; any other branch or site is foreign', () => {
+    expect(pagesOwnership({ branchSha: null, marker: null, pages: null }, 'pub1', false)).toEqual({ branch: 'none', site: 'none' })
+    expect(pagesOwnership({ branchSha: sha, marker: pagesMarker('pub1'), pages: site }, 'pub1', false)).toEqual({ branch: 'ours', site: 'ours' })
+    // the user's own docs branch, another plan's branch, an unknown publication id
+    expect(pagesOwnership({ branchSha: sha, marker: null, pages: null }, 'pub1', false).branch).toBe('foreign')
+    expect(pagesOwnership({ branchSha: sha, marker: pagesMarker('pub2'), pages: null }, 'pub1', false).branch).toBe('foreign')
+    expect(pagesOwnership({ branchSha: sha, marker: pagesMarker('pub1'), pages: null }, undefined, false).branch).toBe('foreign')
+    // a site from main:/docs or from Actions
+    expect(pagesOwnership({ branchSha: null, marker: null, pages: { buildType: 'legacy', branch: 'main', path: '/docs' } }, 'pub1', false).site).toBe('foreign')
+    expect(pagesOwnership({ branchSha: sha, marker: pagesMarker('pub1'), pages: { buildType: 'workflow' } }, 'pub1', false).site).toBe('foreign')
+    // a gh-pages site whose branch is someone else's
+    expect(pagesOwnership({ branchSha: sha, marker: null, pages: site }, 'pub1', true).site).toBe('foreign')
+    // our recorded site whose branch was deleted meanwhile
+    expect(pagesOwnership({ branchSha: null, marker: null, pages: site }, 'pub1', true).site).toBe('ours')
+    expect(pagesOwnership({ branchSha: null, marker: null, pages: site }, 'pub1', false).site).toBe('foreign')
+    expect(canPublishInto({ branch: 'ours', site: 'none' })).toBe(true)
+    expect(canPublishInto({ branch: 'none', site: 'foreign' })).toBe(false)
+  })
+
+  it('asks about a private repository unless its owner pays; an unknown plan counts as free', () => {
+    expect(pagesNeedsChoice(false, undefined)).toBe(false)
+    expect(pagesNeedsChoice(true, undefined)).toBe(true)
+    expect(pagesNeedsChoice(true, 'Free')).toBe(true)
+    expect(pagesNeedsChoice(true, 'team')).toBe(false)
+  })
+
+  it('numbers the separate repository when the name is taken', () => {
+    expect(viewRepoCandidate('flat', 1)).toBe('flat-view')
+    expect(viewRepoCandidate('flat', 3)).toBe('flat-view-3')
+  })
+})
+
+describe('publication keys', () => {
+  it('keys a file without an id by its creation time, so a rename keeps the key', () => {
+    const a = publicationKeys({ name: 'Foo', createdAt: '2020-01-01T00:00:00.000Z' })
+    const b = publicationKeys({ name: 'Bar', createdAt: '2020-01-01T00:00:00.000Z' })
+    expect(a.key).toMatch(/^created:/)
+    expect(b.key).toBe(a.key)
+  })
+
+  it('moves the record to the id the first save gives the file', () => {
+    const before = publicationKeys({ name: 'Foo', createdAt: '2020-01-01T00:00:00.000Z' })
+    const after = publicationKeys({ id: 'p_new', name: 'Foo', createdAt: '2020-01-01T00:00:00.000Z' })
+    expect(after.key).toBe('p_new')
+    expect(after.aliases).toContain(before.key)
+    const records: Record<string, { repo: string }> = { [before.key]: { repo: 'foo-view' } }
+    expect(migrateRecordKey(records, after.key, after.aliases)).toBe(true)
+    expect(records).toEqual({ p_new: { repo: 'foo-view' } })
+    // nothing to move, or the new key already has its own record
+    expect(migrateRecordKey(records, after.key, after.aliases)).toBe(false)
+    expect(migrateRecordKey({ a: 1, b: 2 }, 'a', ['b'])).toBe(false)
   })
 })

@@ -31,7 +31,7 @@ import { MiniSelect, Segmented } from '@/ui/shell/primitives'
 import { WalkLockHint } from '@/ui/shell/WalkLockHint'
 import { useStatus3d } from '@/view3d/status'
 import { parseViewerParams, viewerQuery, type SiteInfo, type ViewerCam, type ViewerParams, type ViewerView } from '@shared/pagesSite'
-import { installEditGuard, viewerEdit } from './guard'
+import { installEditGuard, lockViewerTool, viewerEdit } from './guard'
 import { loadSite } from './load'
 import { WalkStick } from './WalkStick'
 
@@ -105,6 +105,7 @@ async function boot(params: ViewerParams): Promise<Booted> {
     selection: [],
     cameraMode: params.cam,
   })
+  lockViewerTool(uiStore)
   viewerEdit(() => uiStore.getState().setQuality(autoQuality(d.render.quality)))
   document.title = `${site.info?.title || d.meta.name || 'doplan'} — doplan`
   const cat = site.catalog

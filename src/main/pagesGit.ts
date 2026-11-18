@@ -96,9 +96,11 @@ function checkRemote(remote: string): void {
 
 /**
  * Commits everything in `siteDir` as the only commit of `branch` and force-pushes it to `remote`.
- * Resolves with the commit sha.
+ * `expected` is what the branch must be on the remote for the push to replace it: the head seen when
+ * it was checked to be doplan's (null: the branch must not exist). Someone else's branch that
+ * appeared or changed meanwhile is never overwritten. Resolves with the commit sha.
  */
-export async function pushSite(r: GitRunner, siteDir: string, remote: string, branch: string, message: string): Promise<string> {
+export async function pushSite(r: GitRunner, siteDir: string, remote: string, branch: string, message: string, expected: string | null): Promise<string> {
   checkRemote(remote)
   const { args, env: e } = repoArgs(siteDir)
   await fsp.rm(join(siteDir, '.git'), { recursive: true, force: true })
@@ -108,15 +110,24 @@ export async function pushSite(r: GitRunner, siteDir: string, remote: string, br
     await run(r, siteDir, [...args, 'add', '-A', '--', '.'], e)
     await run(r, siteDir, [...args, 'commit', '-q', '--no-verify', '-m', message], e)
     const sha = (await run(r, siteDir, [...args, 'rev-parse', 'HEAD'], e)).trim()
-    await run(r, siteDir, [...args, 'push', '--force', '--quiet', '--no-verify', remote, `HEAD:refs/heads/${branch}`], e)
+    await run(r, siteDir, [...args, 'push', `--force-with-lease=refs/heads/${branch}:${lease(expected)}`, '--quiet', '--no-verify', remote, `HEAD:refs/heads/${branch}`], e)
     return sha
   } finally {
     await fsp.rm(join(siteDir, '.git'), { recursive: true, force: true })
   }
 }
 
-/** deletes `branch` on `remote`; resolves false when it was not there */
-export async function deleteRemoteBranch(r: GitRunner, workDir: string, remote: string, branch: string): Promise<boolean> {
+const lease = (sha: string | null): string => {
+  if (sha !== null && !/^[0-9a-f]{40}([0-9a-f]{24})?$/i.test(sha)) throw new Error('bad commit id')
+  return sha ?? ''
+}
+
+/**
+ * Deletes `branch` on `remote` if its head is still `expected` (the one checked to be doplan's);
+ * resolves false when it was not there.
+ */
+export async function deleteRemoteBranch(r: GitRunner, workDir: string, remote: string, branch: string, expected: string): Promise<boolean> {
+  const sha = lease(expected)
   checkRemote(remote)
   await fsp.rm(workDir, { recursive: true, force: true })
   await fsp.mkdir(workDir, { recursive: true })
@@ -125,7 +136,7 @@ export async function deleteRemoteBranch(r: GitRunner, workDir: string, remote: 
     await run(r, workDir, ['init', '-q', '--template=', resolve(workDir)], e)
     const heads = await run(r, workDir, [...args, 'ls-remote', '--heads', remote, `refs/heads/${branch}`], e)
     if (!heads.trim()) return false
-    await run(r, workDir, [...args, 'push', '--quiet', '--no-verify', remote, `:refs/heads/${branch}`], e)
+    await run(r, workDir, [...args, 'push', `--force-with-lease=refs/heads/${branch}:${sha}`, '--quiet', '--no-verify', remote, `:refs/heads/${branch}`], e)
     return true
   } catch (err) {
     if (err instanceof PagesGitError && /remote ref does not exist|unable to delete .*: remote ref/i.test(err.stderr)) return false

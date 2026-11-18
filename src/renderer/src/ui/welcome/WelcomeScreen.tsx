@@ -1,6 +1,5 @@
-import clsx from 'clsx'
 import { ArrowLeft, FilePlus, FileQuestion, FolderOpen, FolderTree, House, Settings, X } from 'lucide-react'
-import { type ReactNode, useCallback, useEffect, useState } from 'react'
+import { type CSSProperties, type ReactNode, useCallback, useEffect, useState } from 'react'
 import type { RecentEntry } from '@shared/recent'
 import { actions } from '@/actions'
 import { useT } from '@/i18n'
@@ -8,10 +7,13 @@ import { api } from '@/store/api'
 import { dialogStore } from '@/store/dialogs'
 import { uiStore, useUi } from '@/store/ui'
 import { hideWelcome, useWelcome } from '@/store/welcome'
-import { Spinner } from '@/ui/kit'
+import { Button, cn, focusRing, IconButton, ScrollArea, Spinner } from '@/ui/kit'
 import { AppLogo } from '@/ui/shell/AppLogo'
 import { formatWhen, parentOf, svgDataUrl } from './format'
 import './welcomeI18n'
+
+// Colours come only from the theme (styles.css / theme/store.ts tokens), so the screen follows
+// every built-in and installed light or dark theme.
 
 const isWeb = api.platform === 'browser'
 
@@ -27,18 +29,49 @@ function ActionButton({ icon, label, hint, primary, onClick }: { icon: ReactNode
     <button
       type="button"
       onClick={onClick}
-      className={clsx(
-        'group flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-accent',
-        primary ? 'border-transparent bg-accent text-accent-fg hover:bg-accent-hover' : 'border-border bg-panel text-text hover:border-border-strong hover:bg-hover',
+      className={cn(
+        'flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors',
+        focusRing,
+        primary
+          ? 'border-transparent bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)]'
+          : 'border-[var(--border)] bg-[color-mix(in_srgb,var(--text)_4%,transparent)] text-[var(--text)] hover:border-[var(--border-strong)] hover:bg-[var(--hover)]',
       )}
     >
-      <span className={clsx('flex size-8 shrink-0 items-center justify-center rounded-md', primary ? 'bg-white/15' : 'bg-panel-3 text-accent')}>{icon}</span>
+      <span
+        className={cn(
+          'flex size-8 shrink-0 items-center justify-center rounded-md',
+          primary ? 'bg-[color-mix(in_srgb,var(--accent-fg)_16%,transparent)]' : 'bg-[var(--accent-soft)] text-[var(--accent)]',
+        )}
+      >
+        {icon}
+      </span>
       <span className="min-w-0 flex-1">
         <span className="block text-[13px] font-medium">{label}</span>
-        {hint && <span className={clsx('block truncate text-[11px]', primary ? 'text-accent-fg/80' : 'text-muted')}>{hint}</span>}
+        {hint && (
+          <span className={cn('block truncate text-[11px]', primary ? 'text-[color-mix(in_srgb,var(--accent-fg)_80%,transparent)]' : 'text-[var(--muted)]')}>
+            {hint}
+          </span>
+        )}
       </span>
     </button>
   )
+}
+
+/** the plan picture is a luminance mask: its lines are painted in the theme's text colour */
+function PlanPicture({ svg }: { svg: string }) {
+  const url = `url("${svgDataUrl(svg)}")`
+  const mask: CSSProperties = {
+    maskImage: url,
+    maskMode: 'luminance',
+    maskSize: 'contain',
+    maskRepeat: 'no-repeat',
+    maskPosition: 'center',
+    WebkitMaskImage: url,
+    WebkitMaskSize: 'contain',
+    WebkitMaskRepeat: 'no-repeat',
+    WebkitMaskPosition: 'center',
+  }
+  return <div aria-hidden className="absolute inset-2 bg-[var(--text)] opacity-85" style={mask} />
 }
 
 function RecentCard({ entry, busy, onOpen, onRemove }: { entry: RecentEntry; busy: boolean; onOpen(): void; onRemove(): void }) {
@@ -48,9 +81,9 @@ function RecentCard({ entry, busy, onOpen, onRemove }: { entry: RecentEntry; bus
   const where = entry.kind === 'web' ? t('Копия в этом браузере') : parentOf(entry.path)
   return (
     <div
-      className={clsx(
-        'group relative flex flex-col overflow-hidden rounded-lg border bg-panel transition-colors',
-        missing ? 'border-dashed border-border' : 'border-border hover:border-accent focus-within:border-accent',
+      className={cn(
+        'group relative flex flex-col overflow-hidden rounded-lg border bg-[var(--panel)] transition-colors',
+        missing ? 'border-dashed border-[var(--border)]' : 'border-[var(--border)] hover:border-[var(--accent)] focus-within:border-[var(--accent)]',
       )}
     >
       <button
@@ -60,48 +93,52 @@ function RecentCard({ entry, busy, onOpen, onRemove }: { entry: RecentEntry; bus
         title={missing ? t('Файл или папка проекта не найдены: {path}', { path: entry.path }) : entry.path}
         className="flex flex-1 flex-col text-left outline-none disabled:cursor-default"
       >
-        <div className={clsx('relative flex aspect-[16/10] items-center justify-center border-b border-border', missing ? 'bg-panel-2' : 'bg-[#f7f8fa]')}>
+        <div
+          className={cn(
+            'relative flex aspect-[16/10] items-center justify-center border-b border-[var(--border)]',
+            missing ? 'bg-[var(--panel-2)]' : 'bg-[var(--viewport)]',
+          )}
+        >
           {entry.thumb && !missing ? (
-            <img src={svgDataUrl(entry.thumb)} alt="" draggable={false} className="absolute inset-0 size-full object-contain p-2" />
+            <PlanPicture svg={entry.thumb} />
           ) : missing ? (
-            <FileQuestion size={28} className="text-faint" />
+            <FileQuestion size={28} className="text-[var(--faint)]" />
           ) : (
             <AppLogo size={28} className="opacity-25 grayscale" />
           )}
           {busy && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/20">
-              <Spinner className="size-5 text-accent" />
+            <div className="absolute inset-0 flex items-center justify-center bg-[color-mix(in_srgb,var(--bg)_55%,transparent)]">
+              <Spinner className="size-5 text-[var(--accent)]" />
             </div>
           )}
         </div>
         <div className="min-w-0 px-3 py-2">
-          <div className={clsx('truncate text-[13px] font-medium', missing ? 'text-muted' : 'text-text')}>{entry.name || entry.path}</div>
+          <div className={cn('truncate text-[13px] font-medium', missing ? 'text-[var(--muted)]' : 'text-[var(--text)]')}>{entry.name || entry.path}</div>
           {/* long paths keep their end (the folder the project is in) visible */}
-          <div className="truncate text-left text-[11px] text-muted [direction:rtl]">
+          <div className="truncate text-left text-[11px] text-[var(--muted)] [direction:rtl]">
             <bdi>{where}</bdi>
           </div>
-          <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-faint">
-            {missing ? <span className="text-warning">{t('Не найден')}</span> : <span>{formatWhen(entry.modifiedAt, lang, t)}</span>}
-            {entry.kind === 'zip' && !missing && <span className="rounded bg-panel-3 px-1 text-[10px] text-muted">.doplan</span>}
+          <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-[var(--faint)]">
+            {missing ? <span className="text-[var(--warning)]">{t('Не найден')}</span> : <span>{formatWhen(entry.modifiedAt, lang, t)}</span>}
+            {entry.kind === 'zip' && !missing && <span className="rounded bg-[var(--panel-3)] px-1 text-[10px] text-[var(--muted)]">.doplan</span>}
           </div>
         </div>
       </button>
       {missing ? (
-        <div className="px-3 pb-2.5">
-          <button type="button" onClick={onRemove} className="text-[11px] text-accent hover:underline">
+        <div className="px-2 pb-2">
+          <Button size="sm" variant="ghost" onClick={onRemove} className="text-[var(--accent)]!">
             {t('Убрать из списка')}
-          </button>
+          </Button>
         </div>
       ) : (
-        <button
-          type="button"
+        <IconButton
+          size="sm"
+          variant="default"
+          icon={<X size={13} />}
+          label={t('Убрать из списка')}
           onClick={onRemove}
-          title={t('Убрать из списка')}
-          aria-label={t('Убрать из списка')}
-          className="absolute top-1.5 right-1.5 flex size-6 items-center justify-center rounded-md bg-panel/90 text-muted opacity-0 shadow-sm transition-opacity group-hover:opacity-100 hover:text-text focus-visible:opacity-100"
-        >
-          <X size={13} />
-        </button>
+          className="absolute top-1.5 right-1.5 bg-[var(--panel)] opacity-0 shadow-sm transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+        />
       )}
     </div>
   )
@@ -170,14 +207,14 @@ export function WelcomeScreen() {
   }
 
   return (
-    <div className="dp-welcome fixed inset-0 z-[850] flex bg-bg text-text" role="region" aria-label={t('Начальный экран')}>
+    <div className="dp-welcome fixed inset-0 z-[850] flex bg-[var(--bg)] text-[var(--text)]" role="region" aria-label={t('Начальный экран')}>
       {/* left: brand and the first steps */}
-      <aside className="flex w-[300px] shrink-0 flex-col gap-6 border-r border-border bg-panel px-6 py-8">
+      <aside className="flex w-[300px] shrink-0 flex-col gap-6 border-r border-[var(--border)] bg-[var(--panel)] px-6 py-8">
         <div className="flex items-center gap-3">
           <AppLogo size={48} />
           <div>
             <div className="text-xl font-semibold tracking-tight">doplan</div>
-            <div className="text-[11px] leading-snug text-muted">{t('Планировки, 3D и дизайн интерьера')}</div>
+            <div className="text-[11px] leading-snug text-[var(--muted)]">{t('Планировки, 3D и дизайн интерьера')}</div>
           </div>
         </div>
         <nav className="flex flex-col gap-2">
@@ -186,19 +223,22 @@ export function WelcomeScreen() {
           {!isWeb && <ActionButton icon={<FolderTree size={17} />} label={t('Открыть папку проекта…')} onClick={() => void actions.openProjectFolder()} />}
           <ActionButton icon={<House size={17} />} label={t('Открыть пример')} hint={t('Готовая квартира с мебелью')} onClick={() => void actions.newSampleProject()} />
         </nav>
-        <div className="mt-auto flex flex-col gap-1 text-[12px]">
+        <div className="mt-auto flex flex-col gap-1">
           {canClose && (
-            <button type="button" onClick={hideWelcome} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-muted hover:bg-hover hover:text-text">
-              <ArrowLeft size={14} />
+            <Button variant="ghost" onClick={hideWelcome} icon={<ArrowLeft size={14} />} className="justify-start text-[var(--muted)]! hover:text-[var(--text)]!">
               {t('Вернуться к проекту')}
-              <kbd className="ml-auto text-[10px] text-faint">Esc</kbd>
-            </button>
+              <kbd className="ml-auto font-sans text-[10px] text-[var(--faint)]">Esc</kbd>
+            </Button>
           )}
-          <button type="button" onClick={() => dialogStore.getState().open('settings')} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-muted hover:bg-hover hover:text-text">
-            <Settings size={14} />
+          <Button
+            variant="ghost"
+            onClick={() => dialogStore.getState().open('settings')}
+            icon={<Settings size={14} />}
+            className="justify-start text-[var(--muted)]! hover:text-[var(--text)]!"
+          >
             {t('Настройки…')}
-          </button>
-          <div className="px-2 pt-2 text-[10px] text-faint">doplan {api.version}</div>
+          </Button>
+          <div className="px-2.5 pt-2 text-[10px] text-[var(--faint)]">doplan {api.version}</div>
         </div>
       </aside>
 
@@ -207,26 +247,26 @@ export function WelcomeScreen() {
         <header className="flex items-end justify-between gap-4 px-8 pt-8 pb-4">
           <div>
             <h1 className="text-base font-semibold">{t('Недавние проекты')}</h1>
-            <p className="text-[12px] text-muted">
+            <p className="text-[12px] text-[var(--muted)]">
               {isWeb ? t('Проекты, открытые или сохранённые в этом браузере') : t('Проекты, которые вы открывали или сохраняли')}
             </p>
           </div>
           {missingCount > 1 && (
-            <button type="button" onClick={() => void clearMissing()} className="text-[12px] text-accent hover:underline">
+            <Button size="sm" variant="ghost" onClick={() => void clearMissing()} className="text-[var(--accent)]!">
               {t('Убрать ненайденные ({n})', { n: missingCount })}
-            </button>
+            </Button>
           )}
         </header>
-        <div className="min-h-0 flex-1 overflow-auto px-8 pb-8">
+        <ScrollArea className="flex-1 px-8 pb-8">
           {entries === null ? (
-            <div className="flex h-40 items-center justify-center text-muted">
+            <div className="flex h-40 items-center justify-center text-[var(--muted)]">
               <Spinner className="size-5" />
             </div>
           ) : entries.length === 0 ? (
-            <div className="flex h-full min-h-48 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border text-center">
-              <FolderOpen size={28} className="text-faint" />
+            <div className="flex h-full min-h-48 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--border)] text-center">
+              <FolderOpen size={28} className="text-[var(--faint)]" />
               <div className="text-[13px] font-medium">{t('Недавних проектов пока нет')}</div>
-              <div className="max-w-sm text-[12px] text-muted">{t('Создайте новый проект, откройте свой или посмотрите пример — проекты появятся здесь.')}</div>
+              <div className="max-w-sm text-[12px] text-[var(--muted)]">{t('Создайте новый проект, откройте свой или посмотрите пример — проекты появятся здесь.')}</div>
             </div>
           ) : (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
@@ -235,7 +275,7 @@ export function WelcomeScreen() {
               ))}
             </div>
           )}
-        </div>
+        </ScrollArea>
       </main>
     </div>
   )

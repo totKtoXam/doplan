@@ -2,6 +2,8 @@
  * Plan thumbnails of the welcome screen's recent projects. Whenever a project is opened or saved, a
  * small SVG of its first level (walls, rooms, furniture outlines; no dimensions or labels) goes to main,
  * which keeps it next to the recent list. The web build keeps it with its copy of the document.
+ * The picture has no colours of its own: light lines on a transparent ground, shown as a mask painted
+ * with the current theme's text colour, so it fits every light and dark theme.
  */
 import { buildDisplayList, toSvg } from '@core'
 import type { Catalog, DerivedPlan, Doc } from '@core/types'
@@ -26,7 +28,8 @@ export function planThumbSvg(doc: Doc, catalog?: Catalog, derived?: DerivedPlan)
       labels: false,
       grid: false,
       titleBlock: false,
-      theme: 'light',
+      // light lines on dark fills: the card uses the picture as a luminance mask in the theme's colours
+      theme: 'blueprint',
       lights: false,
       electrical: false,
       northArrow: false,
@@ -35,7 +38,7 @@ export function planThumbSvg(doc: Doc, catalog?: Catalog, derived?: DerivedPlan)
       catalog,
       derived,
     })
-    return toSvg(dl, { scale: 100, marginMm: 4 }).svg
+    return toSvg(dl, { scale: 100, marginMm: 4, background: false }).svg
   }
   // a furnished plan may be too detailed to keep: then walls and rooms only
   for (const furniture of [true, false]) {

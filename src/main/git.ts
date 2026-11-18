@@ -1039,12 +1039,24 @@ export function isSafeBranchName(name: string): boolean {
 /**
  * Sends a commit (sha or local ref) to `branch` on the remote without touching the upstream or tags;
  * `force` replaces whatever the branch had (e.g. a generated one-commit gh-pages branch).
+ * `src` null deletes the branch on the remote (a branch already gone is fine); the branch the project
+ * itself syncs with is never deleted this way.
  */
-export async function gitPushRef(root: string, net: GitNet, src: string, branch: string, opts: { force?: boolean; remote?: string } = {}): Promise<void> {
+export async function gitPushRef(root: string, net: GitNet, src: string | null, branch: string, opts: { force?: boolean; remote?: string } = {}): Promise<void> {
   if (!isSafeBranchName(branch)) throw new Error(msg('Недопустимое имя ветки', 'Invalid branch name'))
+  const remote = opts.remote ?? 'origin'
+  if (src === null) {
+    if (branch === (await gitUpstreamBranch(root))) throw new Error(msg('Эту ветку проект использует для синхронизации — её нельзя удалить', 'The project syncs with this branch: it cannot be deleted'))
+    try {
+      await runNet(root, ['push', '--quiet', remote, `:refs/heads/${branch}`], net)
+    } catch (err) {
+      if (!(err instanceof GitError && /remote ref does not exist|unable to delete .*: remote ref/i.test(`${err.stderr}\n${err.message}`))) throw err
+    }
+    return
+  }
   if (!/^[0-9a-f]{40,64}$/.test(src) && !(isSafeBranchName(src.replace(/^refs\/(heads|tags)\//, '')) && /^(refs\/(heads|tags)\/|HEAD$|[A-Za-z0-9])/.test(src)))
     throw new Error(msg('Недопустимая ссылка', 'Invalid reference'))
-  await runNet(root, ['push', '--quiet', opts.remote ?? 'origin', `${opts.force ? '+' : ''}${src}:refs/heads/${branch}`], net)
+  await runNet(root, ['push', '--quiet', remote, `${opts.force ? '+' : ''}${src}:refs/heads/${branch}`], net)
 }
 
 /**

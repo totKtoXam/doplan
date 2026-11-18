@@ -404,5 +404,12 @@ describe.skipIf(!hasGit)('project sync', { timeout: 180_000 }, () => {
     for (const bad of ['-f', 'a..b', 'x.lock', 'a//b', '@{1}']) expect(isSafeBranchName(bad)).toBe(false)
     await expect(gitPushRef(a, net, first, '--force')).rejects.toThrow()
     await expect(gitOrphanCommit(a, [{ path: '../x', data: '' }], 'm')).rejects.toThrow()
+
+    // unpublish: the branch goes away (twice is fine); the project's own branch cannot be deleted
+    await gitPushRef(a, net, null, 'gh-pages')
+    expect(git(remote, 'branch', '--list', 'gh-pages').trim()).toBe('')
+    await gitPushRef(a, net, null, 'gh-pages')
+    await expect(gitPushRef(a, net, null, 'main')).rejects.toThrow()
+    expect(git(remote, 'branch', '--list', 'main').trim()).toContain('main')
   })
 })

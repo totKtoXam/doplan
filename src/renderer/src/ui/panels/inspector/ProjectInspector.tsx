@@ -5,7 +5,7 @@ import { removeLevelMarks } from '@/actions/levels'
 import { useDoc } from '@/store/document'
 import { uiStore, useUi } from '@/store/ui'
 import { useT } from '@/i18n'
-import { cn, focusRing, IconButton, Input, NumberInput, Row, Section, Segmented, Toggle } from '@/ui/kit'
+import { cn, focusRing, IconButton, Input, NumberInput, Row, Section } from '@/ui/kit'
 import { tx } from '../common/catalog'
 import { refsOnLevel } from '../common/edits'
 import { ProjectFolderSection } from '../ProjectFolderDialogs'
@@ -111,17 +111,6 @@ export function ProjectInspector() {
         <Row label={t('Название')}>
           <Input value={meta.name} onChange={(v) => tx('Название проекта', (d) => (d.meta.name = v), 'project.name')} onKeyDown={(e) => e.stopPropagation()} />
         </Row>
-        <Row label={t('Единицы')}>
-          <Segmented
-            value={settings.units}
-            onChange={(u) => setSettings('Единицы измерения', { units: u })}
-            options={[
-              { value: 'mm', label: t('мм') },
-              { value: 'cm', label: t('см') },
-              { value: 'm', label: t('м') },
-            ]}
-          />
-        </Row>
       </Section>
 
       <ProjectFolderSection />
@@ -135,21 +124,9 @@ export function ProjectInspector() {
         </Row>
       </Section>
 
-      <Section title={t('Сетка и привязки')} id="insp.proj.grid">
-        <Row label={t('Шаг сетки')}>
-          <NumberInput kind="length" value={settings.gridMm} min={1} max={5000} round={1} onChange={(v, g) => setSettings('Шаг сетки', { gridMm: v }, `set.grid.${g}`)} />
-        </Row>
-        <Toggle checked={settings.snapGrid} onChange={(v) => setSettings('Привязка к сетке', { snapGrid: v })} label={t('Привязка к сетке')} />
-        <Toggle checked={settings.snapObjects} onChange={(v) => setSettings('Привязка к объектам', { snapObjects: v })} label={t('Привязка к объектам')} />
-        <Toggle checked={settings.snapAngle} onChange={(v) => setSettings('Привязка углов', { snapAngle: v })} label={t('Привязка углов (15°)')} />
-      </Section>
-
-      <Section title={t('Отображение на плане')} id="insp.proj.show">
-        <Toggle checked={settings.showDimensions} onChange={(v) => setSettings('Показ размеров', { showDimensions: v })} label={t('Размеры стен')} />
-        <Toggle checked={settings.showItemSizes} onChange={(v) => setSettings('Показ размеров мебели', { showItemSizes: v })} label={t('Размеры мебели')} />
-        <Toggle checked={settings.showAreas} onChange={(v) => setSettings('Показ площадей', { showAreas: v })} label={t('Площади помещений')} />
-        <Toggle checked={settings.showFurniture2d} onChange={(v) => setSettings('Показ мебели', { showFurniture2d: v })} label={t('Мебель на плане')} />
-      </Section>
+      <p className="px-3 pt-2 pb-1 text-[10px] leading-snug text-muted">
+        {t('Привязки и шаг сетки — в строке состояния внизу, что показывать на плане и единицы — в меню «Вид» над планом.')}
+      </p>
 
       <Section
         title={t('Этажи')}

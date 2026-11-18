@@ -14,7 +14,7 @@ import { accuracyStore, useAccuracy } from '@/store/accuracy'
 import { docStore, useDoc } from '@/store/document'
 import { toast } from '@/store/notify'
 import { uiStore, useUi } from '@/store/ui'
-import { activateTool } from '@/ui/shell/ToolRail'
+import { activateTool } from '@/ui/shell/tools'
 import { FloatingPanel } from '@/ui/kit/FloatingPanel'
 import { TextBtn } from '@/ui/shell/primitives'
 

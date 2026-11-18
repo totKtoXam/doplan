@@ -296,7 +296,7 @@ export function BomDialog({ open, onClose }: DialogPropsBase) {
         {groups.length > 0 && (
           <table className="w-full border-collapse text-[11px]">
             <thead>
-              <tr className="border-b border-[var(--border)] text-left text-[10px] uppercase tracking-wide text-[var(--muted)]">
+              <tr className="border-b border-[var(--border)] text-left text-[11px] font-medium text-[var(--muted)]">
                 <th className="py-1.5 pr-2 font-medium">{t('Наименование')}</th>
                 <th className="w-20 py-1.5 pr-2 text-right font-medium">{t('Количество')}</th>
                 <th className="w-12 py-1.5 pr-2 font-medium">{t('Ед.')}</th>

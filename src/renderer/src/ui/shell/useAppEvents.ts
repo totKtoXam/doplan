@@ -15,7 +15,7 @@ import { checkForUpdatesManually, initUpdates, installUpdate } from '@/store/upd
 import { uiStore } from '@/store/ui'
 import type { ToolId } from '@/contracts'
 import { shortcutKey } from './keys'
-import { activateTool, TOOLS } from './ToolRail'
+import { activateTool, TOOLS } from './tools'
 
 function isEditable(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null

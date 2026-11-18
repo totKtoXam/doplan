@@ -71,6 +71,51 @@ function rot(p: Vec2, c: Vec2, cos: number, sin: number): Vec2 {
   return { x: c.x + dx * cos - dy * sin, y: c.y + dx * sin + dy * cos }
 }
 
+/** the kinds groupRotate turns; openings and rooms follow their walls, underlays stay put */
+export const ROTATABLE_KINDS: ReadonlySet<EntityRef['kind']> = new Set(['wall', 'node', 'item', 'light', 'electric', 'dimension', 'label'])
+
+/**
+ * Whether groupRotate would change anything: some unlocked object of a kind it turns, and not just
+ * one point without a direction of its own (a single label or wall node, or a light without rotation,
+ * turns about itself and stays as it was). A wall turns by its ends, and an end on a locked wall stays
+ * put: a wall between two locked ones does not move, and one with a single free end turns about it.
+ */
+export function canGroupRotate(doc: Doc, refs: readonly EntityRef[]): boolean {
+  const free = unlockedRefs(doc, refs as EntityRef[]).filter((r) => ROTATABLE_KINDS.has(r.kind))
+  const points = new Set<string>()
+  let vis: ReturnType<typeof layerIndex> | undefined
+  const freeNode = (id: Id) => {
+    vis ??= layerIndex(doc)
+    const n = doc.nodes[id]
+    if (n && !vis.locked('node', id)) points.add(`${n.x},${n.y}`)
+  }
+  for (const r of free) {
+    if (r.kind === 'label') {
+      const l = doc.labels[r.id]
+      if (l) points.add(`${l.x},${l.y}`)
+    } else if (r.kind === 'light') {
+      const l = doc.lights[r.id]
+      if (!l) continue
+      if (l.rotation !== undefined) return true
+      points.add(`${l.x},${l.y}`)
+    } else if (r.kind === 'item') {
+      if (doc.items[r.id] && !doc.items[r.id].locked) return true
+    } else if (r.kind === 'node') {
+      const n = doc.nodes[r.id]
+      if (n) points.add(`${n.x},${n.y}`)
+    } else if (r.kind === 'wall') {
+      const w = doc.walls[r.id]
+      if (w) {
+        freeNode(w.a)
+        freeNode(w.b)
+      }
+    } else {
+      return true
+    }
+  }
+  return points.size > 1
+}
+
 /** Rotates the selection by `deg` (clockwise on the plan) around its common centre. */
 export function groupRotate(deg: number): void {
   const doc = currentDoc()

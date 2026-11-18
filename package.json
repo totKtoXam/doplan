@@ -1,6 +1,6 @@
 {
   "name": "doplan",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "description": "doplan — 2D floor plans, photorealistic 3D and interior design",
   "main": "./out/main/index.js",
   "type": "module",
@@ -80,5 +80,8 @@
     "xatlas-web": "^0.1.0",
     "zod": "^4.6.7",
     "zustand": "^5.1.0"
+  },
+  "dependencies": {
+    "@fontsource-variable/golos-text": "^5.3.0"
   }
 }

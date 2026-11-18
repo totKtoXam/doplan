@@ -9,7 +9,8 @@
   "packageManager": "pnpm@10.11.0",
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "build": "electron-vite build && vite build -c vite.viewer.config.ts --logLevel warn",
+    "build:viewer": "vite build -c vite.viewer.config.ts",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
@@ -22,7 +23,7 @@
     "assets:unpack": "tsx tools/assets/unpack.ts",
     "release:notes": "tsx tools/ci/release-notes.ts",
     "icons:build": "tsx tools/icons/build.ts",
-    "dist": "electron-vite build && electron-builder --win --publish never"
+    "dist": "pnpm build && electron-builder --win --publish never"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

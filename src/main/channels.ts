@@ -75,6 +75,12 @@ export const CH = {
   updatesOpenRelease: 'updates:openRelease',
   evUpdateState: 'ev:updateState',
 
+  pagesStatus: 'pages:status',
+  pagesPublish: 'pages:publish',
+  pagesUnpublish: 'pages:unpublish',
+  pagesOpenUrl: 'pages:openUrl',
+  evPagesProgress: 'ev:pagesProgress',
+
   // renderer → main (fire and forget)
   windowSetTitle: 'window:setTitle',
   windowConfirmClose: 'window:confirmClose',

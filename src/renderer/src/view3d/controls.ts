@@ -3,8 +3,9 @@
  *
  *  - orbit: OrbitControls with damping, limits and zoom-to-cursor;
  *  - top:   straight-down, near-orthographic view (narrow FOV), pan + zoom only, plan "up" on top;
- *  - walk:  first person at 1.6 m eye height — WASD / arrows, mouse-drag look, Shift to run,
- *           collision against the 2D wall geometry with door openings left passable;
+ *  - walk:  first person at 1.6 m eye height — WASD / arrows (or the on-screen stick), mouse-drag
+ *           look, Shift to run, collision against the 2D wall geometry with door openings left
+ *           passable; a click captures the mouse (Pointer Lock) for free mouse-look, Esc releases it;
  *  - smooth transitions between modes and for fit();
  *  - wall cut-away (doc.render.wallCutaway): walls standing between the orbit camera and its
  *    target and ceilings seen from above are hidden while orbiting.
@@ -16,6 +17,7 @@ import type { CameraControls, EngineContext } from '@/contracts'
 import { docStore } from '@/store/document'
 import { uiStore } from '@/store/ui'
 import { getShared, type ControlsInternals } from './quality'
+import { setWalkKick, walkPointerLocked, walkStick } from './walkInput'
 
 export type CameraMode = 'orbit' | 'walk' | 'top'
 
@@ -38,6 +40,8 @@ const MAX_PITCH = 80 * (Math.PI / 180)
 const TOP_FOV = 14
 const DEFAULT_FOV = 50
 const TRANSITION_SEC = 0.55
+/** a press that moves less than this (px) is a click: it captures the mouse in walk mode */
+const LOCK_CLICK_SLOP = 4
 
 const PASSABLE: ReadonlySet<OpeningKind> = new Set<OpeningKind>([
   'door',
@@ -155,6 +159,8 @@ export function createControls(ctx: EngineContext): CameraControlsEx {
   let lookPointer = -1
   let lookX = 0
   let lookY = 0
+  /** a mouse press in walk mode that may turn into a click (→ pointer lock) */
+  let lockClick: { id: number; x: number; y: number } | null = null
   let walkDirty = false
   let nearBeforeWalk = camera.near
   const walkTarget = new THREE.Vector3()
@@ -401,6 +407,7 @@ export function createControls(ctx: EngineContext): CameraControlsEx {
       keys.clear()
       velocity.set(0, 0, 0)
       looking = false
+      releaseLock()
     }
     mode = next
     if (next === 'walk') {
@@ -517,8 +524,10 @@ export function createControls(ctx: EngineContext): CameraControlsEx {
         moving = true
       }
     }
-    const forward = enabled ? (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) - (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0) : 0
-    const strafe = enabled ? (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0) : 0
+    const keyForward = (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) - (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0)
+    const keyStrafe = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0)
+    const forward = enabled ? THREE.MathUtils.clamp(keyForward + walkStick.forward, -1, 1) : 0
+    const strafe = enabled ? THREE.MathUtils.clamp(keyStrafe + walkStick.strafe, -1, 1) : 0
     const run = keys.has('ShiftLeft') || keys.has('ShiftRight')
     const speed = run ? RUN_SPEED : WALK_SPEED
     // camera looks along −Z at yaw 0
@@ -579,7 +588,7 @@ export function createControls(ctx: EngineContext): CameraControlsEx {
   function keysActive(): boolean {
     if (!enabled || mode !== 'walk' || shared.stillBusy) return false
     if (!ctx.container.isConnected || ctx.container.offsetParent === null) return false
-    return pointerInside || document.activeElement === canvas
+    return pointerInside || document.activeElement === canvas || walkPointerLocked(canvas)
   }
 
   const WALK_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft', 'ShiftRight'])
@@ -608,8 +617,12 @@ export function createControls(ctx: EngineContext): CameraControlsEx {
     pointerInside = false
   }
   const onPointerDown = (e: PointerEvent): void => {
+    lockClick = null
     if (mode !== 'walk' || !enabled || transition || shared.stillBusy) return
     if (e.button !== 0 && e.button !== 2) return
+    // the mouse is captured: movement turns the view, presses do nothing else
+    if (walkPointerLocked(canvas)) return
+    if (e.pointerType === 'mouse' && e.button === 0) lockClick = { id: e.pointerId, x: e.clientX, y: e.clientY }
     looking = true
     lookPointer = e.pointerId
     lookX = e.clientX
@@ -620,7 +633,19 @@ export function createControls(ctx: EngineContext): CameraControlsEx {
       /* the pointer may already be gone */
     }
   }
+  const turnBy = (dx: number, dy: number): void => {
+    if (dx === 0 && dy === 0) return
+    yaw -= dx * LOOK_SPEED
+    pitch = THREE.MathUtils.clamp(pitch - dy * LOOK_SPEED, -MAX_PITCH, MAX_PITCH)
+    walkDirty = true
+    ctx.invalidate()
+  }
   const onPointerMove = (e: PointerEvent): void => {
+    if (walkPointerLocked(canvas)) {
+      if (mode !== 'walk' || !enabled || transition) return
+      turnBy(e.movementX, e.movementY)
+      return
+    }
     if (!looking || e.pointerId !== lookPointer) return
     if (mode !== 'walk' || !enabled) {
       looking = false
@@ -630,13 +655,11 @@ export function createControls(ctx: EngineContext): CameraControlsEx {
     const dy = e.clientY - lookY
     lookX = e.clientX
     lookY = e.clientY
-    if (dx === 0 && dy === 0) return
-    yaw -= dx * LOOK_SPEED
-    pitch = THREE.MathUtils.clamp(pitch - dy * LOOK_SPEED, -MAX_PITCH, MAX_PITCH)
-    walkDirty = true
-    ctx.invalidate()
+    turnBy(dx, dy)
   }
   const onPointerUp = (e: PointerEvent): void => {
+    const click = lockClick
+    lockClick = null
     if (e.pointerId !== lookPointer) return
     looking = false
     lookPointer = -1
@@ -645,6 +668,40 @@ export function createControls(ctx: EngineContext): CameraControlsEx {
     } catch {
       /* not captured */
     }
+    // a plain click (no drag) in walk mode captures the mouse; Esc gives it back (browser default)
+    if (
+      click &&
+      click.id === e.pointerId &&
+      e.type === 'pointerup' &&
+      mode === 'walk' &&
+      enabled &&
+      Math.hypot(e.clientX - click.x, e.clientY - click.y) <= LOCK_CLICK_SLOP
+    ) {
+      requestLock()
+    }
+  }
+  function requestLock(): void {
+    if (walkPointerLocked(canvas) || typeof canvas.requestPointerLock !== 'function') return
+    try {
+      const p = canvas.requestPointerLock() as unknown as Promise<void> | undefined
+      p?.catch?.(() => {
+        /* refused (no permission, or too soon after an Esc): drag-to-look still works */
+      })
+    } catch {
+      /* not supported */
+    }
+  }
+  function releaseLock(): void {
+    if (!walkPointerLocked(canvas)) return
+    try {
+      document.exitPointerLock()
+    } catch {
+      /* already gone */
+    }
+  }
+  const onLockChange = (): void => {
+    if (!walkPointerLocked(canvas)) keys.clear()
+    ctx.invalidate()
   }
   const onWheel = (e: WheelEvent): void => {
     if (mode !== 'walk' || !enabled || transition) return
@@ -672,6 +729,9 @@ export function createControls(ctx: EngineContext): CameraControlsEx {
   canvas.addEventListener('pointercancel', onPointerUp)
   canvas.addEventListener('wheel', onWheel, { passive: false })
   canvas.addEventListener('contextmenu', onContextMenu)
+  document.addEventListener('pointerlockchange', onLockChange)
+  const kick = (): void => ctx.invalidate()
+  setWalkKick(kick)
 
   let lastCutaway = docStore.getState().doc.render.wallCutaway
   const unsubDoc = docStore.subscribe((state) => {
@@ -710,6 +770,7 @@ export function createControls(ctx: EngineContext): CameraControlsEx {
       enabled = value
       if (!value) {
         looking = false
+        lockClick = null
         keys.clear()
       }
       orbit.enabled = value && mode !== 'walk' && transition === null
@@ -718,6 +779,9 @@ export function createControls(ctx: EngineContext): CameraControlsEx {
       if (disposed) return
       disposed = true
       unsubDoc()
+      releaseLock()
+      document.removeEventListener('pointerlockchange', onLockChange)
+      setWalkKick(null)
       window.removeEventListener('keydown', onKeyDown, true)
       window.removeEventListener('keyup', onKeyUp, true)
       window.removeEventListener('blur', onBlur)

@@ -13,6 +13,7 @@ import type { Asset, Catalog, Hdri, Material } from '../core/types'
 import type { AiChatApi } from './aiChat'
 // ── end ai-chat block ──
 import type { UpdatesApi } from './updater'
+import type { PagesApi } from './pagesSite'
 import type { AssetFeed } from './feeds'
 
 export interface FileFilter {
@@ -292,6 +293,9 @@ export interface DoplanApi {
 
   /** GitHub Releases updates (electron-updater); see src/shared/updater.ts */
   updates: UpdatesApi
+
+  /** read-only copy of the plan on GitHub Pages; see src/shared/pagesSite.ts */
+  pages: PagesApi
 
   window: {
     setTitle(title: string, dirty: boolean): void

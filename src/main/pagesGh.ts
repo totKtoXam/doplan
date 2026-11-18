@@ -149,15 +149,19 @@ export async function gitCredentialArgs(): Promise<string[]> {
 export interface RepoState {
   exists: boolean
   isPrivate: boolean
+  /** the signed-in user can push to it (write or admin access) */
+  canPush?: boolean
 }
 
 export async function repoState(ref: RepoRef): Promise<RepoState> {
-  const r = await runGh(['api', `repos/${ref.owner}/${ref.repo}`, '--jq', '.private'], 30_000)
+  const jq = '"\\(.private) \\((.permissions.push // false) or (.permissions.admin // false))"'
+  const r = await runGh(['api', `repos/${ref.owner}/${ref.repo}`, '--jq', jq], 30_000)
   if (r.code !== 0) {
     if (/HTTP 404|Not Found/i.test(r.stderr)) return { exists: false, isPrivate: false }
     throw ghError(r, msg('Не удалось узнать о репозитории', 'Could not read the repository'))
   }
-  return { exists: true, isPrivate: r.stdout.trim() === 'true' }
+  const [priv, push] = r.stdout.trim().split(/\s+/)
+  return { exists: true, isPrivate: priv === 'true', canPush: push === 'true' }
 }
 
 /** the GitHub plan of the signed-in account ('free', 'pro', …), or undefined */

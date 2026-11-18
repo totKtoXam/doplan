@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PagesConfig, PagesPublishRequest, RepoRef } from '@shared/pagesSite'
-import { docTag, markerDoc, markerId } from '@shared/pagesSite'
+import { docTag, markerDoc, markerId, pagesMarker } from '@shared/pagesSite'
 
 const base = mkdtempSync(join(tmpdir(), 'doplan-pages-flow-'))
 const userData = join(base, 'userData')
@@ -23,6 +23,10 @@ interface FakeRepo {
   branchSha: string | null
   marker: string | null
   pages: PagesConfig | null
+  /** the signed-in user may push (default true) */
+  push?: boolean
+  /** the signed-in user may change the Pages settings (default: push) */
+  admin?: boolean
 }
 
 const gh = {
@@ -65,7 +69,7 @@ vi.mock('./pagesGh', () => ({
   openPagesUrl: async () => undefined,
   repoState: async (ref: RepoRef) => {
     const r = gh.repos.get(k(ref))
-    return r ? { exists: true, isPrivate: r.private } : { exists: false, isPrivate: false }
+    return r ? { exists: true, isPrivate: r.private, canPush: r.push !== false } : { exists: false, isPrivate: false }
   },
   ownerPlan: async (owner: string, login: string | undefined) => (owner === login ? gh.userPlan : gh.orgPlans[owner]),
   inspectPages: async (ref: RepoRef) => {
@@ -90,6 +94,7 @@ vi.mock('./pagesGh', () => ({
   },
   disablePages: async (ref: RepoRef) => {
     gh.calls.push(`nopages ${k(ref)}`)
+    if ((repo(k(ref)).admin ?? repo(k(ref)).push) === false) throw new Error('HTTP 403: Must have admin rights to Repository.')
     repo(k(ref)).pages = null
     return true
   },
@@ -103,6 +108,7 @@ vi.mock('./pagesGit', () => ({
       throw new Error('could not resolve host: github.com')
     }
     const r = repo(key)
+    if (r.push === false) throw new Error('remote: Permission to x denied. The requested URL returned error: 403')
     if (r.branchSha !== expected) throw new Error('stale info')
     r.branchSha = nextSha()
     r.marker = readFileSync(join(siteDir, '.doplan-pages.json'), 'utf8')
@@ -120,6 +126,10 @@ vi.mock('./pagesGit', () => ({
 }))
 
 const { pagesStatus, publishPlan, unpublishPlan } = await import('./pages')
+
+// every test runs whole publish flows (files, JSON records): under load 5 s is not enough, and a test
+// cut off by its timeout leaves its publish running into the next one ("publishing is already running")
+vi.setConfig({ testTimeout: 60_000 })
 
 const setOrigin = (url: string | null) =>
   writeFileSync(join(project, '.git', 'config'), url ? `[core]\n\tbare = false\n[remote "origin"]\n\turl = ${url}\n` : '[core]\n\tbare = false\n')
@@ -327,13 +337,66 @@ describe('the record follows its document', () => {
     expect(gh.calls.filter((c) => c.startsWith('push'))).toEqual([`push me/${name}`])
   })
 
+  it("a clone of someone else's project: their site of the same document is not taken as the user's", async () => {
+    setOrigin('https://github.com/alice/flat.git')
+    const pages = { buildType: 'legacy', branch: 'gh-pages', path: '/', url: 'https://alice.github.io/flat/' }
+    gh.repos.set('alice/flat', fresh({ push: false, branchSha: 'a'.repeat(40), marker: pagesMarker('alicePub', docTag('doc1')), pages }))
+    const st = await status()
+    expect(st.record).toBeNull()
+    expect(st.project?.occupied).toBe('plan')
+    expect(st.separateName).toBe('flat-view')
+    const res = await publishPlan(req({ target: 'separate' }))
+    expect(res.record).toMatchObject({ owner: 'me', repo: 'flat-view' })
+    expect(gh.calls.some((c) => c.includes('alice/'))).toBe(false)
+  })
+
+  it('unpublish where the user lost write access: nothing is touched there, the record goes, the plan can be published again', async () => {
+    setOrigin('https://github.com/acme/plans.git')
+    gh.repos.set('acme/plans', fresh())
+    await publishPlan(req())
+    repo('acme/plans').push = false
+    gh.calls = []
+    await expect(unpublishPlan('doc1')).rejects.toThrow(/Нет прав/)
+    expect(gh.calls).toEqual([])
+    expect((await status()).record).toBeNull()
+
+    // the refusal coming from GitHub itself: may push, may not change Pages (a collaborator)
+    repo('acme/plans').push = true
+    await publishPlan(req())
+    repo('acme/plans').admin = false
+    await expect(unpublishPlan('doc1')).rejects.toThrow(/Нет прав/)
+    expect(JSON.parse(readFileSync(join(userData, 'pages.json'), 'utf8')).doc1).toBeUndefined()
+  })
+
   it('another plan published into the project repository is called that, not "not made by doplan"', async () => {
     gh.repos.set('me/flat', fresh())
     await publishPlan(req({ docId: 'other' }))
     const st = await status('doc1')
     expect(st.record).toBeNull()
     expect(st.project?.occupied).toBe('plan')
-    await expect(publishPlan(req())).rejects.toThrow(/другой план doplan/)
+    await expect(publishPlan(req())).rejects.toThrow(/уже опубликован план doplan/)
+  })
+
+  it('an id-less file renamed or moved on disk keeps its publication; a copy whose original is still there does not take it', async () => {
+    setOrigin(null)
+    const created = 'created:abc123'
+    const original = join(base, 'plans', 'flat.doplan')
+    mkdirSync(join(base, 'plans'), { recursive: true })
+    writeFileSync(original, 'x')
+    const first = await publishPlan(req({ docId: 'file:old', target: 'separate', file: { path: original, created } }))
+
+    // a copy next to it: the original is still there
+    const copy = await pagesStatus({ docId: 'file:copy', contentHash: 'h1', name: 'Flat', file: { path: join(base, 'plans', 'flat (2).doplan'), created } })
+    expect(copy.record).toBeNull()
+    expect((await status('file:old')).record?.repo).toBe(first.record.repo)
+
+    // the original renamed: its record follows the file
+    rmSync(original)
+    const moved = await pagesStatus({ docId: 'file:new', contentHash: 'h1', name: 'Flat', file: { path: join(base, 'plans', 'our flat.doplan'), created } })
+    expect(moved.record?.repo).toBe(first.record.repo)
+    gh.calls = []
+    await publishPlan(req({ docId: 'file:new', target: 'separate', file: { path: join(base, 'plans', 'our flat.doplan'), created } }))
+    expect(gh.calls).toEqual([`push me/${first.record.repo}`, `pages me/${first.record.repo} keep`])
   })
 })
 
@@ -362,10 +425,11 @@ describe('doplan reuses the separate repository it made', () => {
     expect(gh.repos.size).toBe(1)
   })
 
-  it('unpublish and publish again, many times: always the same repository and link', async () => {
+  // 21 cycles: one more than the 20 names a fresh -view-N per cycle would run out of
+  it('unpublish and publish again, many times: always the same repository and link', { timeout: 60_000 }, async () => {
     setOrigin(null)
     const first = await publishPlan(req({ target: 'separate' }))
-    for (let i = 0; i < 25; i++) {
+    for (let i = 0; i < 21; i++) {
       await unpublishPlan('doc1')
       expect((await status()).separateName).toBe(first.record.repo)
       const res = await publishPlan(req({ target: 'separate' }))

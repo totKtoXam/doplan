@@ -91,11 +91,24 @@ describe('planSite', () => {
     }
     const site = planSite(viewDoc({ meta: { name: 'P' }, walls: { w1: { finishA: { materialId: 'm_lib' } } }, items: { i: { assetId: 'a_lib' } } }, { underlays: false }), lib)
     const m = site.catalog.materials[0] as Record<string, unknown>
-    expect(Object.keys(m).sort()).toEqual(['category', 'color', 'id', 'licence', 'maps', 'metalness', 'name', 'roughness', 'sizeMm'])
+    expect(Object.keys(m).sort()).toEqual(['category', 'color', 'custom', 'id', 'licence', 'maps', 'metalness', 'name', 'roughness', 'sizeMm'])
     expect((m.maps as { color: string }).color).toBe('./assets/l/materials/m_lib/color.png')
     const a = site.catalog.assets[0] as Record<string, unknown>
-    expect(Object.keys(a).sort()).toEqual(['author', 'id', 'kind', 'mount', 'name', 'size', 'src'])
+    expect(Object.keys(a).sort()).toEqual(['author', 'custom', 'id', 'kind', 'mount', 'name', 'size', 'src'])
     expect(JSON.stringify(site.catalog)).not.toMatch(/ShopX|12345|shop\.example|Ivan|A-1|bath|RAL/)
+  })
+
+  it('keeps the render flags: custom (tinted user textures, whole user models) and remote (placeholder, no requests)', () => {
+    const cat = {
+      materials: [{ id: 'm2', name: 'M', maps: { color: 'doplan-asset://library/m2/c.jpg' }, remote: true }],
+      assets: [{ id: 'a2', name: 'A', src: 'doplan-asset://library/a2/m.glb', remote: true, custom: true, slots: { s: 'm2' } }],
+      hdris: [{ id: 'h2', name: 'H', src: 'doplan-asset://library/h2.hdr', remote: true }],
+    }
+    const site = planSite({ items: { i: { assetId: 'a2' } }, env: { hdri: 'h2' } }, cat)
+    expect(site.catalog.assets[0]).toMatchObject({ remote: true, custom: true })
+    expect(site.catalog.materials[0]).toMatchObject({ remote: true })
+    expect(site.catalog.hdris[0]).toMatchObject({ remote: true })
+    expect(site.notDownloaded.sort()).toEqual(['a2', 'h2', 'm2'])
   })
 })
 

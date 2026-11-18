@@ -120,7 +120,9 @@ export interface SiteContent {
 }
 
 /**
- * The fields of a catalog entry a public site carries: what the viewer renders with, its name and the
+ * The fields of a catalog entry a public site carries: what the viewer renders with (`custom`: a
+ * user's material tints its texture, a user's model keeps all its parts; `remote`: not downloaded, the
+ * viewer shows a placeholder instead of asking for files the site does not have), its name and the
  * credits line (author / licence / source). Everything else stays home: library materials and models
  * carry the user's product card (vendor, article, shop link, price, note), estimate specs, tags and
  * thumbnails.
@@ -129,13 +131,13 @@ export const SITE_CATALOG_FIELDS = {
   materials: [
     'id', 'name', 'nameRu', 'category', 'color', 'roughness', 'metalness', 'maps', 'sizeMm', 'pattern',
     'transmission', 'opacity', 'ior', 'sheen', 'clearcoat', 'emissive', 'emissiveIntensity', 'normalScale',
-    'source', 'licence',
+    'source', 'licence', 'custom', 'remote',
   ],
   assets: [
     'id', 'name', 'nameRu', 'category', 'kind', 'src', 'procedural', 'size', 'mount', 'elevation', 'slots',
-    'defaultParams', 'source', 'licence', 'author',
+    'defaultParams', 'source', 'licence', 'author', 'custom', 'remote',
   ],
-  hdris: ['id', 'name', 'src', 'kind', 'source', 'licence'],
+  hdris: ['id', 'name', 'src', 'kind', 'source', 'licence', 'remote'],
 } as const
 
 function pickFields(e: Entry, fields: readonly string[]): Entry {
@@ -301,14 +303,29 @@ export function hashString(str: string, seed = 0): string {
  * Keys of the publication record of a document: its id. A file from before project ids has none
  * until its first save; until then it is keyed by its file (path + creation time), so copies of it
  * on disk never share a record. Its first plain save gives it an id at the same path, and the record
- * moves over (migrateRecordKey with these aliases); a Save As copy gets a new id at a new path and
- * does not match, so it never takes over the original's publication.
+ * moves over (migrateRecordKey with these aliases; a save that also moves the file, as Ctrl+S on a
+ * .json does, hands the old key over at save time, see renderer store/pagesKeys). A Save As copy gets
+ * a new id at a new path and does not match, so it never takes over the original's publication.
+ * `created` is the path-free tag of the document's creation: a record whose file is gone (renamed or
+ * moved on disk) follows it, a copy whose original is still there does not (main: movedRecord).
  */
-export function publicationKeys(meta: { id?: string; name: string; createdAt: string }, filePath?: string | null): { key: string; aliases: string[] } {
+export function publicationKeys(
+  meta: { id?: string; name: string; createdAt: string },
+  filePath?: string | null,
+): { key: string; aliases: string[]; created: string } {
   const path = (filePath ?? '').replace(/\\/g, '/').toLowerCase()
-  const file = `file:${hashString(`${path}|${meta.createdAt || meta.name}`)}`
+  const stamp = meta.createdAt || meta.name
+  const file = `file:${hashString(`${path}|${stamp}`)}`
   const key = meta.id ?? file
-  return { key, aliases: file !== key ? [file] : [] }
+  return { key, aliases: file !== key ? [file] : [], created: `created:${hashString(stamp)}` }
+}
+
+/** the file a publication was made from (kept in the local record only, never published) */
+export interface PagesFileRef {
+  /** the document's file or project folder */
+  path: string
+  /** publicationKeys().created */
+  created: string
 }
 
 /**
@@ -575,6 +592,9 @@ export interface PagesRecord {
   pubId?: string
   /** the visible underlays were published */
   underlays?: boolean
+  /** where the document was when published, and its creation tag (see publicationKeys) */
+  file?: string
+  created?: string
 }
 
 export type PagesTargetKind = 'project' | 'separate'
@@ -624,6 +644,8 @@ export interface PagesPublishRequest {
   aliases?: string[]
   /** the visible underlays are in the content */
   underlays?: boolean
+  /** the document's file (a record of a file renamed or moved on disk follows it) */
+  file?: PagesFileRef
 }
 
 export interface PagesPublishResult {
@@ -647,6 +669,8 @@ export interface PagesStatusQuery {
   fresh?: boolean
   /** older keys of this document (see migrateRecordKey) */
   aliases?: string[]
+  /** the document's file (a record of a file renamed or moved on disk follows it) */
+  file?: PagesFileRef
 }
 
 /** window.doplan.pages */

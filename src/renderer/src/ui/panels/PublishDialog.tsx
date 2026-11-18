@@ -22,6 +22,7 @@ import {
 import { addTranslations, useT } from '@/i18n'
 import { api } from '@/store/api'
 import { useDoc } from '@/store/document'
+import { movedKeys } from '@/store/pagesKeys'
 import { confirmDialog, toast } from '@/store/notify'
 import { uiStore } from '@/store/ui'
 import { Button, Dialog, Spinner } from '@/ui/kit'
@@ -75,8 +76,8 @@ addTranslations('en', {
   'Сделать публичным': 'Make public',
   'Снять план с публикации?': 'Unpublish the plan?',
   'Сайт перестанет открываться по ссылке. Ветка gh-pages, созданная doplan, будет удалена.': 'The link stops working. The gh-pages branch doplan made is deleted.',
-  'В ветке gh-pages репозитория {r} уже опубликован другой план doplan. Её не тронем: сайт пойдёт в отдельный публичный репозиторий {s}.':
-    'The gh-pages branch of {r} already holds another doplan plan. It stays as it is: the site goes into a separate public repository {s}.',
+  'В ветке gh-pages репозитория {r} уже опубликован план doplan (другой документ или чужая публикация). Её не тронем: сайт пойдёт в отдельный публичный репозиторий {s}.':
+    'The gh-pages branch of {r} already holds a doplan plan (another document, or someone else’s publication). It stays as it is: the site goes into a separate public repository {s}.',
   'В репозитории {r} уже есть ветка gh-pages, которую сделал не doplan. Её не тронем: сайт пойдёт в отдельный публичный репозиторий {s}.':
     'Repository {r} already has a gh-pages branch doplan did not make. It stays as it is: the site goes into a separate public repository {s}.',
   'У репозитория {r} уже есть свой сайт GitHub Pages. Его не тронем: план пойдёт в отдельный публичный репозиторий {s}.':
@@ -150,8 +151,12 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
   const [choice, setChoice] = useState<PagesPrivateChoice>('separate')
   const [underlays, setUnderlays] = useState(false)
 
-  const { key, aliases } = publicationKeys(doc.meta, filePath)
-  const aliasKey = aliases.join('|')
+  const keys = publicationKeys(doc.meta, filePath)
+  const key = keys.key
+  // older keys: the file key before the first save, also when that save moved the file (store/pagesKeys)
+  const aliasKey = [...keys.aliases, ...(open ? movedKeys(doc.meta.id) : [])].filter((a, i, all) => a !== key && all.indexOf(a) === i).join('|')
+  const aliases = useMemo(() => (aliasKey ? aliasKey.split('|') : []), [aliasKey])
+  const fileRef = useMemo(() => (filePath ? { path: filePath, created: keys.created } : undefined), [filePath, keys.created])
   const underlayCount = visibleUnderlayCount(doc)
   const withUnderlays = underlays && underlayCount > 0
   const shown = useMemo(() => viewDoc(doc, { underlays: withUnderlays }), [doc, withUnderlays])
@@ -163,14 +168,14 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
       setLoading(true)
       setError(null)
       try {
-        setStatus(await api.pages.status({ docId: key, aliases: aliasKey.split('|'), contentHash: hash, name: doc.meta.name, fresh }))
+        setStatus(await api.pages.status({ docId: key, aliases, contentHash: hash, name: doc.meta.name, fresh, ...(fileRef ? { file: fileRef } : {}) }))
       } catch (e) {
         setError((e as Error).message)
       } finally {
         setLoading(false)
       }
     },
-    [key, aliasKey, hash, doc.meta.name],
+    [key, aliases, hash, doc.meta.name, fileRef],
   )
 
   useEffect(() => {
@@ -226,6 +231,7 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
         ...(privateChoice ? { privateChoice } : {}),
         aliases,
         underlays: withUnderlays,
+        ...(fileRef ? { file: fileRef } : {}),
       })
       setResult(res)
       await refresh()
@@ -249,6 +255,8 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
       toast(t('Снято с публикации'), 'success')
       await refresh()
     } catch (e) {
+      // the record may be gone even so (no write access to the repository)
+      await refresh()
       setError((e as Error).message)
     } finally {
       setBusy(null)
@@ -383,7 +391,7 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
             {project?.occupied && (
               <Note kind="warn">
                 {project.occupied === 'plan'
-                  ? t('В ветке gh-pages репозитория {r} уже опубликован другой план doplan. Её не тронем: сайт пойдёт в отдельный публичный репозиторий {s}.', { r: `${project.ref.owner}/${project.ref.repo}`, s: separateRef })
+                  ? t('В ветке gh-pages репозитория {r} уже опубликован план doplan (другой документ или чужая публикация). Её не тронем: сайт пойдёт в отдельный публичный репозиторий {s}.', { r: `${project.ref.owner}/${project.ref.repo}`, s: separateRef })
                   : project.occupied === 'branch'
                   ? t('В репозитории {r} уже есть ветка gh-pages, которую сделал не doplan. Её не тронем: сайт пойдёт в отдельный публичный репозиторий {s}.', { r: `${project.ref.owner}/${project.ref.repo}`, s: separateRef })
                   : t('У репозитория {r} уже есть свой сайт GitHub Pages. Его не тронем: план пойдёт в отдельный публичный репозиторий {s}.', { r: `${project.ref.owner}/${project.ref.repo}`, s: separateRef })}

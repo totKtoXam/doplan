@@ -46,6 +46,7 @@ import {
   viewRepoName,
   type AssetHost,
   type Ownership,
+  type PagesFileRef,
   type PagesInspection,
   type PagesProgress,
   type PagesPublishRequest,
@@ -135,6 +136,47 @@ async function loadRecords(): Promise<Records> {
 
 async function saveRecords(r: Records): Promise<void> {
   await atomicWrite(recordsFile(), JSON.stringify(r, null, 2))
+}
+
+const cleanFile = (f: unknown): PagesFileRef | undefined => {
+  const o = f as Partial<PagesFileRef> | null | undefined
+  return o && typeof o.path === 'string' && o.path.length > 0 && o.path.length <= 4096 && typeof o.created === 'string' && /^created:[0-9a-f]{1,32}$/.test(o.created)
+    ? { path: o.path, created: o.created }
+    : undefined
+}
+
+/**
+ * The record of an id-less file that was renamed or moved on disk: published under its old file key
+ * with the same creation tag, from a file that is no longer there (a copy's original still is, so a
+ * copy never takes it over). One such record only; returns its key.
+ */
+async function movedRecord(records: Records, docId: string, file: PagesFileRef | undefined): Promise<string | null> {
+  if (!file || records[docId]) return null
+  const found: string[] = []
+  for (const [k, r] of Object.entries(records)) {
+    if (k === docId || !k.startsWith('file:') || r.created !== file.created || !r.file || r.file === file.path) continue
+    const gone = await fsp.access(r.file).then(
+      () => false,
+      () => true,
+    )
+    if (gone) found.push(k)
+  }
+  return found.length === 1 ? found[0] : null
+}
+
+/** the document's record moved under `docId` (older keys, a file moved on disk); all its keys */
+async function settleRecord(docId: string, aliases: string[], file: PagesFileRef | undefined): Promise<{ records: Records; aliases: string[] }> {
+  const records = await loadRecords()
+  let changed = migrateRecordKey(records, docId, aliases)
+  const from = await movedRecord(records, docId, file)
+  if (from) {
+    records[docId] = records[from]
+    delete records[from]
+    aliases = [...aliases, from]
+    changed = true
+  }
+  if (changed) await saveRecords(records)
+  return { records, aliases }
 }
 
 const cleanAliases = (a: unknown): string[] => (Array.isArray(a) ? a.filter((x): x is string => typeof x === 'string' && x.length > 0 && x.length <= 200).slice(0, 4) : [])
@@ -231,7 +273,10 @@ async function viewRepoFor(login: string, base: string, docId: string, aliases: 
  */
 async function findOwn(project: RepoRef | null, login: string | undefined, base: string, docId: string, aliases: readonly string[], made: Made): Promise<PagesRecord | null> {
   const tags = docTags(docId, aliases)
-  if (project && (await repoState(project)).exists) {
+  // the tag travels with the file: a clone of someone else's project carries it too, so only a
+  // repository the user can push to is taken as theirs
+  const st = project ? await repoState(project) : null
+  if (project && st?.exists && (st.canPush || sameName(project.owner, login))) {
     const insp = await inspectPages(project)
     if (taggedFor(insp, tags)) return adoptedRecord(project, insp, false)
   }
@@ -247,8 +292,8 @@ function foreignError(ref: RepoRef, own: { branch: Ownership; site: Ownership },
   return new Error(
     own.branch === 'foreign' && markerId(insp?.marker)
       ? msg(
-          `В ветке gh-pages репозитория ${r} опубликован другой план doplan. doplan её не трогает: опубликуйте этот план в отдельный репозиторий.`,
-          `The gh-pages branch of repository ${r} holds another doplan plan. doplan leaves it alone: publish this plan into a separate repository.`,
+          `В ветке gh-pages репозитория ${r} уже опубликован план doplan (другой документ или чужая публикация). doplan её не трогает: опубликуйте этот план в отдельный репозиторий.`,
+          `The gh-pages branch of repository ${r} already holds a doplan plan (another document, or someone else's publication). doplan leaves it alone: publish this plan into a separate repository.`,
         )
       : own.branch === 'foreign'
       ? msg(
@@ -280,9 +325,7 @@ export async function pagesStatus(q: PagesStatusQuery): Promise<PagesStatus> {
   const docId = String(q?.docId ?? '')
   const gh = await ghStatus(!!q?.fresh).catch(() => ({ installed: false, loggedIn: false }) as { installed: boolean; loggedIn: boolean; user?: string })
   const git = !!(await findGit())
-  const aliases = cleanAliases(q?.aliases)
-  const records = await loadRecords()
-  if (migrateRecordKey(records, docId, aliases)) await saveRecords(records)
+  const { records, aliases } = await settleRecord(docId, cleanAliases(q?.aliases), cleanFile(q?.file))
   let record: PagesRecord | null = records[docId] ?? null
   const ref = await projectRepo()
   const base = separateBase(ref, String(q?.name ?? ''), docId)
@@ -344,7 +387,8 @@ function checkRequest(req: PagesPublishRequest): void {
     (req.target === 'project' || req.target === 'separate') &&
     (req.privateChoice === undefined || req.privateChoice === 'makePublic' || req.privateChoice === 'separate') &&
     (req.aliases === undefined || Array.isArray(req.aliases)) &&
-    (req.underlays === undefined || typeof req.underlays === 'boolean')
+    (req.underlays === undefined || typeof req.underlays === 'boolean') &&
+    (req.file === undefined || !!cleanFile(req.file))
   if (!ok) throw new Error('pages: bad publish request')
 }
 
@@ -360,9 +404,8 @@ export async function publishPlan(req: PagesPublishRequest, emit: (p: PagesProgr
     if (!gh.installed) throw new Error(ghMissingText())
     if (!gh.loggedIn || !gh.user) throw new Error(ghLoginText())
     const runner = await gitRunner()
-    const aliases = cleanAliases(req.aliases)
-    const records = await loadRecords()
-    if (migrateRecordKey(records, req.docId, aliases)) await saveRecords(records)
+    const file = cleanFile(req.file)
+    const { records, aliases } = await settleRecord(req.docId, cleanAliases(req.aliases), file)
     const made = await loadMade(req.docId, aliases)
     const project = await projectRepo()
     const base = separateBase(project, req.info.title, req.docId)
@@ -487,6 +530,7 @@ export async function publishPlan(req: PagesPublishRequest, emit: (p: PagesProgr
       separate,
       pubId,
       underlays: !!req.underlays,
+      ...(file ? { file: file.path, created: file.created } : {}),
     }
     const latest = await loadRecords()
     for (const a of aliases) if (a !== req.docId) delete latest[a]
@@ -515,14 +559,37 @@ export async function unpublishPlan(docId: string): Promise<void> {
   const rec = records[docId]
   if (!rec) return
   busy = true
+  const forget = async () => {
+    const latest = await loadRecords()
+    delete latest[docId]
+    await saveRecords(latest)
+  }
+  // a repository the user cannot change (someone else's, access taken away): the site there is not
+  // theirs to take down, but the record must not keep this plan from being published again
+  const noAccess = async (detail?: string) => {
+    await forget()
+    const r = `${rec.owner}/${rec.repo}`
+    return new Error(
+      msg(
+        `Нет прав на запись в репозиторий ${r}: снять там сайт doplan не может. Запись о публикации удалена, план можно опубликовать заново.`,
+        `No write access to repository ${r}: doplan cannot take the site down there. The publication record was removed; the plan can be published again.`,
+      ) + (detail ? `\n${detail}` : ''),
+    )
+  }
   try {
     const gh = await ghStatus(true)
     if (!gh.installed) throw new Error(ghMissingText())
     if (!gh.loggedIn) throw new Error(ghLoginText())
-    await takeDown(await gitRunner(), workDir(docId), refOf(rec), rec.pubId)
-    const latest = await loadRecords()
-    delete latest[docId]
-    await saveRecords(latest)
+    const st = await repoState(refOf(rec))
+    if (st.exists && st.canPush === false && !sameName(rec.owner, gh.user)) throw await noAccess()
+    try {
+      await takeDown(await gitRunner(), workDir(docId), refOf(rec), rec.pubId)
+    } catch (e) {
+      const m = (e as Error).message
+      if (/HTTP 403|\b403\b|permission|denied/i.test(m)) throw await noAccess(m)
+      throw e
+    }
+    await forget()
   } finally {
     busy = false
     await fsp.rm(workDir(docId), { recursive: true, force: true }).catch(() => undefined)

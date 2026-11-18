@@ -616,7 +616,7 @@ export interface PagesTarget {
 }
 
 export interface PagesStatus {
-  gh: { installed: boolean; loggedIn: boolean; user?: string }
+  gh: { installed: boolean; loggedIn: boolean; user?: string; /** gh did not answer in time: unknown, not "signed out" */ slow?: boolean }
   git: boolean
   record: PagesRecord | null
   /** the plan changed since it was published */

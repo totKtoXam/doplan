@@ -905,8 +905,10 @@ export async function gitHead(root: string): Promise<string | null> {
 
 /** how git reaches a remote */
 export interface GitNet {
-  /** `-c` flags placed before the command (the credential helper: github.gitCredentialArgs) */
+  /** `-c` flags placed before the command (the credential helper: github.gitCredentials) */
   config: string[]
+  /** environment variables (the token header for github.com: github.gitCredentials) */
+  env?: Record<string, string>
   /** an action the user started: the user's own credential manager may show its sign-in window */
   interactive: boolean
   /** ms; default 10 minutes for an action the user started, 90 s for a look in the background */
@@ -935,7 +937,7 @@ function runNet(root: string, args: string[], net: GitNet, opts: RunOpts = {}): 
     ...opts,
     config: [...netArgs(net), ...(opts.config ?? [])],
     // a sign-in window of the user's credential manager only for an action the user started
-    env: { GCM_INTERACTIVE: net.interactive ? 'auto' : 'never' },
+    env: { ...net.env, GCM_INTERACTIVE: net.interactive ? 'auto' : 'never' },
     timeout: opts.timeout ?? net.timeout ?? (net.interactive ? 10 * 60_000 : 90_000),
   })
 }

@@ -253,9 +253,11 @@ vi.mock('./github', async (orig) => {
   return {
     ...real,
     // gh is not used: the test "GitHub" needs no credentials
-    gitCredentialArgs: async () => [],
+    gitCredentials: async () => ({ config: [], env: {} }),
+    ghToken: async () => null,
     ghStatus: async () => ({ installed: true, loggedIn: true, user: 'me', install: ghInstallHint('win32', false) }),
     createRepo: async (name: string) => {
+      if (existsSync(join(base, 'remote', 'me', `${name}.git`))) throw new real.GithubError('nameTaken', 'Name already exists on this account')
       created.push(name)
       git(join(base, 'remote', 'me'), 'init', '--bare', '--quiet', '--initial-branch=main', `${name}.git`)
       return { owner: 'me', repo: name, ssh: false }
@@ -264,7 +266,6 @@ vi.mock('./github', async (orig) => {
 })
 
 const { netTestConfig, findGit, gitFetch, gitRemoteUrl, gitLog, gitOrphanCommit, gitPushRef, isSafeBranchName } = await import('./git')
-const { createRepoArgs } = await import('./github')
 const { withSyncLock } = await import('./syncLock')
 const { saveProject } = await import('./project')
 const { grantPath } = await import('./access')
@@ -694,8 +695,35 @@ describe.skipIf(!hasGit)('project sync', { timeout: 180_000 }, () => {
     expect(plan(a).notes).toBe('saved after')
   })
 
-  it('passes the repository name to gh after "--"', () => {
-    expect(createRepoArgs('--web', true)).toEqual(['repo', 'create', '--private', '--', '--web'])
-    expect(createRepoArgs('flat', false, 'line1\nline2')).toEqual(['repo', 'create', '--public', '--description', 'line1 line2', '--', 'flat'])
+  it('creates and sends in three steps, with no look at the new empty repository first', async () => {
+    const a = await project('Steps')
+    useRoot(a)
+    const steps: string[] = []
+    const res = await sync.createAndConnect('steps', true, (s) => steps.push(s))
+    expect(steps).toEqual(['check', 'create', 'send'])
+    expect(res.pushed).toBe(true)
+    // origin/main is known without a fetch: the status is "in sync"
+    expect(res.status.state).toBe('synced')
+  })
+
+  it('creating again after GitHub made the repository anyway joins it; another project is refused', async () => {
+    const a = await project('Again')
+    useRoot(a)
+    await sync.createAndConnect('again', true)
+    await sync.disconnect()
+    // the second try finds the name taken: the repository holds this very project
+    const res = await sync.createAndConnect('again', true)
+    expect(res.status.remote?.repo).toBe('again')
+    expect(res.status.state).toBe('synced')
+    // a repository made on GitHub that never got the project (the first try stopped there): empty, joined
+    bare('half')
+    const h = await project('Half')
+    useRoot(h)
+    expect((await sync.createAndConnect('half', true)).pushed).toBe(true)
+    // another project of the user's under that name: never mixed in
+    const other = await project('Other')
+    useRoot(other)
+    await expect(sync.createAndConnect('again', true)).rejects.toThrow(/уже есть|already have/)
+    expect(await gitRemoteUrl(other)).toBeNull()
   })
 })

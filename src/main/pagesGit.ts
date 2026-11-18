@@ -16,6 +16,8 @@ export interface GitRunner {
   hooksDir: string
   /** extra `-c` flags (credentials for github.com; tests allow the file protocol) */
   config?: string[]
+  /** extra environment variables (the token header for github.com: github.gitCredentials) */
+  env?: Record<string, string>
   timeoutMs?: number
 }
 
@@ -69,7 +71,7 @@ function run(r: GitRunner, cwd: string, args: string[], extraEnv: Record<string,
     execFile(
       r.git,
       [...hardening(r), ...args],
-      { cwd, windowsHide: true, timeout: r.timeoutMs ?? 15 * 60_000, maxBuffer: 64 * 1024 * 1024, env: { ...env(), ...extraEnv } },
+      { cwd, windowsHide: true, timeout: r.timeoutMs ?? 15 * 60_000, maxBuffer: 64 * 1024 * 1024, env: { ...env(), ...r.env, ...extraEnv } },
       (err, stdout, stderr) => {
         const errText = String(stderr ?? '').trim()
         if (err) {

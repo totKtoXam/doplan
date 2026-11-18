@@ -1,27 +1,20 @@
 /**
- * The GitHub Pages calls of "publish for viewing", over the shared GitHub CLI layer (src/main/github.ts:
- * finding and running gh, the sign-in state, creating repositories, visibility, the account plan).
+ * The GitHub Pages calls of "publish for viewing", over the shared GitHub layer (src/main/github.ts:
+ * gh's token read once, GitHub's REST API, creating repositories, visibility, the account plan).
  */
 import { shell } from 'electron'
 import type { PagesConfig, PagesInspection, RepoRef } from '@shared/pagesSite'
 import { PAGES_BRANCH, PAGES_MARKER, pagesUrlOf } from '@shared/pagesSite'
-import { accountPlan, createRepo, runGh, setRepoVisibility, type GhResult } from './github'
+import { accountPlan, apiError, createRepo, githubApi, setRepoVisibility, type ApiResponse } from './github'
 import { msg } from './settings'
 
-/** a gh failure in plain words (the Pages calls: "no admin rights" is the usual refusal) */
-export function ghError(r: GhResult, what: string): Error {
-  const out = `${r.stderr}\n${r.stdout}`
-  if (/HTTP 401|authentication|not logged in|auth login/i.test(out)) return new Error(msg('Сначала войдите в GitHub.', 'Sign in to GitHub first.'))
-  if (/HTTP 403|must have admin|Resource not accessible/i.test(out))
-    return new Error(msg(`${what}: у этой учётной записи GitHub нет прав администратора репозитория.`, `${what}: this GitHub account has no admin rights on the repository.`))
-  if (/could not resolve host|timed out|network|ECONN/i.test(out)) return new Error(msg(`${what}: нет связи с GitHub.`, `${what}: cannot reach GitHub.`))
-  const line =
-    out
-      .split('\n')
-      .map((l) => l.trim())
-      .find(Boolean) ?? ''
-  return new Error(`${what}: ${line.slice(0, 300)}`)
+/** an API refusal of a Pages call in plain words ("no admin rights" is the usual one) */
+export function pagesError(r: ApiResponse, what: string): Error {
+  if (r.status === 403) return new Error(msg(`${what}: у этой учётной записи GitHub нет прав администратора репозитория.`, `${what}: this GitHub account has no admin rights on the repository.`))
+  return new Error(`${what}: ${apiError(r).message}`)
 }
+
+const repoPath = (ref: RepoRef) => `repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}`
 
 // ───────────── repositories ─────────────
 
@@ -33,14 +26,11 @@ export interface RepoState {
 }
 
 export async function repoState(ref: RepoRef): Promise<RepoState> {
-  const jq = '"\\(.private) \\((.permissions.push // false) or (.permissions.admin // false))"'
-  const r = await runGh(['api', `repos/${ref.owner}/${ref.repo}`, '--jq', jq], 30_000)
-  if (r.code !== 0) {
-    if (/HTTP 404|Not Found/i.test(r.stderr)) return { exists: false, isPrivate: false }
-    throw ghError(r, msg('Не удалось узнать о репозитории', 'Could not read the repository'))
-  }
-  const [priv, push] = r.stdout.trim().split(/\s+/)
-  return { exists: true, isPrivate: priv === 'true', canPush: push === 'true' }
+  const r = await githubApi('GET', repoPath(ref))
+  if (r.status === 404) return { exists: false, isPrivate: false }
+  if (r.status !== 200) throw pagesError(r, msg('Не удалось узнать о репозитории', 'Could not read the repository'))
+  const j = (r.json ?? {}) as { private?: unknown; permissions?: { push?: unknown; admin?: unknown } }
+  return { exists: true, isPrivate: j.private === true, canPush: j.permissions?.push === true || j.permissions?.admin === true }
 }
 
 /**
@@ -49,9 +39,9 @@ export async function repoState(ref: RepoRef): Promise<RepoState> {
  */
 export async function ownerPlan(owner: string, login: string | undefined): Promise<string | undefined> {
   if (login && owner.toLowerCase() === login.toLowerCase()) return (await accountPlan().catch(() => null)) ?? undefined
-  const r = await runGh(['api', `orgs/${owner}`, '--jq', '.plan.name // empty'], 20_000)
-  const name = r.code === 0 ? r.stdout.trim().toLowerCase() : ''
-  return name || undefined
+  const r = await githubApi('GET', `orgs/${encodeURIComponent(owner)}`).catch(() => null)
+  const name = r?.status === 200 ? (r.json as { plan?: { name?: unknown } } | null)?.plan?.name : undefined
+  return typeof name === 'string' && name ? name.toLowerCase() : undefined
 }
 
 export async function makePublic(ref: RepoRef): Promise<void> {
@@ -66,42 +56,36 @@ export async function createPublicRepo(name: string, description: string): Promi
 
 // ───────────── Pages ─────────────
 
-const notFound = (r: GhResult) => /HTTP 404|Not Found/i.test(r.stderr)
-
 const siteUrl = (ref: RepoRef, url: string | undefined) => (url && /^https:\/\//.test(url) ? (url.endsWith('/') ? url : `${url}/`) : pagesUrlOf(ref))
+
+const str = (v: unknown) => (typeof v === 'string' ? v : undefined)
 
 /** the Pages setup of a repository, null when Pages are off */
 export async function pagesConfig(ref: RepoRef): Promise<PagesConfig | null> {
-  const r = await runGh(['api', `repos/${ref.owner}/${ref.repo}/pages`], 30_000)
-  if (r.code !== 0) {
-    if (notFound(r)) return null
-    throw ghError(r, msg('Не удалось прочитать настройки Pages', 'Could not read the Pages settings'))
-  }
-  let j: { build_type?: unknown; source?: { branch?: unknown; path?: unknown }; html_url?: unknown }
-  try {
-    j = JSON.parse(r.stdout) as typeof j
-  } catch {
-    throw new Error(msg('GitHub вернул непонятные настройки Pages', 'GitHub returned unreadable Pages settings'))
-  }
-  const s = (v: unknown) => (typeof v === 'string' ? v : undefined)
-  return { buildType: s(j.build_type), branch: s(j.source?.branch), path: s(j.source?.path), url: s(j.html_url) }
+  const r = await githubApi('GET', `${repoPath(ref)}/pages`)
+  if (r.status === 404) return null
+  if (r.status !== 200) throw pagesError(r, msg('Не удалось прочитать настройки Pages', 'Could not read the Pages settings'))
+  const j = r.json as { build_type?: unknown; source?: { branch?: unknown; path?: unknown }; html_url?: unknown } | null
+  if (!j || typeof j !== 'object') throw new Error(msg('GitHub вернул непонятные настройки Pages', 'GitHub returned unreadable Pages settings'))
+  return { buildType: str(j.build_type), branch: str(j.source?.branch), path: str(j.source?.path), url: str(j.html_url) }
 }
 
-/** what the repository has in the way of a gh-pages branch, its doplan marker and a Pages site */
+/** what the repository has in the way of a gh-pages branch, its doplan marker and a Pages site (asked at once) */
 export async function inspectPages(ref: RepoRef): Promise<PagesInspection> {
-  const base = `repos/${ref.owner}/${ref.repo}`
-  const head = await runGh(['api', `${base}/git/ref/heads/${PAGES_BRANCH}`, '--jq', '.object.sha'], 30_000)
-  let branchSha: string | null = null
-  if (head.code === 0) branchSha = head.stdout.trim() || null
-  // 409: an empty repository (no branches at all)
-  else if (!notFound(head) && !/HTTP 409/i.test(head.stderr)) throw ghError(head, msg('Не удалось прочитать ветку gh-pages', 'Could not read the gh-pages branch'))
-  let marker: string | null = null
-  if (branchSha) {
-    const m = await runGh(['api', '-H', 'Accept: application/vnd.github.raw', `${base}/contents/${PAGES_MARKER}?ref=${branchSha}`], 30_000)
-    if (m.code === 0) marker = m.stdout.slice(0, 4096)
-    else if (!notFound(m)) throw ghError(m, msg('Не удалось прочитать ветку gh-pages', 'Could not read the gh-pages branch'))
+  const branch = async (): Promise<{ branchSha: string | null; marker: string | null }> => {
+    const head = await githubApi('GET', `${repoPath(ref)}/git/ref/heads/${PAGES_BRANCH}`)
+    // 404: no such branch; 409: an empty repository (no branches at all)
+    if (head.status === 404 || head.status === 409) return { branchSha: null, marker: null }
+    if (head.status !== 200) throw pagesError(head, msg('Не удалось прочитать ветку gh-pages', 'Could not read the gh-pages branch'))
+    const sha = str((head.json as { object?: { sha?: unknown } } | null)?.object?.sha)
+    if (!sha || !/^[0-9a-f]{40,64}$/.test(sha)) return { branchSha: null, marker: null }
+    const m = await githubApi('GET', `${repoPath(ref)}/contents/${PAGES_MARKER}?ref=${sha}`, { accept: 'application/vnd.github.raw' })
+    if (m.status === 404) return { branchSha: sha, marker: null }
+    if (m.status !== 200) throw pagesError(m, msg('Не удалось прочитать ветку gh-pages', 'Could not read the gh-pages branch'))
+    return { branchSha: sha, marker: m.text.slice(0, 4096) }
   }
-  return { branchSha, marker, pages: await pagesConfig(ref) }
+  const [b, pages] = await Promise.all([branch(), pagesConfig(ref)])
+  return { ...b, pages }
 }
 
 /**
@@ -110,20 +94,20 @@ export async function inspectPages(ref: RepoRef): Promise<PagesInspection> {
  */
 export async function enablePages(ref: RepoRef, current: PagesConfig | null): Promise<string> {
   if (current) return siteUrl(ref, current.url)
-  const api = `repos/${ref.owner}/${ref.repo}/pages`
-  const res = await runGh(['api', '-X', 'POST', api, '-f', `source[branch]=${PAGES_BRANCH}`, '-f', 'source[path]=/'], 30_000)
+  const res = await githubApi('POST', `${repoPath(ref)}/pages`, { body: { source: { branch: PAGES_BRANCH, path: '/' } } })
   // a POST that races GitHub turning Pages on by itself after the push: 409 means "already on"
-  if (res.code !== 0 && !/HTTP 409|already exists/i.test(res.stderr)) throw ghError(res, msg('Не удалось включить GitHub Pages', 'Could not turn on GitHub Pages'))
-  const after = await runGh(['api', api, '--jq', '.html_url'], 30_000)
-  return siteUrl(ref, after.code === 0 ? after.stdout.trim() : undefined)
+  if (res.status === 201 || res.status === 200) return siteUrl(ref, str((res.json as { html_url?: unknown } | null)?.html_url))
+  if (res.status !== 409) throw pagesError(res, msg('Не удалось включить GitHub Pages', 'Could not turn on GitHub Pages'))
+  const after = await pagesConfig(ref).catch(() => null)
+  return siteUrl(ref, after?.url)
 }
 
 /** turns Pages off; resolves false when they were not on */
 export async function disablePages(ref: RepoRef): Promise<boolean> {
-  const r = await runGh(['api', '-X', 'DELETE', `repos/${ref.owner}/${ref.repo}/pages`], 30_000)
-  if (r.code === 0) return true
-  if (/HTTP 404|Not Found/i.test(r.stderr)) return false
-  throw ghError(r, msg('Не удалось выключить GitHub Pages', 'Could not turn off GitHub Pages'))
+  const r = await githubApi('DELETE', `${repoPath(ref)}/pages`)
+  if (r.status === 204 || r.status === 200) return true
+  if (r.status === 404) return false
+  throw pagesError(r, msg('Не удалось выключить GitHub Pages', 'Could not turn off GitHub Pages'))
 }
 
 /** opens a published *.github.io site or a github.com page in the system browser */

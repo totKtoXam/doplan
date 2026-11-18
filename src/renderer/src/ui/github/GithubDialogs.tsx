@@ -6,7 +6,7 @@
 import clsx from 'clsx'
 import { useEffect, useState } from 'react'
 import { Check, CloudDownload, CloudUpload, Copy, ExternalLink, FolderPlus, Lock, Globe, LogIn, RefreshCw, Unplug } from 'lucide-react'
-import { isValidRepoName, parseGithubUrl, repoNameFromProject, type GhStatus } from '@shared/github'
+import { isValidRepoName, parseGithubUrl, repoNameFromProject, type GhStatus, type GithubCreateStep } from '@shared/github'
 import { useT } from '@/i18n'
 import { api } from '@/store/api'
 import { useDoc } from '@/store/document'
@@ -256,8 +256,26 @@ function CreateWay() {
 
   if (!gh) return <div className="flex items-center gap-2 py-2 text-[var(--muted)]"><Spinner /> {t('Ищу GitHub CLI…')}</div>
   if (!gh.installed) return <InstallGh gh={gh} checking={checking} recheck={() => void check()} />
+  // gh did not answer in time: unknown, not "signed out" (a new sign-in would not help)
+  if (gh.slow) return <SlowGh checking={checking} recheck={() => void check()} />
   if (!gh.loggedIn) return <LoginGh onDone={() => void check()} />
   return <CreateRepo user={gh.user ?? ''} onSwitch={() => void check()} />
+}
+
+function SlowGh({ checking, recheck }: { checking: boolean; recheck(): void }) {
+  const t = useT()
+  return (
+    <div className="flex flex-col gap-2">
+      <Note>
+        {t('GitHub CLI (gh) долго не отвечает — компьютер сейчас сильно загружен (например, антивирус проверяет файлы). Подождите немного и проверьте снова: повторный вход не нужен.')}
+      </Note>
+      <div className="flex justify-end">
+        <Button variant="primary" icon={checking ? <Spinner /> : <RefreshCw size={12} />} disabled={checking} onClick={recheck}>
+          {checking ? t('Проверяю…') : t('Проверить снова')}
+        </Button>
+      </div>
+    </div>
+  )
 }
 
 function Steps({ n, of, children }: { n: number; of: number; children: React.ReactNode }) {
@@ -407,12 +425,25 @@ function CreateRepo({ user, onSwitch }: { user: string; onSwitch(): void }) {
   const [name, setName] = useState(() => repoNameFromProject(projectName))
   const [isPrivate, setPrivate] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [step, setStep] = useState<GithubCreateStep | null>(null)
+  useEffect(() => api.github.onCreateStep(setStep), [])
   const valid = isValidRepoName(name.trim())
   const submit = async () => {
     if (!valid || busy) return
     setError(null)
-    setError(await githubCreate(name.trim(), isPrivate))
+    setStep(null)
+    try {
+      setError(await githubCreate(name.trim(), isPrivate))
+    } finally {
+      setStep(null)
+    }
   }
+  const stepText: Record<GithubCreateStep, string> = {
+    check: t('Проверяю вход в GitHub…'),
+    create: t('Создаю репозиторий на GitHub…'),
+    send: t('Отправляю проект…'),
+  }
+  const stepNo: Record<GithubCreateStep, number> = { check: 1, create: 2, send: 3 }
   return (
     <div className="flex flex-col gap-2">
       <Steps n={3} of={3}>{t('Новый репозиторий')}</Steps>
@@ -452,6 +483,11 @@ function CreateRepo({ user, onSwitch }: { user: string; onSwitch(): void }) {
           : t('Проект — план, модели, текстуры — сможет посмотреть и скачать любой человек в интернете.')}
       </Note>
       <ErrorBox text={error} />
+      {busy === 'connect' && step && (
+        <div className="flex items-center gap-2 text-[11px] text-[var(--muted)]" aria-live="polite">
+          <Spinner /> {t('{n} из 3', { n: stepNo[step] })} · {stepText[step]}
+        </div>
+      )}
       <div className="flex justify-end">
         <Button variant="primary" icon={busy === 'connect' ? <Spinner /> : <CloudUpload size={12} />} disabled={!valid || !!busy} onClick={() => void submit()}>
           {busy === 'connect' ? t('Создаю и отправляю…') : t('Создать и отправить')}

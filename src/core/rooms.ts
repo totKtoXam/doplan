@@ -18,7 +18,7 @@ import type { DerivedRoom, Doc, Id, Room, RoomBoundaryEdge, Vec2, Wall, WallGeom
 /** centreline cycles below this area (mm²) are not faces (tree components, slits) */
 const AREA_EPS = 1e3
 /** faces whose inner area is below this (mm²) are dropped: 0.01 m² */
-const MIN_FACE_AREA = 1e4
+export const MIN_FACE_AREA = 1e4
 /** faces smaller than this (m²) never get an automatic Room record (shafts, ducts) */
 export const MIN_ROOM_AREA_M2 = 0.1
 const PT_EPS = 0.01

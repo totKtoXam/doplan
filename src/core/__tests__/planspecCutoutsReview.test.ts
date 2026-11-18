@@ -328,16 +328,16 @@ describe('planspec cutouts: review round 2', () => {
     }
   })
 
-  it('#7 two partly touching shafts mid-room: no false hole-count error, one shaft of their union', () => {
+  it('#7 two partly touching shafts mid-room: no false hole-count error, two shafts with their own walls', () => {
     const spec = base([{ id: 'a', type: 'living', rect: [0, 0, 4000, 3000], cutouts: [{ rect: [1000, 1000, 500, 500] }, { rect: [1500, 1200, 500, 500] }] }])
     const v = validatePlanSpecDetailed(spec)
     expect(v.issues.filter((i) => i.code === 'BUILT_SHAPE_MISMATCH')).toEqual([])
     expect(v.ok).toBe(true)
     const { res, face } = build(spec)
     expect(face('a')?.area).toBeCloseTo(11.5, 2)
-    // touching cutouts of one kind are one cutout (no wall between them): one L-shaped shaft
+    // staggered cutouts (neither side lies in full on the other) are two cutouts, walls back to back
     const shafts = Object.values(res.doc.rooms).filter((r) => r.technical)
-    expect(shafts).toHaveLength(1)
+    expect(shafts).toHaveLength(2)
     expect(shafts.every((r) => r.name === 'Шахта' && r.type === 'other')).toBe(true)
   })
 

@@ -33,7 +33,29 @@ export function GithubDialogs() {
     <>
       <GithubMainDialog open={dialog === 'connect'} />
       <GithubConflictDialog open={dialog === 'conflict'} />
+      <GithubSyncLock />
     </>
+  )
+}
+
+/**
+ * While GitHub's versions come into the folder (get, combine), the editor waits: an edit made then
+ * would be replaced by the reload that follows.
+ */
+function GithubSyncLock() {
+  const t = useT()
+  const busy = useGithub((s) => s.busy)
+  const open = busy === 'pull' || busy === 'resolve'
+  return (
+    <Dialog open={open} onClose={() => undefined} modalLock title={t('GitHub')} width="max-w-sm">
+      <div className="flex items-center gap-3 text-xs" role="status" aria-live="polite">
+        <Spinner />
+        <div className="flex flex-col gap-1">
+          <span>{busy === 'resolve' ? t('Объединяю версии…') : t('Получаю изменения с GitHub…')}</span>
+          <Note>{t('Редактирование продолжится, когда проект обновится. Если откроется окно входа в GitHub — войдите в нём.')}</Note>
+        </div>
+      </div>
+    </Dialog>
   )
 }
 
@@ -414,7 +436,7 @@ function CreateRepo({ user, onSwitch }: { user: string; onSwitch(): void }) {
           aria-invalid={!valid}
         />
       </label>
-      {!valid && <div className="text-[11px] text-danger">{t('Только латинские буквы, цифры, точка, дефис и подчёркивание, до 100 символов')}</div>}
+      {!valid && <div className="text-[11px] text-danger">{t('Только латинские буквы, цифры, точка, дефис и подчёркивание, до 100 символов; в начале не дефис')}</div>}
       <Segmented<'private' | 'public'>
         aria-label={t('Доступ')}
         value={isPrivate ? 'private' : 'public'}

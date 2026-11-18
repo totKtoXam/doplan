@@ -210,6 +210,7 @@ async function spawnGit(cwd: string, args: string[], opts: SpawnOpts = {}): Prom
   const exe = await findGit()
   if (!exe) throw new Error(msg('Git не найден. Установите Git (https://git-scm.com), чтобы вести историю версий.', 'Git not found. Install Git (https://git-scm.com) to keep the version history.'))
   const fullArgs = [...noLazyFetchArgs(), ...hardeningArgs(), ...(opts.config ?? []), ...args]
+  const timeout = opts.timeout ?? 120000
   return new Promise((resolve, reject) => {
     const child = execFile(
       exe,
@@ -219,15 +220,26 @@ async function spawnGit(cwd: string, args: string[], opts: SpawnOpts = {}): Prom
         windowsHide: true,
         encoding: 'buffer',
         maxBuffer: 1024 * 1024 * 1024,
-        timeout: opts.timeout ?? 120000,
+        timeout,
         env: { ...gitEnv(), ...opts.env },
       },
       (error, stdout, stderr) => {
         const code = error ? (typeof (error as { code?: unknown }).code === 'number' ? ((error as { code: number }).code as number) : 1) : 0
         const err = Buffer.from(stderr ?? '').toString('utf8').trim()
+        // the command itself, not --git-dir=…: messages name it without the folder path
+        const cmd = args.find((a) => !a.startsWith('-')) ?? 'git'
+        // killed on its timeout (a server that accepts the connection and never answers): no exit code
+        // of git's own, so even allowFail callers get the failure, worded so it reads as a timeout
+        const overflow = (error as { code?: unknown } | null)?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
+        if (error && !overflow && (error.killed || error.signal)) {
+          reject(new GitError(`git ${cmd}: timeout, no answer within ${Math.round(timeout / 1000)} s`, code, err))
+          return
+        }
         if (error && !opts.allowFail) {
-          const first = err.split('\n').find((l) => /^(fatal|error):/.test(l)) ?? err.split('\n')[0] ?? error.message
-          reject(new GitError(`git ${args[0]}: ${first || error.message}`, code, err))
+          const first = err.split('\n').find((l) => /^(fatal|error):/.test(l)) ?? err.split('\n')[0] ?? ''
+          // never error.message: it is the whole command line with its paths and -c flags
+          const why = typeof (error as { code?: unknown }).code === 'string' ? String((error as { code: string }).code) : `exit code ${code}`
+          reject(new GitError(`git ${cmd}: ${first || why}`, code, err))
           return
         }
         resolve({ code, out: Buffer.from(stdout ?? ''), err })
@@ -897,6 +909,8 @@ export interface GitNet {
   config: string[]
   /** an action the user started: the user's own credential manager may show its sign-in window */
   interactive: boolean
+  /** ms; default 10 minutes for an action the user started, 90 s for a look in the background */
+  timeout?: number
 }
 
 /** test hook: extra `-c` flags for network commands (a local repository standing in for GitHub) */
@@ -922,7 +936,7 @@ function runNet(root: string, args: string[], net: GitNet, opts: RunOpts = {}): 
     config: [...netArgs(net), ...(opts.config ?? [])],
     // a sign-in window of the user's credential manager only for an action the user started
     env: { GCM_INTERACTIVE: net.interactive ? 'auto' : 'never' },
-    timeout: opts.timeout ?? (net.interactive ? 10 * 60_000 : 90_000),
+    timeout: opts.timeout ?? net.timeout ?? (net.interactive ? 10 * 60_000 : 90_000),
   })
 }
 

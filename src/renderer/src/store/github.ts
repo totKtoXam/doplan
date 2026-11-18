@@ -11,7 +11,7 @@ import { t } from '@/i18n'
 import '@/ui/github/githubI18n'
 import { api } from './api'
 import { docStore } from './document'
-import { alertDialog, confirmDialog, toast } from './notify'
+import { alertDialog, choiceDialog, confirmDialog, toast } from './notify'
 import { projectStore } from './project'
 
 export type GithubBusy = 'push' | 'pull' | 'connect' | 'resolve' | 'disconnect' | 'check' | null
@@ -65,10 +65,26 @@ async function ensureSaved(): Promise<boolean> {
   return saveProject(false)
 }
 
-/** the open project read again from its folder after GitHub changed it */
+/**
+ * The open project read again from its folder after GitHub changed it. The editor is locked while
+ * GitHub works (GithubSyncLock), so the document is normally clean here; changed anyway, the user
+ * decides: nothing is replaced without asking.
+ */
 async function reloadFromDisk(): Promise<void> {
   const root = projectStore.getState().root
-  if (root) await openProject(root, { skipConfirm: true, reload: 'disk' })
+  if (!root) return
+  if (docStore.getState().dirty) {
+    const choice = await choiceDialog(
+      t('Проект изменён во время обмена с GitHub'),
+      t('Пока шёл обмен с GitHub, в проекте появились несохранённые правки. Загрузить версию, полученную с GitHub (эти правки пропадут), или оставить на экране свои?'),
+      [
+        { id: 'keep', label: t('Оставить мои правки') },
+        { id: 'load', label: t('Загрузить с GitHub'), variant: 'danger' },
+      ],
+    )
+    if (choice !== 'load') return
+  }
+  await openProject(root, { skipConfirm: true, reload: 'disk' })
 }
 
 async function run<T>(busy: Exclude<GithubBusy, null>, fn: () => Promise<T>): Promise<T | null> {
@@ -103,14 +119,22 @@ async function afterPull(res: PullResult, thenPush: boolean): Promise<boolean> {
   return true
 }
 
-async function pushNow(): Promise<void> {
+/** sends; GitHub ahead: gets its versions first and sends once more, never in a loop */
+async function pushNow(retried = false): Promise<void> {
   const res = await api.github.push()
   set({ status: res.status })
   if (res.needPull) {
+    if (retried) throw new Error(t('Версии на GitHub снова изменились, пока шла отправка. Попробуйте отправить ещё раз чуть позже.'))
     toast(t('На GitHub есть новые версии — сначала получаю их'), 'info')
-    const pr = await api.github.pull()
-    if (!(await afterPull(pr, true))) return
-    return pushNow()
+    const busy = githubStore.getState().busy
+    set({ busy: 'pull' })
+    try {
+      const pr = await api.github.pull()
+      if (!(await afterPull(pr, true))) return
+    } finally {
+      set({ busy })
+    }
+    return pushNow(true)
   }
   showWarnings(res.warnings)
   toast(t('Отправлено на GitHub'), 'success')
@@ -137,6 +161,8 @@ export async function githubPull(): Promise<void> {
 export async function githubResolve(choice: ConflictChoice): Promise<void> {
   const thenPush = githubStore.getState().pushAfterResolve
   set({ dialog: null, conflicts: [], pushAfterResolve: false })
+  // what is on screen is a version too: resolve() works on the folder, and the reload below replaces the screen
+  if (!(await ensureSaved())) return
   await run('resolve', async () => {
     const res = await api.github.resolve(choice)
     set({ status: res.status })

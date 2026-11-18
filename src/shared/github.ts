@@ -19,7 +19,8 @@ export interface GithubRepoRef {
 }
 
 const OWNER_RE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/
-const REPO_RE = /^[A-Za-z0-9._-]{1,100}$/
+// never a leading '-': gh would read such a name as one of its flags
+const REPO_RE = /^[A-Za-z0-9._][A-Za-z0-9._-]{0,99}$/
 
 export function isValidRepoName(name: string): boolean {
   return REPO_RE.test(name) && name !== '.' && name !== '..' && !/\.git$/i.test(name)
@@ -65,6 +66,18 @@ export function parseGithubUrl(input: string): GithubRepoRef | null {
   if (ssh && parts.length > 2) return null
   if (!OWNER_RE.test(owner) || !isValidRepoName(repo)) return null
   return { owner, repo, ssh }
+}
+
+/**
+ * A remote address safe to show: a user name or token in an https address (a token clone) is dropped,
+ * a password in any other one too. Anything that is not a URL stays as it is.
+ */
+export function stripUrlCredentials(input: string): string {
+  const s = String(input ?? '')
+  const m = /^([a-z][a-z0-9+.-]*:\/\/)([^/?#]*)@/i.exec(s)
+  if (!m) return s
+  const keep = /^https?:\/\/$/i.test(m[1]) ? '' : `${m[2].split(':')[0]}@`
+  return `${m[1]}${keep}${s.slice(m[0].length)}`
 }
 
 /** the address git uses as the remote */
@@ -253,14 +266,31 @@ export interface GithubApi {
 
 // ───────────── errors ─────────────
 
-export type SyncErrorCode = 'offline' | 'auth' | 'forbidden' | 'notFound' | 'nameTaken' | 'rejected' | 'tooLarge' | 'timeout' | 'unknown'
+export type SyncErrorCode =
+  | 'offline'
+  | 'auth'
+  | 'forbidden'
+  | 'notFound'
+  | 'nameTaken'
+  | 'rejected'
+  | 'protectedBranch'
+  | 'emailPrivacy'
+  | 'refused'
+  | 'tooLarge'
+  | 'timeout'
+  | 'unknown'
 
 /** what kind of failure a git or gh message describes */
 export function classifyError(text: string): SyncErrorCode {
   const s = String(text ?? '')
   if (/Name already exists|already exists on this account/i.test(s)) return 'nameTaken'
   if (/GH001|exceeds GitHub's file size limit|Large files detected|pack exceeds maximum allowed size|this exceeds GitHub/i.test(s)) return 'tooLarge'
-  if (/\[rejected\]|non-fast-forward|fetch first|Updates were rejected|failed to push some refs/i.test(s)) return 'rejected'
+  // GitHub itself refused the versions (rules of the repository): getting changes would not help
+  if (/GH007|push would publish a private email|private email address/i.test(s)) return 'emailPrivacy'
+  if (/GH006|GH013|Protected branch|protected branch hook declined|Repository rule violations|rule violations found/i.test(s)) return 'protectedBranch'
+  if (/\[remote rejected\]|hook declined/i.test(s)) return 'refused'
+  // only "GitHub has versions you do not": a bare "failed to push some refs" says nothing about why
+  if (/\[rejected\]|non-fast-forward|fetch first|Updates were rejected/i.test(s)) return 'rejected'
   if (/timed out|ETIMEDOUT|timeout/i.test(s) && !/Could not resolve/i.test(s)) {
     if (/Connection timed out|Operation timed out|connect.*timed out/i.test(s)) return 'offline'
     return 'timeout'
@@ -291,6 +321,11 @@ export function errorText(code: SyncErrorCode, lang: 'ru' | 'en', detail = ''): 
     notFound: 'Репозиторий не найден. Проверьте ссылку; если репозиторий приватный — войдите в GitHub под аккаунтом, у которого есть к нему доступ.',
     nameTaken: 'Репозиторий с таким именем у вас уже есть. Придумайте другое имя или подключите существующий по ссылке.',
     rejected: 'На GitHub появились новые версии. Сначала получите изменения, потом отправьте свои.',
+    protectedBranch:
+      'Ветка на GitHub защищена правилами репозитория, и отправлять в неё напрямую нельзя. Владелец может снять защиту в настройках репозитория (Settings → Branches или Rules).',
+    emailPrivacy:
+      'GitHub не принял версии: в них указан ваш адрес почты, а в настройках GitHub включено его скрытие. Укажите в Git адрес вида …@users.noreply.github.com (он есть в GitHub → Settings → Emails) либо снимите там «Block command line pushes that expose my email».',
+    refused: 'GitHub отказался принять версии.',
     tooLarge: 'GitHub не принял слишком большой файл (лимит — 100 МБ на файл). Уменьшите или удалите большую модель либо подложку.',
     timeout: 'GitHub слишком долго не отвечает. Попробуйте ещё раз чуть позже.',
     unknown: 'Не удалось связаться с GitHub.',
@@ -302,12 +337,17 @@ export function errorText(code: SyncErrorCode, lang: 'ru' | 'en', detail = ''): 
     notFound: 'Repository not found. Check the link; for a private repository, sign in to GitHub with an account that has access to it.',
     nameTaken: 'You already have a repository with this name. Choose another name or connect the existing one by its link.',
     rejected: 'GitHub has new versions. Get the changes first, then send yours.',
+    protectedBranch:
+      'The branch on GitHub is protected by the repository rules and cannot be pushed to directly. Its owner can lift the protection in the repository settings (Settings → Branches or Rules).',
+    emailPrivacy:
+      'GitHub refused the versions: they carry your email address, and your GitHub settings keep it private. Set an …@users.noreply.github.com address in Git (see GitHub → Settings → Emails) or untick “Block command line pushes that expose my email” there.',
+    refused: 'GitHub refused the versions.',
     tooLarge: 'GitHub refused a file that is too large (the limit is 100 MB per file). Make the large model or underlay smaller, or remove it.',
     timeout: 'GitHub takes too long to answer. Try again a little later.',
     unknown: 'Could not reach GitHub.',
   }
   const text = (lang === 'en' ? en : ru)[code]
-  return code === 'unknown' && detail ? `${text} ${detail}` : text
+  return (code === 'unknown' || code === 'refused') && detail ? `${text} ${detail}` : text
 }
 
 /** the most telling line of a git/gh error output (fatal:/error:/remote: lines first) */
@@ -316,7 +356,9 @@ export function firstErrorLine(text: string): string {
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean)
-  const line = lines.find((l) => /^(fatal|error|remote: error|GraphQL|HTTP \d)/i.test(l)) ?? lines[0] ?? ''
+  // the server's own reason (remote: error: …) says more than git's closing "failed to push some refs"
+  const telling = (re: RegExp) => lines.find((l) => re.test(l) && !/^error: failed to push some refs/i.test(l))
+  const line = telling(/^remote: error/i) ?? telling(/^(fatal|error|GraphQL|HTTP \d)/i) ?? telling(/\[remote rejected\]/i) ?? lines[0] ?? ''
   return line.slice(0, 300)
 }
 

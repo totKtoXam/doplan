@@ -21,6 +21,7 @@ import {
   remoteUrlOf,
   type ResolveResult,
   sizeCheck,
+  stripUrlCredentials,
   type SyncErrorCode,
   webUrlOf,
 } from '../shared/github'
@@ -68,18 +69,14 @@ import { handleIpc } from './ipc'
 import { grantPath } from './access'
 import { commitFolder, folderTrust, getProjectRoot, readFolderFile, trustFolder } from './projectFolder'
 import { msg } from './settings'
+import { withSyncLock } from './syncLock'
 import { sendToRenderer } from './window'
 
 const REMOTE = 'origin'
 const remoteRef = (branch: string) => `refs/remotes/${REMOTE}/${branch}`
 
-// one sync action at a time
-let chain: Promise<unknown> = Promise.resolve()
-function exclusive<T>(fn: () => Promise<T>): Promise<T> {
-  const p = chain.then(fn, fn)
-  chain = p.catch(() => undefined)
-  return p
-}
+// one sync action at a time, and no save from the editor in between (syncLock)
+const exclusive = withSyncLock
 
 /** git and gh failures in plain words; anything else as it is */
 async function guard<T>(fn: () => Promise<T>): Promise<T> {
@@ -153,8 +150,10 @@ async function targetBranch(root: string): Promise<string> {
 async function computeStatus(root: string): Promise<GithubSyncStatus> {
   const url = await gitRemoteUrl(root, REMOTE)
   if (!url) return { state: 'disconnected', ahead: 0, behind: 0 }
-  const ref = parseGithubUrl(url)
-  const remote = ref ? { url, owner: ref.owner, repo: ref.repo, webUrl: webUrlOf(ref) } : { url }
+  // a token clone keeps its token in the address: it never reaches the screen
+  const shown = stripUrlCredentials(url)
+  const ref = parseGithubUrl(shown)
+  const remote = ref ? { url: shown, owner: ref.owner, repo: ref.repo, webUrl: webUrlOf(ref) } : { url: shown }
   const branch = await targetBranch(root)
   const check = lastCheck?.root === root ? lastCheck : null
   const base = { remote, branch, checkedAt: check?.at, error: check?.error, errorCode: check?.errorCode }
@@ -170,7 +169,9 @@ export async function syncStatus(fetch = false): Promise<GithubSyncStatus> {
   if ('reason' in r) return { state: 'unavailable', reason: r.reason, ahead: 0, behind: 0 }
   if (!r.repo) return { state: 'disconnected', ahead: 0, behind: 0 }
   const { root } = r
-  if (fetch && (await gitRemoteUrl(root, REMOTE))) {
+  // a look nobody asked for goes to github.com only, never to whatever host a received folder names
+  const url = fetch ? await gitRemoteUrl(root, REMOTE) : null
+  if (url && parseGithubUrl(stripUrlCredentials(url))) {
     try {
       await gitFetch(root, await net(false), REMOTE)
       noteCheck(root)
@@ -230,7 +231,13 @@ async function pushLocked(root: string, n: GitNet): Promise<PushResult> {
   try {
     await gitPush(root, n, branch, REMOTE)
   } catch (err) {
-    if (err instanceof GitError && humanError(err.stderr).kind === 'rejected') return { needPull: true, warnings, status: await computeStatus(root) }
+    // "get the changes first" only when GitHub really has versions this side lacks; a refusal by the
+    // repository's rules (protected branch, private email) is shown as it is, or send → get → send loops
+    if (err instanceof GitError && humanError(err.stderr).kind === 'rejected') {
+      await gitFetch(root, n, REMOTE).catch(() => undefined)
+      if ((await gitRefExists(root, remoteRef(branch))) && (await gitAheadBehind(root, remoteRef(branch))).behind)
+        return { needPull: true, warnings, status: await computeStatus(root) }
+    }
     throw err
   }
   await gitFetch(root, n, REMOTE).catch(() => undefined)

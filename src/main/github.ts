@@ -275,14 +275,19 @@ export function startGhLogin(emit: (ev: GhLoginEvent) => void): void {
 // ───────────── repositories ─────────────
 
 /** creates a repository on the signed-in account; resolves with its address */
+/** `gh repo create` arguments: the flags first, then `--`, so the name is never read as a flag */
+export function createRepoArgs(name: string, isPrivate: boolean, description = ''): string[] {
+  const args = ['repo', 'create', isPrivate ? '--private' : '--public']
+  if (description) args.push('--description', description.replace(/[\r\n]+/g, ' ').slice(0, 300))
+  return [...args, '--', name]
+}
+
 export async function createRepo(name: string, isPrivate: boolean, description = ''): Promise<GithubRepoRef> {
-  if (!isValidRepoName(name)) throw new GithubError('unknown', msg('Недопустимое имя репозитория: только латинские буквы, цифры, «-», «_» и «.».', 'Invalid repository name: Latin letters, digits, “-”, “_” and “.” only.'))
+  if (!isValidRepoName(name)) throw new GithubError('unknown', msg('Недопустимое имя репозитория: только латинские буквы, цифры, «-», «_» и «.», и не с «-» в начале.', 'Invalid repository name: Latin letters, digits, “-”, “_” and “.” only, not starting with “-”.'))
   const st = await ghStatus(true)
   if (!st.installed) throw new GithubError('ghMissing', ghMissingText())
   if (!st.loggedIn) throw new GithubError('ghLogin', ghLoginText())
-  const args = ['repo', 'create', name, isPrivate ? '--private' : '--public']
-  if (description) args.push('--description', description.replace(/[\r\n]+/g, ' ').slice(0, 300))
-  const r = await runGh(args, 60_000)
+  const r = await runGh(createRepoArgs(name, isPrivate, description), 60_000)
   const out = `${r.stdout}\n${r.stderr}`
   if (r.code !== 0) throw humanError(out)
   const ref = parseCreatedRepoUrl(out) ?? (st.user ? { owner: st.user, repo: name, ssh: false } : null)

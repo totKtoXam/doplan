@@ -98,7 +98,7 @@ addTranslations('en', {
   'Вы вошли в GitHub': 'Signed in to GitHub',
   обновить: 'refresh',
   'Имя репозитория': 'Repository name',
-  'Только латинские буквы, цифры, точка, дефис и подчёркивание, до 100 символов': 'Only Latin letters, digits, dot, hyphen and underscore, up to 100 characters',
+  'Только латинские буквы, цифры, точка, дефис и подчёркивание, до 100 символов; в начале не дефис': 'Only Latin letters, digits, dot, hyphen and underscore, up to 100 characters, not starting with a hyphen',
   Доступ: 'Access',
   Приватный: 'Private',
   Публичный: 'Public',
@@ -127,4 +127,13 @@ addTranslations('en', {
   'Сохранить обе': 'Keep both',
   'Здесь остаётся ваша версия, а версия с GitHub сохраняется рядом отдельной папкой проекта — сравните и перенесите нужное.':
     'Your version stays here and the GitHub version is saved next to it as a separate project folder: compare them and move over what you need.',
+  'Редактирование продолжится, когда проект обновится. Если откроется окно входа в GitHub — войдите в нём.':
+    'Editing resumes once the project is updated. If a GitHub sign-in window opens, sign in there.',
+  'Проект изменён во время обмена с GitHub': 'The project changed during the exchange with GitHub',
+  'Пока шёл обмен с GitHub, в проекте появились несохранённые правки. Загрузить версию, полученную с GitHub (эти правки пропадут), или оставить на экране свои?':
+    'Unsaved edits appeared in the project during the exchange with GitHub. Load the version received from GitHub (these edits will be lost) or keep yours on screen?',
+  'Оставить мои правки': 'Keep my edits',
+  'Загрузить с GitHub': 'Load from GitHub',
+  'Версии на GitHub снова изменились, пока шла отправка. Попробуйте отправить ещё раз чуть позже.':
+    'The versions on GitHub changed again while sending. Try sending again a little later.',
 })

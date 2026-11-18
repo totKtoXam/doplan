@@ -18,7 +18,9 @@ import {
   remoteUrlOf,
   repoNameFromProject,
   sizeCheck,
+  stripUrlCredentials,
   webUrlOf,
+  firstErrorLine,
 } from '../shared/github'
 
 // ───────────── pure helpers ─────────────
@@ -56,6 +58,23 @@ describe('GitHub addresses', () => {
       'https://github.com/anna/fl at',
     ])
       expect(parseGithubUrl(bad), bad).toBeNull()
+  })
+
+  it('refuses repository names gh would read as its own flags', () => {
+    for (const bad of ['-p', '--web', '--clone', '--internal', '--public']) expect(isValidRepoName(bad), bad).toBe(false)
+    expect(isValidRepoName('a-b')).toBe(true)
+    expect(isValidRepoName('.dotfiles')).toBe(true)
+    expect(parseGithubUrl('https://github.com/anna/-flat')).toBeNull()
+  })
+
+  it('drops a token or password from an address before it is shown', () => {
+    expect(stripUrlCredentials('https://user:ghp_SECRET@github.com/anna/flat.git')).toBe('https://github.com/anna/flat.git')
+    expect(stripUrlCredentials('https://ghp_SECRET@github.com/anna/flat.git')).toBe('https://github.com/anna/flat.git')
+    expect(stripUrlCredentials('http://u:p@host.example/x')).toBe('http://host.example/x')
+    expect(stripUrlCredentials('ssh://git:secret@github.com/anna/flat.git')).toBe('ssh://git@github.com/anna/flat.git')
+    expect(stripUrlCredentials('ssh://git@github.com/anna/flat.git')).toBe('ssh://git@github.com/anna/flat.git')
+    expect(stripUrlCredentials('git@github.com:anna/flat.git')).toBe('git@github.com:anna/flat.git')
+    expect(stripUrlCredentials('C:/repos/flat')).toBe('C:/repos/flat')
   })
 
   it('builds remote and page addresses', () => {
@@ -119,6 +138,23 @@ describe('errors in plain words', () => {
     ['remote: Repository not found.\nfatal: repository \'https://github.com/a/b.git/\' not found', 'notFound'],
     ['GraphQL: Name already exists on this account (createRepository)', 'nameTaken'],
     [' ! [rejected]        HEAD -> main (fetch first)\nerror: failed to push some refs', 'rejected'],
+    [' ! [rejected]        main -> main (non-fast-forward)\nerror: failed to push some refs', 'rejected'],
+    // GitHub's own refusals: getting changes would not help, so they are never 'rejected'
+    [
+      'remote: error: GH006: Protected branch update failed for refs/heads/main.\nremote: error: Changes must be made through a pull request.\n ! [remote rejected] main -> main (protected branch hook declined)\nerror: failed to push some refs to \'https://github.com/a/b.git\'',
+      'protectedBranch',
+    ],
+    [
+      'remote: error: GH013: Repository rule violations found for refs/heads/main.\n ! [remote rejected] main -> main (push declined due to repository rule violations)\nerror: failed to push some refs',
+      'protectedBranch',
+    ],
+    [
+      'remote: error: GH007: Your push would publish a private email address.\n ! [remote rejected] main -> main (push declined due to email privacy restrictions)\nerror: failed to push some refs',
+      'emailPrivacy',
+    ],
+    [' ! [remote rejected] main -> main (failed to update ref)\nerror: failed to push some refs to \'file:///x\'', 'refused'],
+    ['error: failed to push some refs to \'https://github.com/a/b.git\'', 'unknown'],
+    ['git fetch: timeout, no answer within 90 s', 'timeout'],
     ['remote: error: GH001: Large files detected. You may want to try Git Large File Storage', 'tooLarge'],
     ['something else entirely', 'unknown'],
   ])('%s → %s', (text, code) => {
@@ -129,6 +165,15 @@ describe('errors in plain words', () => {
     expect(errorText('offline', 'ru')).toMatch(/интернет/)
     expect(errorText('offline', 'en')).toMatch(/internet/)
     expect(errorText('unknown', 'ru', 'fatal: boom')).toMatch(/fatal: boom/)
+    expect(errorText('emailPrivacy', 'ru')).toMatch(/noreply/)
+    expect(errorText('protectedBranch', 'en')).toMatch(/protected/)
+    expect(errorText('timeout', 'ru')).toMatch(/не отвечает/)
+  })
+
+  it('quotes the server reason, not git closing line', () => {
+    const out = ' ! [remote rejected] main -> main (pre-receive hook declined)\nerror: failed to push some refs\nremote: error: custom rule says no'
+    expect(firstErrorLine(out)).toBe('remote: error: custom rule says no')
+    expect(firstErrorLine(' ! [remote rejected] main -> main (failed to update ref)\nerror: failed to push some refs')).toMatch(/remote rejected/)
   })
 })
 
@@ -172,7 +217,11 @@ vi.mock('./github', async (orig) => {
   }
 })
 
-const { netTestConfig, findGit, gitRemoteUrl, gitLog, gitOrphanCommit, gitPushRef, isSafeBranchName } = await import('./git')
+const { netTestConfig, findGit, gitFetch, gitRemoteUrl, gitLog, gitOrphanCommit, gitPushRef, isSafeBranchName } = await import('./git')
+const { createRepoArgs } = await import('./github')
+const { withSyncLock } = await import('./syncLock')
+const { saveProject } = await import('./project')
+const { grantPath } = await import('./access')
 const { createFolderProject, setProjectRoot, trustFolder, writeFolderProject } = await import('./projectFolder')
 const sync = await import('./githubSync')
 
@@ -411,5 +460,106 @@ describe.skipIf(!hasGit)('project sync', { timeout: 180_000 }, () => {
     await gitPushRef(a, net, null, 'gh-pages')
     await expect(gitPushRef(a, net, null, 'main')).rejects.toThrow()
     expect(git(remote, 'branch', '--list', 'main').trim()).toContain('main')
+  })
+
+  it('shows a refusal by GitHub as it is, never as "get the changes first"', async () => {
+    const url = bare('locked')
+    const a = await project('L')
+    useRoot(a)
+    await sync.connect(url)
+    // the server cannot update its branch (as with a protected branch): nothing new there to get
+    writeFileSync(join(remotes, 'me', 'locked.git', 'refs', 'heads', 'main.lock'), '')
+    await writeFolderProject(a, { ...plan(a), notes: 'refused' })
+    const err = await sync.push().then(
+      (r) => r,
+      (e: Error) => e,
+    )
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).toMatch(/GitHub отказался|GitHub refused/)
+    expect((await sync.syncStatus()).state).toBe('ahead')
+  })
+
+  it('still asks to get the changes first when GitHub really has newer versions', async () => {
+    const url = bare('race')
+    const a = await project('R')
+    useRoot(a)
+    await sync.connect(url)
+    const b = await cloneOf('race')
+    useRoot(b)
+    await writeFolderProject(b, { ...plan(b), notes: 'from B' })
+    await sync.push()
+    useRoot(a)
+    await writeFolderProject(a, { ...plan(a), version: 1, meta: { name: 'R2' } })
+    const res = await sync.push()
+    expect(res.needPull).toBe(true)
+  })
+
+  it('looks only at github.com in the background, never at another host a folder names', async () => {
+    const a = await project('H')
+    useRoot(a)
+    git(join(remotes, 'me'), 'init', '--bare', '--quiet', '--initial-branch=main', 'elsewhere.git')
+    // the other host would answer (a local repository) if it were asked
+    netTestConfig.push('-c', `url.${pathToFileURL(remotes).href}/.insteadOf=https://elsewhere.example/`)
+    git(a, 'remote', 'add', 'origin', 'https://elsewhere.example/me/elsewhere.git')
+    const st = await sync.syncStatus(true)
+    expect(st.checkedAt).toBeUndefined()
+    expect(st.state).toBe('notPushed')
+    expect(git(a, 'for-each-ref', 'refs/remotes').trim()).toBe('')
+  })
+
+  it('never shows the token of a token clone', async () => {
+    const url = bare('token')
+    const a = await project('T')
+    useRoot(a)
+    await sync.connect(url)
+    netTestConfig.push('-c', `url.${pathToFileURL(remotes).href}/.insteadOf=https://user:ghp_SECRET@github.com/`)
+    git(a, 'remote', 'set-url', 'origin', 'https://user:ghp_SECRET@github.com/me/token.git')
+    const st = await sync.syncStatus(true)
+    expect(JSON.stringify(st)).not.toContain('ghp_SECRET')
+    expect(st.remote).toMatchObject({ url: 'https://github.com/me/token.git', owner: 'me', repo: 'token' })
+    expect(st.error).toBeUndefined()
+  })
+
+  it('says a server that never answers timed out, in plain words without the command line', async () => {
+    const { createServer } = await import('node:net')
+    const sockets: import('node:net').Socket[] = []
+    const server = createServer((s) => void sockets.push(s))
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()))
+    const port = (server.address() as import('node:net').AddressInfo).port
+    try {
+      const a = await project('S')
+      useRoot(a)
+      git(a, 'remote', 'add', 'origin', 'https://stall.example/me/x.git')
+      netTestConfig.push('-c', 'protocol.http.allow=always', '-c', `url.http://127.0.0.1:${port}/.insteadOf=https://stall.example/`)
+      const err = (await gitFetch(a, { config: [], interactive: false, timeout: 2000 }).catch((e: unknown) => e)) as Error & { stderr?: string }
+      expect(err).toBeInstanceOf(Error)
+      expect(err.message).toMatch(/^git fetch: timeout/)
+      expect(err.message).not.toMatch(/Command failed|--git-dir|-c /)
+      expect(classifyError(`${err.stderr ?? ''}\n${err.message}`)).toBe('timeout')
+      expect(sockets.length).toBeGreaterThan(0)
+    } finally {
+      for (const s of sockets) s.destroy()
+      server.close()
+    }
+  })
+
+  it('makes a save wait while a GitHub action works on the folder', async () => {
+    const a = await project('W')
+    grantPath(a)
+    useRoot(a)
+    let release!: () => void
+    const held = withSyncLock(() => new Promise<void>((r) => (release = r)))
+    const saving = saveProject({ ...plan(a), notes: 'saved after' }, a, { overwrite: true })
+    await new Promise((r) => setTimeout(r, 300))
+    expect(plan(a).notes).not.toBe('saved after')
+    release()
+    await held
+    await saving
+    expect(plan(a).notes).toBe('saved after')
+  })
+
+  it('passes the repository name to gh after "--"', () => {
+    expect(createRepoArgs('--web', true)).toEqual(['repo', 'create', '--private', '--', '--web'])
+    expect(createRepoArgs('flat', false, 'line1\nline2')).toEqual(['repo', 'create', '--public', '--description', 'line1 line2', '--', 'flat'])
   })
 })

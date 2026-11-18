@@ -15,10 +15,19 @@ Machine-readable per-entry licence/author fields are in `catalog.json`.
 ## Khronos glTF-Sample-Assets (https://github.com/KhronosGroup/glTF-Sample-Assets)
 - Per-model licences. The script only accepts CC0 and CC-BY-4.0.
 - **CC0** (bundled): SheenChair, GlassVaseFlowers.
-- **CC-BY-4.0** (on-demand only, attribution REQUIRED when downloaded and used; author is stored in the catalog `author` field):
-  GlamVelvetSofa, SheenWoodLeatherSofa, ChairDamaskPurplegold, CommercialRefrigerator, AnisotropyBarnLamp,
-  IridescenceLamp, GlassHurricaneCandleHolder, DiffuseTransmissionPlant, LightsPunctualLamp.
-  The app must list them in its credits screen with owner and artist (see `author`).
+- **CC-BY-4.0** (on-demand only, attribution REQUIRED when downloaded and used; the app shows the author from the catalog
+  `author` field). Some models combine CC-BY parts with CC0 parts: the CC0 authors are marked "(CC0)". Generated from the
+  catalog:
+
+- Диван бархатный (фотореал): "Glam Velvet Sofa" by Wayfair, LLC / Eric Chadwick, https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/GlamVelvetSofa, CC-BY-4.0
+- Диван кожаный на дереве: "Sheen Wood Leather Sofa" by DGG / Eric Chadwick; Fran Calvente (CC0), https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/SheenWoodLeatherSofa, CC-BY-4.0
+- Настольная лампа (переливающаяся): "Iridescence Lamp" by Wayfair / Eric Chadwick, https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/IridescenceLamp, CC-BY-4.0
+- Подсвечник стеклянный: "Glass Hurricane Candle Holder" by Wayfair / Eric Chadwick, https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/GlassHurricaneCandleHolder, CC-BY-4.0
+- Растение (транслюценция): "Diffuse Transmission Plant" by DGG / Eric Chadwick; Rico Cilliers (CC0), https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/DiffuseTransmissionPlant, CC-BY-4.0
+- Светильник амбарный: "Anisotropy Barn Lamp" by Wayfair / Eric Chadwick, https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/AnisotropyBarnLamp, CC-BY-4.0
+- Стул с дамасской обивкой: "Chair Damask Purple-gold" by Wayfair / Eric Chadwick, https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/ChairDamaskPurplegold, CC-BY-4.0
+- Торшер (с источником света): "Lights Punctual Lamp" by DGG, https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/LightsPunctualLamp, CC-BY-4.0
+- Холодильник-витрина: "Commercial Refrigerator" by DGG / Eric Chadwick; Sean Thomas, https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/CommercialRefrigerator, CC-BY-4.0
 
 ## KayKit Furniture Bits (https://github.com/KayKit-Game-Assets/KayKit-Furniture-Bits-1.0)
 - Licence: **CC0 1.0**. Stylised low-poly, on-demand only.

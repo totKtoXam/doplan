@@ -67,6 +67,12 @@ export function liveHost(): ToolHost {
   }
 }
 
+export interface DraftMark {
+  readonly cur: Doc
+  readonly patches: number
+  readonly count: number
+}
+
 /** Plan mode: changes go to a private copy; `apply()` replays them on the live document. */
 export class DraftHost implements ToolHost {
   readonly baseRevision: number
@@ -127,6 +133,19 @@ export class DraftHost implements ToolHost {
 
   get empty(): boolean {
     return this.patches.length === 0
+  }
+
+  /** where the draft is now, to go back to with `rollback` */
+  mark(): DraftMark {
+    return { cur: this.cur, patches: this.patches.length, count: this.count }
+  }
+
+  /** forgets the changes made after `m` */
+  rollback(m: DraftMark): void {
+    this.cur = m.cur
+    this.patches.length = m.patches
+    this.count = m.count
+    this.cache.clear()
   }
 
   /** Applies the draft as one undoable step. Returns false if the document changed meanwhile and patching failed. */

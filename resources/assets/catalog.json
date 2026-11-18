@@ -6764,7 +6764,32 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/Sofa_01/Sofa_01_1k.gltf",
+      "path": "models/sofa_01/Sofa_01_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/Sofa_01/Sofa_01_diff_1k.jpg",
+      "path": "models/sofa_01/textures/Sofa_01_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/Sofa_01/Sofa_01_nor_gl_1k.jpg",
+      "path": "models/sofa_01/textures/Sofa_01_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/Sofa_01/Sofa_01.bin",
+      "path": "models/sofa_01/Sofa_01.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/Sofa_01/Sofa_01_arm_1k.jpg",
+      "path": "models/sofa_01/textures/Sofa_01_arm_1k.jpg"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_sofa_02",
@@ -6785,7 +6810,32 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/sofa_02/sofa_02_1k.gltf",
+      "path": "models/sofa_02/sofa_02_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/sofa_02/sofa_02_diff_1k.jpg",
+      "path": "models/sofa_02/textures/sofa_02_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/sofa_02/sofa_02_arm_1k.jpg",
+      "path": "models/sofa_02/textures/sofa_02_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/sofa_02/sofa_02_nor_gl_1k.jpg",
+      "path": "models/sofa_02/textures/sofa_02_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/sofa_02/sofa_02.bin",
+      "path": "models/sofa_02/sofa_02.bin"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_sofa_03",
@@ -6806,7 +6856,32 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/sofa_03/sofa_03_1k.gltf",
+      "path": "models/sofa_03/sofa_03_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/sofa_03/sofa_03_rough_1k.jpg",
+      "path": "models/sofa_03/textures/sofa_03_rough_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/sofa_03/sofa_03.bin",
+      "path": "models/sofa_03/sofa_03.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/sofa_03/sofa_03_diff_1k.jpg",
+      "path": "models/sofa_03/textures/sofa_03_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/sofa_03/sofa_03_nor_gl_1k.jpg",
+      "path": "models/sofa_03/textures/sofa_03_nor_gl_1k.jpg"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_chinese_sofa",
@@ -6873,7 +6948,32 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/bar_chair_round_01/bar_chair_round_01_1k.gltf",
+      "path": "models/bar_chair_round_01/bar_chair_round_01_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/bar_chair_round_01/bar_chair_round_01_arm_1k.jpg",
+      "path": "models/bar_chair_round_01/textures/bar_chair_round_01_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/bar_chair_round_01/bar_chair_round_01.bin",
+      "path": "models/bar_chair_round_01/bar_chair_round_01.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/bar_chair_round_01/bar_chair_round_01_diff_1k.jpg",
+      "path": "models/bar_chair_round_01/textures/bar_chair_round_01_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/bar_chair_round_01/bar_chair_round_01_nor_gl_1k.jpg",
+      "path": "models/bar_chair_round_01/textures/bar_chair_round_01_nor_gl_1k.jpg"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_dining_chair_02",
@@ -6894,7 +6994,32 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/dining_chair_02/dining_chair_02_1k.gltf",
+      "path": "models/dining_chair_02/dining_chair_02_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/dining_chair_02/dining_chair_02.bin",
+      "path": "models/dining_chair_02/dining_chair_02.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/dining_chair_02/dining_chair_02_nor_gl_1k.jpg",
+      "path": "models/dining_chair_02/textures/dining_chair_02_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/dining_chair_02/dining_chair_02_diff_1k.jpg",
+      "path": "models/dining_chair_02/textures/dining_chair_02_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/dining_chair_02/dining_chair_02_arm_1k.jpg",
+      "path": "models/dining_chair_02/textures/dining_chair_02_arm_1k.jpg"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_mid_century_lounge_chair",
@@ -6915,7 +7040,32 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/mid_century_lounge_chair/mid_century_lounge_chair_1k.gltf",
+      "path": "models/mid_century_lounge_chair/mid_century_lounge_chair_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/mid_century_lounge_chair/mid_century_lounge_chair_nor_gl_1k.jpg",
+      "path": "models/mid_century_lounge_chair/textures/mid_century_lounge_chair_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/mid_century_lounge_chair/mid_century_lounge_chair_diff_1k.jpg",
+      "path": "models/mid_century_lounge_chair/textures/mid_century_lounge_chair_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/mid_century_lounge_chair/mid_century_lounge_chair_arm_1k.jpg",
+      "path": "models/mid_century_lounge_chair/textures/mid_century_lounge_chair_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/mid_century_lounge_chair/mid_century_lounge_chair.bin",
+      "path": "models/mid_century_lounge_chair/mid_century_lounge_chair.bin"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_modern_arm_chair_01",
@@ -6936,7 +7086,44 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/modern_arm_chair_01/modern_arm_chair_01_1k.gltf",
+      "path": "models/modern_arm_chair_01/modern_arm_chair_01_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modern_arm_chair_01/modern_arm_chair_01_pillow_nor_gl_1k.jpg",
+      "path": "models/modern_arm_chair_01/textures/modern_arm_chair_01_pillow_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modern_arm_chair_01/modern_arm_chair_01_legs_nor_gl_1k.jpg",
+      "path": "models/modern_arm_chair_01/textures/modern_arm_chair_01_legs_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modern_arm_chair_01/modern_arm_chair_01_pillow_arm_1k.jpg",
+      "path": "models/modern_arm_chair_01/textures/modern_arm_chair_01_pillow_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modern_arm_chair_01/modern_arm_chair_01_legs_diff_1k.jpg",
+      "path": "models/modern_arm_chair_01/textures/modern_arm_chair_01_legs_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modern_arm_chair_01/modern_arm_chair_01_legs_arm_1k.jpg",
+      "path": "models/modern_arm_chair_01/textures/modern_arm_chair_01_legs_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/modern_arm_chair_01/modern_arm_chair_01.bin",
+      "path": "models/modern_arm_chair_01/modern_arm_chair_01.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modern_arm_chair_01/modern_arm_chair_01_pillow_diff_1k.jpg",
+      "path": "models/modern_arm_chair_01/textures/modern_arm_chair_01_pillow_diff_1k.jpg"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_painted_wooden_chair_01",
@@ -7279,7 +7466,32 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/coffee_table_round_01/coffee_table_round_01_1k.gltf",
+      "path": "models/coffee_table_round_01/coffee_table_round_01_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/coffee_table_round_01/coffee_table_round_01_diff_1k.jpg",
+      "path": "models/coffee_table_round_01/textures/coffee_table_round_01_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/coffee_table_round_01/coffee_table_round_01_arm_1k.jpg",
+      "path": "models/coffee_table_round_01/textures/coffee_table_round_01_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/coffee_table_round_01/coffee_table_round_01.bin",
+      "path": "models/coffee_table_round_01/coffee_table_round_01.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/coffee_table_round_01/coffee_table_round_01_nor_gl_1k.jpg",
+      "path": "models/coffee_table_round_01/textures/coffee_table_round_01_nor_gl_1k.jpg"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_dining_table",
@@ -7300,7 +7512,32 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/dining_table/dining_table_1k.gltf",
+      "path": "models/dining_table/dining_table_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/dining_table/dining_table_nor_gl_1k.jpg",
+      "path": "models/dining_table/textures/dining_table_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/dining_table/dining_table_diff_1k.jpg",
+      "path": "models/dining_table/textures/dining_table_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/dining_table/dining_table_arm_1k.jpg",
+      "path": "models/dining_table/textures/dining_table_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/dining_table/dining_table.bin",
+      "path": "models/dining_table/dining_table.bin"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_modern_coffee_table_01",
@@ -7321,7 +7558,32 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/modern_coffee_table_01/modern_coffee_table_01_1k.gltf",
+      "path": "models/modern_coffee_table_01/modern_coffee_table_01_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/modern_coffee_table_01/modern_coffee_table_01.bin",
+      "path": "models/modern_coffee_table_01/modern_coffee_table_01.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modern_coffee_table_01/modern_coffee_table_01_rough_1k.jpg",
+      "path": "models/modern_coffee_table_01/textures/modern_coffee_table_01_rough_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modern_coffee_table_01/modern_coffee_table_01_diff_1k.jpg",
+      "path": "models/modern_coffee_table_01/textures/modern_coffee_table_01_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modern_coffee_table_01/modern_coffee_table_01_nor_gl_1k.jpg",
+      "path": "models/modern_coffee_table_01/textures/modern_coffee_table_01_nor_gl_1k.jpg"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_modern_coffee_table_02",
@@ -7446,7 +7708,32 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/side_table_01/side_table_01_1k.gltf",
+      "path": "models/side_table_01/side_table_01_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/side_table_01/side_table_01.bin",
+      "path": "models/side_table_01/side_table_01.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/side_table_01/side_table_01_diff_1k.jpg",
+      "path": "models/side_table_01/textures/side_table_01_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/side_table_01/side_table_01_nor_gl_1k.jpg",
+      "path": "models/side_table_01/textures/side_table_01_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/side_table_01/side_table_01_arm_1k.jpg",
+      "path": "models/side_table_01/textures/side_table_01_arm_1k.jpg"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_side_table_tall_01",
@@ -7559,7 +7846,32 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/metal_office_desk/metal_office_desk_1k.gltf",
+      "path": "models/metal_office_desk/metal_office_desk_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_office_desk/metal_office_desk_nor_gl_1k.jpg",
+      "path": "models/metal_office_desk/textures/metal_office_desk_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_office_desk/metal_office_desk_diff_1k.jpg",
+      "path": "models/metal_office_desk/textures/metal_office_desk_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_office_desk/metal_office_desk_arm_1k.jpg",
+      "path": "models/metal_office_desk/textures/metal_office_desk_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/metal_office_desk/metal_office_desk.bin",
+      "path": "models/metal_office_desk/metal_office_desk.bin"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_classicnightstand_01",
@@ -7580,7 +7892,32 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/ClassicNightstand_01/ClassicNightstand_01_1k.gltf",
+      "path": "models/classicnightstand_01/ClassicNightstand_01_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/ClassicNightstand_01/ClassicNightstand_01_arm_1k.jpg",
+      "path": "models/classicnightstand_01/textures/ClassicNightstand_01_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/ClassicNightstand_01/ClassicNightstand_01.bin",
+      "path": "models/classicnightstand_01/ClassicNightstand_01.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/ClassicNightstand_01/ClassicNightstand_01_nor_gl_1k.jpg",
+      "path": "models/classicnightstand_01/textures/ClassicNightstand_01_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/ClassicNightstand_01/ClassicNightstand_01_diff_1k.jpg",
+      "path": "models/classicnightstand_01/textures/ClassicNightstand_01_diff_1k.jpg"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_painted_wooden_nightstand",
@@ -7647,7 +7984,32 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/ClassicConsole_01/ClassicConsole_01_1k.gltf",
+      "path": "models/classicconsole_01/ClassicConsole_01_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/ClassicConsole_01/ClassicConsole_01_nor_gl_1k.jpg",
+      "path": "models/classicconsole_01/textures/ClassicConsole_01_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/ClassicConsole_01/ClassicConsole_01_arm_1k.jpg",
+      "path": "models/classicconsole_01/textures/ClassicConsole_01_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/ClassicConsole_01/ClassicConsole_01.bin",
+      "path": "models/classicconsole_01/ClassicConsole_01.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/ClassicConsole_01/ClassicConsole_01_diff_1k.jpg",
+      "path": "models/classicconsole_01/textures/ClassicConsole_01_diff_1k.jpg"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_outdoor_table_chair_set_01",
@@ -7830,7 +8192,32 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/GothicBed_01/GothicBed_01_1k.gltf",
+      "path": "models/gothicbed_01/GothicBed_01_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/GothicBed_01/GothicBed_01_diff_1k.jpg",
+      "path": "models/gothicbed_01/textures/GothicBed_01_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/GothicBed_01/GothicBed_01_nor_gl_1k.jpg",
+      "path": "models/gothicbed_01/textures/GothicBed_01_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/GothicBed_01/GothicBed_01.bin",
+      "path": "models/gothicbed_01/GothicBed_01.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/GothicBed_01/GothicBed_01_arm_1k.jpg",
+      "path": "models/gothicbed_01/textures/GothicBed_01_arm_1k.jpg"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_old_bed_frame",
@@ -8035,7 +8422,32 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/modern_wooden_cabinet/modern_wooden_cabinet_1k.gltf",
+      "path": "models/modern_wooden_cabinet/modern_wooden_cabinet_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/modern_wooden_cabinet/modern_wooden_cabinet.bin",
+      "path": "models/modern_wooden_cabinet/modern_wooden_cabinet.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modern_wooden_cabinet/modern_wooden_cabinet_nor_gl_1k.jpg",
+      "path": "models/modern_wooden_cabinet/textures/modern_wooden_cabinet_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modern_wooden_cabinet/modern_wooden_cabinet_arm_1k.jpg",
+      "path": "models/modern_wooden_cabinet/textures/modern_wooden_cabinet_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modern_wooden_cabinet/modern_wooden_cabinet_diff_1k.jpg",
+      "path": "models/modern_wooden_cabinet/textures/modern_wooden_cabinet_diff_1k.jpg"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_painted_wooden_cabinet",
@@ -8102,7 +8514,32 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/drawer_cabinet/drawer_cabinet_1k.gltf",
+      "path": "models/drawer_cabinet/drawer_cabinet_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/drawer_cabinet/drawer_cabinet_arm_1k.jpg",
+      "path": "models/drawer_cabinet/textures/drawer_cabinet_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/drawer_cabinet/drawer_cabinet_nor_gl_1k.jpg",
+      "path": "models/drawer_cabinet/textures/drawer_cabinet_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/drawer_cabinet/drawer_cabinet_diff_1k.jpg",
+      "path": "models/drawer_cabinet/textures/drawer_cabinet_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/drawer_cabinet/drawer_cabinet.bin",
+      "path": "models/drawer_cabinet/drawer_cabinet.bin"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_steel_frame_shelves_01",
@@ -8123,7 +8560,32 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/steel_frame_shelves_01/steel_frame_shelves_01_1k.gltf",
+      "path": "models/steel_frame_shelves_01/steel_frame_shelves_01_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/steel_frame_shelves_01/steel_frame_shelves_01_diff_1k.jpg",
+      "path": "models/steel_frame_shelves_01/textures/steel_frame_shelves_01_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/steel_frame_shelves_01/steel_frame_shelves_01_nor_gl_1k.jpg",
+      "path": "models/steel_frame_shelves_01/textures/steel_frame_shelves_01_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/steel_frame_shelves_01/steel_frame_shelves_01_arm_1k.jpg",
+      "path": "models/steel_frame_shelves_01/textures/steel_frame_shelves_01_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/steel_frame_shelves_01/steel_frame_shelves_01.bin",
+      "path": "models/steel_frame_shelves_01/steel_frame_shelves_01.bin"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_wooden_display_shelves_01",
@@ -8144,7 +8606,32 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/wooden_display_shelves_01/wooden_display_shelves_01_1k.gltf",
+      "path": "models/wooden_display_shelves_01/wooden_display_shelves_01_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_display_shelves_01/wooden_display_shelves_01_arm_1k.jpg",
+      "path": "models/wooden_display_shelves_01/textures/wooden_display_shelves_01_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_display_shelves_01/wooden_display_shelves_01_nor_gl_1k.jpg",
+      "path": "models/wooden_display_shelves_01/textures/wooden_display_shelves_01_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/wooden_display_shelves_01/wooden_display_shelves_01.bin",
+      "path": "models/wooden_display_shelves_01/wooden_display_shelves_01.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_display_shelves_01/wooden_display_shelves_01_diff_1k.jpg",
+      "path": "models/wooden_display_shelves_01/textures/wooden_display_shelves_01_diff_1k.jpg"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_vintage_cabinet_01",
@@ -8415,7 +8902,32 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/modern_ceiling_lamp_01/modern_ceiling_lamp_01_1k.gltf",
+      "path": "models/modern_ceiling_lamp_01/modern_ceiling_lamp_01_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modern_ceiling_lamp_01/modern_ceiling_lamp_01_arm_1k.jpg",
+      "path": "models/modern_ceiling_lamp_01/textures/modern_ceiling_lamp_01_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modern_ceiling_lamp_01/modern_ceiling_lamp_01_diff_1k.jpg",
+      "path": "models/modern_ceiling_lamp_01/textures/modern_ceiling_lamp_01_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/modern_ceiling_lamp_01/modern_ceiling_lamp_01.bin",
+      "path": "models/modern_ceiling_lamp_01/modern_ceiling_lamp_01.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modern_ceiling_lamp_01/modern_ceiling_lamp_01_nor_gl_1k.jpg",
+      "path": "models/modern_ceiling_lamp_01/textures/modern_ceiling_lamp_01_nor_gl_1k.jpg"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_desk_lamp_arm_01",
@@ -8436,7 +8948,32 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/desk_lamp_arm_01/desk_lamp_arm_01_1k.gltf",
+      "path": "models/desk_lamp_arm_01/desk_lamp_arm_01_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/desk_lamp_arm_01/desk_lamp_arm_01_nor_gl_1k.jpg",
+      "path": "models/desk_lamp_arm_01/textures/desk_lamp_arm_01_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/desk_lamp_arm_01/desk_lamp_arm_01_arm_1k.jpg",
+      "path": "models/desk_lamp_arm_01/textures/desk_lamp_arm_01_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/desk_lamp_arm_01/desk_lamp_arm_01_diff_1k.jpg",
+      "path": "models/desk_lamp_arm_01/textures/desk_lamp_arm_01_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/desk_lamp_arm_01/desk_lamp_arm_01.bin",
+      "path": "models/desk_lamp_arm_01/desk_lamp_arm_01.bin"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_industrial_wall_lamp",
@@ -8458,7 +8995,48 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/industrial_wall_lamp/industrial_wall_lamp_1k.gltf",
+      "path": "models/industrial_wall_lamp/industrial_wall_lamp_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/industrial_wall_lamp/industrial_wall_lamp_emissive_1k.jpg",
+      "path": "models/industrial_wall_lamp/textures/industrial_wall_lamp_emissive_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/industrial_wall_lamp/industrial_wall_lamp_nor_gl_1k.jpg",
+      "path": "models/industrial_wall_lamp/textures/industrial_wall_lamp_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/industrial_wall_lamp/industrial_wall_lamp_diff_1k.jpg",
+      "path": "models/industrial_wall_lamp/textures/industrial_wall_lamp_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/industrial_wall_lamp/industrial_wall_lamp_arm_1k.jpg",
+      "path": "models/industrial_wall_lamp/textures/industrial_wall_lamp_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/industrial_wall_lamp/industrial_wall_lamp_glass_nor_gl_1k.jpg",
+      "path": "models/industrial_wall_lamp/textures/industrial_wall_lamp_glass_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/industrial_wall_lamp/industrial_wall_lamp_glass_diff_1k.jpg",
+      "path": "models/industrial_wall_lamp/textures/industrial_wall_lamp_glass_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/industrial_wall_lamp/industrial_wall_lamp_glass_arm_1k.jpg",
+      "path": "models/industrial_wall_lamp/textures/industrial_wall_lamp_glass_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/industrial_wall_lamp/industrial_wall_lamp.bin",
+      "path": "models/industrial_wall_lamp/industrial_wall_lamp.bin"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_hanging_industrial_lamp",
@@ -8479,7 +9057,40 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/hanging_industrial_lamp/hanging_industrial_lamp_1k.gltf",
+      "path": "models/hanging_industrial_lamp/hanging_industrial_lamp_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_industrial_lamp/hanging_industrial_lamp_emissive_1k.jpg",
+      "path": "models/hanging_industrial_lamp/textures/hanging_industrial_lamp_emissive_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_industrial_lamp/hanging_industrial_lamp_nor_gl_1k.jpg",
+      "path": "models/hanging_industrial_lamp/textures/hanging_industrial_lamp_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_industrial_lamp/hanging_industrial_lamp_diff_1k.jpg",
+      "path": "models/hanging_industrial_lamp/textures/hanging_industrial_lamp_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_industrial_lamp/hanging_industrial_lamp_arm_1k.jpg",
+      "path": "models/hanging_industrial_lamp/textures/hanging_industrial_lamp_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_industrial_lamp/hanging_industrial_lamp_glass_nor_gl_1k.jpg",
+      "path": "models/hanging_industrial_lamp/textures/hanging_industrial_lamp_glass_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/hanging_industrial_lamp/hanging_industrial_lamp.bin",
+      "path": "models/hanging_industrial_lamp/hanging_industrial_lamp.bin"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_industrial_pipe_lamp",
@@ -8663,7 +9274,32 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/Television_01/Television_01_1k.gltf",
+      "path": "models/television_01/Television_01_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/Television_01/Television_01.bin",
+      "path": "models/television_01/Television_01.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/Television_01/Television_01_arm_1k.jpg",
+      "path": "models/television_01/textures/Television_01_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/Television_01/Television_01_diff_1k.jpg",
+      "path": "models/television_01/textures/Television_01_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/Television_01/Television_01_nor_gl_1k.jpg",
+      "path": "models/television_01/textures/Television_01_nor_gl_1k.jpg"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_television_02",
@@ -8730,7 +9366,32 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/electric_stove/electric_stove_1k.gltf",
+      "path": "models/electric_stove/electric_stove_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/electric_stove/electric_stove.bin",
+      "path": "models/electric_stove/electric_stove.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/electric_stove/electric_stove_nor_gl_1k.jpg",
+      "path": "models/electric_stove/textures/electric_stove_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/electric_stove/electric_stove_arm_1k.jpg",
+      "path": "models/electric_stove/textures/electric_stove_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/electric_stove/electric_stove_diff_1k.jpg",
+      "path": "models/electric_stove/textures/electric_stove_diff_1k.jpg"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_vintage_microwave",
@@ -9183,7 +9844,44 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/potted_plant_02/potted_plant_02_1k.gltf",
+      "path": "models/potted_plant_02/potted_plant_02_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_02/potted_plant_02_leaves_diff_1k.jpg",
+      "path": "models/potted_plant_02/textures/potted_plant_02_leaves_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/potted_plant_02/potted_plant_02.bin",
+      "path": "models/potted_plant_02/potted_plant_02.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_02/potted_plant_02_pot_rough_1k.jpg",
+      "path": "models/potted_plant_02/textures/potted_plant_02_pot_rough_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_02/potted_plant_02_leaves_rough_1k.jpg",
+      "path": "models/potted_plant_02/textures/potted_plant_02_leaves_rough_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_02/potted_plant_02_pot_diff_1k.jpg",
+      "path": "models/potted_plant_02/textures/potted_plant_02_pot_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_02/potted_plant_02_leaves_nor_gl_1k.jpg",
+      "path": "models/potted_plant_02/textures/potted_plant_02_leaves_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_02/potted_plant_02_pot_nor_gl_1k.jpg",
+      "path": "models/potted_plant_02/textures/potted_plant_02_pot_nor_gl_1k.jpg"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_potted_plant_04",
@@ -9204,7 +9902,32 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/potted_plant_04/potted_plant_04_1k.gltf",
+      "path": "models/potted_plant_04/potted_plant_04_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/potted_plant_04/potted_plant_04.bin",
+      "path": "models/potted_plant_04/potted_plant_04.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_04/potted_plant_04_nor_gl_1k.jpg",
+      "path": "models/potted_plant_04/textures/potted_plant_04_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_04/potted_plant_04_arm_1k.jpg",
+      "path": "models/potted_plant_04/textures/potted_plant_04_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_04/potted_plant_04_diff_1k.jpg",
+      "path": "models/potted_plant_04/textures/potted_plant_04_diff_1k.jpg"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_pachira_aquatica_01",
@@ -9467,7 +10190,32 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/ceramic_vase_01/ceramic_vase_01_1k.gltf",
+      "path": "models/ceramic_vase_01/ceramic_vase_01_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/ceramic_vase_01/ceramic_vase_01_nor_gl_1k.jpg",
+      "path": "models/ceramic_vase_01/textures/ceramic_vase_01_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/ceramic_vase_01/ceramic_vase_01_diff_1k.jpg",
+      "path": "models/ceramic_vase_01/textures/ceramic_vase_01_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/ceramic_vase_01/ceramic_vase_01_arm_1k.jpg",
+      "path": "models/ceramic_vase_01/textures/ceramic_vase_01_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/ceramic_vase_01/ceramic_vase_01.bin",
+      "path": "models/ceramic_vase_01/ceramic_vase_01.bin"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_ceramic_vase_02",
@@ -9686,7 +10434,44 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/hanging_picture_frame_01/hanging_picture_frame_01_1k.gltf",
+      "path": "models/hanging_picture_frame_01/hanging_picture_frame_01_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_01/hanging_picture_frame_01_artwork_roughness_1k.jpg",
+      "path": "models/hanging_picture_frame_01/textures/hanging_picture_frame_01_artwork_roughness_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/hanging_picture_frame_01/hanging_picture_frame_01.bin",
+      "path": "models/hanging_picture_frame_01/hanging_picture_frame_01.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_01/hanging_picture_frame_01_artwork_diff_1k.jpg",
+      "path": "models/hanging_picture_frame_01/textures/hanging_picture_frame_01_artwork_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_01/hanging_picture_frame_01_artwork_nor_gl_1k.jpg",
+      "path": "models/hanging_picture_frame_01/textures/hanging_picture_frame_01_artwork_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_01/hanging_picture_frame_01_arm_1k.jpg",
+      "path": "models/hanging_picture_frame_01/textures/hanging_picture_frame_01_arm_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_01/hanging_picture_frame_01_nor_gl_1k.jpg",
+      "path": "models/hanging_picture_frame_01/textures/hanging_picture_frame_01_nor_gl_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_01/hanging_picture_frame_01_diff_1k.jpg",
+      "path": "models/hanging_picture_frame_01/textures/hanging_picture_frame_01_diff_1k.jpg"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_standing_picture_frame_01",
@@ -9812,7 +10597,32 @@
    ],
    "source": "polyhaven",
    "licence": "CC0",
-   "author": "Poly Haven"
+   "author": "Poly Haven",
+   "remote": true,
+   "download": {
+    "files": [
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/throw_pillows_01/throw_pillows_01_1k.gltf",
+      "path": "models/throw_pillows_01/throw_pillows_01_1k.gltf"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/throw_pillows_01/throw_pillows_01_rough_1k.jpg",
+      "path": "models/throw_pillows_01/textures/throw_pillows_01_rough_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/throw_pillows_01/throw_pillows_01_diff_1k.jpg",
+      "path": "models/throw_pillows_01/textures/throw_pillows_01_diff_1k.jpg"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/throw_pillows_01/throw_pillows_01.bin",
+      "path": "models/throw_pillows_01/throw_pillows_01.bin"
+     },
+     {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/throw_pillows_01/throw_pillows_01_nor_gl_1k.jpg",
+      "path": "models/throw_pillows_01/textures/throw_pillows_01_nor_gl_1k.jpg"
+     }
+    ]
+   }
   },
   {
    "id": "asset_ph_book_encyclopedia_set_01",
@@ -10649,7 +11459,7 @@
    ],
    "source": "khronos-gltf-sample-assets",
    "licence": "CC-BY-4.0",
-   "author": "DGG / Eric Chadwick) + CC0 (Fran Calvente",
+   "author": "DGG / Eric Chadwick; Fran Calvente (CC0)",
    "remote": true,
    "download": {
     "files": [
@@ -10870,7 +11680,7 @@
    ],
    "source": "khronos-gltf-sample-assets",
    "licence": "CC-BY-4.0",
-   "author": "DGG / Eric Chadwick) + CC0 (Rico Cilliers",
+   "author": "DGG / Eric Chadwick; Rico Cilliers (CC0)",
    "remote": true,
    "download": {
     "files": [

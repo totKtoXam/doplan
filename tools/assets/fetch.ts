@@ -1,12 +1,15 @@
 /**
  * doplan asset fetcher.
  *
- *   pnpm exec tsx tools/assets/fetch.ts [--all] [--only=models|materials|hdris] [--limit=N]
+ *   pnpm exec tsx tools/assets/fetch.ts [--all] [--only=models|materials|hdris] [--limit=N] [--no-optimize]
  *
  * Reads tools/assets/manifest.json, downloads the BUNDLED core pack (or everything with --all)
  * into resources/assets and (re)writes resources/assets/catalog.json + LICENSES.md.
  * Every manifest entry that is not downloaded locally becomes a `remote: true` catalog entry with a
  * `download` field ({ files } or { zip }) so the app can fetch it on demand into the user library.
+ *
+ * Bundled JPEG textures are then re-encoded in place for a smaller installer (tools/assets/optimize.ts,
+ * idempotent; --no-optimize keeps the source files as downloaded).
  *
  * Resumable (existing non-empty files are skipped), never aborts on a single failure.
  * Downloads are untrusted: only whitelisted extensions are written, paths are sanitised, nothing is executed.
@@ -22,6 +25,8 @@ import { NodeIO } from '@gltf-transform/core'
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions'
 import { getBounds, metalRough, prune, textureCompress } from '@gltf-transform/functions'
 import { gltfExtents, implausibleSize, sizeFromGltf, type GltfJson } from './sizes'
+import { optimizeTextures } from './optimize'
+import { khronosCredits, parseLicence } from './licence'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..', '..')
@@ -35,20 +40,14 @@ const ALLOWED_EXT = new Set(['.gltf', '.glb', '.bin', '.jpg', '.jpeg', '.png', '
 const argv = process.argv.slice(2)
 const FLAG_ALL = argv.includes('--all')
 const ONLY = argv.find((a) => a.startsWith('--only='))?.slice(7) as 'models' | 'materials' | 'hdris' | undefined
+const NO_OPTIMIZE = argv.includes('--no-optimize')
 const LIMIT = Number(argv.find((a) => a.startsWith('--limit='))?.slice(8) ?? '0') || 0
 const want = (k: 'models' | 'materials' | 'hdris') => !ONLY || ONLY === k
 
 // ───────────────────────────── bundled core pack ─────────────────────────────
-const BUNDLE_MODELS = new Set([
-  'ph:sofa_02', 'ph:sofa_03', 'ph:Sofa_01', 'ph:modern_arm_chair_01', 'ph:mid_century_lounge_chair',
-  'ph:dining_chair_02', 'ph:bar_chair_round_01', 'ph:dining_table', 'ph:modern_coffee_table_01',
-  'ph:coffee_table_round_01', 'ph:side_table_01', 'ph:ClassicNightstand_01', 'ph:GothicBed_01',
-  'ph:modern_wooden_cabinet', 'ph:drawer_cabinet', 'ph:steel_frame_shelves_01', 'ph:wooden_display_shelves_01',
-  'ph:ClassicConsole_01', 'ph:modern_ceiling_lamp_01', 'ph:desk_lamp_arm_01', 'ph:hanging_industrial_lamp',
-  'ph:industrial_wall_lamp', 'ph:potted_plant_02', 'ph:potted_plant_04', 'ph:ceramic_vase_01',
-  'ph:hanging_picture_frame_01', 'ph:throw_pillows_01', 'ph:Television_01', 'ph:electric_stove',
-  'ph:metal_office_desk', 'khr:SheenChair', 'khr:GlassVaseFlowers',
-])
+// Poly Haven models are on-demand downloads (installer size): the box keeps the models that need a repair at
+// fetch time (`fix` in the manifest, always bundled: the raw download is not usable as is) and these two.
+const BUNDLE_MODELS = new Set(['khr:SheenChair', 'khr:GlassVaseFlowers'])
 const BUNDLE_MATERIALS = new Set([
   'ph:herringbone_parquet', 'ph:laminate_floor_02', 'ph:wood_floor', 'ph:oak_veneer_01', 'ph:american_walnut_veneer',
   'ph:white_oak_veneer', 'ph:plank_flooring', 'ph:dark_wooden_planks', 'ph:long_white_tiles', 'ph:terrazzo_tiles',
@@ -338,11 +337,6 @@ async function loadAcgMeta(ids: string[]): Promise<void> {
 }
 
 // ───────────────────────────── models ─────────────────────────────
-function parseLicence(l: string): { licence: string; author?: string } {
-  const m = /^(CC0-1\.0|CC-BY-4\.0)\s*\((.*)\)\s*$/.exec(l)
-  if (m) return { licence: m[1] === 'CC0-1.0' ? 'CC0' : m[1], author: m[2] }
-  return { licence: l.startsWith('CC0') ? 'CC0' : l }
-}
 function modelPrefix(id: string): string {
   const p = id.slice(0, id.indexOf(':'))
   return p === 'ph' ? 'ph' : p === 'khr' ? 'khr' : p === 'kaykit' ? 'kk' : p
@@ -647,10 +641,11 @@ Machine-readable per-entry licence/author fields are in \`catalog.json\`.
 ## Khronos glTF-Sample-Assets (https://github.com/KhronosGroup/glTF-Sample-Assets)
 - Per-model licences. The script only accepts CC0 and CC-BY-4.0.
 - **CC0** (bundled): SheenChair, GlassVaseFlowers.
-- **CC-BY-4.0** (on-demand only, attribution REQUIRED when downloaded and used; author is stored in the catalog \`author\` field):
-  GlamVelvetSofa, SheenWoodLeatherSofa, ChairDamaskPurplegold, CommercialRefrigerator, AnisotropyBarnLamp,
-  IridescenceLamp, GlassHurricaneCandleHolder, DiffuseTransmissionPlant, LightsPunctualLamp.
-  The app must list them in its credits screen with owner and artist (see \`author\`).
+- **CC-BY-4.0** (on-demand only, attribution REQUIRED when downloaded and used; the app shows the author from the catalog
+  \`author\` field). Some models combine CC-BY parts with CC0 parts: the CC0 authors are marked "(CC0)". Generated from the
+  catalog:
+
+@@KHRONOS@@
 
 ## KayKit Furniture Bits (https://github.com/KayKit-Game-Assets/KayKit-Furniture-Bits-1.0)
 - Licence: **CC0 1.0**. Stylised low-poly, on-demand only.
@@ -676,7 +671,7 @@ function licensesMd(assets: Asset[], mf: Manifest): string {
     .filter((a) => a.source?.includes('sketchfab.com'))
     .sort((a, b) => (a.nameRu ?? a.name).localeCompare(b.nameRu ?? b.name, 'ru'))
     .map((a) => `- ${a.nameRu ?? a.name}: "${a.name}" by ${a.author ?? 'unknown'}, ${a.source}, ${a.licence}${fixed.has(a.id) ? ' (modified: repaired for doplan)' : ''}`)
-  return LICENSES_MD.replace('@@SKETCHFAB@@', rows.join('\n') || '- (none)')
+  return LICENSES_MD.replace('@@KHRONOS@@', khronosCredits(assets).join('\n') || '- (none)').replace('@@SKETCHFAB@@', rows.join('\n') || '- (none)')
 }
 
 // ───────────────────────────── main ─────────────────────────────
@@ -711,6 +706,11 @@ async function main(): Promise<void> {
     catalog.materials = merge(prev.materials, materials)
     catalog.assets = merge(prev.assets, assets)
     catalog.hdris = merge(prev.hdris, hdris)
+  }
+  // smaller bundled textures (same names and format, so the catalog does not change); idempotent
+  if (!NO_OPTIMIZE) {
+    const o = await optimizeTextures(OUT, { log: (s) => fail('optimize', s.trim()) })
+    log(`textures: ${o.files} jpeg, ${o.encoded} re-encoded, ${(o.before / 1048576).toFixed(1)} MB -> ${(o.after / 1048576).toFixed(1)} MB`)
   }
   await writeFile(catalogPath, JSON.stringify(catalog, null, 1))
   await writeFile(path.join(OUT, 'LICENSES.md'), licensesMd(catalog.assets, mf))

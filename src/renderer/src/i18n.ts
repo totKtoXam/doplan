@@ -494,6 +494,18 @@ const en: Record<string, string> = {
   'Здесь предлагается создавать новые проекты («Новый проект», «Сохранить как»).': 'New projects are suggested here (New project, Save as).',
   'Изменить…': 'Change…',
   'По умолчанию': 'Default',
+  'Источники ресурсов': 'Asset sources',
+  'Откуда скачиваются модели, материалы и HDRI, которых нет в установке. Источники перебираются сверху вниз: берётся первый включённый, где элемент есть.': 'Where models, materials and HDRIs that are not in the installation are downloaded from. Sources are tried top to bottom: the first enabled one that has the item is used.',
+  'Нужен адрес https://… или полный путь к папке': 'Enter an https://… address or a full folder path',
+  'Такой источник уже есть': 'This source is already in the list',
+  'Включён': 'Enabled',
+  'doplan (свой репозиторий)': 'doplan (own repository)',
+  'Исходные сайты': 'Original sites',
+  'Выше': 'Move up',
+  'Ниже': 'Move down',
+  'Все источники отключены: скачать ничего не получится.': 'All sources are off: nothing can be downloaded.',
+  'Название источника': 'Source name',
+  'Адрес источника': 'Source address',
   'История версий': 'Version history',
   'Инструкции для ИИ': 'AI instructions',
   'Инструкции для ИИ (AGENTS.md)': 'AI instructions (AGENTS.md)',
@@ -631,6 +643,11 @@ export function t(key: string, vars?: Vars): string {
 export function useT(): typeof t {
   const lang = useUi((s) => s.lang)
   return useCallback((key: string, vars?: Vars) => translate(lang, key, vars), [lang])
+}
+
+/** `s` is `key` in one of the languages: text stored under a language the UI has since been switched from */
+export function isAnyTranslation(s: string, key: string): boolean {
+  return s === key || Object.values(dictionaries).some((d) => d[key] === s)
 }
 
 /** Register extra translations at runtime (e.g. from a module that owns many strings). */

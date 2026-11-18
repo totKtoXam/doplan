@@ -50,9 +50,10 @@ Never re-use a version number that installed copies may already have downloaded;
 
 ## Heavy assets and the assets pack
 
-`resources/assets/{models,materials,hdris}` (~175 MB of CC0 files) are gitignored; `catalog.json`, `thumbs/` and
+`resources/assets/{models,materials,hdris}` (~70 MB of CC0 files) are gitignored; `catalog.json`, `thumbs/` and
 `LICENSES.md` are tracked. Locally they come from `pnpm assets:fetch` (live Poly Haven / ambientCG APIs; it also
-rewrites `catalog.json`). CI must not depend on live APIs, so it restores them from a fixed **assets pack**:
+rewrites `catalog.json` and re-encodes the JPEG textures, see `pnpm assets:optimize` below). Everything else in the
+catalog is on demand (`remote: true`) and is downloaded by the app from the asset feeds (docs/ASSET-FEEDS.md). CI must not depend on live APIs, so it restores them from a fixed **assets pack**:
 
 - `tools/assets/pack.json` — the one place that names the pack: number `N`, the zip's `sha256`, size, file count.
 - GitHub release `assets-N` (not a `v*` tag, **not marked Latest**, so electron-updater never sees it) holds
@@ -64,7 +65,8 @@ Scripts:
 
 | command | what it does |
 | --- | --- |
-| `pnpm assets:check [--root=DIR]` | every bundled (`remote !== true`) `models/…`, `materials/…`, `hdris/…` path in `catalog.json` exists and is non-empty, and every bundled `.gltf`'s buffers/images exist. Run it before `pnpm dist`. |
+| `pnpm assets:check [--root=DIR]` | every bundled (`remote !== true`) `models/…`, `materials/…`, `hdris/…` path in `catalog.json` exists and is non-empty, every bundled `.gltf`'s buffers/images exist, and no unused file is lying in those folders (it would be shipped: e.g. a model left over after it became on demand). Run it before `pnpm dist`. |
+| `pnpm assets:optimize [--dry]` | re-encodes the JPEG textures under `resources/assets` with mozjpeg (colour q88 4:2:0, normal maps q85 4:4:4, packed ORM/ARM q88 4:4:4, roughness/AO/metalness as 1-channel greyscale of the channel three.js reads). Each file gets a `doplan-optimized/1` JPEG comment, so re-runs skip it; a file that would not shrink by 5% is kept as is. `assets:fetch` runs it (unless `--no-optimize`). |
 | `pnpm assets:pack [--pack=N] [--out=DIR]` | zips the three folders (deterministic: same files → same sha256) into `DIR/doplan-assets-N.zip` (default `release/assets-pack/`) and writes `tools/assets/pack.json`. Refuses if `assets:check` fails, or if the files changed but `N` was not bumped. |
 | `pnpm assets:unpack <zip> [--dest=DIR]` | verifies the sha256 against `pack.json` and extracts into `resources/assets` (or `DIR`); only `models|materials|hdris/…` entries are accepted, and it refuses to write over existing folders. |
 
@@ -74,6 +76,7 @@ Do this whenever the bundled assets change (a new `pnpm assets:fetch`, new/remov
 the next tag fails at `assets:check`, or ships stale files.
 
 ```bash
+pnpm assets:optimize              # no-op if assets:fetch already ran it
 pnpm assets:check
 pnpm assets:pack --pack=2          # next number; prints the upload command
 gh release create assets-2 release/assets-pack/doplan-assets-2.zip -R totKtoXam/doplan --latest=false --title "doplan assets pack 2" --notes "CC0 models/materials/HDRIs for CI release builds (not an app release)."

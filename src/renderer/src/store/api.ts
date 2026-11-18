@@ -6,9 +6,14 @@
 import type { AppSettings, DoplanApi, FileFilter, MenuCommand } from '@shared/ipc'
 import { DEFAULT_AI_SETTINGS } from '@shared/aiChat'
 import { releasePageUrl } from '@shared/updater'
+import { DEFAULT_FEEDS } from '@shared/feeds'
+import { ghInstallHint, type GithubSyncStatus } from '@shared/github'
+
+/** the web build has no git: GitHub sync lives in the desktop app */
+const webSync: GithubSyncStatus = { state: 'unavailable', reason: 'GitHub sync is available in the doplan desktop app', ahead: 0, behind: 0 }
 
 /** version shown by the web build (no Electron); keep in step with package.json */
-const WEB_VERSION = '0.13.0-web'
+const WEB_VERSION = '0.15.0-web'
 
 const SETTINGS_KEY = 'doplan.settings'
 
@@ -20,6 +25,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   anthropicApiKeySet: false,
   recent: [],
   projectsDir: null,
+  assetFeeds: DEFAULT_FEEDS.map((f) => ({ ...f })),
 }
 
 function readLocalSettings(): AppSettings {
@@ -301,6 +307,39 @@ function createFallbackApi(): DoplanApi {
       onLogin: noopUnsub,
     },
     // ── end ai-chat block ──
+    github: {
+      async ghStatus() {
+        return { installed: false, loggedIn: false, install: ghInstallHint('browser', false) }
+      },
+      async installGh() {
+        return false
+      },
+      async login() {},
+      async loginCancel() {},
+      onLogin: noopUnsub,
+      async status() {
+        return webSync
+      },
+      async connect() {
+        throw new Error(webSync.reason)
+      },
+      async create() {
+        throw new Error(webSync.reason)
+      },
+      async push() {
+        throw new Error(webSync.reason)
+      },
+      async pull() {
+        throw new Error(webSync.reason)
+      },
+      async resolve() {
+        throw new Error(webSync.reason)
+      },
+      async disconnect() {
+        return webSync
+      },
+      async openPage() {},
+    },
     updates: {
       async get() {
         return { mode: 'disabled', current: WEB_VERSION, status: { kind: 'idle' } }
@@ -313,6 +352,19 @@ function createFallbackApi(): DoplanApi {
         window.open(releasePageUrl(version), '_blank', 'noopener')
       },
       onState: noopUnsub,
+    },
+    pages: {
+      async status() {
+        return { gh: { installed: false, loggedIn: false }, git: false, record: null, outdated: false, project: null, separateName: '' }
+      },
+      async publish() {
+        throw new Error('Публикация доступна только в настольном приложении')
+      },
+      async unpublish() {},
+      onProgress: noopUnsub,
+      async openUrl(url: string) {
+        window.open(url, '_blank', 'noopener')
+      },
     },
     window: {
       setTitle(title: string, dirty: boolean) {

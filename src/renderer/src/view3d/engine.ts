@@ -40,6 +40,7 @@ import { createProceduralFactory } from './procedural'
 import { mountPerfOverlay, perfBegin, perfBeginOnce, perfEnabled, perfEnd, perfPending, perfRecord, perfTime } from './perf'
 import { getQuality, getShared } from './quality'
 import { createMeasure3D } from './measure3d'
+import { isViewOnly } from '@/store/viewOnly'
 
 type CameraMode = 'orbit' | 'walk' | 'top'
 
@@ -429,7 +430,8 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     const lighting = createLighting(ctx)
     const post = createPost(ctx)
     const controls = createControls(ctx) as ControlsWithView
-    const interaction = createInteraction(ctx, { controls, post })
+    // the published viewer never edits: no picking, dragging or gizmos
+    const interaction = isViewOnly() ? { dispose() {} } : createInteraction(ctx, { controls, post })
     const pathTracer = createPathTracer(ctx)
     return { lighting, post, controls, interaction, pathTracer }
   }

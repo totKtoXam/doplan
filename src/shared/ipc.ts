@@ -12,7 +12,10 @@ import type { Asset, Catalog, Hdri, Material } from '../core/types'
 // ── ai-chat block ──
 import type { AiChatApi } from './aiChat'
 // ── end ai-chat block ──
+import type { GithubApi } from './github'
 import type { UpdatesApi } from './updater'
+import type { PagesApi } from './pagesSite'
+import type { AssetFeed } from './feeds'
 
 export interface FileFilter {
   name: string
@@ -35,6 +38,8 @@ export interface AppSettings {
   recent: RecentProject[]
   /** default parent folder for new projects chosen in Settings; null → Documents/doplan */
   projectsDir: string | null
+  /** where on-demand catalog entries are downloaded from, in priority order (see shared/feeds.ts) */
+  assetFeeds: AssetFeed[]
 }
 
 // ── project folders + git versions ──
@@ -287,8 +292,14 @@ export interface DoplanApi {
   aiChat: AiChatApi
   // ── end ai-chat block ──
 
+  /** the open project's GitHub repository (gh sign-in, connect, send, get); see src/shared/github.ts */
+  github: GithubApi
+
   /** GitHub Releases updates (electron-updater); see src/shared/updater.ts */
   updates: UpdatesApi
+
+  /** read-only copy of the plan on GitHub Pages; see src/shared/pagesSite.ts */
+  pages: PagesApi
 
   window: {
     setTitle(title: string, dirty: boolean): void

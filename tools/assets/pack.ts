@@ -43,9 +43,11 @@ function main(): void {
   const outDir = path.resolve(arg('out') ?? path.join(ROOT, 'release', 'assets-pack'))
 
   const catalog = JSON.parse(readFileSync(CATALOG_PATH, 'utf8')) as CatalogLike
-  const { checked, missing } = checkBundledAssets(catalog, ASSETS_DIR)
-  if (missing.length) {
-    console.error(`[assets:pack] ${missing.length} of ${checked} bundled files missing, refusing to pack. Run \`pnpm assets:check\`.`)
+  const { checked, missing, stray } = checkBundledAssets(catalog, ASSETS_DIR)
+  if (missing.length || stray.length) {
+    console.error(
+      `[assets:pack] ${missing.length} of ${checked} bundled files missing, ${stray.length} unused files on disk, refusing to pack. Run \`pnpm assets:check\`.`,
+    )
     process.exit(1)
   }
 

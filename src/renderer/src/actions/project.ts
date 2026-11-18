@@ -5,11 +5,13 @@ import { buildCommitMessage } from '@shared/projectFormat'
 import type { DocReload } from '@/contracts'
 import { t } from '@/i18n'
 import { api } from '@/store/api'
-import { docStore, historyPosition, undoLabelsSince } from '@/store/document'
+import { beginSave, docStore, endSave, historyPosition, undoLabelsSince, type SaveSnapshot } from '@/store/document'
 import { handles } from '@/store/handles'
 import { alertDialog, choiceDialog, confirmDialog, promptDialog, toast } from '@/store/notify'
 import { createDialogForks, finishCreateDialog, openCreateDialog, type ProjectKind, projectStore } from '@/store/project'
 import { runProjectHooks } from '@/store/projectHooks'
+// moves the publication record of an id-less file to the id its first save gives it
+import '@/store/pagesKeys'
 import { buildSampleApartment } from '@/store/sample'
 import { uiStore } from '@/store/ui'
 import { currentDoc, errorText } from './util'
@@ -413,7 +415,7 @@ export function pendingCommitMessage(): string {
 export async function saveProject(saveAs = false, opts?: { message?: string; overwrite?: boolean }): Promise<boolean> {
   // an opened copy may be getting an id of its own: the save writes that one
   await runProjectHooks('beforeSave')
-  const { doc, filePath } = docStore.getState()
+  const { filePath, loadId: gen } = docStore.getState()
   const ps = projectStore.getState()
   const folder = ps.kind === 'folder' && !!filePath
   if (saveAs || !filePath || (!folder && ps.kind !== 'zip' && api.platform !== 'browser')) {
@@ -436,10 +438,17 @@ export async function saveProject(saveAs = false, opts?: { message?: string; ove
   }
   message ??= pendingCommitMessage()
 
+  // reopened, reloaded or another version shown while the question was open: not this document any more
+  if (docStore.getState().loadId !== gen) return false
+  // the save may wait (behind a GitHub send): what it writes is this snapshot, not what is on screen later
+  const snap = beginSave()
   try {
-    const id = saveId(doc, filePath, false)
-    const res = await api.project.save(withId(doc, id), filePath, { message, overwrite: opts?.overwrite })
+    const id = saveId(snap.doc, filePath, false)
+    const res = await api.project.save(withId(snap.doc, id), filePath, { message, overwrite: opts?.overwrite })
     if (!res) return false
+    // another project, the same one read again or an old version opened while it waited: the answer is
+    // about a document no longer on screen (its viewing state and saved mark stay as they are)
+    if (stale(snap, filePath)) return false
     if (res.externalChange) {
       const choice = await choiceDialog(
         t('plan.json изменён вне doplan'),
@@ -450,14 +459,16 @@ export async function saveProject(saveAs = false, opts?: { message?: string; ove
           { id: 'overwrite', label: t('Перезаписать'), variant: 'primary' },
         ],
       )
+      if (stale(snap, filePath)) return false
       if (choice === 'overwrite') return saveProject(false, { message, overwrite: true })
       if (choice === 'reload') await openProject(filePath, { skipConfirm: true, reload: ps.viewing ? 'version' : 'disk' })
       return false
     }
-    docStore.getState().markSaved(res.path, id)
-    projectStore.setState((s) => ({ commitMarker: historyPosition(), viewing: null, historyRev: s.historyRev + 1 }))
+    docStore.getState().markSaved(res.path, id, snap)
+    projectStore.setState((s) => ({ commitMarker: snap.at, viewing: null, historyRev: s.historyRev + 1 }))
     await runProjectHooks('saved', false)
-    void api.project.clearRecovery().catch(() => {})
+    // edits made while the save waited keep their recovery snapshot
+    if (!docStore.getState().dirty) void api.project.clearRecovery().catch(() => {})
     refreshRecent()
     if (res.commitError) toast(t('Сохранено, но версия не записана: {err}', { err: res.commitError }), 'warning', 7000)
     else if (res.commit) toast(t('Сохранено · версия «{msg}»', { msg: message }), 'success')
@@ -466,7 +477,14 @@ export async function saveProject(saveAs = false, opts?: { message?: string; ove
   } catch (err) {
     await alertDialog(t('Не удалось сохранить проект'), errorText(err))
     return false
+  } finally {
+    endSave(snap)
   }
+}
+
+/** the save's document is gone from the screen: another load (open, reload, version) or another file (Save As) */
+function stale(snap: SaveSnapshot, filePath: string): boolean {
+  return docStore.getState().loadId !== snap.loadId || otherFileOpen(filePath)
 }
 
 /** single-file save (.doplan opened earlier, or the browser fallback) */

@@ -6,21 +6,27 @@ import { shell } from 'electron'
 import type { PagesConfig, PagesInspection, RepoRef } from '@shared/pagesSite'
 import { PAGES_BRANCH, PAGES_MARKER, pagesUrlOf } from '@shared/pagesSite'
 import { accountPlan, createRepo, runGh, setRepoVisibility, type GhResult } from './github'
+import { httpStatus, PagesGhError } from './pagesError'
 import { msg } from './settings'
 
-/** a gh failure in plain words (the Pages calls: "no admin rights" is the usual refusal) */
-export function ghError(r: GhResult, what: string): Error {
+/** a gh failure in plain words, with its kind (the Pages calls: "no admin rights" is the usual refusal) */
+export function ghError(r: GhResult, what: string): PagesGhError {
   const out = `${r.stderr}\n${r.stdout}`
-  if (/HTTP 401|authentication|not logged in|auth login/i.test(out)) return new Error(msg('Сначала войдите в GitHub.', 'Sign in to GitHub first.'))
-  if (/HTTP 403|must have admin|Resource not accessible/i.test(out))
-    return new Error(msg(`${what}: у этой учётной записи GitHub нет прав администратора репозитория.`, `${what}: this GitHub account has no admin rights on the repository.`))
-  if (/could not resolve host|timed out|network|ECONN/i.test(out)) return new Error(msg(`${what}: нет связи с GitHub.`, `${what}: cannot reach GitHub.`))
+  const status = httpStatus(out)
+  if (status === 401 || /authentication|not logged in|auth login/i.test(out)) return new PagesGhError(msg('Сначала войдите в GitHub.', 'Sign in to GitHub first.'), 'auth', status)
+  if (status === 403 || /must have admin|Resource not accessible/i.test(out))
+    return new PagesGhError(
+      msg(`${what}: у этой учётной записи GitHub нет прав администратора репозитория.`, `${what}: this GitHub account has no admin rights on the repository.`),
+      'forbidden',
+      status,
+    )
+  if (/could not resolve host|timed out|network|ECONN/i.test(out)) return new PagesGhError(msg(`${what}: нет связи с GitHub.`, `${what}: cannot reach GitHub.`), 'network', status)
   const line =
     out
       .split('\n')
       .map((l) => l.trim())
       .find(Boolean) ?? ''
-  return new Error(`${what}: ${line.slice(0, 300)}`)
+  return new PagesGhError(`${what}: ${line.slice(0, 300)}`, status === 404 ? 'notFound' : 'unknown', status)
 }
 
 // ───────────── repositories ─────────────
@@ -30,17 +36,19 @@ export interface RepoState {
   isPrivate: boolean
   /** the signed-in user can push to it (write or admin access) */
   canPush?: boolean
+  /** its default branch (GitHub refuses to delete it) */
+  defaultBranch?: string
 }
 
 export async function repoState(ref: RepoRef): Promise<RepoState> {
-  const jq = '"\\(.private) \\((.permissions.push // false) or (.permissions.admin // false))"'
+  const jq = '"\\(.private) \\((.permissions.push // false) or (.permissions.admin // false)) \\(.default_branch // "")"'
   const r = await runGh(['api', `repos/${ref.owner}/${ref.repo}`, '--jq', jq], 30_000)
   if (r.code !== 0) {
     if (/HTTP 404|Not Found/i.test(r.stderr)) return { exists: false, isPrivate: false }
     throw ghError(r, msg('Не удалось узнать о репозитории', 'Could not read the repository'))
   }
-  const [priv, push] = r.stdout.trim().split(/\s+/)
-  return { exists: true, isPrivate: priv === 'true', canPush: push === 'true' }
+  const [priv, push, def] = r.stdout.trim().split(/\s+/)
+  return { exists: true, isPrivate: priv === 'true', canPush: push === 'true', ...(def ? { defaultBranch: def } : {}) }
 }
 
 /**

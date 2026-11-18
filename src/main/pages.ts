@@ -60,11 +60,12 @@ import {
 } from '@shared/pagesSite'
 import { CH } from './channels'
 import { atomicWrite, readJson } from './fsutil'
-import { findGit, gitInit, gitPushRef } from './git'
+import { findGit, gitInit, gitPushRef, gitRemoteUrls, gitUpstreamBranch } from './git'
 import { ghLoginText, ghMissingText, ghStatus, gitCredentialArgs } from './github'
 import { handleIpc } from './ipc'
 import { buildSite } from './pagesBuild'
 import { createPublicRepo, disablePages, enablePages, inspectPages, makePublic, openPagesUrl, ownerPlan, repoState } from './pagesGh'
+import { isNoAccess } from './pagesError'
 import { pushSite, type GitRunner } from './pagesGit'
 import { mainDir, paths } from './paths'
 import { getProjectRoot } from './projectFolder'
@@ -219,6 +220,7 @@ async function gitRunner(): Promise<GitRunner> {
 const remoteOf = (ref: RepoRef) => `https://github.com/${ref.owner}/${ref.repo}.git`
 const refOf = (r: PagesRecord): RepoRef => ({ owner: r.owner, repo: r.repo })
 const sameName = (a: string, b: string | undefined) => !!b && a.toLowerCase() === b.toLowerCase()
+const sameRepo = (a: RepoRef | null, b: RepoRef) => !!a && repoKey(a) === repoKey(b)
 
 const separateBase = (project: RepoRef | null, name: string, docId: string) => project?.repo ?? planSlug(name, docId)
 
@@ -283,11 +285,11 @@ async function findOwn(project: RepoRef | null, login: string | undefined, base:
   const st = project ? await repoState(project) : null
   if (project && st?.exists && (st.canPush || sameName(project.owner, login))) {
     const insp = await inspectPages(project)
-    if (taggedFor(insp, tags)) return adoptedRecord(project, insp, false)
+    if (taggedFor(insp, tags) && insp.pages) return adoptedRecord(project, insp, false)
   }
   if (login) {
     const slot = await viewRepoFor(login, base, docId, aliases, made).catch(() => null)
-    if (slot?.tagged) return adoptedRecord(slot.ref, slot.insp, true)
+    if (slot?.tagged && slot.insp.pages) return adoptedRecord(slot.ref, slot.insp, true)
   }
   return null
 }
@@ -331,13 +333,60 @@ async function removeBranch(work: string, ref: RepoRef, expected: string): Promi
   }
 }
 
-/** turns off doplan's own Pages site and deletes doplan's own gh-pages branch; anything else stays */
+/**
+ * The open project syncs with the gh-pages branch of `ref` (it was connected to a site repository):
+ * a site pushed there would replace the project's history on GitHub, and taking it down would delete it.
+ */
+async function guardSyncBranch(ref: RepoRef): Promise<void> {
+  const root = getProjectRoot()
+  if (!root) return
+  const urls = await gitRemoteUrls(root).catch(() => [] as string[])
+  if (!urls.some((u) => sameRepo(parseGithubRemote(u), ref))) return
+  if ((await gitUpstreamBranch(root).catch(() => null)) !== PAGES_BRANCH) return
+  throw new Error(
+    msg(
+      `Проект синхронизируется с веткой gh-pages репозитория ${ref.owner}/${ref.repo}, поэтому сайт плана туда не публикуется и не снимается. Подключите проект к другому репозиторию.`,
+      `The project syncs with the gh-pages branch of ${ref.owner}/${ref.repo}, so the plan site is neither published there nor taken down. Connect the project to another repository.`,
+    ),
+  )
+}
+
+/**
+ * A gh-pages branch that is the repository's default one (a `-view` repository doplan made starts
+ * empty, so its first branch is gh-pages) cannot be deleted: its content is replaced by one commit
+ * holding only doplan's marker and a note, so nothing of the plan stays there.
+ */
+async function emptyBranch(work: string, ref: RepoRef, head: string, marker: string): Promise<void> {
+  const dir = join(work, 'empty')
+  await fsp.rm(dir, { recursive: true, force: true })
+  await fsp.mkdir(dir, { recursive: true })
+  try {
+    await fsp.writeFile(join(dir, PAGES_MARKER), marker)
+    await fsp.writeFile(
+      join(dir, 'README.md'),
+      msg('План, опубликованный здесь для просмотра в doplan, снят с публикации.\n', 'The plan published here for viewing with doplan was unpublished.\n'),
+    )
+    await pushSite(await gitRunner(), dir, remoteOf(ref), PAGES_BRANCH, msg('План снят с публикации (doplan)', 'Plan unpublished (doplan)'), head)
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true }).catch(() => undefined)
+  }
+}
+
+/** takes doplan's gh-pages branch away: deleted, or emptied when it is the default branch */
+async function dropBranch(work: string, ref: RepoRef, head: string, marker: string, defaultBranch: string | undefined): Promise<void> {
+  await guardSyncBranch(ref)
+  if (defaultBranch === PAGES_BRANCH) await emptyBranch(work, ref, head, marker)
+  else await removeBranch(work, ref, head)
+}
+
+/** turns off doplan's own Pages site and takes doplan's own gh-pages branch away; anything else stays */
 async function takeDown(work: string, ref: RepoRef, pubId: string | undefined): Promise<void> {
-  if (!(await repoState(ref)).exists) return
+  const st = await repoState(ref)
+  if (!st.exists) return
   const insp = await inspectPages(ref)
   const own = pagesOwnership(insp, pubId, true)
   if (own.site === 'ours') await disablePages(ref)
-  if (own.branch === 'ours' && insp.branchSha) await removeBranch(work, ref, insp.branchSha)
+  if (own.branch === 'ours' && insp.branchSha) await dropBranch(work, ref, insp.branchSha, insp.marker ?? '', st.defaultBranch)
 }
 
 // ───────────── status ─────────────
@@ -529,7 +578,9 @@ export async function publishPlan(req: PagesPublishRequest, emit: (p: PagesProgr
         insp = EMPTY
       }
     }
-    await fsp.writeFile(join(siteDir, PAGES_MARKER), pagesMarker(pubId, docTag(req.docId)))
+    const marker = pagesMarker(pubId, docTag(req.docId))
+    await fsp.writeFile(join(siteDir, PAGES_MARKER), marker)
+    await guardSyncBranch(ref)
 
     // ── push + Pages ──
     emit({ step: 'push' })
@@ -541,7 +592,10 @@ export async function publishPlan(req: PagesPublishRequest, emit: (p: PagesProgr
       url = await enablePages(ref, own.site === 'ours' ? insp.pages : null)
     } catch (e) {
       // Pages refused (an owner plan without Pages for private repositories…): take the new branch back
-      if (insp.branchSha === null) await removeBranch(work, ref, sha).catch(() => undefined)
+      if (insp.branchSha === null)
+        await repoState(ref)
+          .then((st) => dropBranch(work, ref, sha, marker, st.defaultBranch))
+          .catch(() => undefined)
       throw e
     }
 
@@ -609,8 +663,7 @@ export async function unpublishPlan(docId: string): Promise<void> {
     try {
       await takeDown(workDir(docId), refOf(rec), rec.pubId)
     } catch (e) {
-      const m = (e as Error).message
-      if (/HTTP 403|\b403\b|permission|denied/i.test(m)) throw await noAccess(m)
+      if (isNoAccess(e)) throw await noAccess((e as Error).message)
       throw e
     }
     await forget()

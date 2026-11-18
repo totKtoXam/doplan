@@ -1084,7 +1084,13 @@ export async function gitPushRef(
     try {
       await runNet(root, ['push', '--quiet', ...lease, remote, `:refs/heads/${branch}`], net)
     } catch (err) {
-      if (!(err instanceof GitError && /remote ref does not exist|unable to delete .*: remote ref/i.test(`${err.stderr}\n${err.message}`))) throw err
+      if (err instanceof GitError && /remote ref does not exist|unable to delete .*: remote ref/i.test(`${err.stderr}\n${err.message}`)) return
+      // with a lease, a branch already gone is refused as "stale info" too: gone is what was asked for
+      if (lease.length && err instanceof GitError && /stale info/i.test(err.stderr)) {
+        const heads = await runNet(root, ['ls-remote', '--heads', remote, `refs/heads/${branch}`], net)
+        if (!trimOut(heads)) return
+      }
+      throw err
     }
     return
   }

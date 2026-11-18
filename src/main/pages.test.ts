@@ -27,6 +27,8 @@ interface FakeRepo {
   push?: boolean
   /** the signed-in user may change the Pages settings (default: push) */
   admin?: boolean
+  /** default 'main'; a repository doplan creates starts empty, so its first branch gh-pages is the default */
+  defaultBranch?: string
 }
 
 const gh = {
@@ -35,6 +37,9 @@ const gh = {
   orgPlans: {} as Record<string, string | undefined>,
   failEnable: false,
   failPush: 0,
+  /** the open project's sync: origin URLs and upstream branch */
+  syncUrls: [] as string[],
+  syncBranch: null as string | null,
   calls: [] as string[],
   seq: 0,
 }
@@ -56,6 +61,8 @@ vi.mock('./window', () => ({ sendToRenderer: () => undefined }))
 vi.mock('./git', () => ({
   findGit: async () => 'git',
   gitInit: async () => undefined,
+  gitRemoteUrls: async () => gh.syncUrls,
+  gitUpstreamBranch: async () => gh.syncBranch,
   // only deletes here (the site itself goes up through pagesGit.pushSite)
   gitPushRef: async (_root: string, _net: unknown, src: string | null, _branch: string, opts: { remote: string; expected?: string }) => {
     if (src !== null || !opts.expected) throw new Error('pages: a delete with the checked head only')
@@ -63,6 +70,7 @@ vi.mock('./git', () => ({
     gh.calls.push(`delete ${key}`)
     const r = repo(key)
     if (r.branchSha !== opts.expected) throw new Error('stale info')
+    if ((r.defaultBranch ?? 'main') === 'gh-pages') throw Object.assign(new Error('git push: error: failed to push some refs'), { stderr: 'deletion of the current branch prohibited' })
     r.branchSha = null
     r.marker = null
   },
@@ -84,7 +92,7 @@ vi.mock('./pagesGh', () => ({
   openPagesUrl: async () => undefined,
   repoState: async (ref: RepoRef) => {
     const r = gh.repos.get(k(ref))
-    return r ? { exists: true, isPrivate: r.private, canPush: r.push !== false } : { exists: false, isPrivate: false }
+    return r ? { exists: true, isPrivate: r.private, canPush: r.push !== false, defaultBranch: r.defaultBranch ?? 'main' } : { exists: false, isPrivate: false }
   },
   ownerPlan: async (owner: string, login: string | undefined) => (owner === login ? gh.userPlan : gh.orgPlans[owner]),
   inspectPages: async (ref: RepoRef) => {
@@ -97,7 +105,7 @@ vi.mock('./pagesGh', () => ({
   },
   createPublicRepo: async (name: string) => {
     gh.calls.push(`create me/${name}`)
-    gh.repos.set(`me/${name}`, fresh())
+    gh.repos.set(`me/${name}`, fresh({ defaultBranch: 'gh-pages' }))
     return { owner: 'me', repo: name }
   },
   enablePages: async (ref: RepoRef, current: PagesConfig | null) => {
@@ -109,7 +117,10 @@ vi.mock('./pagesGh', () => ({
   },
   disablePages: async (ref: RepoRef) => {
     gh.calls.push(`nopages ${k(ref)}`)
-    if ((repo(k(ref)).admin ?? repo(k(ref)).push) === false) throw new Error('HTTP 403: Must have admin rights to Repository.')
+    // what pagesGh.ghError makes of 'gh: Must have admin rights to Repository. (HTTP 403)': translated text, typed kind
+    const { PagesGhError } = await import('./pagesError')
+    if ((repo(k(ref)).admin ?? repo(k(ref)).push) === false)
+      throw new PagesGhError('Не удалось выключить GitHub Pages: у этой учётной записи GitHub нет прав администратора репозитория.', 'forbidden', 403)
     repo(k(ref)).pages = null
     return true
   },
@@ -155,6 +166,8 @@ const status = (docId = 'doc1', aliases?: string[]) => pagesStatus({ docId, cont
 beforeEach(() => {
   gh.repos.clear()
   gh.calls = []
+  gh.syncUrls = []
+  gh.syncBranch = null
   gh.userPlan = 'free'
   gh.orgPlans = {}
   gh.failEnable = false
@@ -341,6 +354,39 @@ describe('the record follows its document', () => {
     await publishPlan(req({ target: 'separate' }))
     expect(gh.calls.filter((c) => c.startsWith('create'))).toEqual([])
     expect(gh.calls.filter((c) => c.startsWith('push'))).toEqual([`push me/${name}`])
+  })
+
+  it('unpublishing a separate repository (gh-pages is its default branch): Pages off, the site emptied, the record gone for good', async () => {
+    setOrigin(null)
+    const first = await publishPlan(req({ target: 'separate' }))
+    const ref = `me/${first.record.repo}`
+    gh.calls = []
+    await unpublishPlan('doc1')
+    // the default branch cannot be deleted: one commit with only the marker replaces the site
+    expect(gh.calls).toEqual([`nopages ${ref}`, `push ${ref}`])
+    expect(repo(ref).pages).toBeNull()
+    expect(markerId(repo(ref).marker)).toBe(first.record.pubId)
+    expect(readFileSync(join(userData, 'pages.json'), 'utf8')).not.toContain('doc1')
+    // not taken back as a live publication of this document, and publishing again reuses the repository
+    expect((await status()).record).toBeNull()
+    const again = await publishPlan(req({ target: 'separate' }))
+    expect(again.record.repo).toBe(first.record.repo)
+    expect(gh.calls.filter((c) => c.startsWith('create'))).toEqual([])
+  })
+
+  it('never publishes into, nor takes down, the gh-pages branch the open project syncs with', async () => {
+    setOrigin(null)
+    const first = await publishPlan(req({ target: 'separate' }))
+    const ref = `me/${first.record.repo}`
+    gh.syncUrls = [`https://github.com/${ref}.git`]
+    gh.syncBranch = 'gh-pages'
+    gh.calls = []
+    await expect(publishPlan(req({ target: 'separate', info: { ...req().info, contentHash: 'h2' } }))).rejects.toThrow(/синхронизируется/)
+    await expect(unpublishPlan('doc1')).rejects.toThrow(/синхронизируется/)
+    expect(gh.calls.filter((c) => c.startsWith('push') || c.startsWith('delete'))).toEqual([])
+    // another branch of the same repository, or another repository: no objection
+    gh.syncBranch = 'main'
+    await unpublishPlan('doc1')
   })
 
   it('a request made for another project folder (opened meanwhile) is refused before anything happens', async () => {

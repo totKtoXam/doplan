@@ -174,15 +174,22 @@ export function planSite(doc: unknown, catalog: CatalogLike, builtinIds: Readonl
     if (!files.has(f.path)) files.set(f.path, f)
     return siteUrlOf(f.path)
   }
+  // a not-downloaded entry has no files on this computer: its URLs are rewritten all the same, but
+  // nothing is copied (the viewer shows a placeholder for `remote`, the dialog says so once)
+  const rewriteOnly = (s: string): string => {
+    const f = siteFileOf(s)
+    return f ? siteUrlOf(f.path) : s
+  }
+  const site = (e: Entry, fields: readonly string[]) => mapStrings(pickFields(e, fields), e.remote ? rewriteOnly : rewrite)
   const notDownloaded = [...assets, ...materials, ...hdris].filter((e) => e.remote).map((e) => e.id)
 
   return {
     doc: mapStrings(doc, rewrite),
     catalog: {
       version: catalog.version ?? 1,
-      materials: materials.map((e) => mapStrings(pickFields(e, SITE_CATALOG_FIELDS.materials), rewrite)),
-      assets: assets.map((e) => mapStrings(pickFields(e, SITE_CATALOG_FIELDS.assets), rewrite)),
-      hdris: hdris.map((e) => mapStrings(pickFields(e, SITE_CATALOG_FIELDS.hdris), rewrite)),
+      materials: materials.map((e) => site(e, SITE_CATALOG_FIELDS.materials)),
+      assets: assets.map((e) => site(e, SITE_CATALOG_FIELDS.assets)),
+      hdris: hdris.map((e) => site(e, SITE_CATALOG_FIELDS.hdris)),
     },
     files: [...files.values()],
     notDownloaded,

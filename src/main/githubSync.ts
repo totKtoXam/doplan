@@ -25,6 +25,7 @@ import {
   type SyncErrorCode,
   webUrlOf,
 } from '../shared/github'
+import { PAGES_BRANCH, PAGES_MARKER } from '../shared/pagesSite'
 import { CH } from './channels'
 import {
   findGit,
@@ -426,6 +427,16 @@ async function connectLocked(url: unknown): Promise<ConnectResult> {
     await gitFetch(root, n, REMOTE)
     const branch = heads.head
     const theirs = remoteRef(branch)
+    // a plan published for viewing: the project would go public with the site, and publishing again
+    // or unpublishing would replace or delete what the project syncs with
+    if (branch === PAGES_BRANCH || (await gitTreeFiles(root, theirs)).some((f) => f.path === PAGES_MARKER))
+      throw new GithubError(
+        'unknown',
+        msg(
+          'Это репозиторий сайта плана, опубликованного doplan для просмотра (ветка gh-pages). Проект в него не отправляется: создайте для проекта отдельный репозиторий.',
+          'This is the repository of a plan site published by doplan for viewing (the gh-pages branch). The project is not sent there: create a separate repository for the project.',
+        ),
+      )
     if (!(await gitRelated(root, theirs))) {
       // GitHub has files of its own (a README, a licence…): they join the project; another project is never mixed in
       const files = await gitTreeFiles(root, theirs)

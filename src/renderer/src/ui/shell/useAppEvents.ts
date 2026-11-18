@@ -13,7 +13,7 @@ import { notifyStore, alertDialog } from '@/store/notify'
 import { projectStore } from '@/store/project'
 import { checkForUpdatesManually, initUpdates, installUpdate } from '@/store/updates'
 import { uiStore } from '@/store/ui'
-import { runFileOpen, showWelcome, welcomeBlocksKey, welcomeBlocksMenu } from '@/store/welcome'
+import { runFileDrop, runFileOpen, showWelcome, welcomeBlocksKey, welcomeBlocksMenu } from '@/store/welcome'
 import type { ToolId } from '@/contracts'
 import { shortcutKey } from './keys'
 import { activateTool, TOOLS } from './tools'
@@ -345,7 +345,7 @@ export function useAppEvents(enabled: boolean): { dragOver: boolean } {
       depth = 0
       setDragOver(false)
       const files = Array.from(e.dataTransfer?.files ?? [])
-      void actions.handleDroppedFiles(files)
+      void runFileDrop(() => actions.handleDroppedFiles(files))
     }
     window.addEventListener('dragenter', onDragEnter)
     window.addEventListener('dragover', onDragOver)

@@ -29,11 +29,30 @@ export function hideWelcome(): void {
   if (welcomeStore.getState().open) welcomeStore.setState({ open: false, canClose: false })
 }
 
-// a loaded document closes the screen; so does any change to the document behind it (a file dropped
-// on the screen, a PlanSpec or image sent by a second instance): the user must see what happened to it
+// a loaded document closes the screen. Edits of the document behind it do not by themselves: an AI agent
+// or a sync may still be writing while the user picks a project. Only the user's own file actions over the
+// screen (runFileDrop, runFileOpen) close it when they changed the document: the user must see the result.
 docStore.subscribe((s, prev) => {
-  if (s.loadId !== prev.loadId || s.revision !== prev.revision) hideWelcome()
+  if (s.loadId !== prev.loadId) hideWelcome()
 })
+
+async function runUserFileAction(run: () => Promise<unknown>, launch: boolean): Promise<void> {
+  const before = docStore.getState()
+  try {
+    await run()
+  } catch (err) {
+    console.error('[doplan] file action failed', err)
+  } finally {
+    const after = docStore.getState()
+    if (after.revision !== before.revision) hideWelcome()
+    else if (launch && after.loadId === before.loadId) showWelcome(false)
+  }
+}
+
+/** files dropped on the window (an image as underlay, a PlanSpec as a level, a 3D model …) */
+export function runFileDrop(drop: () => Promise<unknown>): Promise<void> {
+  return runUserFileAction(drop, false)
+}
 
 // ───────────── the file the app was launched to open ─────────────
 
@@ -45,22 +64,14 @@ export function expectLaunchOpen(): void {
 }
 
 /**
- * Runs the open of a file sent by main. When it is the launch file and nothing got loaded or changed
- * (unreadable file, failed import, cancelled question), the start screen is shown instead of a blank
- * untitled editor.
+ * Runs the open of a file sent by main (double click, a second instance). When it is the launch file and
+ * nothing got loaded or changed (unreadable file, failed import, cancelled question), the start screen is
+ * shown instead of a blank untitled editor.
  */
-export async function runFileOpen(open: () => Promise<unknown>): Promise<void> {
+export function runFileOpen(open: () => Promise<unknown>): Promise<void> {
   const launch = launchPending
   launchPending = false
-  const before = docStore.getState()
-  try {
-    await open()
-  } catch (err) {
-    console.error('[doplan] open of a file from main failed', err)
-  } finally {
-    const after = docStore.getState()
-    if (launch && after.loadId === before.loadId && after.revision === before.revision) showWelcome(false)
-  }
+  return runUserFileAction(open, launch)
 }
 
 /** menu commands that still make sense on the welcome screen; the rest would act on the hidden editor */

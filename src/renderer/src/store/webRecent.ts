@@ -135,18 +135,50 @@ export type WebRecent = ReturnType<typeof createWebRecent>
 
 export const webRecent: WebRecent = createWebRecent()
 
+/** per storage and key: the smallest value length that did not fit even with every copy dropped */
+const neverFitsOf = new WeakMap<Storage, Map<string, number>>()
+
 /**
  * setItem for what matters more than the recent copies (the crash-recovery copy, the settings): when the
- * storage is full, the oldest copies go first. Throws when it still does not fit.
+ * storage is full, the oldest copies go first, as few as needed. When the value does not fit even
+ * without any copy (a plan with a huge photo underlay), the copies are put back as they were and it
+ * throws; a value at least that large then does not try again.
  */
 export function setItemMakingRoom(key: string, value: string, storage: Storage | null = defaultStorage(), recent: WebRecent = webRecent): void {
   if (!storage) return
+  let neverFits = neverFitsOf.get(storage)
+  if (!neverFits) neverFitsOf.set(storage, (neverFits = new Map()))
+  try {
+    storage.setItem(key, value)
+    neverFits.delete(key)
+    return
+  } catch (err) {
+    const limit = neverFits.get(key)
+    if (limit !== undefined && value.length >= limit) throw err
+  }
+  let before: string | null = null
+  try {
+    before = storage.getItem(WEB_RECENT_KEY)
+  } catch {
+    /* unreadable: nothing to put back */
+  }
   for (;;) {
     try {
       storage.setItem(key, value)
+      neverFits.delete(key)
       return
     } catch (err) {
-      if (!recent.shed()) throw err
+      if (recent.shed()) continue
+      // nothing left to drop and still too large: dropping the copies was for nothing
+      neverFits.set(key, Math.min(value.length, neverFits.get(key) ?? Infinity))
+      if (before !== null) {
+        try {
+          storage.setItem(WEB_RECENT_KEY, before)
+        } catch {
+          /* it fitted before this write, so it fits again; if not, the copies are lost */
+        }
+      }
+      throw err
     }
   }
 }

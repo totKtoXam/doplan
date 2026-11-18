@@ -30,7 +30,7 @@ vi.stubGlobal('requestAnimationFrame', (cb: () => void) => setTimeout(cb, 0))
 
 const { docStore } = await import('@/store/document')
 const { projectStore } = await import('@/store/project')
-const { welcomeStore, showWelcome, hideWelcome, welcomeBlocksMenu, welcomeBlocksKey, runFileOpen } = await import('@/store/welcome')
+const { welcomeStore, showWelcome, hideWelcome, welcomeBlocksMenu, welcomeBlocksKey, runFileOpen, runFileDrop } = await import('@/store/welcome')
 const { makeEditorInert } = await import('./inert')
 const { prepareStartup } = await import('./startup')
 const { planThumbSvg } = await import('./thumbnail')
@@ -115,14 +115,25 @@ describe('the file the app was launched to open', () => {
 })
 
 describe('the document behind the screen', () => {
-  it('a change to it (a dropped image or PlanSpec, a file from a second instance) closes the screen', async () => {
+  it('a change made by the user (a dropped image or PlanSpec, a file from a second instance) closes the screen', async () => {
     await prepareStartup()
     expect(open()).toBe(true)
-    docStore.getState().transact('underlay', (d) => void (d.meta.name = 'С подложкой'))
+    await runFileDrop(async () => docStore.getState().transact('underlay', (d) => void (d.meta.name = 'С подложкой')))
     expect(open()).toBe(false)
     showWelcome(true)
-    docStore.getState().transact('level', (d) => void (d.meta.name = 'С этажом'))
+    await runFileOpen(async () => docStore.getState().transact('level', (d) => void (d.meta.name = 'С этажом')))
     expect(open()).toBe(false)
+    // a drop that changed nothing (an unsupported file) leaves it up
+    showWelcome(true)
+    await runFileDrop(async () => {})
+    expect(open()).toBe(true)
+  })
+
+  it('a background change (an AI agent still at work, a sync) does not close it under the cursor', () => {
+    showWelcome(true)
+    docStore.getState().transact('agent', (d) => void (d.meta.name = 'Обставлено агентом'))
+    expect(open()).toBe(true)
+    expect(welcomeStore.getState().canClose).toBe(true)
   })
 
   it('the editor is out of reach while the screen is up, and back after', () => {

@@ -105,6 +105,28 @@ describe('web recent projects', () => {
     expect(() => setItemMakingRoom('doplan.recovery', 'r'.repeat(3_000_000), store, r)).toThrow()
   })
 
+  it('keeps the copies when the value would not fit even without them (a plan with a huge photo)', () => {
+    const store = sharedStorage(3_000_000)
+    const r = createWebRecent(store)
+    r.remember(doc('a', 'A', 'x'.repeat(900_000)), null)
+    r.remember(doc('b', 'B', 'y'.repeat(900_000)), null)
+    const listed = store.data.get(WEB_RECENT_KEY)
+    let sheds = 0
+    const counting = { ...r, shed: () => (sheds++, r.shed()) }
+    expect(() => setItemMakingRoom('doplan.recovery', 'r'.repeat(5_000_000), store, counting)).toThrow()
+    expect(store.data.get(WEB_RECENT_KEY)).toBe(listed)
+    expect(r.list().map((e) => e.exists)).toEqual([true, true])
+    // the next autosave of the same plan does not try again
+    sheds = 0
+    expect(() => setItemMakingRoom('doplan.recovery', 'r'.repeat(5_000_100), store, counting)).toThrow()
+    expect(sheds).toBe(0)
+    expect(r.list().map((e) => e.exists)).toEqual([true, true])
+    // a smaller one that fits once a copy goes still makes room
+    setItemMakingRoom('doplan.recovery', 'r'.repeat(1_400_000), store, counting)
+    expect(store.data.get('doplan.recovery')!.length).toBe(1_400_000)
+    expect(r.list().map((e) => e.exists)).toEqual([true, false])
+  })
+
   it('works without storage and ignores damaged data', () => {
     const none = createWebRecent(null)
     none.remember(doc('a', 'A'), null)

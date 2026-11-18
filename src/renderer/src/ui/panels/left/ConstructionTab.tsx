@@ -38,8 +38,6 @@ export function ConstructionTab() {
   const t = useT()
   const tool = useUi((s) => s.tool)
   const wallKind = useUi((s) => s.wallKind)
-  const wallThickness = useUi((s) => s.wallThickness)
-  const wallHeight = useUi((s) => s.wallHeight)
   const openingKind = useUi((s) => s.openingKind)
   const [wizard, setWizard] = useState<null | 'rect' | 'L'>(null)
   const [photo, setPhoto] = useState(false)
@@ -70,14 +68,8 @@ export function ConstructionTab() {
             />
           ))}
         </CardGrid>
-        <Row label={t('Толщина')}>
-          <NumberInput kind="length" value={wallThickness} min={0} max={2000} round={1} onChange={(v) => uiStore.getState().set({ wallThickness: v })} />
-        </Row>
-        <Row label={t('Высота')}>
-          <NumberInput kind="length" value={wallHeight} min={100} max={20000} round={1} onChange={(v) => uiStore.getState().set({ wallHeight: v })} />
-        </Row>
         <p className="text-[10px] leading-snug text-[var(--muted)]">
-          {t('Щёлкайте по плану, чтобы ставить узлы; во время рисования введите число — длина сегмента. Esc — закончить.')}
+          {t('Щёлкайте по плану, чтобы ставить узлы; во время рисования введите число — длина сегмента. Esc — закончить. Толщина и высота — в строке инструмента над планом.')}
         </p>
       </Section>
 

@@ -13,7 +13,7 @@ import { useDoc } from '@/store/document'
 import { clearMarks, deleteMark, marksStore, useMarks } from '@/store/marks'
 import { useUi } from '@/store/ui'
 import { cn } from '@/ui/kit'
-import { activateTool } from '@/ui/shell/ToolRail'
+import { activateTool } from '@/ui/shell/tools'
 
 export function MarksPanel() {
   const tr = useT()

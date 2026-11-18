@@ -1,4 +1,4 @@
-import { app, Menu, type MenuItemConstructorOptions } from 'electron'
+import { app, Menu, type ContextMenuParams, type MenuItemConstructorOptions, type WebContents } from 'electron'
 import type { MenuCommand } from '../shared/ipc'
 import type { UpdateMenuAction } from '../shared/updater'
 import { CH } from './channels'
@@ -42,6 +42,7 @@ const L = {
     zoomFit: 'Показать всё',
     fullscreen: 'Полноэкранный режим',
     devtools: 'Инструменты разработчика',
+    inspect: 'Просмотреть код элемента',
     reload: 'Перезагрузить',
     help: 'Справка',
     checkUpdates: 'Проверить обновления…',
@@ -90,6 +91,7 @@ const L = {
     zoomFit: 'Zoom to fit',
     fullscreen: 'Full screen',
     devtools: 'Developer tools',
+    inspect: 'Inspect element',
     reload: 'Reload',
     help: 'Help',
     checkUpdates: 'Check for updates…',
@@ -104,6 +106,37 @@ const L = {
     instructions: 'AI instructions…',
   },
 } as const
+
+/** language of the last built menu: the text-field menu speaks it too */
+let menuLang: Lang = 'ru'
+
+/**
+ * Right click in a text field (or on selected text): Cut / Copy / Paste / Select all. The native
+ * menu bar that had them is hidden; the app's own context menus (plan, 3D, layers) prevent this one.
+ */
+export function showTextContextMenu(wc: WebContents, p: ContextMenuParams): void {
+  const t = L[menuLang]
+  const items: MenuItemConstructorOptions[] = []
+  if (p.isEditable) {
+    items.push(
+      { label: t.undo, role: 'undo', enabled: p.editFlags.canUndo },
+      { label: t.redo, role: 'redo', enabled: p.editFlags.canRedo },
+      { type: 'separator' },
+      { label: t.cut, role: 'cut', enabled: p.editFlags.canCut },
+      { label: t.copy, role: 'copy', enabled: p.editFlags.canCopy },
+      { label: t.paste, role: 'paste', enabled: p.editFlags.canPaste },
+      { type: 'separator' },
+      { label: t.selectAll, role: 'selectAll', enabled: p.editFlags.canSelectAll },
+    )
+  } else if (p.selectionText.trim()) {
+    items.push({ label: t.copy, role: 'copy' })
+  }
+  if (!app.isPackaged) {
+    if (items.length) items.push({ type: 'separator' })
+    items.push({ label: t.inspect, click: () => wc.inspectElement(p.x, p.y) })
+  }
+  if (items.length) Menu.buildFromTemplate(items).popup()
+}
 
 function cmd(command: MenuCommand) {
   return () => sendToRenderer(CH.evMenu, command)
@@ -122,6 +155,7 @@ export function buildMenu(
   onDownloadPage: (version?: string) => void,
 ): void {
   const t = L[lang]
+  menuLang = lang
   const withV = (s: string, v: string) => s.replace('{v}', v)
   // «Перезапустить и установить» goes through the renderer: it settles unsaved changes first
   const updateItem: MenuItemConstructorOptions =

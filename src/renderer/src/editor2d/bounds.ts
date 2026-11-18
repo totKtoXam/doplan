@@ -1,5 +1,5 @@
 /** Plan-space extents used by zoom-to-fit. Pure (no Pixi), so it is unit-testable. */
-import type { DerivedPlan, Doc, Id } from '@core/types'
+import type { DerivedPlan, Doc, EntityRef, Id } from '@core/types'
 import { type BBox, bboxOf, bboxUnion, bboxValid } from './geom'
 import { dimensionLine, itemCorners, labelBox, underlayCorners } from './shapes'
 
@@ -84,4 +84,85 @@ export function fitBounds(doc: Doc, derivedAll: Record<Id, DerivedPlan>, levelId
   const below = levelBelow(doc, levelId)
   const plan = below ? derivedAll[below] : undefined
   return plan ? ghostBounds(plan) : null
+}
+
+/**
+ * plan-space box around the selected objects (to place UI next to the selection), or null when none
+ * of them is drawn on the plan
+ */
+export function selectionBounds(doc: Doc, derived: DerivedPlan | undefined, refs: readonly EntityRef[]): BBox | null {
+  const { grow, box } = grower()
+  const point = (x: number, y: number, r: number) => grow({ minX: x - r, minY: y - r, maxX: x + r, maxY: y + r })
+  for (const r of refs) {
+    switch (r.kind) {
+      case 'wall': {
+        const g = derived?.wallGeoms[r.id]
+        if (g) grow(bboxOf(g.polygon.length ? g.polygon : [g.a, g.b]))
+        break
+      }
+      case 'opening': {
+        const o = doc.openings[r.id]
+        const w = o && doc.walls[o.wallId]
+        const a = w && doc.nodes[w.a]
+        const b = w && doc.nodes[w.b]
+        if (!o || !a || !b) break
+        const len = Math.hypot(b.x - a.x, b.y - a.y) || 1
+        const ux = (b.x - a.x) / len
+        const uy = (b.y - a.y) / len
+        const h = o.width / 2
+        const cx = a.x + ux * o.offset
+        const cy = a.y + uy * o.offset
+        // the leaf swing reaches about a width away from the wall
+        grow(bboxOf([{ x: cx - ux * h - uy * o.width, y: cy - uy * h + ux * o.width }, { x: cx + ux * h + uy * o.width, y: cy + uy * h - ux * o.width }]))
+        break
+      }
+      case 'room': {
+        const d = derived?.rooms.find((x) => x.roomId === r.id)
+        if (d?.polygon.length) grow(bboxOf(d.polygon))
+        else {
+          const room = doc.rooms[r.id]
+          if (room) point(room.anchor.x, room.anchor.y, 300)
+        }
+        break
+      }
+      case 'item': {
+        const it = doc.items[r.id]
+        if (it) grow(bboxOf(itemCorners(it)))
+        break
+      }
+      case 'light': {
+        const l = doc.lights[r.id]
+        if (l) point(l.x, l.y, 200)
+        break
+      }
+      case 'electric': {
+        const e = doc.electrical?.[r.id]
+        if (e) point(e.x, e.y, 150)
+        break
+      }
+      case 'node': {
+        const n = doc.nodes[r.id]
+        if (n) point(n.x, n.y, 100)
+        break
+      }
+      case 'label': {
+        const l = doc.labels[r.id]
+        if (l) grow(bboxOf(labelBox(l)))
+        break
+      }
+      case 'dimension': {
+        const d = doc.dimensions[r.id]
+        if (!d) break
+        const ln = dimensionLine(d)
+        grow(bboxOf([d.a, d.b, ln.a, ln.b]))
+        break
+      }
+      case 'underlay': {
+        const u = doc.underlays[r.id]
+        if (u) grow(bboxOf(underlayCorners(u)))
+        break
+      }
+    }
+  }
+  return box()
 }

@@ -119,7 +119,7 @@ export function Section({ title, children, id, defaultOpen = true, actions, clas
           aria-controls={bodyId}
           onClick={() => setOpen(!open)}
           className={cn(
-            'flex h-full min-w-0 flex-1 items-center gap-1 pl-2 text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--text)]',
+            'flex h-full min-w-0 flex-1 items-center gap-1 pl-2 text-left text-[12px] font-semibold text-[var(--text)] hover:text-[var(--accent)]',
             focusRing,
           )}
         >

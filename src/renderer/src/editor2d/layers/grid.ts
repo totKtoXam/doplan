@@ -1,6 +1,12 @@
 import { Graphics } from 'pixi.js'
 import type { EditorCtx } from '../context'
 import { gridSteps } from '../snap'
+import type { Palette } from '../theme'
+
+/** when the grid must be redrawn: the camera, the step and every colour it is drawn with (a theme may change the lines and keep the background) */
+export function gridKey(cam: { version: number; width: number; height: number }, gridMm: number, pal: Palette): string {
+  return [cam.version, cam.width, cam.height, gridMm, pal.bg, pal.gridMinor, pal.gridMajor, pal.gridMinorAlpha, pal.gridMajorAlpha, pal.axisX, pal.axisY].join('|')
+}
 
 /** Adaptive grid drawn in screen space (only visible lines), rebuilt when the camera changes. */
 export class GridLayer {
@@ -15,7 +21,7 @@ export class GridLayer {
     const cam = ctx.camera
     const pal = ctx.palette()
     const gridMm = ctx.doc().settings.gridMm
-    const key = `${cam.version}|${cam.width}|${cam.height}|${gridMm}|${pal.bg}`
+    const key = gridKey(cam, gridMm, pal)
     if (key === this.key) return
     this.key = key
     const g = this.g

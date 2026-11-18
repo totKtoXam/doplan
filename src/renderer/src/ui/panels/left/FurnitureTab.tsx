@@ -106,7 +106,7 @@ export function FurnitureTab() {
       {groups.map((g, gi) =>
         g.items.length === 0 ? null : (
           <div key={g.title ?? gi} className="flex flex-col gap-1.5">
-            {g.title && <div className="pt-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">{g.title}</div>}
+            {g.title && <div className="pt-1 text-[11px] font-semibold text-[var(--muted)]">{g.title}</div>}
             <div className="grid grid-cols-3 gap-1.5">
               {g.items.map((a) => (
                 <AssetTile key={a.id} asset={a} lang={lang} />
@@ -138,7 +138,7 @@ function KitchenPresets() {
   const lang = useLang()
   return (
     <div className="flex flex-col gap-1.5" data-testid="kitchen-presets">
-      <div className="pt-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">{t('Готовые кухни')}</div>
+      <div className="pt-1 text-[11px] font-semibold text-[var(--muted)]">{t('Готовые кухни')}</div>
       <div className="grid grid-cols-2 gap-1.5">
         {KITCHEN_PRESETS.map((p) => (
           <Button key={p.id} onClick={() => void placeKitchenPreset(p)} title={t('Выделите стену или комнату — гарнитур встанет вдоль стены')}>

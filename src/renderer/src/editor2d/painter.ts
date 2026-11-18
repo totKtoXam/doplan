@@ -19,6 +19,20 @@ export interface TextOpts {
   italic?: boolean
   alpha?: number
   align?: 'left' | 'center' | 'right'
+  /** a ring of this colour round the glyphs (the plan colour), so the text reads on any fill under it */
+  halo?: number
+}
+
+function textStyle(raster: number, color: number, o: TextOpts) {
+  return {
+    fontFamily: FONT,
+    fontSize: raster,
+    fill: color,
+    fontWeight: o.bold ? ('600' as const) : ('400' as const),
+    fontStyle: o.italic ? ('italic' as const) : ('normal' as const),
+    align: o.align ?? 'left',
+    ...(o.halo !== undefined ? { stroke: { color: o.halo, width: Math.max(2, raster * 0.32), join: 'round' as const } } : {}),
+  }
 }
 
 interface PoolEntry {
@@ -51,19 +65,12 @@ export class TextPool {
     const raster = rasterSize(size)
     const color = o.color ?? 0xffffff
     const align = o.align ?? 'left'
-    const sig = `${raster}|${color}|${o.bold ? 1 : 0}|${o.italic ? 1 : 0}|${this.resolution}|${align}`
+    const sig = `${raster}|${color}|${o.bold ? 1 : 0}|${o.italic ? 1 : 0}|${this.resolution}|${align}|${o.halo ?? ''}`
     let e = this.entries.get(key)
     if (!e) {
       const text = new Text({
         text: str,
-        style: {
-          fontFamily: FONT,
-          fontSize: raster,
-          fill: color,
-          fontWeight: o.bold ? '600' : '400',
-          fontStyle: o.italic ? 'italic' : 'normal',
-          align,
-        },
+        style: textStyle(raster, color, o),
         resolution: this.resolution,
       })
       text.eventMode = 'none'
@@ -72,14 +79,7 @@ export class TextPool {
       this.entries.set(key, e)
     } else {
       if (e.sig !== sig) {
-        e.text.style = {
-          fontFamily: FONT,
-          fontSize: raster,
-          fill: color,
-          fontWeight: o.bold ? '600' : '400',
-          fontStyle: o.italic ? 'italic' : 'normal',
-          align,
-        }
+        e.text.style = textStyle(raster, color, o)
         e.text.resolution = this.resolution
         e.sig = sig
       }
@@ -324,7 +324,8 @@ export class Painter {
 
   /**
    * Dimension line between plan points a and b, shifted by `offsetMm` along unit normal `n`
-   * plus `offsetPx` screen px. The text is rotated along the line and always stays readable.
+   * plus `offsetPx` screen px. The text is rotated along the line and always stays readable: it has a
+   * halo of the plan colour, as dimensions often sit inside rooms whose floor may be of any colour.
    */
   dimension(
     key: string,
@@ -334,7 +335,17 @@ export class Painter {
     offsetMm: number,
     offsetPx: number,
     label: string,
-    o: { color: number; alpha?: number; size?: number; width?: number; extension?: boolean; bold?: boolean; italic?: boolean },
+    o: {
+      color: number
+      alpha?: number
+      /** of the line and ticks alone (the number keeps `alpha`) */
+      lineAlpha?: number
+      size?: number
+      width?: number
+      extension?: boolean
+      bold?: boolean
+      italic?: boolean
+    },
   ): void {
     const sa = this.S(a)
     const sb = this.S(b)
@@ -361,7 +372,7 @@ export class Painter {
     const ty = (uy - ux) * 4
     g.moveTo(A.x - tx, A.y - ty).lineTo(A.x + tx, A.y + ty)
     g.moveTo(B.x - tx, B.y - ty).lineTo(B.x + tx, B.y + ty)
-    g.stroke({ width, color: o.color, alpha })
+    g.stroke({ width, color: o.color, alpha: o.lineAlpha ?? alpha })
     let ang = Math.atan2(dy, dx)
     if (ang > Math.PI / 2 + 1e-6 || ang <= -Math.PI / 2 + 1e-6) ang += Math.PI
     // "above" the line in the text's own frame
@@ -376,6 +387,7 @@ export class Painter {
       anchorY: 1,
       bold: o.bold,
       italic: o.italic,
+      halo: this.pal.bg,
     })
   }
 }

@@ -116,7 +116,7 @@ export function AboutDialog({ open, onClose }: DialogPropsBase) {
         </div>
 
         <div className="flex flex-col gap-2.5 rounded-lg border border-[var(--border)] p-3">
-          <div className="text-[11px] font-semibold tracking-wide text-[var(--muted)] uppercase">{t('Обновления')}</div>
+          <div className="text-[12px] font-semibold text-[var(--text)]">{t('Обновления')}</div>
           <UpdateStatusView st={st} manual={manual} />
           <div className="flex flex-wrap justify-end gap-2">
             {st.mode !== 'disabled' && (

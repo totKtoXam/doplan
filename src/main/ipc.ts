@@ -23,7 +23,7 @@ import {
 } from './project'
 import { getProjectRoot } from './projectFolder'
 import { getSettings, setApiKey, setSettings } from './settings'
-import { confirmClose, getMainWindow, isTrustedUrl, setWindowTitle } from './window'
+import { confirmClose, getMainWindow, isTrustedUrl, runWindowCommand, setWindowTitle } from './window'
 
 function senderOk(e: IpcMainInvokeEvent | IpcMainEvent): boolean {
   const frame = e.senderFrame
@@ -103,4 +103,5 @@ export function registerIpc(): void {
 
   on(CH.windowSetTitle, (title: unknown, dirty: unknown) => setWindowTitle(title, dirty))
   on(CH.windowConfirmClose, () => confirmClose())
+  on(CH.windowCommand, (cmd: unknown) => runWindowCommand(cmd))
 }

@@ -2707,28 +2707,10 @@ export function usesCutoutLogic(spec: unknown): boolean {
   )
 }
 
-/** a cutout plan the new check refuses while the base check (a56f5f4) accepts it: the base builds it,
- *  with a warning that says why — the gate never drops a plan the base accepted */
-function baseFallback(spec: PlanSpec, now: PlanValidation): PlanIssue | null {
-  if (now.ok) return null
-  if (!legacy.validatePlanSpecDetailed(spec as legacy.PlanSpec).ok) return null
-  const first = now.issues.find((i) => i.severity === 'error')
-  return {
-    severity: 'warning',
-    code: 'CUTOUT_BASE_BUILD',
-    message: `Вырезы построены прежним способом: точная проверка их не приняла (${first?.message ?? 'нет описания'}). Проверьте шахты и колонны на плане`,
-    ...(first?.path ? { path: first.path } : {}),
-    ...(first?.ids ? { ids: first.ids } : {}),
-  }
-}
-
+/** a plan with cutouts, shafts or voids is always built and checked by the cutout compiler: when its
+ *  check refuses, the plan is refused (the base would lose the shafts, the floor and the technical mark) */
 export function compilePlanSpecDetailed(spec: PlanSpec, opts: CompileOptions = {}): CompileResult {
   if (!usesCutoutLogic(spec)) return legacy.compilePlanSpecDetailed(spec as legacy.PlanSpec, opts)
-  const note = baseFallback(spec, validateCutoutSpec(spec))
-  if (note) {
-    const r = legacy.compilePlanSpecDetailed(spec as legacy.PlanSpec, opts)
-    return { ...r, issues: [...(r.issues as PlanIssue[]), note] }
-  }
   return compileCutoutSpec(spec, opts)
 }
 
@@ -3234,11 +3216,7 @@ export function explainedSeverity(sev: PlanIssueSeverity, note: string | undefin
 /** Full validation with metrics (same code as the in-app check and `dp spec validate`). */
 export function validatePlanSpecDetailed(input: PlanSpec): PlanValidation {
   if (!usesCutoutLogic(input)) return legacy.validatePlanSpecDetailed(input as legacy.PlanSpec)
-  const now = validateCutoutSpec(input)
-  const note = baseFallback(input, now)
-  if (!note) return now
-  const old = legacy.validatePlanSpecDetailed(input as legacy.PlanSpec) as PlanValidation
-  return { ...old, issues: [...old.issues, note] }
+  return validateCutoutSpec(input)
 }
 
 /** the check of the cutout compiler (compileCutoutSpec) */

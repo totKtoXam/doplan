@@ -2,7 +2,7 @@
 // come out bit for bit as at a56f5f4: walls, openings, derived faces and wall outlines, room areas,
 // issues. The digests in fixtures/legacyPlans.a56f5f4.json were made by the a56f5f4 tree itself from
 // the same seeded specs. The cutout geometry turns on only with a cutout (or a technical room / cutout
-// wall); a cutout plan the new check refuses while the base check accepts it is built by the base.
+// wall); such a plan is always built and checked by the cutout compiler, and refused when its check refuses.
 import { describe, expect, it } from 'vitest'
 import { derivePlan } from '../derive'
 import { compileCutoutSpec, compilePlanSpecDetailed, parsePlanSpec, usesCutoutLogic, validateCutoutSpec, validatePlanSpecDetailed, type PlanSpec } from '../planspec'
@@ -55,24 +55,34 @@ describe('planspec: which compiler builds a plan', () => {
     expect(now).toEqual(digestPlan(0, spec, api(validateCutoutSpec, compileCutoutSpec)))
   })
 
-  it('a cutout plan only the base check accepts is built by the base, with a warning (the gate never drops it)', () => {
-    // two shafts across the line of a reflex corner: the cutout compiler refuses them (CUTOUT_AT_CORNER)
+  it('a cutout plan the cutout check refuses is refused, even when the base check would accept it', () => {
+    // two shafts across the line of a reflex corner: the cutout compiler refuses them (CUTOUT_AT_CORNER);
+    // the base would build them, losing a shaft, floor and the technical mark, so it is never asked
     const spec = sp([{ id: 'a', type: 'living', polygon: L, cutouts: [{ rect: [1400, 1000, 600, 600], kind: 'shaft' }, { rect: [2000, 1000, 600, 600], kind: 'shaft' }] }])
-    expect(validateCutoutSpec(spec).issues.map((i) => i.code)).toContain('CUTOUT_AT_CORNER')
     expect(base.validatePlanSpecDetailed(spec as unknown as base.PlanSpec).ok).toBe(true)
     const v = validatePlanSpecDetailed(spec)
-    expect(v.ok).toBe(true)
-    const note = v.issues.find((i) => i.code === 'CUTOUT_BASE_BUILD')
-    expect(note?.severity).toBe('warning')
-    expect(note?.message).toMatch(/прежним способом/)
+    expect(v.ok).toBe(false)
+    expect(v.issues.find((i) => i.code === 'CUTOUT_AT_CORNER')?.severity).toBe('error')
+    expect(v).toEqual(validateCutoutSpec(spec))
+    expect(v.issues.some((i) => i.code === 'CUTOUT_BASE_BUILD')).toBe(false)
     const res = compilePlanSpecDetailed(parsePlanSpec(spec))
-    expect(res.issues.some((i) => i.code === 'CUTOUT_BASE_BUILD')).toBe(true)
-    const old = api(base.validatePlanSpecDetailed, base.compilePlanSpecDetailed)
-    const a = digestPlan(0, spec, PUBLIC)
-    const b = digestPlan(0, spec, old)
-    expect(a.hash.walls).toBe(b.hash.walls)
-    expect(a.hash.faces).toBe(b.hash.faces)
-    expect(a.areas).toEqual(b.areas)
+    expect(res.issues.some((i) => i.code === 'CUTOUT_BASE_BUILD')).toBe(false)
+    expect(digestPlan(0, spec, PUBLIC)).toEqual(digestPlan(0, spec, api(validateCutoutSpec, compileCutoutSpec)))
+  })
+
+  it('a refused shape (BUILT_SHAPE_MISMATCH) is not built by the base either', () => {
+    const spec = {
+      ...sp([
+        { id: 'a', type: 'living', polygon: [[0, 0], [2500, 0], [2500, 1900], [4800, 1900], [4800, 3600], [0, 3600]], labelledArea: 12.5, cutouts: [{ rect: [2650, 1900, 750, 550], kind: 'shaft' }] },
+        { id: 'b', type: 'bedroom', rect: [4800, 1900, 2000, 1700] },
+      ]),
+      defaults: { exteriorThickness: 510, partitionThickness: 100, loadBearingThickness: 200 },
+    }
+    const v = validatePlanSpecDetailed(spec)
+    expect(v).toEqual(validateCutoutSpec(spec))
+    expect(v.issues.some((i) => i.code === 'CUTOUT_BASE_BUILD')).toBe(false)
+    expect(v.ok).toBe(false)
+    expect(v.issues.find((i) => i.code === 'BUILT_SHAPE_MISMATCH')?.severity).toBe('error')
   })
 
   it('a cutout plan both checks refuse stays refused with the new check’s errors', () => {

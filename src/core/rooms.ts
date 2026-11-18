@@ -367,8 +367,7 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
     // reflex corner a snapped wall moved by a few mm, and its nodes still lie well inside the loop,
     // whichever way the plan is turned
     const pts = c.hes.map((h) => doc.nodes[h.from])
-    // (a level without voids: first as at a56f5f4, by one point of the island's wall face; only an
-    // island that finds no face that way is placed by its centrelines)
+    // (a level without voids keeps the a56f5f4 rule exactly: one point of the island's wall face)
     const probe = ring[0]
     const byAxes = (f: Face): boolean => f.centerline.length >= 3 && pts.every((p) => pointInPolygon(p, f.centerline))
     let best: Face | null = null

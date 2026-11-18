@@ -1,4 +1,4 @@
-import { FileDown, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, TriangleExclamationPoint } from 'lucide-react'
+import { FileDown, PanelRightClose, PanelRightOpen, TriangleExclamationPoint } from 'lucide-react'
 import { Component, type ComponentType, type ErrorInfo, type ReactNode, useEffect, useState } from 'react'
 import { builtinCatalog, mergeCatalog } from '@core'
 import { actions } from '@/actions'
@@ -24,13 +24,13 @@ import { RightDock } from '@/ai' // ai-chat: «Свойства | ИИ» tabs
 import { LevelTabs } from '@/ui/shell/LevelTabs'
 import { VariantCompareDialog } from '@/ui/variants/VariantCompareDialog'
 import { ProjectFolderDialogs } from '@/ui/panels/ProjectFolderDialogs'
+import { ActivityBar } from '@/ui/shell/ActivityBar'
 import { PublishDialog } from '@/ui/panels/PublishDialog'
 import { AppLogo } from '@/ui/shell/AppLogo'
 import { Overlays } from '@/ui/shell/Overlays'
 import { IconBtn } from '@/ui/shell/primitives'
 import { StatusBar } from '@/ui/shell/StatusBar'
 import { ToolOptionsBar } from '@/ui/shell/ToolOptionsBar'
-import { ToolRail } from '@/ui/shell/ToolRail'
 import { TopBar } from '@/ui/shell/TopBar'
 import { useAppEvents } from '@/ui/shell/useAppEvents'
 import { Workspace } from '@/ui/shell/Workspace'
@@ -155,7 +155,7 @@ export function App() {
     <div className="flex h-full flex-col bg-bg text-text">
       <TopBar />
       <div className="flex min-h-0 flex-1">
-        <ToolRail />
+        <ActivityBar />
         <ResizablePanel
           side="left"
           id="dp-left-panel"
@@ -172,14 +172,6 @@ export function App() {
         {/* the viewports fill the rest; a narrow window shrinks the side panels before them */}
         <main data-panel-fill className="flex min-w-[240px] flex-1 basis-0 flex-col">
           <div className="flex shrink-0 items-stretch border-b border-border bg-panel">
-            <div className="flex items-center border-r border-border px-0.5">
-              <IconBtn
-                icon={leftOpen ? PanelLeftClose : PanelLeftOpen}
-                size="sm"
-                label={leftOpen ? tr('Скрыть каталог') : tr('Показать каталог')}
-                onClick={() => uiStore.setState({ leftPanelOpen: !leftOpen })}
-              />
-            </div>
             <div className="min-w-0 flex-1 [&>div]:border-b-0">
               <ToolOptionsBar />
             </div>

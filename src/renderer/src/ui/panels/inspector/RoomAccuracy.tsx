@@ -10,7 +10,7 @@ import '@/ui/accuracyI18n'
 import { accuracyStore } from '@/store/accuracy'
 import { useDoc } from '@/store/document'
 import { Button, NumberInput, Row, fmtNum } from '@/ui/kit'
-import { activateTool } from '@/ui/shell/ToolRail'
+import { activateTool } from '@/ui/shell/tools'
 import { tx } from '../common/catalog'
 import { Hint, Stat } from './shared'
 

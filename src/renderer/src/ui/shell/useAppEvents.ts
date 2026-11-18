@@ -16,7 +16,7 @@ import { uiStore } from '@/store/ui'
 import { showWelcome, welcomeBlocksKey, welcomeBlocksMenu } from '@/store/welcome'
 import type { ToolId } from '@/contracts'
 import { shortcutKey } from './keys'
-import { activateTool, TOOLS } from './ToolRail'
+import { activateTool, TOOLS } from './tools'
 
 function isEditable(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null

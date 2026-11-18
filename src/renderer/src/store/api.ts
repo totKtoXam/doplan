@@ -3,7 +3,7 @@
  * browser tab (no Electron): settings live in localStorage, saves become downloads,
  * everything else resolves to a harmless "nothing happened" value.
  */
-import type { AppSettings, DoplanApi, FileFilter, MenuCommand } from '@shared/ipc'
+import type { AppSettings, DoplanApi, FileFilter, MenuCommand, WindowCommand } from '@shared/ipc'
 import { DEFAULT_AI_SETTINGS } from '@shared/aiChat'
 import { releasePageUrl } from '@shared/updater'
 import { DEFAULT_FEEDS } from '@shared/feeds'
@@ -14,7 +14,7 @@ import { WEB_RECENT_PREFIX, webRecent } from './webRecent'
 const webSync: GithubSyncStatus = { state: 'unavailable', reason: 'GitHub sync is available in the doplan desktop app', ahead: 0, behind: 0 }
 
 /** version shown by the web build (no Electron); keep in step with package.json */
-const WEB_VERSION = '0.15.0-web'
+const WEB_VERSION = '0.16.0-web'
 
 const SETTINGS_KEY = 'doplan.settings'
 
@@ -385,6 +385,10 @@ function createFallbackApi(): DoplanApi {
     window: {
       setTitle(title: string, dirty: boolean) {
         document.title = `${dirty ? '• ' : ''}${title} — doplan`
+      },
+      command(cmd: WindowCommand) {
+        if (cmd === 'reload') location.reload()
+        else if (cmd === 'fullscreen') void (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => {})
       },
       onMenu: noopUnsub as (cb: (cmd: MenuCommand) => void) => () => void,
       onCloseRequest: noopUnsub,

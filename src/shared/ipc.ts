@@ -178,6 +178,9 @@ export type MenuCommand =
   // welcome screen
   | 'welcome'
 
+/** what the «Вид» menu asks of the window (the native menu that had these items is hidden) */
+export type WindowCommand = 'fullscreen' | 'reload' | 'devtools'
+
 export interface DoplanApi {
   platform: string
   version: string
@@ -309,6 +312,8 @@ export interface DoplanApi {
 
   window: {
     setTitle(title: string, dirty: boolean): void
+    /** the window items of the hidden native menu: full screen; reload and devtools in a dev run */
+    command(cmd: WindowCommand): void
     onMenu(cb: (cmd: MenuCommand) => void): () => void
     /** main asks before closing; renderer answers via confirmClose */
     onCloseRequest(cb: () => void): () => void

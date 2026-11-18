@@ -79,7 +79,7 @@
   --color-warning: var(--warning);
   --color-success: var(--success);
   --color-viewport: var(--viewport);
-  --font-sans: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-sans: 'Golos Text Variable', 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, ui-monospace, monospace;
   --shadow-pop: var(--shadow);
 }

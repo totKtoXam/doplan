@@ -2,12 +2,12 @@
 import { addTranslations } from '@/i18n'
 
 addTranslations('en', {
-  // tool rail / left panel
+  // tool / left panel
   Электроточка: 'Electrical point',
   Электрика: 'Electrical',
   'Розетки, выключатели, слаботочка': 'Sockets, switches, low voltage',
-  'Кликните у стены, чтобы поставить розетку или выключатель (тип — во вкладке «Электрика»)':
-    'Click near a wall to place a socket or a switch (the type is in the «Electrical» tab)',
+  'Кликните у стены, чтобы поставить розетку или выключатель (тип — в разделе «Электрика»)':
+    'Click near a wall to place a socket or a switch (the type is in the «Electrical» section)',
   Установка: 'Placement',
   'Постов в рамке': 'Frame posts',
   'Высота от пола': 'Height above floor',

@@ -16,6 +16,17 @@ import { projectStore } from './project'
 
 export type GithubBusy = 'push' | 'pull' | 'connect' | 'resolve' | 'disconnect' | 'check' | null
 
+/**
+ * The open project's generation: which folder, and which load of it. Every open, reload (after a pull
+ * or a merge) and version view starts a new one. Each GitHub action takes it before it awaits main and
+ * drops the answer, and every step after it, once the generation has changed: main works on whatever
+ * project is open at the moment of the call, so a later step would act on another project.
+ */
+export interface Generation {
+  root: string | null
+  loadId: number
+}
+
 interface GithubUiState {
   status: GithubSyncStatus | null
   busy: GithubBusy
@@ -24,6 +35,8 @@ interface GithubUiState {
   conflicts: string[]
   /** send right after the conflict is settled (the user pressed «Отправить») */
   pushAfterResolve: boolean
+  /** the project generation the conflict belongs to */
+  conflictGen: Generation | null
 }
 
 export const githubStore = createStore<GithubUiState>()(() => ({
@@ -32,6 +45,7 @@ export const githubStore = createStore<GithubUiState>()(() => ({
   dialog: null,
   conflicts: [],
   pushAfterResolve: false,
+  conflictGen: null,
 }))
 
 export function useGithub<T>(selector: (s: GithubUiState) => T): T {
@@ -41,6 +55,20 @@ export function useGithub<T>(selector: (s: GithubUiState) => T): T {
 const set = (p: Partial<GithubUiState>) => githubStore.setState(p)
 
 const errText = (err: unknown) => (err instanceof Error ? err.message : String(err))
+
+export function generation(): Generation {
+  return { root: projectStore.getState().root, loadId: docStore.getState().loadId }
+}
+
+function current(gen: Generation): boolean {
+  const now = generation()
+  return now.root === gen.root && now.loadId === gen.loadId
+}
+
+/** an answer about a project no longer on screen: forget it, show the open one's own state */
+function dropped(): void {
+  void refreshGithub(false)
+}
 
 /** the open project's state; `fetch` looks at GitHub first */
 export async function refreshGithub(fetch = false): Promise<void> {
@@ -56,23 +84,24 @@ export async function refreshGithub(fetch = false): Promise<void> {
 }
 
 /** saves the document (each save is a version) so sync works on what is on screen; false: not now */
-async function ensureSaved(): Promise<boolean> {
+async function ensureSaved(gen: Generation): Promise<boolean> {
   if (projectStore.getState().viewing) {
     await alertDialog(t('Открыта старая версия'), t('Вернитесь к текущей версии («К текущей»), потом синхронизируйте с GitHub.'))
     return false
   }
-  if (!docStore.getState().dirty) return true
-  return saveProject(false)
+  if (docStore.getState().dirty && !(await saveProject(false))) return false
+  // the save may have waited: the action is for the project it was started on
+  return current(gen)
 }
 
 /**
  * The open project read again from its folder after GitHub changed it. The editor is locked while
  * GitHub works (GithubSyncLock), so the document is normally clean here; changed anyway, the user
- * decides: nothing is replaced without asking.
+ * decides: nothing is replaced without asking. Resolves with the generation after it (the same one
+ * when the user kept the screen), or null when the project on screen is another one by now.
  */
-async function reloadFromDisk(): Promise<void> {
-  const root = projectStore.getState().root
-  if (!root) return
+async function reloadFromDisk(gen: Generation): Promise<Generation | null> {
+  if (!gen.root || !current(gen)) return null
   if (docStore.getState().dirty) {
     const choice = await choiceDialog(
       t('Проект изменён во время обмена с GitHub'),
@@ -82,9 +111,13 @@ async function reloadFromDisk(): Promise<void> {
         { id: 'load', label: t('Загрузить с GitHub'), variant: 'danger' },
       ],
     )
-    if (choice !== 'load') return
+    // the question waited: never read a folder over a project opened in the meantime
+    if (!current(gen)) return null
+    if (choice !== 'load') return gen
   }
-  await openProject(root, { skipConfirm: true, reload: 'disk' })
+  await openProject(gen.root, { skipConfirm: true, reload: 'disk' })
+  // exactly this reload and nothing else: the next generation is ours
+  return docStore.getState().loadId === gen.loadId + 1 ? generation() : null
 }
 
 async function run<T>(busy: Exclude<GithubBusy, null>, fn: () => Promise<T>): Promise<T | null> {
@@ -105,68 +138,81 @@ function showWarnings(warnings: string[]): void {
   for (const w of warnings) toast(w, 'warning', 9000)
 }
 
-/** what a pull brought: reload, a note, or the conflict choice */
-async function afterPull(res: PullResult, thenPush: boolean): Promise<boolean> {
+/** what a pull brought: reload, a note, or the conflict choice; resolves with the generation to go on with, null: stop */
+async function afterPull(res: PullResult, thenPush: boolean, gen: Generation): Promise<Generation | null> {
+  if (!current(gen)) {
+    dropped()
+    return null
+  }
   set({ status: res.status })
   if (res.result === 'conflict') {
-    set({ dialog: 'conflict', conflicts: res.conflicts ?? [], pushAfterResolve: thenPush })
-    return false
+    set({ dialog: 'conflict', conflicts: res.conflicts ?? [], pushAfterResolve: thenPush, conflictGen: gen })
+    return null
   }
   if (res.result === 'updated' || res.result === 'merged') {
-    await reloadFromDisk()
+    const next = await reloadFromDisk(gen)
     toast(res.result === 'merged' ? t('Изменения с GitHub объединены с вашими') : t('Получены изменения с GitHub'), 'success')
+    return next
   }
-  return true
+  return gen
 }
 
 /** sends; GitHub ahead: gets its versions first and sends once more, never in a loop */
-async function pushNow(retried = false): Promise<void> {
+async function pushNow(gen: Generation, retried = false): Promise<void> {
   const res = await api.github.push()
+  if (!current(gen)) return dropped()
   set({ status: res.status })
   if (res.needPull) {
     if (retried) throw new Error(t('Версии на GitHub снова изменились, пока шла отправка. Попробуйте отправить ещё раз чуть позже.'))
     toast(t('На GitHub есть новые версии — сначала получаю их'), 'info')
     const busy = githubStore.getState().busy
     set({ busy: 'pull' })
+    let next: Generation | null
     try {
-      const pr = await api.github.pull()
-      if (!(await afterPull(pr, true))) return
+      next = await afterPull(await api.github.pull(), true, gen)
     } finally {
       set({ busy })
     }
-    return pushNow(true)
+    if (next) await pushNow(next, true)
+    return
   }
   showWarnings(res.warnings)
   toast(t('Отправлено на GitHub'), 'success')
 }
 
 export async function githubPush(): Promise<void> {
-  if (!(await ensureSaved())) return
-  await run('push', pushNow)
+  const gen = generation()
+  if (!(await ensureSaved(gen))) return
+  await run('push', () => pushNow(gen))
 }
 
 export async function githubPull(): Promise<void> {
-  if (!(await ensureSaved())) return
+  const gen = generation()
+  if (!(await ensureSaved(gen))) return
   await run('pull', async () => {
     const res = await api.github.pull()
+    if (!current(gen)) return dropped()
     if (res.result === 'upToDate') {
       set({ status: res.status })
       toast(t('На GitHub нет ничего нового'), 'info')
       return
     }
-    await afterPull(res, false)
+    await afterPull(res, false, gen)
   })
 }
 
 export async function githubResolve(choice: ConflictChoice): Promise<void> {
-  const thenPush = githubStore.getState().pushAfterResolve
-  set({ dialog: null, conflicts: [], pushAfterResolve: false })
+  const { pushAfterResolve: thenPush, conflictGen: gen } = githubStore.getState()
+  forgetConflict()
+  // the conflict belongs to the project it came from: another one on screen has nothing to settle
+  if (!gen || !current(gen)) return
   // what is on screen is a version too: resolve() works on the folder, and the reload below replaces the screen
-  if (!(await ensureSaved())) return
+  if (!(await ensureSaved(gen))) return
   await run('resolve', async () => {
     const res = await api.github.resolve(choice)
+    if (!current(gen)) return dropped()
     set({ status: res.status })
-    await reloadFromDisk()
+    const next = await reloadFromDisk(gen)
     if (res.copyPath) {
       const copy = res.copyPath
       toast(t('Версия с GitHub сохранена отдельным проектом: {name}', { name: copy.split(/[\\/]/).pop() ?? copy }), 'success', 12000, {
@@ -174,43 +220,44 @@ export async function githubResolve(choice: ConflictChoice): Promise<void> {
         run: () => void openProject(copy),
       })
     } else toast(choice === 'theirs' ? t('Взята версия с GitHub') : t('Оставлена ваша версия'), 'success')
-    if (thenPush) await pushNow()
+    if (thenPush && next) await pushNow(next)
   })
 }
 
-export function githubCancelConflict(): void {
-  set({ dialog: null, conflicts: [], pushAfterResolve: false })
+function forgetConflict(): void {
+  set({ dialog: null, conflicts: [], pushAfterResolve: false, conflictGen: null })
 }
 
-async function afterConnect(res: ConnectResult): Promise<void> {
+export function githubCancelConflict(): void {
+  forgetConflict()
+}
+
+async function afterConnect(res: ConnectResult, gen: Generation): Promise<void> {
+  if (!current(gen)) return dropped()
   set({ status: res.status, dialog: null })
   showWarnings(res.warnings)
-  if (res.pull && !(await afterPull(res.pull, true))) return
+  const next = res.pull ? await afterPull(res.pull, true, gen) : gen
+  if (!next) return
   if (res.pushed) toast(t('Проект отправлен на GitHub'), 'success')
-  else if (res.pull?.result !== 'conflict') await pushNow()
+  else await pushNow(next)
 }
 
 /** connects an existing repository; resolves with an error text to show in the dialog, or null */
 export async function githubConnect(url: string): Promise<string | null> {
-  if (!(await ensureSaved())) return null
-  if (githubStore.getState().busy) return null
-  set({ busy: 'connect' })
-  try {
-    await afterConnect(await api.github.connect(url))
-    return null
-  } catch (err) {
-    return errText(err)
-  } finally {
-    set({ busy: null })
-  }
+  return connectWith(() => api.github.connect(url))
 }
 
 export async function githubCreate(name: string, isPrivate: boolean): Promise<string | null> {
-  if (!(await ensureSaved())) return null
+  return connectWith(() => api.github.create(name, isPrivate))
+}
+
+async function connectWith(call: () => Promise<ConnectResult>): Promise<string | null> {
+  const gen = generation()
+  if (!(await ensureSaved(gen))) return null
   if (githubStore.getState().busy) return null
   set({ busy: 'connect' })
   try {
-    await afterConnect(await api.github.create(name, isPrivate))
+    await afterConnect(await call(), gen)
     return null
   } catch (err) {
     return errText(err)
@@ -220,6 +267,7 @@ export async function githubCreate(name: string, isPrivate: boolean): Promise<st
 }
 
 export async function githubDisconnect(): Promise<void> {
+  const gen = generation()
   const st = githubStore.getState().status
   const name = st?.remote?.owner ? `${st.remote.owner}/${st.remote.repo}` : (st?.remote?.url ?? '')
   const ok = await confirmDialog(
@@ -227,9 +275,12 @@ export async function githubDisconnect(): Promise<void> {
     t('Проект перестанет синхронизироваться с репозиторием {name}. Сам репозиторий на GitHub и все версии на этом компьютере останутся; подключить снова можно в любой момент.', { name }),
     { ok: t('Отключить'), cancel: t('Отмена') },
   )
-  if (!ok) return
+  // the question was about the project open when it was asked
+  if (!ok || !current(gen)) return
   await run('disconnect', async () => {
-    set({ status: await api.github.disconnect() })
+    const status = await api.github.disconnect()
+    if (!current(gen)) return dropped()
+    set({ status })
     toast(t('Проект отключён от GitHub'), 'info')
   })
 }
@@ -249,7 +300,8 @@ export function closeGithubDialog(): void {
 let started = false
 /**
  * Keeps the state current: on every project open, after each saved version, and a look at GitHub
- * every 5 minutes while the window is visible.
+ * every 5 minutes while the window is visible. A new project generation closes the GitHub dialogs:
+ * they were about the project that was open.
  */
 export function startGithubWatch(): void {
   if (started || api.platform === 'browser') return
@@ -259,6 +311,7 @@ export function startGithubWatch(): void {
   projectStore.subscribe((s) => {
     if (s.root !== lastRoot) {
       lastRoot = s.root
+      forgetConflict()
       set({ status: null })
       void refreshGithub(true)
     } else if (s.historyRev !== lastRev) {
@@ -267,6 +320,7 @@ export function startGithubWatch(): void {
     lastRev = s.historyRev
   })
   docStore.subscribe((s, prev) => {
+    if (s.loadId !== prev.loadId) forgetConflict()
     // a save (dirty → clean) may have added a version
     if (prev.dirty && !s.dirty) void refreshGithub(false)
   })

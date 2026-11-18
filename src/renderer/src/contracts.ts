@@ -67,8 +67,8 @@ export interface DocState {
   redo(): void
   load(doc: Doc, filePath: string | null, reload?: DocReload): void
   newDoc(name?: string): void
-  /** `id`: the Doc.meta.id the file was written with; `at`: the history position it was taken at (default: now) */
-  markSaved(filePath: string, id?: string, at?: number): void
+  /** `id`: the Doc.meta.id the file was written with; `written`: the snapshot written (default: what is on screen) */
+  markSaved(filePath: string, id?: string, written?: { doc: Doc; at: number; exact: boolean }): void
   /** a copy of another file was opened: it gets an id of its own and is changed until saved with it */
   setDocId(id: string): void
 }

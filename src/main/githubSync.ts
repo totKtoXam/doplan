@@ -361,6 +361,8 @@ export function resolveConflict(choice: ConflictChoice): Promise<ResolveResult> 
     guard(async () => {
       if (choice !== 'mine' && choice !== 'theirs' && choice !== 'both') throw new Error('bad choice')
       const root = await requireRoot()
+      // the same check as push and pull: one address, or nothing is fetched
+      await requireRemote(root)
       await commitPending(root, msg('Перед получением изменений с GitHub', 'Before getting changes from GitHub'))
       const n = await net(true)
       await gitFetch(root, n, REMOTE)

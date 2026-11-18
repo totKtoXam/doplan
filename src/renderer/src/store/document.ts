@@ -175,6 +175,8 @@ let nextEntryId = 1
 let baseId = 0
 /** history position of the last saved/loaded state; -1 = not reachable through undo/redo */
 let savedId = 0
+/** positions a save in flight was taken at (id → number of saves): no later edit merges into them */
+const savePins = new Map<number, number>()
 
 /** id of the current history position */
 function currentId(): number {
@@ -216,7 +218,8 @@ export const docStore = createStore<DocStoreState>()((set, get) => {
     const entry: HistoryEntry = { ...data, id: nextEntryId++ }
     const top = undoStack[undoStack.length - 1]
     // never merge into the saved entry: undo must be able to return to the saved state
-    if (mergeKey && top && top.id !== savedId && top.mergeKey === mergeKey && entry.time - top.time < MERGE_WINDOW_MS) {
+    // nor into one a save in flight was taken at: that entry must keep describing the written file
+    if (mergeKey && top && top.id !== savedId && !savePins.has(top.id) && top.mergeKey === mergeKey && entry.time - top.time < MERGE_WINDOW_MS) {
       top.patches = [...top.patches, ...entry.patches]
       top.inverse = [...entry.inverse, ...top.inverse]
       top.time = entry.time
@@ -410,9 +413,11 @@ export const docStore = createStore<DocStoreState>()((set, get) => {
       get().load(createEmptyDoc(name), null)
     },
 
-    markSaved(filePath, id, at) {
-      // `at`: the history position the written document was taken at; edits made since stay unsaved
-      savedId = at ?? currentId()
+    markSaved(filePath, id, written) {
+      // `written`: the snapshot that went to disk. Saved is what is on screen only if it is that very
+      // snapshot; edited since, the snapshot's own history position (pinned, so nothing merged into
+      // it); taken during a live preview, no position holds it
+      savedId = !written ? currentId() : !written.exact ? -1 : written.doc === get().doc ? currentId() : written.at
       // the id the file was written with (Save As / the first save of an older file give a new one); not an edit
       const doc = id && id !== get().doc.meta.id ? { ...get().doc, meta: { ...get().doc.meta, id } } : get().doc
       set({ doc, filePath, dirty: computeDirty() })
@@ -444,6 +449,31 @@ export function useDoc<T>(selector: (s: DocStoreState) => T): T {
 /** id of the current history position (pass it back to `undoLabelsSince` later) */
 export function historyPosition(): number {
   return currentId()
+}
+
+/** what a save writes: the document as it is now, where it sits in the history, and which load it belongs to */
+export interface SaveSnapshot {
+  doc: Doc
+  /** history position the document was taken at */
+  at: number
+  /** false during a live preview: no history position holds this document */
+  exact: boolean
+  /** DocState.loadId when taken: another open, reload or version view makes the snapshot stale */
+  loadId: number
+}
+
+/** takes the document for a save and pins its history position until `endSave` */
+export function beginSave(): SaveSnapshot {
+  const s = docStore.getState()
+  const at = currentId()
+  savePins.set(at, (savePins.get(at) ?? 0) + 1)
+  return { doc: s.doc, at, exact: !s.transientActive, loadId: s.loadId }
+}
+
+export function endSave(snap: SaveSnapshot): void {
+  const n = (savePins.get(snap.at) ?? 1) - 1
+  if (n > 0) savePins.set(snap.at, n)
+  else savePins.delete(snap.at)
 }
 
 /** labels of the history entries made after position `since`, oldest first (undone entries excluded) */

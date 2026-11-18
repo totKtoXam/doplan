@@ -187,6 +187,26 @@ describe('errors in plain words', () => {
     expect(classifyError(text)).toBe(code)
   })
 
+  // REVIEW-NIGHT-3 #5: the words of the push protection block in a repository or owner name are not a found secret
+  const odd = 'https://github.com/me/unblock-secrets-demo.git'
+  it.each([
+    [`To ${odd}\n ! [rejected]        main -> main (fetch first)\nerror: failed to push some refs to '${odd}'\nhint: Updates were rejected because the remote contains work that you do not have locally.`, 'rejected'],
+    [`fatal: unable to access '${odd}/': Could not resolve host: github.com`, 'offline'],
+    ['remote: Permission to me/unblock-secrets-demo.git denied to bob.\nfatal: unable to access … The requested URL returned error: 403', 'forbidden'],
+    [`remote: error: GH013: Repository rule violations found for refs/heads/main.\nremote: - Changes must be made through a pull request.\nTo ${odd}\n ! [remote rejected] main -> main (push declined due to repository rule violations)`, 'protectedBranch'],
+    [`remote: Repository not found.\nfatal: repository '${odd}/' not found`, 'notFound'],
+    [`fatal: unable to access 'C:/projects/PUSH PROTECTION/secret scanning/': Could not resolve host: github.com`, 'offline'],
+  ])('a repository named like the secret block: %s → %s', (text, code) => {
+    expect(classifyError(text)).toBe(code)
+    expect(secretScanDetail(text)).toBe('')
+  })
+
+  it('finds the secret by the link of its fixed shape alone, too', () => {
+    const link = 'https://github.com/me/unblock-secrets-demo/security/secret-scanning/unblock-secret/2abcDEF'
+    expect(classifyError(`remote:   ${link}\n ! [remote rejected] main -> main`)).toBe('secretFound')
+    expect(secretScanDetail(`remote:   ${link}`)).toBe(link)
+  })
+
   it('says what to do, in both languages', () => {
     expect(errorText('offline', 'ru')).toMatch(/интернет/)
     expect(errorText('offline', 'en')).toMatch(/internet/)
@@ -248,7 +268,7 @@ const { createRepoArgs } = await import('./github')
 const { withSyncLock } = await import('./syncLock')
 const { saveProject } = await import('./project')
 const { grantPath } = await import('./access')
-const { createFolderProject, getProjectRoot, setProjectRoot, trustFolder, writeFolderProject } = await import('./projectFolder')
+const { createFolderProject, getProjectRoot, readFolderPlan, setProjectRoot, trustFolder, writeFolderProject } = await import('./projectFolder')
 const sync = await import('./githubSync')
 
 const remotes = join(base, 'remote')
@@ -616,10 +636,36 @@ describe.skipIf(!hasGit)('project sync', { timeout: 180_000 }, () => {
     expect(st.remote?.owner).toBeUndefined()
     await expect(sync.push()).rejects.toThrow(/несколько адресов|several addresses/)
     await expect(sync.pull()).rejects.toThrow(/несколько адресов|several addresses/)
+    // nor a conflict choice: it would fetch from the first address (REVIEW-NIGHT-3 #2)
+    await expect(sync.resolveConflict('theirs')).rejects.toThrow(/несколько адресов|several addresses/)
     expect(git(join(remotes, 'me', 'evil.git'), 'for-each-ref').trim()).toBe('')
     // connecting again leaves one address
     await sync.connect(url)
     expect(git(a, 'config', '--get-all', 'remote.origin.url').trim()).toBe('https://github.com/me/multi.git')
+  })
+
+  // REVIEW-NIGHT-3 #4: the project reopened while its save waited shows the file from before the write;
+  // the next save from that screen must not overwrite the written one without a question
+  it('a save that waited while the project was read again leaves the next save a question', async () => {
+    const a = await project('Wr')
+    grantPath(a)
+    useRoot(a)
+    let release!: () => void
+    const held = withSyncLock(() => new Promise<void>((r) => (release = r)))
+    const saving = saveProject({ ...plan(a), notes: 'A edited' }, a)
+    await new Promise((r) => setTimeout(r, 300)) // queued behind the lock
+    await readFolderPlan(a) // reopened: read before the write
+    release()
+    await held
+    expect((await saving)?.externalChange).toBeFalsy()
+    expect(plan(a).notes).toBe('A edited')
+    const next = await saveProject({ ...plan(a), notes: 'A tweak' }, a)
+    expect(next?.externalChange).toBe(true)
+    expect(plan(a).notes).toBe('A edited')
+    // without a read in between, a save is "seen" as before
+    await saveProject({ ...plan(a), notes: 'A tweak' }, a, { overwrite: true })
+    expect((await saveProject({ ...plan(a), notes: 'A again' }, a))?.externalChange).toBeFalsy()
+    expect(plan(a).notes).toBe('A again')
   })
 
   it('makes a save wait while a GitHub action works on the folder', async () => {

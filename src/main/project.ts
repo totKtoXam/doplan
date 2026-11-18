@@ -25,6 +25,7 @@ import {
   loadFolderAssets,
   parseJsonText,
   planChangedOnDisk,
+  planReadCount,
   readFolderPlan,
   readPickedFile,
   readInstructions,
@@ -291,13 +292,16 @@ async function zipSaveDialog(doc: unknown, suggested: string, title: string): Pr
 
 async function saveFolder(dir: string, doc: unknown, opts: ProjectSaveOptions): Promise<ProjectSaveResult> {
   // only an existing doplan project folder is written here; new folders are made by create()
+  // the document comes from the folder as read so far: a read while the save waits is a newer screen
+  const readsBefore = planReadCount(dir)
   const root = await folderRootOf(dir)
   if (!root || !samePath(root, dir)) throw new Error(notProjectFolder())
   const openBefore = getProjectRoot()
   // never in the middle of a GitHub action: it may be merging into this very folder (syncLock)
   return withSyncLock(async () => {
     if (!opts.overwrite && (await planChangedOnDisk(root))) return { path: root, externalChange: true }
-    await writeFolderProject(root, doc)
+    // reopened or reloaded meanwhile: that screen shows the file before this write, so its next save asks first
+    await writeFolderProject(root, doc, planReadCount(root) === readsBefore)
     // another project opened while this save waited stays the open one
     const openNow = getProjectRoot()
     if (openNow === openBefore || (openNow && openBefore && samePath(openNow, openBefore))) setProjectRoot(root)

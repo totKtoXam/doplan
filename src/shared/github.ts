@@ -281,6 +281,14 @@ export type SyncErrorCode =
   | 'timeout'
   | 'unknown'
 
+/**
+ * GitHub's push protection block: its own `remote:` lines (a repository, owner or folder name may
+ * contain the same words, but never as the server's message) and the link to allow the secret, which
+ * has a fixed shape: github.com/<owner>/<repo>/security/secret-scanning/unblock-secret/<id>.
+ */
+const PUSH_PROTECTION_LINE = /^\s*remote:.*(PUSH PROTECTION|Push cannot contain secrets|secret scanning)/im
+const UNBLOCK_SECRET_URL = /https:\/\/github\.com\/[A-Za-z0-9-]+\/[A-Za-z0-9._-]+\/security\/secret-scanning\/unblock-secret\/[A-Za-z0-9]+/i
+
 /** what kind of failure a git or gh message describes */
 export function classifyError(text: string): SyncErrorCode {
   const s = String(text ?? '')
@@ -289,7 +297,7 @@ export function classifyError(text: string): SyncErrorCode {
   // GitHub itself refused the versions (rules of the repository): getting changes would not help
   if (/GH007|push would publish a private email|private email address/i.test(s)) return 'emailPrivacy'
   // push protection reports itself as GH013 too: a secret in the versions, not a protected branch
-  if (/PUSH PROTECTION|Push cannot contain secrets|unblock-secret|secret scanning/i.test(s)) return 'secretFound'
+  if (PUSH_PROTECTION_LINE.test(s) || UNBLOCK_SECRET_URL.test(s)) return 'secretFound'
   if (/GH006|GH013|Protected branch|protected branch hook declined|Repository rule violations|rule violations found/i.test(s)) return 'protectedBranch'
   if (/\[remote rejected\]|hook declined/i.test(s)) return 'refused'
   // only "GitHub has versions you do not": a bare "failed to push some refs" says nothing about why
@@ -360,8 +368,9 @@ export function errorText(code: SyncErrorCode, lang: 'ru' | 'en', detail = ''): 
 /** where push protection found secrets (file:line) and its link to allow one, from git's output */
 export function secretScanDetail(text: string): string {
   const s = String(text ?? '')
-  const paths = [...new Set([...s.matchAll(/path:\s*(\S+)/gi)].map((m) => m[1]))].slice(0, 5)
-  const link = /https:\/\/github\.com\/[^\s'"<>]+unblock-secret[^\s'"<>]*/i.exec(s)?.[0]
+  // only the server's own lines: a path elsewhere (a folder name in a local error) is not a finding
+  const paths = [...new Set([...s.matchAll(/^\s*remote:\s*path:\s*(\S+)/gim)].map((m) => m[1]))].slice(0, 5)
+  const link = UNBLOCK_SECRET_URL.exec(s)?.[0]
   return [paths.length ? paths.join(', ') : '', link ?? ''].filter(Boolean).join(' — ')
 }
 

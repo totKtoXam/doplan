@@ -2231,6 +2231,9 @@ function cornerRank(o: Seg, lambda: number): number {
   return -o.t * 1e5 + Math.min(lambda, 1e5 - 1)
 }
 
+/** a corner on an end's way: `o`'s line beyond its end `oEnd` */
+type Via = { lambda: number; point: Vec2; o: Seg; oEnd: 'a' | 'b' }
+
 /**
  * Joins the free wall ends. Every pass decides all ends from the same positions and then moves them
  * together, so the result does not depend on the order of the walls (the order follows the
@@ -2245,6 +2248,8 @@ function joinEnds(segs: Seg[], mergeMm: number): void {
   for (let pass = 0; pass < 6; pass++) {
     const moves: Move[] = []
     const pulls: Move[] = []
+    // ends heading for a wall body with a nearer corner on the way, beyond another wall's end
+    const detours: { s: Seg; end: 'a' | 'b'; body: number; via: Via[] }[] = []
     for (const s of segs) {
       for (const end of ['a', 'b'] as const) {
         const p = s[end]
@@ -2255,6 +2260,7 @@ function joinEnds(segs: Seg[], mergeMm: number): void {
         // otherwise (ends meeting near a corner) the thickest target wins, then the nearest
         let body: { lambda: number; point: Vec2 } | null = null
         let corner: { lambda: number; point: Vec2; o: Seg; oEnd: 'a' | 'b'; beyond: boolean } | null = null
+        const via: Via[] = []
         for (const o of segs) {
           if (o === s) continue
           // the outline walls are joined as if there were no cutouts: a cutout wall never draws an
@@ -2275,9 +2281,20 @@ function joinEnds(segs: Seg[], mergeMm: number): void {
             if (h.lambda > 0.5 && (!body || h.lambda < body.lambda)) body = { lambda: h.lambda, point: h.point }
           } else {
             const oEnd = h.mu < oL / 2 ? 'a' : 'b'
+            if (beyond && h.lambda > 0.5) via.push({ lambda: h.lambda, point: h.point, o, oEnd })
             // an end already on the other wall's line beyond its end (it got there while that wall
-            // moved) still meets it there
-            if ((h.lambda > 0.5 || (beyond && h.lambda >= -0.5)) && (!corner || cornerRank(o, h.lambda) < cornerRank(corner.o, corner.lambda)))
+            // moved) still meets it there. Two cutout walls in line met at the same point (a misread
+            // splits a column side in two): the one ending short of it is brought along, whatever
+            // the order of the walls (the first one found won, so a turn of the plan kept or dropped
+            // the piece that closes the column)
+            const rk = cornerRank(o, h.lambda)
+            const ck = corner ? cornerRank(corner.o, corner.lambda) : Infinity
+            const better = !corner
+              ? true
+              : o.cut && corner.o.cut
+                ? rk < ck - 1e-6 || (Math.abs(rk - ck) <= 1e-6 && beyond && !corner.beyond)
+                : rk < ck
+            if ((h.lambda > 0.5 || (beyond && h.lambda >= -0.5)) && better)
               corner = { lambda: Math.max(0, h.lambda), point: h.point, o, oEnd, beyond }
           }
         }
@@ -2285,11 +2302,42 @@ function joinEnds(segs: Seg[], mergeMm: number): void {
         if (!best) continue
         const q = V(r3(best.point.x), r3(best.point.y))
         moves.push({ s, end, p: q, lambda: best.lambda })
+        if (body && via.some((v) => v.lambda < body!.lambda - 0.5)) detours.push({ s, end, body: body.lambda, via })
         // a corner beyond the other wall's end, which sits on a third wall (a separator) and so never
         // moves itself: bring that end to the corner too, or the two walls never meet
         if (!body && corner?.beyond && onAnother(corner.o[corner.oEnd], corner.o))
           pulls.push({ s: corner.o, end: corner.oEnd, p: q, lambda: corner.lambda })
       }
+    }
+    // a detour end stops on the nearer wall's line when that wall's end crosses its path in the same
+    // pass (it will stand there: a T), as when the walls were joined one after another. Two walls
+    // crossing each other's path that way: the longer one (then the thicker) runs on, the
+    // other stops on it; with neither stronger both run on as they were
+    const moveOf = (s: Seg, end: 'a' | 'b') => moves.find((x) => x.s === s && x.end === end)
+    const rank = (s: Seg) => vDist(s.a, s.b) * 1e4 + s.t
+    const crossing = (d: { s: Seg; end: 'a' | 'b' }, v: Via): boolean => {
+      const om = moveOf(v.o, v.oEnd)
+      if (!om) return false
+      const dir = vNorm(vSub(d.s[d.end], d.end === 'a' ? d.s.b : d.s.a))
+      const side = (p: Vec2) => vCross(dir, vSub(p, d.s[d.end]))
+      return Math.sign(side(om.s[om.end])) !== Math.sign(side(om.p)) && Math.abs(side(om.p)) > 0.5
+    }
+    const stops = new Map<Move, Via>()
+    for (const d of detours) {
+      let stop: Via | null = null
+      for (const v of d.via) {
+        if (v.lambda >= d.body - 0.5 || (stop && v.lambda >= stop.lambda) || !crossing(d, v)) continue
+        const back = detours.find((x) => x.s === v.o && x.end === v.oEnd)
+        const mutual = back?.via.some((w) => w.o === d.s && w.oEnd === d.end && w.lambda < back.body - 0.5 && crossing(back, w))
+        if (mutual && Math.abs(rank(v.o) - rank(d.s)) < 1e-6) continue
+        if (mutual && rank(v.o) < rank(d.s)) continue
+        stop = v
+      }
+      if (stop) stops.set(moveOf(d.s, d.end)!, stop)
+    }
+    for (const [m, v] of stops) {
+      m.p = V(r3(v.point.x), r3(v.point.y))
+      m.lambda = v.lambda
     }
     // an end pulled by several walls goes to the nearest corner (then the lowest point, for a tie)
     const pulled = new Map<string, Move>()
@@ -3303,9 +3351,12 @@ export function validatePlanSpecDetailed(input: PlanSpec): PlanValidation {
       const got = [f.polygon, ...f.holes]
       // two holes of the built face that touch (partly adjacent cutouts, each with its own void) are
       // one hole of the checked shape: their shared side borders no floor and is not compared
-      // (a probe on a boundary is no floor: pointInPoly there follows the rounding, so the orientation)
+      // (a probe on a boundary is no floor: pointInPoly there follows the rounding, so the orientation).
+      // A hairline sliver of floor (a snapped wall leaves 2.5 mm along a wall body) borders no floor
+      // either: a probe 2 mm in counts only with 0.8 mm clear, so any sliver under 2.8 mm is skipped
+      // the same way in every orientation (0.5 mm clear made a 2.5 mm sliver a tie of the rounding)
       const floorAt = (p: Vec2) =>
-        got.every((g) => distToPolyBoundary(p, g) > 0.5) && pointInPoly(p, f.polygon) && !f.holes.some((h) => pointInPoly(p, h))
+        got.every((g) => distToPolyBoundary(p, g) > 0.8) && pointInPoly(p, f.polygon) && !f.holes.some((h) => pointInPoly(p, h))
       const inner = (s: Vec2, side: Vec2) => !floorAt(vAdd(s, vMul(side, 2))) && !floorAt(vAdd(s, vMul(side, -2)))
       const dev = Math.max(boundaryDeviation(got, want, inner), boundaryDeviation(want, got))
       const nHoles = holeGroups(f.polygon, f.holes)

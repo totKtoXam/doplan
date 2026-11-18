@@ -115,7 +115,9 @@ File → «План из PlanSpec (JSON)…», and the CLI uses it in `pnpm dp s
     touching, not overlapping.
   - Touching cutouts of the same kind are one cutout: one void, no wall between them. Between
     cutouts of different kinds the wall is built inside the stronger one (column > box > shaft): a
-    shaft beside a column keeps its whole rect as void, the column is solid anyway.
+    shaft beside a column keeps its whole rect as void, the column is solid anyway. This holds when a
+    side of one lies whole on the other (an L or T of two rects). Staggered cutouts, sharing only part
+    of a side, each keep their own walls, back to back, whatever their kinds.
   - The compiler builds the cutout walls: sides facing the floor are `wall` thick (default
     `defaults.partitionThickness`; thinned if the cutout is too small); sides on the room outline
     continue the room's own wall, and so does a side in line with the outline wall at a reflex
@@ -129,7 +131,9 @@ File → «План из PlanSpec (JSON)…», and the CLI uses it in `pnpm dp s
     8 orientations with the cutout misread by ±10 / ±20 mm, plus random plans). The void inside is a
     technical room (`technical: true`, type other) named `name` (default Шахта / Короб / Колонна),
     however small: whatever its size it is not floor, so it is left out of the room, total and living
-    areas (in the check, in `dp spec validate` and in the app). `kind: "column"` is solid: its walls
+    areas (in the check, in `dp spec validate` and in the app). A shaft or box too small to leave
+    0.01 m² inside its walls (a vent duct, ~250 × 350 mm) gets its walls and no void: the app has no
+    closed area that small. `kind: "column"` is solid: its walls
     fill it, up to 640 mm thick each; a wider column keeps a small «Колонна» void inside. A project
     with technical voids is saved as file format 4 (doplan 0.14 and older refuse to open it rather
     than drop the flag).

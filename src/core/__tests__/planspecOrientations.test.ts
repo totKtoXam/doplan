@@ -105,6 +105,25 @@ const SCENARIOS: Record<string, [unknown, number, boolean, boolean?]> = {
   'r4 #13 column with a wide gap to the neighbour': [sp([Lr([col([1000, 200, 1000, 800])]), nb([2400, 0, 1600, 600])]), 0, true],
   'r4 #15 shaft at a reflex corner, neighbour 95 mm off both ways': [sp([Lr([shaft([1400, 1000, 600, 600])]), nb([2095, 0, 1905, 905])]), 0, true],
   'r4 #16 column and neighbour shaft across a 510 mm wall': [sp([R([col([3600, 1000, 400, 500])]), { id: 'b', type: 'bedroom', rect: [4200, 0, 3000, 3000], cutouts: [shaft([4200, 700, 400, 500])] }], 510), 0, true],
+  // night review
+  'n #2 staggered columns': [sp([R([col([1000, 1000, 400, 400]), col([1400, 1300, 400, 400])])]), 1, true],
+  'n #2 staggered column and shaft': [sp([R([col([1000, 1000, 400, 400]), shaft([1400, 1200, 400, 400])])]), -1, true],
+  'n #2 staggered boxes, 10 mm shared': [sp([R([{ rect: [1000, 1000, 400, 400], kind: 'box' }, { rect: [1400, 1390, 400, 400], kind: 'box' }])]), -1, true],
+  'n #3 neighbour in the notch, 640 mm walls': [sp([Lr([]), nb([2105, 5, 1900, 900])], 640), -1, true],
+  'n #3 two rooms stacked 5 mm off': [sp([{ id: 'a', type: 'living', rect: [0, 0, 4000, 3000] }, bedroom('b', [5, 3105, 4000, 3000])]), -1, true],
+  'n #3 corridor, 510 mm walls': [sp([{ id: 'h', type: 'hall', rect: [0, 0, 1200, 6000] }, { id: 'a', type: 'living', rect: [-3095, 5, 3000, 3500] }, bedroom('c', [1300, 1000, 3000, 3000])], 510), -1, true],
+  'n #4 small shaft (vent)': [sp([R([shaft([1500, 1500, 250, 350])], [0, 0, 4000, 4000])]), 0, true],
+  'n #4 small box': [sp([R([{ rect: [1500, 1500, 200, 300], kind: 'box' }], [0, 0, 4000, 4000])]), -1, true],
+  'n #5 columns sharing 50 mm of a side': [sp([R([col([1500, 1500, 1000, 1000]), col([2500, 2450, 500, 500])], [0, 0, 5000, 5000])]), 1, true],
+  'n #5 shafts sharing 150 mm': [sp([R([shaft([1500, 1500, 1000, 1000]), shaft([2500, 2350, 500, 500])], [0, 0, 5000, 5000])]), -1, true],
+  'n #5 shaft then column sharing 20 mm': [sp([R([shaft([1500, 1500, 1000, 1000]), col([2500, 2480, 500, 500])], [0, 0, 5000, 5000])]), -1, true],
+  'n #5 two shafts, fuzz': [sp([R([shaft([1100, 4100, 650, 750]), shaft([850, 3350, 300, 750])], [0, 0, 5900, 5300])]), -1, true],
+  'n #6 three rooms at a corner, 200 mm gaps': [sp([{ id: 'a', type: 'living', rect: [0, 0, 4000, 3000] }, bedroom('b', [-3200, 0, 3000, 2800]), { id: 'c', type: 'kitchen', rect: [0, -2800, 2900, 2600] }]), -1, true],
+  'n #7 columns touching at a corner': [sp([R([col([1000, 1000, 400, 400]), col([1400, 1400, 600, 600])], [0, 0, 4000, 4000])]), 1, true],
+  'n #7 shaft and column touching at a corner': [sp([R([shaft([1000, 1000, 400, 400]), col([1400, 1400, 600, 600])], [0, 0, 4000, 4000])]), 1, true],
+  'n #7 touching columns, fuzz': [sp([R([col([4150, 1500, 200, 650]), col([4156, 650, 1050, 850])], [0, 0, 5850, 3400])], 380), -1, true],
+  'n #8 L-shaped column of two': [sp([R([col([1150, 1900, 800, 250]), col([1700, 850, 250, 1050])], [0, 0, 3400, 4000])]), 1, true],
+  'n #8 L room with a shaft, neighbour 5 mm off': [sp([Lr([shaft([1350, 4500, 550, 250])], [[1600, 0], [3350, 0], [3350, 5250], [0, 5250], [0, 3750], [1600, 3750]]), bedroom('b', [-5, 15, 1500, 3650])], 250), -1, true],
 }
 
 const turn = (o: number) => (p: P): P => {

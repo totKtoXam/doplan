@@ -1,14 +1,15 @@
 /**
  * What the app starts with: an empty plan behind the welcome screen. The welcome screen is skipped when
- * the app was launched to open a file (that file opens instead); a crash-recovery copy is offered over
- * it as before (restoring it loads the document, which closes the screen).
+ * the app was launched to open a file (that file opens instead, and the screen comes when it cannot be
+ * opened); a crash-recovery copy is offered over it as before (restoring it loads the document, which
+ * closes the screen).
  */
 import { createEmptyDoc } from '@core'
 import { startupView } from '@shared/recent'
 import { loadDocument } from '@/actions/project'
 import { t } from '@/i18n'
 import { api } from '@/store/api'
-import { showWelcome } from '@/store/welcome'
+import { expectLaunchOpen, showWelcome } from '@/store/welcome'
 import { installRecentThumbs } from './thumbnail'
 
 export async function prepareStartup(): Promise<'file' | 'welcome'> {
@@ -25,6 +26,7 @@ export async function prepareStartup(): Promise<'file' | 'welcome'> {
   }
   const view = startupView(launch)
   if (view === 'welcome') showWelcome(false)
+  else expectLaunchOpen() // shown after all if that file does not open
   installRecentThumbs()
   return view
 }

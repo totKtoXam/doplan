@@ -21,6 +21,7 @@ addTranslations('en', {
   'Недавних проектов пока нет': 'No recent projects yet',
   'Создайте новый проект, откройте свой или посмотрите пример — проекты появятся здесь.':
     'Create a new project, open one of yours or look at the sample: your projects will show up here.',
+  'Копии в этом браузере больше нет': 'The copy in this browser is gone',
   'Копия в этом браузере': 'Copy in this browser',
   'Файл или папка проекта не найдены: {path}': 'The project file or folder was not found: {path}',
   'Не найден': 'Not found',

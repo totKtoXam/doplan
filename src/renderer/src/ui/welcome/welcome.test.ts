@@ -6,7 +6,7 @@ import type { Doc } from '@core/types'
 // closed by whatever document gets loaded (an opened project, the sample, a restored crash copy).
 
 const fake = vi.hoisted(() => {
-  const state = { launchFile: false, launchFails: false, thumbs: [] as [string, string][] }
+  const state = { launchFile: false, launchFails: false, thumbs: [] as [string, string | null][] }
   const fallback = (o: Record<string, unknown>) => new Proxy(o, { get: (t, k: string) => (k in t ? t[k] : async () => undefined) })
   const api = {
     platform: 'win32',
@@ -17,7 +17,7 @@ const fake = vi.hoisted(() => {
         state.launchFile = false // main answers true only once
         return { file }
       },
-      setThumb: async (path: string, svg: string) => void state.thumbs.push([path, svg]),
+      setThumb: async (path: string, svg: string | null) => void state.thumbs.push([path, svg]),
       list: async () => [],
       remove: async () => {},
     },
@@ -30,7 +30,8 @@ vi.stubGlobal('requestAnimationFrame', (cb: () => void) => setTimeout(cb, 0))
 
 const { docStore } = await import('@/store/document')
 const { projectStore } = await import('@/store/project')
-const { welcomeStore, showWelcome, hideWelcome, welcomeBlocksMenu, welcomeBlocksKey } = await import('@/store/welcome')
+const { welcomeStore, showWelcome, hideWelcome, welcomeBlocksMenu, welcomeBlocksKey, runFileOpen } = await import('@/store/welcome')
+const { makeEditorInert } = await import('./inert')
 const { prepareStartup } = await import('./startup')
 const { planThumbSvg } = await import('./thumbnail')
 const { buildSampleApartment } = await import('@/store/sample')
@@ -81,6 +82,62 @@ describe('startup', () => {
   })
 })
 
+describe('the file the app was launched to open', () => {
+  it('a launch file that does not open brings the start screen instead of a blank editor', async () => {
+    fake.state.launchFile = true
+    expect(await prepareStartup()).toBe('file')
+    expect(open()).toBe(false)
+    await runFileOpen(async () => {
+      throw new Error('broken .doplan')
+    })
+    expect(open()).toBe(true)
+    expect(welcomeStore.getState().canClose).toBe(false)
+  })
+
+  it('also when it opens to nothing (a cancelled import question)', async () => {
+    fake.state.launchFile = true
+    await prepareStartup()
+    await runFileOpen(async () => {})
+    expect(open()).toBe(true)
+  })
+
+  it('stays away when the launch file opens', async () => {
+    fake.state.launchFile = true
+    await prepareStartup()
+    await runFileOpen(async () => docStore.getState().load(createEmptyDoc('Квартира'), 'C:/p/Квартира.doplan'))
+    expect(open()).toBe(false)
+    // later opens sent by a second instance are not launches: a failed one keeps the editor
+    await runFileOpen(async () => {
+      throw new Error('broken')
+    })
+    expect(open()).toBe(false)
+  })
+})
+
+describe('the document behind the screen', () => {
+  it('a change to it (a dropped image or PlanSpec, a file from a second instance) closes the screen', async () => {
+    await prepareStartup()
+    expect(open()).toBe(true)
+    docStore.getState().transact('underlay', (d) => void (d.meta.name = 'С подложкой'))
+    expect(open()).toBe(false)
+    showWelcome(true)
+    docStore.getState().transact('level', (d) => void (d.meta.name = 'С этажом'))
+    expect(open()).toBe(false)
+  })
+
+  it('the editor is out of reach while the screen is up, and back after', () => {
+    type El = { inert: boolean; previousElementSibling: El | null }
+    const topBar: El = { inert: false, previousElementSibling: null }
+    const panels: El = { inert: false, previousElementSibling: topBar }
+    const statusBar: El = { inert: true, previousElementSibling: panels } // inert already: left as it was
+    const screen: El = { inert: false, previousElementSibling: statusBar }
+    const undo = makeEditorInert(screen)
+    expect([topBar.inert, panels.inert, statusBar.inert, screen.inert]).toEqual([true, true, true, false])
+    undo()
+    expect([topBar.inert, panels.inert, statusBar.inert]).toEqual([false, false, true])
+  })
+})
+
 describe('welcome screen from the menu', () => {
   it('can go back to the project it was opened over, but not at startup', async () => {
     showWelcome(true)
@@ -122,6 +179,23 @@ describe('plan thumbnails', () => {
       docStore.getState().load(buildSampleApartment('Квартира') as Doc, 'C:/p/Квартира')
       await vi.advanceTimersByTimeAsync(700)
       expect(fake.state.thumbs).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('is dropped when the plan has become empty', async () => {
+    vi.useFakeTimers()
+    try {
+      await prepareStartup()
+      docStore.getState().load(buildSampleApartment('Квартира') as Doc, 'C:/p/Квартира')
+      await vi.advanceTimersByTimeAsync(700)
+      docStore.getState().load(createEmptyDoc('Квартира'), 'C:/p/Квартира')
+      await vi.advanceTimersByTimeAsync(700)
+      expect(fake.state.thumbs.map(([p, svg]) => [p, svg === null ? null : 'svg'])).toEqual([
+        ['C:/p/Квартира', 'svg'],
+        ['C:/p/Квартира', null],
+      ])
     } finally {
       vi.useRealTimers()
     }

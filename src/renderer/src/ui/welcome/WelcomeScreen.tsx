@@ -1,5 +1,5 @@
 import { ArrowLeft, FilePlus, FileQuestion, FolderOpen, FolderTree, House, Settings, X } from 'lucide-react'
-import { type CSSProperties, type ReactNode, useCallback, useEffect, useState } from 'react'
+import { type CSSProperties, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { RecentEntry } from '@shared/recent'
 import { actions } from '@/actions'
 import { useT } from '@/i18n'
@@ -10,6 +10,7 @@ import { hideWelcome, useWelcome } from '@/store/welcome'
 import { Button, cn, focusRing, IconButton, ScrollArea, Spinner } from '@/ui/kit'
 import { AppLogo } from '@/ui/shell/AppLogo'
 import { formatWhen, parentOf, svgDataUrl } from './format'
+import { type InertTarget, makeEditorInert } from './inert'
 import './welcomeI18n'
 
 // Colours come only from the theme (styles.css / theme/store.ts tokens), so the screen follows
@@ -78,7 +79,8 @@ function RecentCard({ entry, busy, onOpen, onRemove }: { entry: RecentEntry; bus
   const t = useT()
   const lang = useUi((s) => s.lang)
   const missing = !entry.exists
-  const where = entry.kind === 'web' ? t('Копия в этом браузере') : parentOf(entry.path)
+  // a web entry whose copy was dropped (storage full) is no longer in this browser
+  const where = entry.kind !== 'web' ? parentOf(entry.path) : missing ? t('Копии в этом браузере больше нет') : t('Копия в этом браузере')
   return (
     <div
       className={cn(
@@ -151,6 +153,7 @@ export function WelcomeScreen() {
   const canClose = useWelcome((s) => s.canClose)
   const [entries, setEntries] = useState<RecentEntry[] | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
 
   const reload = useCallback(() => {
     api.recent
@@ -167,6 +170,15 @@ export function WelcomeScreen() {
     setEntries(null)
     reload()
   }, [open, reload])
+
+  // the editor behind is out of reach (Tab, Enter, its File menu); focus starts on «Новый проект»
+  useLayoutEffect(() => {
+    const root = rootRef.current
+    if (!open || !root) return
+    const undo = makeEditorInert(root as unknown as InertTarget)
+    root.querySelector<HTMLButtonElement>('nav button')?.focus({ preventScroll: true })
+    return undo
+  }, [open])
 
   // Esc goes back to the project the screen was opened over
   useEffect(() => {
@@ -207,7 +219,7 @@ export function WelcomeScreen() {
   }
 
   return (
-    <div className="dp-welcome fixed inset-0 z-[850] flex bg-[var(--bg)] text-[var(--text)]" role="region" aria-label={t('Начальный экран')}>
+    <div ref={rootRef} className="dp-welcome fixed inset-0 z-[850] flex bg-[var(--bg)] text-[var(--text)]" role="region" aria-label={t('Начальный экран')}>
       {/* left: brand and the first steps */}
       <aside className="flex w-[300px] shrink-0 flex-col gap-6 border-r border-[var(--border)] bg-[var(--panel)] px-6 py-8">
         <div className="flex items-center gap-3">

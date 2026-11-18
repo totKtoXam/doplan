@@ -31,7 +31,8 @@ export interface RecentApi {
   /** drops a project from the list (the project itself is not touched) */
   remove(path: string): Promise<void>
   /** stores the plan thumbnail of a project that is in the list (ignored otherwise) */
-  setThumb(path: string, svg: string): Promise<void>
+  /** the plan picture of a recent project; null drops it (the plan is empty now, or too large to draw) */
+  setThumb(path: string, svg: string | null): Promise<void>
   /** true once if the app was started to open a file (double click, command line); false afterwards */
   launch(): Promise<{ file: boolean }>
 }

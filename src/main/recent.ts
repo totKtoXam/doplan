@@ -22,7 +22,8 @@ export function registerRecentIpc(): void {
   handleIpc(RECENT_CH.setThumb, async (path: unknown, svg: unknown) => {
     // only projects of the list get a thumbnail: the renderer cannot make main write files elsewhere
     if (typeof path !== 'string' || !path || !(await isRecentPath(path))) return
-    await writeThumb(thumbsDir(), path, svg)
+    if (svg === null) await dropThumb(thumbsDir(), path)
+    else await writeThumb(thumbsDir(), path, svg)
   })
   handleIpc(RECENT_CH.launch, () => ({ file: takeLaunchOpen() }))
 }

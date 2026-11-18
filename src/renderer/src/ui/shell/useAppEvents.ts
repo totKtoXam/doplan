@@ -13,7 +13,7 @@ import { notifyStore, alertDialog } from '@/store/notify'
 import { projectStore } from '@/store/project'
 import { checkForUpdatesManually, initUpdates, installUpdate } from '@/store/updates'
 import { uiStore } from '@/store/ui'
-import { showWelcome, welcomeBlocksKey, welcomeBlocksMenu } from '@/store/welcome'
+import { runFileOpen, showWelcome, welcomeBlocksKey, welcomeBlocksMenu } from '@/store/welcome'
 import type { ToolId } from '@/contracts'
 import { shortcutKey } from './keys'
 import { activateTool, TOOLS } from './tools'
@@ -277,7 +277,7 @@ export function useAppEvents(enabled: boolean): { dragOver: boolean } {
 
     offs.push(api.window.onMenu(onMenu))
     offs.push(api.window.onCloseRequest(() => void actions.handleCloseRequest()))
-    offs.push(api.window.onOpenFile((p) => void onOpenFile(p)))
+    offs.push(api.window.onOpenFile((p) => void runFileOpen(() => onOpenFile(p))))
     offs.push(initUpdates())
 
     // title / dirty flag

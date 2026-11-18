@@ -52,14 +52,16 @@ function rememberCurrent(): void {
   const { doc, filePath, derived } = docStore.getState()
   // an old version shown from the history is not what the project looks like now
   if (!filePath || projectStore.getState().viewing) return
-  let svg: string | null = null
+  // null: nothing to draw (empty plan) or too large — the old picture goes; undefined: drawing failed,
+  // the old picture stays
+  let svg: string | null | undefined
   try {
     svg = planThumbSvg(doc, uiStore.getState().catalog, derived[doc.levelOrder[0] ?? ''])
   } catch (err) {
     console.warn('[doplan] plan thumbnail failed', err)
   }
   if (api.platform === 'browser') webRecent.remember(doc, svg)
-  else if (svg) void api.recent.setThumb(filePath, svg).catch(() => {})
+  else if (svg !== undefined) void api.recent.setThumb(filePath, svg).catch(() => {})
 }
 
 let installed = false

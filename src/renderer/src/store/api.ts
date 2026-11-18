@@ -8,7 +8,7 @@ import { DEFAULT_AI_SETTINGS } from '@shared/aiChat'
 import { releasePageUrl } from '@shared/updater'
 import { DEFAULT_FEEDS } from '@shared/feeds'
 import { ghInstallHint, type GithubSyncStatus } from '@shared/github'
-import { WEB_RECENT_PREFIX, webRecent } from './webRecent'
+import { setItemMakingRoom, WEB_RECENT_PREFIX, webRecent } from './webRecent'
 
 /** the web build has no git: GitHub sync lives in the desktop app */
 const webSync: GithubSyncStatus = { state: 'unavailable', reason: 'GitHub sync is available in the doplan desktop app', ahead: 0, behind: 0 }
@@ -41,7 +41,8 @@ function readLocalSettings(): AppSettings {
 
 function writeLocalSettings(s: AppSettings): void {
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(s))
+    // settings go before the copies of recent documents (webRecent)
+    setItemMakingRoom(SETTINGS_KEY, JSON.stringify(s))
   } catch {
     /* storage unavailable */
   }
@@ -130,7 +131,8 @@ function createFallbackApi(): DoplanApi {
       },
       async autosave(doc: unknown) {
         try {
-          localStorage.setItem('doplan.recovery', JSON.stringify(doc))
+          // the crash-recovery copy goes before the copies of recent documents (webRecent)
+          setItemMakingRoom('doplan.recovery', JSON.stringify(doc))
         } catch {
           /* quota */
         }

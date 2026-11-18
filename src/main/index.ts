@@ -21,6 +21,7 @@ import { registerGithubIpc, shutdownGithub } from './githubSync'
 import { getSettings, onSettingsChanged } from './settings'
 import { getUpdateState, initUpdater, onUpdateState, openReleasePage } from './updater'
 import { registerPages } from './pages'
+import { registerRecentIpc } from './recent'
 import { updateMenuAction } from '../shared/updater'
 import { closeWasConfirmed, createMainWindow, getMainWindow, isTrustedUrl, requestOpenFile } from './window'
 
@@ -124,6 +125,7 @@ if (!gotLock) {
     registerGithubIpc() // github
     initUpdater()
     registerPages()
+    registerRecentIpc() // welcome screen
     await Promise.all([initProjectStore(), ensureLibrary()])
 
     const s = await getSettings()

@@ -13,6 +13,7 @@ import { notifyStore, alertDialog } from '@/store/notify'
 import { projectStore } from '@/store/project'
 import { checkForUpdatesManually, initUpdates, installUpdate } from '@/store/updates'
 import { uiStore } from '@/store/ui'
+import { showWelcome, welcomeBlocksKey, welcomeBlocksMenu } from '@/store/welcome'
 import type { ToolId } from '@/contracts'
 import { shortcutKey } from './keys'
 import { activateTool, TOOLS } from './ToolRail'
@@ -45,6 +46,7 @@ function onKeyDown(e: KeyboardEvent): void {
   const selectFocused = (e.target as HTMLElement | null)?.tagName === 'SELECT'
   if (e.defaultPrevented || (isEditable(e.target) && !(ctrl && selectFocused)) || anyDialogOpen()) return
   const key = shortcutKey(e)
+  if (welcomeBlocksKey(ctrl && !e.altKey && !e.shiftKey, key)) return
   const ui = uiStore.getState()
 
   if (ctrl && !e.altKey) {
@@ -140,8 +142,11 @@ function onKeyDown(e: KeyboardEvent): void {
 function onMenu(cmd: MenuCommand): void {
   // native menu items and their accelerators reach here even while a dialog is open; keyboard
   // shortcuts are ignored then (onKeyDown), and so are menu commands — they would act behind the dialog
-  if (anyDialogOpen()) return
+  if (anyDialogOpen() || welcomeBlocksMenu(cmd)) return
   switch (cmd) {
+    case 'welcome':
+      showWelcome(true)
+      break
     case 'new':
       void actions.newProject()
       break

@@ -16,6 +16,7 @@ import type { GithubApi } from './github'
 import type { UpdatesApi } from './updater'
 import type { PagesApi } from './pagesSite'
 import type { AssetFeed } from './feeds'
+import type { RecentApi } from './recent'
 
 export interface FileFilter {
   name: string
@@ -174,6 +175,8 @@ export type MenuCommand =
   | 'exportDoplan'
   | 'history'
   | 'instructions'
+  // welcome screen
+  | 'welcome'
 
 export interface DoplanApi {
   platform: string
@@ -300,6 +303,9 @@ export interface DoplanApi {
 
   /** read-only copy of the plan on GitHub Pages; see src/shared/pagesSite.ts */
   pages: PagesApi
+
+  /** welcome screen: recent projects checked on disk, plan thumbnails, the launch file; see src/shared/recent.ts */
+  recent: RecentApi
 
   window: {
     setTitle(title: string, dirty: boolean): void

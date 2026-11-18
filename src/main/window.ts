@@ -7,6 +7,9 @@ let mainWindow: BrowserWindow | null = null
 let allowClose = false
 let rendererReady = false
 const pendingOpen: string[] = []
+/** welcome screen: a file was asked to open before the page first loaded (double click on a project, command line) */
+let launchOpen = false
+let everLoaded = false
 
 const devUrl = !app.isPackaged ? process.env['ELECTRON_RENDERER_URL'] : undefined
 
@@ -51,6 +54,7 @@ export function broadcast(channel: string, ...args: unknown[]): void {
 
 /** queue a file for the renderer (delivered after the page has loaded) */
 export function requestOpenFile(path: string): void {
+  if (!everLoaded) launchOpen = true
   if (rendererReady) sendToRenderer(CH.evOpenFile, path)
   else pendingOpen.push(path)
   const w = getMainWindow()
@@ -58,6 +62,13 @@ export function requestOpenFile(path: string): void {
     if (w.isMinimized()) w.restore()
     w.focus()
   }
+}
+
+/** true once if the app was started to open a file (the renderer then skips the welcome screen) */
+export function takeLaunchOpen(): boolean {
+  const v = launchOpen
+  launchOpen = false
+  return v
 }
 
 export function confirmClose(): void {
@@ -122,6 +133,7 @@ export function createMainWindow(): BrowserWindow {
 
   win.webContents.on('did-finish-load', () => {
     rendererReady = true
+    everLoaded = true
     while (pendingOpen.length) win.webContents.send(CH.evOpenFile, pendingOpen.shift())
   })
   win.webContents.on('did-start-loading', () => {

@@ -9,8 +9,11 @@
  * Never throws into the app: every failure becomes an `error` state (offline → quiet) and a log line.
  * The feed comes from resources/app-update.yml, written by electron-builder from `publish:`.
  */
+import { appendFileSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { format } from 'node:util'
 import { app, shell } from 'electron'
-import { autoUpdater, type AppUpdater, type ProgressInfo, type UpdateInfo } from 'electron-updater'
+import { autoUpdater, type AppUpdater, type ProgressInfo, type UpdateDownloadedEvent, type UpdateInfo } from 'electron-updater'
 import {
   clampPercent,
   detectUpdateMode,
@@ -23,17 +26,42 @@ import {
 } from '../shared/updater'
 import { CH } from './channels'
 import { handleIpc } from './ipc'
+import { spawnRelaunchWatcher } from './relaunch'
 import { allowQuitWithoutPrompt, sendToRenderer } from './window'
 
 const FIRST_CHECK_MS = 10_000
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000
+const LOG_MAX_BYTES = 512 * 1024
+
+/** %APPDATA%\doplan\logs\updater.log — shared with the relaunch watcher; null until initUpdater() */
+let logFile: string | null = null
+
+function toFile(level: string, a: unknown[]): void {
+  if (!logFile) return
+  try {
+    let size = 0
+    try {
+      size = statSync(logFile).size
+    } catch {
+      /* new file */
+    }
+    const line = `${new Date().toISOString()} ${level} ${format(...a)}\n`
+    if (size > LOG_MAX_BYTES) writeFileSync(logFile, line)
+    else appendFileSync(logFile, line)
+  } catch {
+    /* logging never breaks updates */
+  }
+}
 
 const log = {
-  info: (...a: unknown[]) => console.log('[doplan:update]', ...a),
-  warn: (...a: unknown[]) => console.warn('[doplan:update]', ...a),
-  error: (...a: unknown[]) => console.error('[doplan:update]', ...a),
+  info: (...a: unknown[]) => (console.log('[doplan:update]', ...a), toFile('info', a)),
+  warn: (...a: unknown[]) => (console.warn('[doplan:update]', ...a), toFile('warn', a)),
+  error: (...a: unknown[]) => (console.error('[doplan:update]', ...a), toFile('error', a)),
   debug: () => {},
 }
+
+/** the installer electron-updater will run (from 'update-downloaded') */
+let downloadedFile: string | undefined
 
 let state: UpdateState = { mode: 'disabled', current: '0.0.0', status: { kind: 'idle' } }
 let updater: AppUpdater | null = null
@@ -115,7 +143,10 @@ function wire(up: AppUpdater, mode: UpdateState['mode']): void {
       bytesPerSecond: p.bytesPerSecond ?? 0,
     })
   })
-  up.on('update-downloaded', (info: UpdateInfo) => setStatus({ kind: 'downloaded', ...infoFields(info) }))
+  up.on('update-downloaded', (info: UpdateDownloadedEvent) => {
+    downloadedFile = info.downloadedFile
+    setStatus({ kind: 'downloaded', ...infoFields(info) })
+  })
   up.on('error', (err: Error) => {
     if (installing) {
       installing = false
@@ -140,6 +171,15 @@ function install(): void {
   // the renderer has already settled unsaved changes: skip the close handshake
   installing = true
   allowQuitWithoutPrompt(true)
+  // the installer's own relaunch (--force-run) fails when the install dir needs admin rights; the watcher
+  // starts the new version once the install is done, unless the installer already did
+  if (logFile) {
+    const started = spawnRelaunchWatcher(
+      { parentPid: process.pid, exePath: process.execPath, version: state.status.version, installerFile: downloadedFile, logPath: logFile },
+      (err) => log.error('relaunch watcher:', err),
+    )
+    log.info(`relaunch watcher ${started ? 'started' : 'not started'}`)
+  }
   // silent: the assisted NSIS wizard would otherwise reappear on every update; keeps the install dir.
   // A failure to start the installer is reported synchronously through 'error' (see wire()).
   up.quitAndInstall(true, true)
@@ -161,6 +201,13 @@ export function initUpdater(): void {
   handleIpc(CH.updatesOpenRelease, (version: unknown) => openReleasePage(version))
 
   if (mode === 'disabled') return
+  try {
+    const dir = app.getPath('logs')
+    mkdirSync(dir, { recursive: true })
+    logFile = join(dir, 'updater.log')
+  } catch {
+    logFile = null
+  }
   try {
     updater = autoUpdater
     wire(updater, mode)

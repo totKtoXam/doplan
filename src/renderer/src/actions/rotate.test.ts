@@ -71,4 +71,46 @@ describe('rotating dimensions and labels', () => {
     groupRotate(90)
     expect(doc()).toBe(before)
   })
+
+  it('the button is off for a wall whose ends sit on locked walls', () => {
+    const d = createEmptyDoc('T')
+    const levelId = d.levelOrder[0]
+    const [w1] = addWall(d, levelId, { x: 0, y: 0 }, { x: 4000, y: 0 }, { thickness: 200 })
+    const [w2] = addWall(d, levelId, { x: 4000, y: 0 }, { x: 4000, y: 3000 }, { thickness: 200 })
+    const [w3] = addWall(d, levelId, { x: 4000, y: 3000 }, { x: 0, y: 3000 }, { thickness: 200 })
+    expect(d.walls[w2].a === d.walls[w1].b || d.walls[w2].b === d.walls[w1].b).toBe(true)
+    d.walls[w1].locked = true
+    docStore.getState().load(d, null)
+    uiStore.setState({ activeLevelId: levelId })
+    const doc = () => docStore.getState().doc
+    const wall = (id: string): EntityRef[] => [{ kind: 'wall', id }]
+    // one end free: it turns about that end, which stays where it is
+    expect(canGroupRotate(doc(), wall(w2))).toBe(false)
+    select(wall(w2))
+    let before = doc()
+    groupRotate(90)
+    expect(doc()).toBe(before)
+    // with another, free wall it turns about their common centre
+    expect(canGroupRotate(doc(), [...wall(w2), ...wall(w3)])).toBe(true)
+    // both ends on locked walls
+    docStore.getState().load({ ...doc(), walls: { ...doc().walls, [w3]: { ...doc().walls[w3], locked: true } } }, null)
+    expect(canGroupRotate(doc(), wall(w2))).toBe(false)
+    select(wall(w2))
+    before = doc()
+    groupRotate(90)
+    expect(doc()).toBe(before)
+  })
+
+  it('a free wall can turn', () => {
+    const d = createEmptyDoc('T')
+    const levelId = d.levelOrder[0]
+    const [w] = addWall(d, levelId, { x: 0, y: 0 }, { x: 4000, y: 0 }, { thickness: 200 })
+    docStore.getState().load(d, null)
+    uiStore.setState({ activeLevelId: levelId })
+    expect(canGroupRotate(docStore.getState().doc, [{ kind: 'wall', id: w }])).toBe(true)
+    uiStore.setState({ selection: [{ kind: 'wall', id: w }] })
+    const before = docStore.getState().doc
+    groupRotate(90)
+    expect(docStore.getState().doc).not.toBe(before)
+  })
 })

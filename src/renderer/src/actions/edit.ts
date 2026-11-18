@@ -77,11 +77,18 @@ export const ROTATABLE_KINDS: ReadonlySet<EntityRef['kind']> = new Set(['wall', 
 /**
  * Whether groupRotate would change anything: some unlocked object of a kind it turns, and not just
  * one point without a direction of its own (a single label or wall node, or a light without rotation,
- * turns about itself and stays as it was).
+ * turns about itself and stays as it was). A wall turns by its ends, and an end on a locked wall stays
+ * put: a wall between two locked ones does not move, and one with a single free end turns about it.
  */
 export function canGroupRotate(doc: Doc, refs: readonly EntityRef[]): boolean {
   const free = unlockedRefs(doc, refs as EntityRef[]).filter((r) => ROTATABLE_KINDS.has(r.kind))
   const points = new Set<string>()
+  let vis: ReturnType<typeof layerIndex> | undefined
+  const freeNode = (id: Id) => {
+    vis ??= layerIndex(doc)
+    const n = doc.nodes[id]
+    if (n && !vis.locked('node', id)) points.add(`${n.x},${n.y}`)
+  }
   for (const r of free) {
     if (r.kind === 'label') {
       const l = doc.labels[r.id]
@@ -96,6 +103,12 @@ export function canGroupRotate(doc: Doc, refs: readonly EntityRef[]): boolean {
     } else if (r.kind === 'node') {
       const n = doc.nodes[r.id]
       if (n) points.add(`${n.x},${n.y}`)
+    } else if (r.kind === 'wall') {
+      const w = doc.walls[r.id]
+      if (w) {
+        freeNode(w.a)
+        freeNode(w.b)
+      }
     } else {
       return true
     }

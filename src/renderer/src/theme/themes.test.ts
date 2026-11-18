@@ -111,6 +111,26 @@ describe('colour themes', () => {
     expect(r.ui.viewport).toBe('#ffffff')
     const black = themeFromFile('{"extends":"Light Modern","colors":{"editor.background":"#1e1e1e"}}')
     expect(resolveTheme(black, [...BUILTIN_THEMES, black]).kind).toBe('light')
+    // the same when the parent has no panel key, only an editor background: the panels take the parent's
+    const edDark = themeFromFile('{"name":"EdOnly","type":"dark","colors":{"editor.background":"#1e1e1e","foreground":"#cccccc"}}')
+    const edWhite = themeFromFile('{"name":"EdWhite","extends":"EdOnly","colors":{"editor.background":"#ffffff"}}')
+    const w = resolveTheme(edWhite, [edDark, edWhite])
+    expect(w.kind).toBe('dark')
+    expect(w.ui.panel).toBe('#1e1e1e')
+    expect(w.ui.text).toBe('#cccccc')
+    expect(w.ui.viewport).toBe('#ffffff')
+    // a parent without type (its kind from its editor) and the reverse, light under a dark plan
+    const noType = themeFromFile('{"name":"NoType","colors":{"editor.background":"#1e1e1e"}}')
+    const over = themeFromFile('{"extends":"NoType","colors":{"editor.background":"#ffffff"}}')
+    const o = resolveTheme(over, [noType, over])
+    expect([o.kind, o.ui.panel]).toEqual(['dark', '#1e1e1e'])
+    const edLight = themeFromFile('{"name":"EdLight","type":"light","colors":{"editor.background":"#ffffff"}}')
+    const edBlack = themeFromFile('{"extends":"EdLight","colors":{"editor.background":"#1e1e1e"}}')
+    const b = resolveTheme(edBlack, [edLight, edBlack])
+    expect([b.kind, b.ui.panel, b.ui.viewport]).toEqual(['light', '#ffffff', '#1e1e1e'])
+    // an overlay's own editor background of the theme's kind still makes the panels
+    const ownDark = themeFromFile('{"extends":"EdOnly","colors":{"editor.background":"#2a2a2a"}}')
+    expect(resolveTheme(ownDark, [edDark, ownDark]).ui.panel).toBe('#2a2a2a')
   })
 
   it('the kind of an overlay follows its parent: reinstalled with another kind, or installed after it', () => {
@@ -194,7 +214,7 @@ describe('colour themes', () => {
       if (t.plan === 'classic') continue
       const bg = hex(r.plan.bg)
       expect(contrast(hex(r.plan.dim), bg), t.id).toBeGreaterThanOrEqual(3)
-      expect(contrast(hex(r.plan.dimAuto), bg), t.id).toBeGreaterThanOrEqual(2.5)
+      expect(contrast(hex(r.plan.dimAuto), bg), t.id).toBeGreaterThanOrEqual(3)
       seen.add(hex(r.plan.dim))
     }
     // not one grey for all: the themes differ

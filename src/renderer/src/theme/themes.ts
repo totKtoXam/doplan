@@ -290,7 +290,14 @@ export function resolveTheme(t: ThemeSource, all: readonly ThemeSource[] = []): 
     return undefined
   }
 
-  const panel = flatten(get('doplan.panel', 'sideBar.background', 'editor.background') ?? fb.panel, fb.panel)
+  // without a panel key the panels take the editor background, but an overlay's editor.background is only
+  // its plan's (themeKind): the nearest one of the theme's kind, the overlay's own or a parent's
+  const editorPanel = () =>
+    layers
+      .map((l) => l.colors['editor.background'])
+      .reverse()
+      .find((c) => parseColor(c) && kindOfColour(flatten(c, fb.panel)) === kind)
+  const panel = flatten(get('doplan.panel', 'sideBar.background') ?? editorPanel() ?? fb.panel, fb.panel)
   const solid = (v: string | undefined) => (v ? flatten(v, panel) : undefined)
   let text = solid(get('doplan.text', 'foreground', 'sideBar.foreground', 'editor.foreground')) ?? fb.text
   if (contrast(text, panel) < 4.5) text = readableOn(panel, '#eeeeee', '#1a1a1a')
@@ -389,17 +396,17 @@ function planPalette(kind: ThemeKind, ui: UiTokens, colors: Record<string, strin
     p.gridMajor = N(text)
     p.text = N(text)
     p.textMuted = N(mutedPlan)
-    // dimensions: in the theme's colour of numbers if it reads on the plan and on the rooms (pulled
-    // toward the text if it does not), else in the text colour
-    const room = dark ? mix(bg, text, 0.07) : mix(bg, '#ffffff', 0.75)
-    const reads = (c: string, min: number) => Math.min(contrast(c, bg), contrast(c, room)) >= min
+    // dimensions: in the theme's colour of numbers if it reads on the plan (pulled toward the text if
+    // it does not), else in the text colour. A floor may be of any colour, so no colour reads on every
+    // room: the numbers have a halo of the plan colour (Painter.dimension), and that is what they sit on
+    const reads = (c: string) => contrast(c, bg) >= 3
     const numRaw = colors['doplan.number']
     const num = parseColor(numRaw) ? flatten(numRaw, bg) : undefined
-    const dimC = num && [0, 0.25, 0.5].map((t) => mix(num, text, t)).find((c) => reads(c, 3))
+    const dimC = num && [0, 0.25, 0.5].map((t) => mix(num, text, t)).find(reads)
     if (dimC) {
       p.dim = N(dimC)
       const faded = mix(dimC, bg, 0.3)
-      p.dimAuto = N(reads(faded, 2.5) ? faded : dimC)
+      p.dimAuto = N(reads(faded) ? faded : dimC)
     } else {
       p.dim = N(mix(text, bg, dark ? 0.1 : 0.08))
       p.dimAuto = N(mix(text, bg, 0.45))

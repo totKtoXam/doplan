@@ -1,10 +1,15 @@
-// No-cutout plans must build exactly as at a56f5f4 (before the cutout work): the same number of walls
+// The cutout compiler (compileCutoutSpec) on plain corners. The public entry sends a plan without
+// cutouts to the base code (planspecBase.ts, pinned bit for bit by planspecLegacy.test.ts); the cutout
+// compiler builds the plain part of every plan that has a cutout, and the cutout geometry of the faces
+// (rooms.ts: folded rings untwisted) works on a level with a technical void. So every plan here gets a
+// detached 600 × 600 technical void far away (VOID), which touches nothing and is left out of the counts.
+// The cases below were first pinned as no-cutout plans that must build as at a56f5f4: the same walls
 // and closed areas, the same room areas, the same gate. The expectations below were produced by the
 // a56f5f4 compiler; only plans it built cleanly (no dangling wall, merged or open room) are listed, so
 // a difference here is a regression, not a base defect fixed
 import { describe, expect, it } from 'vitest'
 import { derivePlan } from '../derive'
-import { compilePlanSpecDetailed, parsePlanSpec, validatePlanSpecDetailed, type PlanSpec } from '../planspec'
+import { compileCutoutSpec, parsePlanSpec, validateCutoutSpec, type PlanSpec } from '../planspec'
 import { polygonArea } from '../geom'
 import { untwistRing } from '../rooms'
 
@@ -30,30 +35,38 @@ const CASES: [string, (number[] | number[][] | null)[], number, Want][] = [
   ["ofuzz seed 100018", [[0,0,4850,4200],[0,-1780,4850,1400],[-2300,0,2200,4200]], 380, {"walls":11,"faces":3,"areas":{"a":20.37,"b":6.79,"c":9.24},"ok":true}],
 ]
 
+/** a technical void far from every plan: it turns the cutout geometry on and touches nothing */
+const VOID = { id: 'z', type: 'other', rect: [40000, 40000, 600, 600], technical: true }
+
 function spec(rooms: (number[] | number[][] | null)[], T: number): PlanSpec {
   const ids = 'abcde'
   return parsePlanSpec({
     version: 1,
     units: 'mm',
     defaults: { exteriorThickness: T, partitionThickness: 100, loadBearingThickness: 200 },
-    rooms: rooms.flatMap((r, i) => (r ? [{ id: ids[i], type: TYPES[i], ...(typeof r[0] === 'number' ? { rect: r } : { polygon: r }) }] : [])),
+    rooms: [...rooms.flatMap((r, i) => (r ? [{ id: ids[i], type: TYPES[i], ...(typeof r[0] === 'number' ? { rect: r } : { polygon: r }) }] : [])), VOID],
     openings: [],
   })
 }
+/** the faces and walls of the plan itself (the far void and its 4 walls left out) */
+function built(s: PlanSpec) {
+  const res = compileCutoutSpec(s)
+  const faces = derivePlan(res.doc, res.levelId).rooms.filter((f) => f.roomId !== res.roomIds.z)
+  return { res, faces, walls: Object.keys(res.doc.walls).length - 4 }
+}
 
-describe('planspec without cutouts: built as at a56f5f4', () => {
+describe('the cutout compiler on plain corners: as at a56f5f4 or exact', () => {
   for (const [name, rooms, T, want] of CASES) {
     it(name, () => {
       const s = spec(rooms, T)
-      const res = compilePlanSpecDetailed(s)
-      const faces = derivePlan(res.doc, res.levelId).rooms
-      expect(Object.keys(res.doc.walls).length, 'walls').toBe(want.walls)
+      const { res, faces, walls } = built(s)
+      expect(walls, 'walls').toBe(want.walls)
       expect(faces.length, 'closed areas').toBe(want.faces)
       for (const [id, a] of Object.entries(want.areas)) {
         const f = faces.find((x) => x.roomId === res.roomIds[id])
         expect(f?.area ?? -1, `room ${id}`).toBeCloseTo(a, 4)
       }
-      expect(validatePlanSpecDetailed(s).ok, 'gate').toBe(want.ok)
+      expect(validateCutoutSpec(s).ok, 'gate').toBe(want.ok)
     })
   }
 })
@@ -80,7 +93,7 @@ function turnRect(r: number[], o: number): number[] {
   return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1])]
 }
 
-describe('planspec pinwheel corners: exact rooms in every orientation', () => {
+describe('the cutout compiler on pinwheel corners: exact rooms in every orientation', () => {
   for (const [name, rooms, T] of PINWHEELS) {
     it(name, () => {
       for (let o = 0; o < 8; o++) {
@@ -88,14 +101,13 @@ describe('planspec pinwheel corners: exact rooms in every orientation', () => {
           rooms.map((r) => turnRect(r, o)),
           T,
         )
-        const res = compilePlanSpecDetailed(s)
-        const faces = derivePlan(res.doc, res.levelId).rooms
+        const { res, faces } = built(s)
         expect(faces.length, `closed areas, orientation ${o}`).toBe(rooms.length)
         rooms.forEach((r, i) => {
           const f = faces.find((x) => x.roomId === res.roomIds['abcde'[i]])
           expect(f?.area ?? -1, `room ${'abcde'[i]}, orientation ${o}`).toBeCloseTo((r[2] * r[3]) / 1e6, 4)
         })
-        expect(validatePlanSpecDetailed(s).ok, `gate, orientation ${o}`).toBe(true)
+        expect(validateCutoutSpec(s).ok, `gate, orientation ${o}`).toBe(true)
       }
     })
   }
@@ -133,7 +145,7 @@ function turnRoom(r: number[] | number[][] | null, o: number): number[] | number
   })
 }
 
-describe('planspec review night 3: plain corners in every orientation', () => {
+describe('the cutout compiler on the plain corners of review night 3, in every orientation', () => {
   for (const [name, rooms, T, areas, ok, types] of NIGHT3) {
     it(name, () => {
       for (let o = 0; o < 8; o++) {
@@ -142,14 +154,13 @@ describe('planspec review night 3: plain corners in every orientation', () => {
           T,
         )
         if (types) s.rooms.forEach((r) => (r.type = types['abcde'.indexOf(r.id)] as typeof r.type))
-        const res = compilePlanSpecDetailed(s)
-        const faces = derivePlan(res.doc, res.levelId).rooms
+        const { res, faces } = built(s)
         expect(faces.length, `closed areas, orientation ${o}`).toBe(Object.keys(areas).length)
         for (const [id, a] of Object.entries(areas)) {
           const f = faces.find((x) => x.roomId === res.roomIds[id])
           expect(f?.area ?? -1, `room ${id}, orientation ${o}`).toBeCloseTo(a, 4)
         }
-        expect(validatePlanSpecDetailed(s).ok, `gate, orientation ${o}`).toBe(ok)
+        expect(validateCutoutSpec(s).ok, `gate, orientation ${o}`).toBe(ok)
       }
     })
   }

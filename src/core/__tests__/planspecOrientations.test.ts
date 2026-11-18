@@ -5,7 +5,7 @@
 // cutouts, less the cutouts
 import { describe, expect, it } from 'vitest'
 import { derivePlan } from '../derive'
-import { compilePlanSpecDetailed, parsePlanSpec, validatePlanSpecDetailed, type PlanSpec } from '../planspec'
+import { compileCutoutSpec, parsePlanSpec, validateCutoutSpec, type PlanSpec } from '../planspec'
 
 type P = [number, number]
 interface SpecLike {
@@ -27,6 +27,9 @@ const Lr = (cutouts: unknown[], polygon: P[] = L) => ({ id: 'a', type: 'living',
 const nb = (rect: number[]) => ({ id: 'b', type: 'bathroom', rect })
 const bedroom = (id: string, rect: number[]) => ({ id, type: 'bedroom', rect })
 const col = (rect: number[]) => ({ rect, kind: 'column' })
+/** a technical void far away: a plan without cutouts goes to the base code, so a plain corner of the
+ *  cutout compiler is checked in a plan with a void (the cutout geometry of the faces works only there) */
+const VOID = { id: 'z', type: 'other', rect: [40000, 40000, 600, 600], technical: true }
 const shaft = (rect: number[]) => ({ rect, kind: 'shaft' })
 
 /** name → [spec, index of the cutout of room a that gets misread (-1: none), the gate opens, skip the area check] */
@@ -102,8 +105,8 @@ const SCENARIOS: Record<string, [unknown, number, boolean, boolean?]> = {
   // orientation. The first layout was refused while room a's outline folded over the junction (18.16 m²)
   // and builds exactly since the fold is cut off; the other is still refused (planspec-reference.md,
   // unsupported junctions)
-  'r4 #12 neighbour edge in a wall gap (builds exactly)': [sp([{ id: 'a', type: 'living', rect: [0, 0, 4850, 3750] }, bedroom('b', [-2800, 300, 2600, 3250]), { id: 'd', type: 'bathroom', rect: [-100, 3950, 3250, 2650] }], 510), -1, true],
-  'r4 #12 … other layout (refused)': [sp([{ id: 'a', type: 'living', rect: [0, 0, 2600, 3350] }, bedroom('b', [-2800, 200, 2700, 1800]), { id: 'd', type: 'bathroom', rect: [100, -3400, 2600, 3300] }], 510), -1, false],
+  'r4 #12 neighbour edge in a wall gap (builds exactly)': [sp([{ id: 'a', type: 'living', rect: [0, 0, 4850, 3750] }, bedroom('b', [-2800, 300, 2600, 3250]), { id: 'd', type: 'bathroom', rect: [-100, 3950, 3250, 2650] }, VOID], 510), -1, true],
+  'r4 #12 … other layout (refused)': [sp([{ id: 'a', type: 'living', rect: [0, 0, 2600, 3350] }, bedroom('b', [-2800, 200, 2700, 1800]), { id: 'd', type: 'bathroom', rect: [100, -3400, 2600, 3300] }, VOID], 510), -1, false],
   'r4 #13 column with a wide gap to the neighbour': [sp([Lr([col([1000, 200, 1000, 800])]), nb([2400, 0, 1600, 600])]), 0, true],
   'r4 #15 shaft at a reflex corner, neighbour 95 mm off both ways': [sp([Lr([shaft([1400, 1000, 600, 600])]), nb([2095, 0, 1905, 905])]), 0, true],
   'r4 #16 column and neighbour shaft across a 510 mm wall': [sp([R([col([3600, 1000, 400, 500])]), { id: 'b', type: 'bedroom', rect: [4200, 0, 3000, 3000], cutouts: [shaft([4200, 700, 400, 500])] }], 510), 0, true],
@@ -163,9 +166,10 @@ interface Outcome {
   tech: number[]
 }
 function outcome(spec: SpecLike): Outcome {
-  const v = validatePlanSpecDetailed(spec as unknown as PlanSpec)
+  // the cutout compiler itself, also for the plain reference plan (the public entry sends plans without cutouts to the base code)
+  const v = validateCutoutSpec(spec as unknown as PlanSpec)
   const codes = [...new Set(v.issues.filter((i) => i.severity === 'error' || /BUILT_SHAPE|DANGLING/.test(i.code)).map((i) => `${i.severity}:${i.code}`))].sort().join(' ')
-  const res = compilePlanSpecDetailed(parsePlanSpec(spec))
+  const res = compileCutoutSpec(parsePlanSpec(spec))
   const plan = derivePlan(res.doc, res.levelId)
   const area: Record<string, number> = {}
   const holes: Record<string, number> = {}

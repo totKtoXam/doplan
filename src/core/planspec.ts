@@ -20,6 +20,7 @@ import { BUILTIN_ASSETS, createEmptyDoc, defaultRoom, OPENING_DEFAULTS, ROOM_TYP
 import { addItem, addOpening, addWall, normalize, syncRooms } from './ops'
 import { derivePlan } from './derive'
 import { MIN_FACE_AREA } from './rooms'
+import * as legacy from './planspecBase'
 import { newId } from './ids'
 import { makeProvenance } from './provenance'
 
@@ -2691,7 +2692,48 @@ function applySpecProvenance(doc: Doc, levelId: Id, spec: PlanSpec, U: UnitConv,
   for (const w of Object.values(doc.walls)) if (w.dims && !w.dims.left && !w.dims.right) delete w.dims
 }
 
+/**
+ * the spec needs the cutout geometry: a room with cutouts, a technical room or a cutout wall (what
+ * `dp doc spec` writes for voids). Any other spec is built and checked by the a56f5f4 code
+ * (planspecBase.ts), exactly as before the cutout work. Reads raw input too (validation coerces later)
+ */
+export function usesCutoutLogic(spec: unknown): boolean {
+  const s = spec as { rooms?: unknown; walls?: unknown } | null
+  const rooms = s && Array.isArray(s.rooms) ? (s.rooms as { cutouts?: unknown; technical?: unknown }[]) : []
+  const walls = s && Array.isArray(s.walls) ? (s.walls as { cutout?: unknown }[]) : []
+  return (
+    rooms.some((r) => !!r && ((Array.isArray(r.cutouts) && r.cutouts.length > 0) || !!r.technical)) ||
+    walls.some((w) => !!w && !!w.cutout)
+  )
+}
+
+/** a cutout plan the new check refuses while the base check (a56f5f4) accepts it: the base builds it,
+ *  with a warning that says why — the gate never drops a plan the base accepted */
+function baseFallback(spec: PlanSpec, now: PlanValidation): PlanIssue | null {
+  if (now.ok) return null
+  if (!legacy.validatePlanSpecDetailed(spec as legacy.PlanSpec).ok) return null
+  const first = now.issues.find((i) => i.severity === 'error')
+  return {
+    severity: 'warning',
+    code: 'CUTOUT_BASE_BUILD',
+    message: `Вырезы построены прежним способом: точная проверка их не приняла (${first?.message ?? 'нет описания'}). Проверьте шахты и колонны на плане`,
+    ...(first?.path ? { path: first.path } : {}),
+    ...(first?.ids ? { ids: first.ids } : {}),
+  }
+}
+
 export function compilePlanSpecDetailed(spec: PlanSpec, opts: CompileOptions = {}): CompileResult {
+  if (!usesCutoutLogic(spec)) return legacy.compilePlanSpecDetailed(spec as legacy.PlanSpec, opts)
+  const note = baseFallback(spec, validateCutoutSpec(spec))
+  if (note) {
+    const r = legacy.compilePlanSpecDetailed(spec as legacy.PlanSpec, opts)
+    return { ...r, issues: [...(r.issues as PlanIssue[]), note] }
+  }
+  return compileCutoutSpec(spec, opts)
+}
+
+/** the compiler with cutouts, shafts and columns inside rooms (usesCutoutLogic) */
+export function compileCutoutSpec(spec: PlanSpec, opts: CompileOptions = {}): CompileResult {
   const issues: PlanIssue[] = []
   const U = makeUnits(spec)
   const D = resolveDefaults(spec)
@@ -3191,6 +3233,16 @@ export function explainedSeverity(sev: PlanIssueSeverity, note: string | undefin
 
 /** Full validation with metrics (same code as the in-app check and `dp spec validate`). */
 export function validatePlanSpecDetailed(input: PlanSpec): PlanValidation {
+  if (!usesCutoutLogic(input)) return legacy.validatePlanSpecDetailed(input as legacy.PlanSpec)
+  const now = validateCutoutSpec(input)
+  const note = baseFallback(input, now)
+  if (!note) return now
+  const old = legacy.validatePlanSpecDetailed(input as legacy.PlanSpec) as PlanValidation
+  return { ...old, issues: [...old.issues, note] }
+}
+
+/** the check of the cutout compiler (compileCutoutSpec) */
+export function validateCutoutSpec(input: PlanSpec): PlanValidation {
   const c = new Coercer()
   const spec = coerceSpec(input, c)
   const issues: PlanIssue[] = [...c.issues]
@@ -3355,7 +3407,7 @@ export function validatePlanSpecDetailed(input: PlanSpec): PlanValidation {
   // ── compile-based checks
   let res: CompileResult
   try {
-    res = compilePlanSpecDetailed(spec)
+    res = compileCutoutSpec(spec)
   } catch (e) {
     issues.push({ severity: 'error', code: 'COMPILE_FAILED', message: `Не удалось построить план: ${(e as Error).message}` })
     return done()

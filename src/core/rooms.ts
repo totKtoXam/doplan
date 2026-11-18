@@ -251,6 +251,11 @@ interface Face {
  * A face without a record gets the deterministic id `auto_<hash of its node ids>`.
  */
 export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeom>): DerivedRoom[] {
+  // the cutout geometry (folded rings untwisted, islands placed by their centrelines, records matched
+  // around voids) works only on a level with a technical void: a level without one (a plan without
+  // cutouts, a plan drawn by hand) is detected exactly as before the cutout work (a56f5f4)
+  let voidLevel = false
+  for (const id in doc.rooms) if (doc.rooms[id].levelId === levelId && doc.rooms[id].technical) voidLevel = true
   // ── half-edges ──
   const hes: HalfEdge[] = []
   const out = new Map<Id, HalfEdge[]>()
@@ -327,7 +332,8 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
   for (const c of cycles) {
     if (c.area > AREA_EPS) {
       const edges: RoomBoundaryEdge[] = []
-      const polygon = untwistRing(sideRing(c.hes, wallGeoms, edges))
+      const side = sideRing(c.hes, wallGeoms, edges)
+      const polygon = voidLevel ? untwistRing(side) : side
       const ringArea = polygon.length >= 3 ? polygonArea(polygon) : 0
       if (ringArea <= 0) continue
       const ids = pruneSpurs(c.hes.map((h) => h.from))
@@ -361,12 +367,22 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
     // reflex corner a snapped wall moved by a few mm, and its nodes still lie well inside the loop,
     // whichever way the plan is turned
     const pts = c.hes.map((h) => doc.nodes[h.from])
+    // (a level without voids: first as at a56f5f4, by one point of the island's wall face; only an
+    // island that finds no face that way is placed by its centrelines)
+    const probe = ring[0]
+    const byAxes = (f: Face): boolean => f.centerline.length >= 3 && pts.every((p) => pointInPolygon(p, f.centerline))
     let best: Face | null = null
     for (const f of faces) {
       if (f.cycle.comp === comp) continue
       if (best && f.ringArea >= best.ringArea) continue
-      if (f.centerline.length >= 3 && pts.every((p) => pointInPolygon(p, f.centerline))) best = f
+      if (voidLevel ? byAxes(f) : pointInPolygon(probe, f.polygon)) best = f
     }
+    if (!best && !voidLevel)
+      for (const f of faces) {
+        if (f.cycle.comp === comp) continue
+        if (best && f.ringArea >= best.ringArea) continue
+        if (byAxes(f)) best = f
+      }
     if (!best) continue
     best.holes.push(ring)
     best.holeArea += area
@@ -391,7 +407,11 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
   // its anchor was left. A void none of whose faces is left (its walls removed) takes no face: the
   // void is floor of the room again, not a shaft the size of the room. Nor does a void one wall of
   // which is removed: its nodes are all still on the room's face that took its floor (4 of the 8
-  // nodes of a rect with a notch), but that face is far larger than the void's own outline was
+  // nodes of a rect with a notch), but that face is far larger than the void's own outline was, or
+  // (a room of any size, a 0.9 m² closet) it holds the label of a real room outside that outline: the
+  // room keeps its face and its record, the void none. A void dragged onto a room's label has that
+  // label inside its own outline and keeps its face
+  const realAnchors = records.filter((x) => !x.technical && !!x.anchor && Number.isFinite(x.anchor.x) && Number.isFinite(x.anchor.y))
   const claimed = new Map<Face, { r: Room; score: number }>()
   const byNodes = new Set<Room>()
   for (const r of records) {
@@ -406,6 +426,11 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
     let best: { face: Face; area: number; score: number } | null = null
     for (const p of prepared) {
       if (outline > 0 && p.face.ringArea > outline * 1.5 + 1e5) continue
+      if (
+        ring.length >= 3 &&
+        realAnchors.some((x) => pointInPolygon(x.anchor, p.face.polygon, p.face.holes) && !pointInPolygon(x.anchor, ring))
+      )
+        continue
       let common = 0
       for (const id of p.face.nodeIds) if (want.has(id)) common++
       if (!common) continue
@@ -443,7 +468,7 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
     }
     // the anchor inside a void that follows its walls (the void was dragged onto the room's label):
     // the room keeps the smallest free face around the anchor, the one around the void
-    if (!hit)
+    if (!hit && voidLevel)
       for (const p of prepared) {
         if (claimed.has(p.face) || (hit && p.area >= hit.area)) continue
         if (pointInPolygon(r.anchor, p.face.polygon)) hit = p

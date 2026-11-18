@@ -24,6 +24,7 @@ import { LevelTabs } from '@/ui/shell/LevelTabs'
 import { VariantCompareDialog } from '@/ui/variants/VariantCompareDialog'
 import { ProjectFolderDialogs } from '@/ui/panels/ProjectFolderDialogs'
 import { ActivityBar } from '@/ui/shell/ActivityBar'
+import { PublishDialog } from '@/ui/panels/PublishDialog'
 import { AppLogo } from '@/ui/shell/AppLogo'
 import { Overlays } from '@/ui/shell/Overlays'
 import { IconBtn } from '@/ui/shell/primitives'
@@ -98,6 +99,7 @@ const DIALOGS: [DialogKey, ComponentType<{ open: boolean; onClose(): void }>][] 
   ['render', RenderDialog],
   ['about', AboutDialog],
   ['variants', VariantCompareDialog],
+  ['publish', PublishDialog],
 ]
 
 function Dialogs() {

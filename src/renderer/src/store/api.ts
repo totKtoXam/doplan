@@ -13,7 +13,7 @@ import { ghInstallHint, type GithubSyncStatus } from '@shared/github'
 const webSync: GithubSyncStatus = { state: 'unavailable', reason: 'GitHub sync is available in the doplan desktop app', ahead: 0, behind: 0 }
 
 /** version shown by the web build (no Electron); keep in step with package.json */
-const WEB_VERSION = '0.14.1-web'
+const WEB_VERSION = '0.15.0-web'
 
 const SETTINGS_KEY = 'doplan.settings'
 
@@ -352,6 +352,19 @@ function createFallbackApi(): DoplanApi {
         window.open(releasePageUrl(version), '_blank', 'noopener')
       },
       onState: noopUnsub,
+    },
+    pages: {
+      async status() {
+        return { gh: { installed: false, loggedIn: false }, git: false, record: null, outdated: false, project: null, separateName: '' }
+      },
+      async publish() {
+        throw new Error('Публикация доступна только в настольном приложении')
+      },
+      async unpublish() {},
+      onProgress: noopUnsub,
+      async openUrl(url: string) {
+        window.open(url, '_blank', 'noopener')
+      },
     },
     window: {
       setTitle(title: string, dirty: boolean) {

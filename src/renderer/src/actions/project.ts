@@ -10,6 +10,8 @@ import { handles } from '@/store/handles'
 import { alertDialog, choiceDialog, confirmDialog, promptDialog, toast } from '@/store/notify'
 import { createDialogForks, finishCreateDialog, openCreateDialog, type ProjectKind, projectStore } from '@/store/project'
 import { runProjectHooks } from '@/store/projectHooks'
+// moves the publication record of an id-less file to the id its first save gives it
+import '@/store/pagesKeys'
 import { buildSampleApartment } from '@/store/sample'
 import { uiStore } from '@/store/ui'
 import { currentDoc, errorText } from './util'

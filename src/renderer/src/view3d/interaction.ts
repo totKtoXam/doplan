@@ -46,6 +46,7 @@ import { resizePrefs } from '@/store/resizePrefs'
 import { uiStore } from '@/store/ui'
 import { t } from '@/i18n'
 import { getShared } from './quality'
+import { walkPointerLocked } from './walkInput'
 import { type HandleSpec, ResizeHandles, worldPerPixel } from './resizeHandles'
 
 const DEG = Math.PI / 180
@@ -1572,7 +1573,8 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
   }
 
   const onPointerDown = (e: PointerEvent): void => {
-    if (disposed || shared.stillBusy) return
+    // a captured mouse (walk mode Pointer Lock) only turns the view
+    if (disposed || shared.stillBusy || walkPointerLocked(canvas)) return
     try {
       canvas.focus({ preventScroll: true })
     } catch {
@@ -1698,7 +1700,7 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
   }
 
   const onPointerMove = (e: PointerEvent): void => {
-    if (disposed || shared.stillBusy) return
+    if (disposed || shared.stillBusy || walkPointerLocked(canvas)) return
     lastMove = e
     lastPointer = e
     if (!frame) frame = requestAnimationFrame(processMove)

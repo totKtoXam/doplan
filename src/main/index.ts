@@ -20,6 +20,7 @@ import { registerGithubIpc, shutdownGithub } from './githubSync'
 // ── end ai-chat block ──
 import { getSettings, onSettingsChanged } from './settings'
 import { getUpdateState, initUpdater, onUpdateState, openReleasePage } from './updater'
+import { registerPages } from './pages'
 import { updateMenuAction } from '../shared/updater'
 import { closeWasConfirmed, createMainWindow, getMainWindow, isTrustedUrl, requestOpenFile } from './window'
 
@@ -123,6 +124,7 @@ if (!gotLock) {
     registerAiChat() // ai-chat
     registerGithubIpc() // github
     initUpdater()
+    registerPages()
     await Promise.all([initProjectStore(), ensureLibrary()])
 
     const s = await getSettings()

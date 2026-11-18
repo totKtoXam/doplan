@@ -6,6 +6,7 @@
 import type { ToolId } from '@/contracts'
 import type { Vec2 } from '@core/types'
 import { uiStore } from '@/store/ui'
+import { toolAfterEscape } from '@/store/viewOnly'
 import type { EditorCtx, PointerInfo } from './context'
 import { setHover } from './tools/common'
 import type { Tool } from './tools/types'
@@ -341,7 +342,8 @@ export function attachInput(env: InputEnv): InputHandle {
       if (ctx.html.menuOpen) {
         ctx.html.closeMenu()
       } else if (!env.tool().cancel?.()) {
-        if (env.toolId() !== 'select') uiStore.getState().setTool('select')
+        const next = toolAfterEscape(env.toolId())
+        if (next) uiStore.getState().setTool(next)
         else return
       }
       ev.preventDefault()

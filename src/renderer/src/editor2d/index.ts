@@ -19,6 +19,7 @@ import { docStore } from '@/store/document'
 import { handles as appHandles } from '@/store/handles'
 import { uiStore } from '@/store/ui'
 import { accuracyStore } from '@/store/accuracy'
+import { isViewOnly } from '@/store/viewOnly'
 import { fitBounds } from './bounds'
 import { buildContextMenu } from './contextMenu'
 import { EMPTY_DERIVED, type ContextMenuItem, type EditorCtx } from './context'
@@ -193,6 +194,7 @@ export const createEditor2D: CreateEditor2D = async (container: HTMLElement): Pr
     toolId: () => toolId,
     zoomBy,
     onContextMenu(info) {
+      if (isViewOnly()) return
       const list = buildContextMenu(ctx, info.plan, zoomToFit)
       html.showMenu(info.screen.x, info.screen.y, list)
       requestRender()

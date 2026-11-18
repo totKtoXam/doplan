@@ -27,6 +27,7 @@ import type { Engine3DHandle } from '@/contracts'
 import { prefs3dStore, usePrefs3d, type DenoiseMode, type TraceMode } from '@/view3d/prefs'
 import { useStatus3d } from '@/view3d/status'
 import { IconBtn, MiniSelect, Segmented, TextBtn } from './primitives'
+import { WalkLockHint } from './WalkLockHint'
 import { Ai3DMenu } from '@/ai' // ai-chat
 
 const QUALITY: QualityPreset[] = ['low', 'medium', 'high', 'ultra']
@@ -244,6 +245,7 @@ export function Viewport3D({ hidden }: { hidden?: boolean }) {
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
   const backendPref = useUi((s) => s.backendPref)
+  const walking = useUi((s) => s.cameraMode === 'walk')
 
   useEffect(() => {
     const el = host.current
@@ -336,6 +338,7 @@ export function Viewport3D({ hidden }: { hidden?: boolean }) {
       )}
       {engine && <Overlay engine={engine} hidden={hidden} />}
       {engine && !hidden && <BusyStatus />}
+      {engine && !hidden && <WalkLockHint host={host} active={walking} />}
       {!hidden && <Ai3DMenu host={host} />}
     </div>
   )

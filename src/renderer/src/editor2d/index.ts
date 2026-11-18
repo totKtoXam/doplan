@@ -12,7 +12,7 @@
 // the renderer CSP forbids 'unsafe-eval': Pixi must use its pre-compiled shader/uniform sync paths
 import 'pixi.js/unsafe-eval'
 import { Application, Container, Graphics } from 'pixi.js'
-import type { Doc, EntityRef, Id } from '@core/types'
+import type { Doc, EntityRef, Id, Vec2 } from '@core/types'
 import { visibleDoc, visiblePlan } from '@core/layers'
 import type { CreateEditor2D, Editor2DHandle, ToolId } from '@/contracts'
 import { docStore } from '@/store/document'
@@ -41,6 +41,8 @@ import { UnderlaysLayer } from './layers/underlays'
 import { WallsLayer } from './layers/walls'
 import { Painter, TextPool } from './painter'
 import { snapshotPng } from './snapshot'
+import { itemCorners } from './shapes'
+import { projectOnSegment } from '@core/geom'
 import { paletteFor, type Palette } from './theme'
 import { themeStore } from '@/theme/store'
 import { createTools, type Tool } from './tools'
@@ -427,7 +429,53 @@ export const createEditor2D: CreateEditor2D = async (container: HTMLElement): Pr
     snapshotPng(pixelsPerMetre) {
       return snapshotPng(levelId(), pixelsPerMetre)
     },
+    pick(clientX, clientY) {
+      const r = canvas.getBoundingClientRect()
+      return ctx.hit.hit(camera.toPlan(clientX - r.left, clientY - r.top), ctx.mm(8))
+    },
+    snapPoint(clientX, clientY) {
+      const r = canvas.getBoundingClientRect()
+      return snapPlanPoint(ctx, camera.toPlan(clientX - r.left, clientY - r.top))
+    },
   }
+}
+
+/** a measured point caught by a corner (wall, node, item) or a wall face within a few pixels */
+function snapPlanPoint(ctx: EditorCtx, p: Vec2): { p: Vec2; snap: 'vertex' | 'edge' | null } {
+  const { doc, derived } = ctx.view()
+  const lid = ctx.levelId()
+  const corner = ctx.mm(12)
+  let best: Vec2 | null = null
+  let bestD = corner
+  const tryCorner = (q: Vec2): void => {
+    const d = Math.hypot(q.x - p.x, q.y - p.y)
+    if (d < bestD) {
+      bestD = d
+      best = q
+    }
+  }
+  for (const id in derived.wallGeoms) for (const q of derived.wallGeoms[id].polygon) tryCorner(q)
+  for (const id in doc.items) {
+    const it = doc.items[id]
+    if (it.levelId === lid) for (const q of itemCorners(it)) tryCorner(q)
+  }
+  for (const room of derived.rooms) for (const q of room.polygon) tryCorner(q)
+  if (best) return { p: { ...(best as Vec2) }, snap: 'vertex' }
+  let edge: Vec2 | null = null
+  let edgeD = ctx.mm(8)
+  const tryEdges = (poly: readonly Vec2[]): void => {
+    for (let i = 0; i < poly.length; i++) {
+      const pr = projectOnSegment(p, poly[i], poly[(i + 1) % poly.length])
+      if (pr.dist < edgeD) {
+        edgeD = pr.dist
+        edge = pr.point
+      }
+    }
+  }
+  for (const id in derived.wallGeoms) tryEdges(derived.wallGeoms[id].polygon)
+  for (const id in doc.items) if (doc.items[id].levelId === lid) tryEdges(itemCorners(doc.items[id]))
+  if (edge) return { p: { ...(edge as Vec2) }, snap: 'edge' }
+  return { p, snap: null }
 }
 
 export default createEditor2D

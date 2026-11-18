@@ -96,6 +96,9 @@ addTranslations('en', {
   'Репозиторий {r} не найден на GitHub. План можно опубликовать в отдельный публичный репозиторий {s}.':
     'Repository {r} was not found on GitHub. The plan can be published into a separate public repository {s}.',
   'Показать подложку': 'Include the underlay',
+  'Разрешить скачать план (.doplan)': 'Let viewers download the plan (.doplan)',
+  'Любой, у кого есть ссылка, сможет скачать план файлом и открыть его в doplan: стены, размеры, мебель и материалы — без цен и заметок.':
+    'Anyone with the link can download the plan as a file and open it in doplan: walls, sizes, furniture and materials — without prices and notes.',
   'Подложка — это скан или фото исходного плана. На планах БТИ часто есть адрес, кадастровый номер и имена: всё это увидят все, у кого есть ссылка.':
     'The underlay is a scan or photo of the source plan. BTI plans often show the address, the cadastral number and names: everyone with the link sees all of it.',
   'Скрытые подложки, карандашные пометки, цены и заметки не публикуются.': 'Hidden underlays, pencil marks, prices and notes are not published.',
@@ -174,6 +177,7 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
   const [result, setResult] = useState<PagesPublishResult | null>(null)
   const [choice, setChoice] = useState<PagesPrivateChoice>('separate')
   const [underlays, setUnderlays] = useState(false)
+  const [download, setDownload] = useState(false)
 
   const keys = publicationKeys(doc.meta, filePath)
   const key = keys.key
@@ -229,10 +233,14 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
   const recordStuck = !!record && !record.separate && !!recordTarget && (recordTarget.needsChoice || !recordTarget.exists)
   const choiceRef = recordStuck ? recordTarget?.ref : project?.ref
   const recordUnderlays = record?.underlays ?? false
+  const recordDownload = record?.download ?? false
 
   useEffect(() => {
     if (open) setUnderlays(recordUnderlays)
   }, [open, recordUnderlays])
+  useEffect(() => {
+    if (open) setDownload(recordDownload)
+  }, [open, recordDownload])
 
   const publish = async (built: SiteContent | null = content) => {
     if (!built || !status) return
@@ -262,7 +270,7 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
       const res = await api.pages.publish({
         docId: key,
         content: built,
-        info: { title: doc.meta.name, publishedAt: new Date().toISOString(), contentHash: hash, app: `doplan ${api.version}` },
+        info: { title: doc.meta.name, publishedAt: new Date().toISOString(), contentHash: hash, app: `doplan ${api.version}`, ...(download ? { download: true } : {}) },
         target: privateChoice === 'separate' ? 'separate' : target,
         ...(privateChoice ? { privateChoice } : {}),
         aliases,
@@ -490,6 +498,13 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
                 </span>
               </label>
             )}
+            <label className="flex cursor-pointer items-start gap-2">
+              <input type="checkbox" className="mt-0.5" checked={download} disabled={!!busy} onChange={(e) => setDownload(e.currentTarget.checked)} />
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="font-medium">{t('Разрешить скачать план (.doplan)')}</span>
+                {download && <span className="text-[var(--warning)]">{t('Любой, у кого есть ссылка, сможет скачать план файлом и открыть его в doplan: стены, размеры, мебель и материалы — без цен и заметок.')}</span>}
+              </span>
+            </label>
             <div className="text-[var(--muted)]">{t('Скрытые подложки, карандашные пометки, цены и заметки не публикуются.')}</div>
             {remote.length > 0 && (
               <Note kind="warn">

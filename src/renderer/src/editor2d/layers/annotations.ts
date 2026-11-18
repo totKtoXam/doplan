@@ -8,6 +8,7 @@ import type { DerivedPlan, DerivedRoom, Doc, ElectricPoint, Item, Light, Vec2 } 
 import { t } from '@/i18n'
 import '@/ui/accuracyI18n'
 import { accuracyStore } from '@/store/accuracy'
+import { isViewOnly } from '@/store/viewOnly'
 import type { EditorCtx } from '../context'
 import { type BBox, bboxOf, bboxOverlap, DEG, dist, rectCorners } from '../geom'
 import { formatArea, formatLen } from '../format'
@@ -300,7 +301,8 @@ export class AnnotationsLayer {
       const n = { x: -(g.to.y - g.from.y) / l, y: (g.to.x - g.from.x) / l }
       p.dimension(`ig:${it.id}:${g.dir}`, g.from, g.to, n, 0, 0, formatLen(g.dist, units), { color: pal.ok, size: 11, width: 1.2, extension: false, bold: true })
     }
-    if (unreliable) {
+    // the tape-measure reminder is for the author; a visitor of a published plan cannot act on it
+    if (unreliable && !isViewOnly()) {
       const box = bboxOf(itemCorners(it))
       const s = ctx.camera.toScreen({ x: (box.minX + box.maxX) / 2, y: box.minY })
       p.sbadge(`icw:${it.id}`, `⚠ ${t(CLEARANCE_WARNING)}`, s.x, s.y - 34, { bg: pal.warn, color: 0x1b1300, size: 10.5 })

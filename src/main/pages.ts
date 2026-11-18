@@ -455,6 +455,7 @@ function checkRequest(req: PagesPublishRequest): void {
     req.content.files.every((f) => f && HOSTS.includes(f.host) && typeof f.rel === 'string' && typeof f.path === 'string' && f.path.startsWith('assets/')) &&
     req.info &&
     typeof req.info.title === 'string' &&
+    (req.info.download === undefined || typeof req.info.download === 'boolean') &&
     (req.target === 'project' || req.target === 'separate') &&
     (req.privateChoice === undefined || req.privateChoice === 'makePublic' || req.privateChoice === 'separate') &&
     (req.aliases === undefined || Array.isArray(req.aliases)) &&
@@ -608,6 +609,7 @@ export async function publishPlan(req: PagesPublishRequest, emit: (p: PagesProgr
       separate,
       pubId,
       underlays: !!req.underlays,
+      ...(req.info.download ? { download: true } : {}),
       ...(file ? { file: file.path, created: file.created } : {}),
     }
     const latest = await loadRecords()

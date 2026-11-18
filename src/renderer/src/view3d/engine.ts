@@ -41,6 +41,7 @@ import { mountPerfOverlay, perfBegin, perfBeginOnce, perfEnabled, perfEnd, perfP
 import { frameDpr, getQuality, getShared } from './quality'
 import { createMeasure3D } from './measure3d'
 import { isViewOnly } from '@/store/viewOnly'
+import { createViewerPick, type ViewerPick } from './viewerPick'
 
 type CameraMode = 'orbit' | 'walk' | 'top'
 
@@ -329,6 +330,8 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     const levelId = activeLevel(doc)
     const fullPlan = ds.derived[levelId]
     const plan = fullPlan && visiblePlan(ds.doc, fullPlan)
+    // the viewer hides a door or a window but keeps its hole in the wall
+    const holes = isViewOnly() && doc.openings !== ds.doc.openings ? ds.doc.openings : undefined
 
     if (doc.render.quality && doc.render.quality !== lastDocQuality) {
       lastDocQuality = doc.render.quality
@@ -358,7 +361,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     if (archDirty) {
       try {
         const t0 = performance.now()
-        if (arch.sync({ doc, plan, levelId, epoch })) {
+        if (arch.sync({ doc, plan, levelId, epoch, holes })) {
           sceneChanged = true
           perfRecord('3d.sync.architecture', t0)
         }
@@ -810,8 +813,16 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     }
   }
 
+  let viewerPick: ViewerPick | null = null
   // ── public handle ──
   const handle: Engine3DHandle = {
+    pickAt(clientX, clientY) {
+      flushSync()
+      return (viewerPick ??= createViewerPick(ctx)).pick(clientX, clientY)
+    },
+    projectPoint(p) {
+      return (viewerPick ??= createViewerPick(ctx)).project(p)
+    },
     destroy() {
       if (destroyed) return
       destroyed = true

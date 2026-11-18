@@ -150,6 +150,20 @@ export interface Editor2DHandle {
   toPlan(clientX: number, clientY: number): Vec2
   /** raster snapshot of the current level without UI chrome */
   snapshotPng(pixelsPerMetre: number): Promise<Blob>
+  /** viewer: the object under a client point by the Select tool's rules (hidden / locked ones are skipped) */
+  pick?(clientX: number, clientY: number): EntityRef | null
+  /** viewer measuring: the client point on the plan, caught by a nearby corner or wall face */
+  snapPoint?(clientX: number, clientY: number): { p: Vec2; snap: 'vertex' | 'edge' | null }
+}
+
+/** what the published viewer finds under a screen point in 3D */
+export interface EntityPick {
+  ref: EntityRef | null
+  /** world point, metres; snapped when `snap` is a vertex or an edge */
+  point: [number, number, number]
+  snap: 'vertex' | 'edge' | 'face'
+  /** 'floor' | 'ceiling' | … for architecture surfaces */
+  surface?: string
 }
 
 /** editor2d/index.ts */
@@ -184,6 +198,10 @@ export interface Engine3DHandle {
   stopPathTracing(): void
   renderStill(opts: StillOptions): Promise<Blob>
   exportGlb(): Promise<ArrayBuffer>
+  /** viewer: the object and the (snapped) surface point under a client point */
+  pickAt?(clientX: number, clientY: number): EntityPick | null
+  /** viewer: world point (metres) → client px, null behind the camera */
+  projectPoint?(p: readonly [number, number, number]): [number, number] | null
   /** square PNG thumbnail of an asset / material sphere on neutral background */
   renderAssetThumb(asset: Asset, size: number): Promise<Blob>
   renderMaterialThumb(material: Material, size: number): Promise<Blob>

@@ -14,6 +14,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import type { Id, OpeningKind } from '@core/types'
 import type { CameraControls, EngineContext } from '@/contracts'
+import { layerIndex } from '@core/layers'
 import { docStore } from '@/store/document'
 import { uiStore } from '@/store/ui'
 import { getShared, type ControlsInternals } from './quality'
@@ -204,10 +205,12 @@ export function createControls(ctx: EngineContext): CameraControlsEx {
     solidsKey = key
     solids = []
     if (!plan) return solids
+    // what is hidden does not stop the walk: a hidden wall, the hole of a hidden window
+    const vis = layerIndex(doc)
     const byWall = new Map<Id, Array<[number, number]>>()
     for (const id in doc.openings) {
       const o = doc.openings[id]
-      if (!PASSABLE.has(o.kind)) continue
+      if (!PASSABLE.has(o.kind) && !vis.hidden('opening', id)) continue
       let list = byWall.get(o.wallId)
       if (!list) {
         list = []
@@ -217,7 +220,7 @@ export function createControls(ctx: EngineContext): CameraControlsEx {
     }
     for (const id in doc.walls) {
       const wall = doc.walls[id]
-      if (wall.levelId !== levelId || wall.kind === 'virtual') continue
+      if (wall.levelId !== levelId || wall.kind === 'virtual' || vis.hidden('wall', id)) continue
       const geom = plan.wallGeoms[id]
       if (!geom || !(geom.length > 1)) continue
       const dx = (geom.b.x - geom.a.x) / geom.length

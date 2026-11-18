@@ -19,7 +19,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { builtinCatalog, mergeCatalog, parseDoc } from '@core'
-import type { Catalog, QualityPreset } from '@core/types'
+import type { Catalog, Doc, QualityPreset } from '@core/types'
 import type { Editor2DHandle, Engine3DHandle } from '@/contracts'
 import { createEditor2D } from '@/editor2d'
 import { addTranslations, useT } from '@/i18n'
@@ -36,6 +36,8 @@ import { loadSite } from './load'
 import { currentDevice, rememberQuality, storedQuality, viewerQuality } from './quality'
 import { setDprPolicy } from '@/view3d/quality'
 import { WalkStick } from './WalkStick'
+import { unlockAll } from './hideState'
+import { ElementCard, ExportMenu, HiddenPanel, installViewerTools, MeasureOverlay, resetTools, setCeiling, setHost3d, ToolRail, usePickClicks, useToolKeys } from './ViewerTools'
 
 addTranslations('en', {
   'Загрузка плана…': 'Loading the plan…',
@@ -80,6 +82,8 @@ const PT_TARGET = 256
 
 interface Booted {
   info: SiteInfo | null
+  /** the plan as published (the .doplan download) */
+  pristine: Doc
   credits: { name: string; author?: string; licence?: string; source?: string }[]
 }
 
@@ -92,6 +96,12 @@ async function boot(params: ViewerParams): Promise<Booted> {
   installEditGuard()
   docStore.getState().load(doc, null)
   const d = docStore.getState().doc
+  const pristine = d
+  // what the author published hidden stays hidden; locks guard edits, and a viewer has none
+  const authorHidden = new Set<string>()
+  for (const [kind, table] of [['item', d.items], ['wall', d.walls], ['opening', d.openings], ['room', d.rooms], ['light', d.lights], ['electric', d.electrical]] as const)
+    for (const id in table ?? {}) if ((table?.[id] as { hidden?: boolean } | undefined)?.hidden) authorHidden.add(`${kind}:${id}`)
+  viewerEdit(() => docStore.getState().transact('view', unlockAll))
   uiStore.getState().setCatalog(mergeCatalog(builtinCatalog(), site.catalog as Partial<Catalog>))
   uiStore.getState().set({
     activeLevelId: params.level && d.levels[params.level] ? params.level : (d.levelOrder[0] ?? ''),
@@ -100,6 +110,7 @@ async function boot(params: ViewerParams): Promise<Booted> {
     cameraMode: params.cam,
   })
   lockViewerTool(uiStore)
+  installViewerTools({ authorHidden, authorCeiling: d.render.ceilingVisible })
   viewerEdit(() => uiStore.getState().setQuality(viewerQuality(d.render.quality, currentDevice(), storedQuality())))
   // sharp at rest (the device's own pixel ratio), not soft while walking
   setDprPolicy({ restMax: 2, movingMin: 1 })
@@ -108,7 +119,7 @@ async function boot(params: ViewerParams): Promise<Booted> {
   const credits = [...(cat.assets ?? []), ...(cat.materials ?? []), ...(cat.hdris ?? [])]
     .filter((e) => e && (e.source || e.licence || ('author' in e && e.author)))
     .map((e) => ({ name: e.name, author: 'author' in e ? e.author : undefined, licence: e.licence, source: e.source }))
-  return { info: site.info, credits }
+  return { info: site.info, credits, pristine }
 }
 
 export function ViewerApp() {
@@ -167,6 +178,7 @@ function Viewer({ params, setParams, booted }: { params: ViewerParams; setParams
   const levelMap = useDoc((s) => s.doc.levels)
   const levels = useMemo(() => levelOrder.map((id) => ({ id, name: levelMap[id]?.name ?? id })), [levelOrder, levelMap])
   const activeLevel = useUi((s) => s.activeLevelId)
+  useToolKeys()
 
   useEffect(() => {
     if (params.view === '3d') setUsed3d(true)
@@ -174,6 +186,7 @@ function Viewer({ params, setParams, booted }: { params: ViewerParams; setParams
 
   const setView = (view: ViewerView) => setParams({ ...params, view })
   const setLevel = (level: string) => {
+    resetTools()
     uiStore.getState().set({ activeLevelId: level, selection: [] })
     setParams({ ...params, level: level === levels[0]?.id ? undefined : level })
   }
@@ -205,6 +218,7 @@ function Viewer({ params, setParams, booted }: { params: ViewerParams; setParams
             { value: '3d', label: <><Box size={13} />3D</> },
           ]}
         />
+        <ExportMenu title={booted.info?.title || name} pristine={booted.pristine} allowFile={booted.info?.download === true} />
         <HeaderBtn label={copied ? t('Ссылка скопирована') : t('Скопировать ссылку на этот вид')} onClick={() => void copyLink()}>
           {copied ? <Check size={16} className="text-success" /> : <Link2 size={16} />}
         </HeaderBtn>
@@ -215,6 +229,9 @@ function Viewer({ params, setParams, booted }: { params: ViewerParams; setParams
       <main className="relative min-h-0 flex-1">
         <Plan2D hidden={params.view !== '2d'} />
         {used3d && <Scene3D hidden={params.view !== '3d'} cam={params.cam} onCam={(cam) => setParams({ ...params, cam })} />}
+        <ToolRail />
+        <HiddenPanel show3d={params.view === '3d'} />
+        <ElementCard />
         {infoOpen && <InfoPanel booted={booted} onClose={() => setInfoOpen(false)} />}
       </main>
     </div>
@@ -323,10 +340,12 @@ function Plan2D({ hidden }: { hidden: boolean }) {
       }
     }
   }, [attempt])
+  usePickClicks(host, '2d', false)
 
   return (
     <div className={hidden ? 'hidden' : 'absolute inset-0 overflow-hidden bg-viewport'}>
       <div ref={host} className="absolute inset-0" />
+      {!hidden && <MeasureOverlay view="2d" />}
       {error && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center">
           <TriangleExclamationPoint size={28} className="text-warning" />
@@ -373,6 +392,7 @@ function Scene3D({ hidden, cam, onCam }: { hidden: boolean; cam: ViewerCam; onCa
         }
         handle = h
         setHandle('engine3d', h)
+        setHost3d(el)
         uiStore.setState({ backend: h.backend })
         h.setCameraMode(uiStore.getState().cameraMode)
         ro = new ResizeObserver((entries) => {
@@ -392,6 +412,7 @@ function Scene3D({ hidden, cam, onCam }: { hidden: boolean; cam: ViewerCam; onCa
       ro?.disconnect()
       if (handle) {
         setHandle('engine3d', null)
+        setHost3d(null)
         uiStore.setState({ backend: null })
         handle.destroy()
       }
@@ -404,6 +425,7 @@ function Scene3D({ hidden, cam, onCam }: { hidden: boolean; cam: ViewerCam; onCa
     uiStore.getState().set({ cameraMode: cam })
     engine.setCameraMode(cam)
   }, [cam, engine])
+  usePickClicks(host, '3d', cam === 'walk')
 
   return (
     <div className={hidden ? 'hidden' : 'absolute inset-0 overflow-hidden bg-viewport'}>
@@ -431,6 +453,7 @@ function Scene3D({ hidden, cam, onCam }: { hidden: boolean; cam: ViewerCam; onCa
           </div>
         </div>
       )}
+      {engine && !hidden && <MeasureOverlay view="3d" />}
       {engine && <Toolbar3D engine={engine} cam={cam} onCam={onCam} />}
       {engine && !hidden && <Busy />}
       {engine && !hidden && <WalkLockHint host={host} active={cam === 'walk'} />}
@@ -447,7 +470,7 @@ function Toolbar3D({ engine, cam, onCam }: { engine: Engine3DHandle; cam: Viewer
   const pt = useUi((s) => s.pathTracing)
   const canTrace = engine.backend === 'webgpu'
 
-  const toggle = (key: 'wallCutaway' | 'ceilingVisible') =>
+  const toggle = (key: 'wallCutaway') =>
     viewerEdit(() =>
       docStore.getState().transact(key, (d) => {
         d.render[key] = !d.render[key]
@@ -483,7 +506,7 @@ function Toolbar3D({ engine, cam, onCam }: { engine: Engine3DHandle; cam: Viewer
         <ToolBtn label={t('Срез стен')} active={cutaway} onClick={() => toggle('wallCutaway')}>
           <SquareDashed size={14} />
         </ToolBtn>
-        <ToolBtn label={t('Потолок')} active={ceiling} onClick={() => toggle('ceilingVisible')}>
+        <ToolBtn label={t('Потолок')} active={ceiling} onClick={() => setCeiling(!ceiling)}>
           <LampCeiling size={14} />
         </ToolBtn>
         <ToolBtn label={t('Сбросить камеру')} onClick={() => engine.resetCamera()}>

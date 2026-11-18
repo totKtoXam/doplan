@@ -434,6 +434,8 @@ export interface SiteInfo {
   publishedAt: string
   contentHash: string
   app: string
+  /** the viewer offers the published plan as a .doplan file (off unless the author ticks it) */
+  download?: boolean
 }
 
 // ───────────── GitHub repositories and Pages ─────────────
@@ -599,6 +601,8 @@ export interface PagesRecord {
   pubId?: string
   /** the visible underlays were published */
   underlays?: boolean
+  /** viewers may download the plan as a .doplan file */
+  download?: boolean
   /** where the document was when published, and its creation tag (see publicationKeys) */
   file?: string
   created?: string

@@ -20,16 +20,16 @@ export function installEditGuard(): void {
 
 interface ToolState {
   tool: string
-  selection: readonly unknown[]
 }
 
 /**
- * The viewer's 2D plan stays on the Pan tool with nothing selected, whatever switches it (Esc, a
- * tool's own fallback): no selection outlines, handles or rename prompts in a read-only page.
+ * The viewer's 2D plan stays on the Pan tool, whatever switches it (Esc, a tool's own fallback): no
+ * handles, drags or rename prompts in a read-only page. The selection is the viewer's own (the
+ * element card): it is outlined, never edited.
  */
 export function lockViewerTool<S extends ToolState>(store: { getState(): S; setState(p: Partial<S>): void; subscribe(fn: (s: S) => void): () => void }): () => void {
   const fix = (s: S) => {
-    if (s.tool !== 'pan' || s.selection.length) store.setState({ tool: 'pan', selection: [] } as unknown as Partial<S>)
+    if (s.tool !== 'pan') store.setState({ tool: 'pan' } as unknown as Partial<S>)
   }
   fix(store.getState())
   return store.subscribe(fix)

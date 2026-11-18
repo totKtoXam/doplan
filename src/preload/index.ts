@@ -9,6 +9,7 @@ import type { AiLoginEvent, AiProviderId, AiRunEvent, AiToolCall } from '../shar
 // ── end ai-chat block ──
 import type { GhLoginEvent } from '../shared/github'
 import type { UpdateState } from '../shared/updater'
+import type { PagesProgress } from '../shared/pagesSite'
 import { CH, VERSION_ARG } from '../main/channels'
 import { cleanIpcError } from '../shared/ipcError'
 
@@ -166,6 +167,14 @@ const api: DoplanApi = {
     install: () => invoke(CH.updatesInstall),
     openReleasePage: (version) => invoke(CH.updatesOpenRelease, version ?? null),
     onState: (cb) => subscribe<[UpdateState]>(CH.evUpdateState, (s) => cb(s)),
+  },
+
+  pages: {
+    status: (q) => invoke(CH.pagesStatus, q),
+    publish: (req) => invoke(CH.pagesPublish, req),
+    unpublish: (docId) => invoke(CH.pagesUnpublish, docId),
+    onProgress: (cb) => subscribe<[PagesProgress]>(CH.evPagesProgress, (p) => cb(p)),
+    openUrl: (url) => invoke(CH.pagesOpenUrl, url),
   },
 
   window: {

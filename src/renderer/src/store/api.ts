@@ -353,6 +353,19 @@ function createFallbackApi(): DoplanApi {
       },
       onState: noopUnsub,
     },
+    pages: {
+      async status() {
+        return { gh: { installed: false, loggedIn: false }, git: false, record: null, outdated: false, project: null, separateName: '' }
+      },
+      async publish() {
+        throw new Error('Публикация доступна только в настольном приложении')
+      },
+      async unpublish() {},
+      onProgress: noopUnsub,
+      async openUrl(url: string) {
+        window.open(url, '_blank', 'noopener')
+      },
+    },
     window: {
       setTitle(title: string, dirty: boolean) {
         document.title = `${dirty ? '• ' : ''}${title} — doplan`

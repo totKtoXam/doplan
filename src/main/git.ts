@@ -1062,14 +1062,27 @@ export function isSafeBranchName(name: string): boolean {
  * `force` replaces whatever the branch had (e.g. a generated one-commit gh-pages branch).
  * `src` null deletes the branch on the remote (a branch already gone is fine); the branch the project
  * itself syncs with is never deleted this way.
+ * `remote`: a remote name, or an https address without credentials (a repository the project does not
+ * sync with, e.g. a separate one for a published site). `expected`: the head the branch must still have
+ * on the remote (one checked to be doplan's): a branch someone changed meanwhile is left as it is.
  */
-export async function gitPushRef(root: string, net: GitNet, src: string | null, branch: string, opts: { force?: boolean; remote?: string } = {}): Promise<void> {
+export async function gitPushRef(
+  root: string,
+  net: GitNet,
+  src: string | null,
+  branch: string,
+  opts: { force?: boolean; remote?: string; expected?: string } = {},
+): Promise<void> {
   if (!isSafeBranchName(branch)) throw new Error(msg('Недопустимое имя ветки', 'Invalid branch name'))
   const remote = opts.remote ?? 'origin'
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(remote) && !/^https:\/\/[A-Za-z0-9.-]+(:\d+)?\/[^\s@]+$/.test(remote))
+    throw new Error(msg('Недопустимый адрес репозитория', 'Invalid repository address'))
+  if (opts.expected !== undefined && !/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(opts.expected)) throw new Error(msg('Недопустимая ссылка', 'Invalid reference'))
+  const lease = opts.expected ? [`--force-with-lease=refs/heads/${branch}:${opts.expected}`] : []
   if (src === null) {
     if (branch === (await gitUpstreamBranch(root))) throw new Error(msg('Эту ветку проект использует для синхронизации — её нельзя удалить', 'The project syncs with this branch: it cannot be deleted'))
     try {
-      await runNet(root, ['push', '--quiet', remote, `:refs/heads/${branch}`], net)
+      await runNet(root, ['push', '--quiet', ...lease, remote, `:refs/heads/${branch}`], net)
     } catch (err) {
       if (!(err instanceof GitError && /remote ref does not exist|unable to delete .*: remote ref/i.test(`${err.stderr}\n${err.message}`))) throw err
     }
@@ -1077,7 +1090,7 @@ export async function gitPushRef(root: string, net: GitNet, src: string | null, 
   }
   if (!/^[0-9a-f]{40,64}$/.test(src) && !(isSafeBranchName(src.replace(/^refs\/(heads|tags)\//, '')) && /^(refs\/(heads|tags)\/|HEAD$|[A-Za-z0-9])/.test(src)))
     throw new Error(msg('Недопустимая ссылка', 'Invalid reference'))
-  await runNet(root, ['push', '--quiet', remote, `${opts.force ? '+' : ''}${src}:refs/heads/${branch}`], net)
+  await runNet(root, ['push', '--quiet', ...lease, remote, `${opts.force && !lease.length ? '+' : ''}${src}:refs/heads/${branch}`], net)
 }
 
 /**

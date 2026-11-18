@@ -28,6 +28,7 @@ import {
   Square,
   Sun,
   Undo2,
+  Globe,
 } from 'lucide-react'
 import { actions } from '@/actions'
 import { useT } from '@/i18n'
@@ -125,6 +126,7 @@ export function TopBar() {
     { type: 'separator' },
     { type: 'header', label: t('Проект') },
     { label: t('Файл .doplan (один файл)…'), onSelect: () => void actions.exportDoplan() },
+    { label: t('Опубликовать для просмотра…'), icon: Globe, onSelect: () => dialogStore.getState().open('publish') },
   ]
 
   const viewOptions: { value: ViewMode; label: ReactNode; title: string; kbd: string }[] = [

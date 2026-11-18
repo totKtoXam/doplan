@@ -500,6 +500,17 @@ describe.skipIf(!hasGit)('project sync', { timeout: 180_000 }, () => {
     await expect(gitPushRef(a, net, first, '--force')).rejects.toThrow()
     await expect(gitOrphanCommit(a, [{ path: '../x', data: '' }], 'm')).rejects.toThrow()
 
+    // with the head checked to be doplan's: a branch changed since is neither replaced nor deleted
+    await expect(gitPushRef(a, net, first, 'gh-pages', { expected: first })).rejects.toThrow()
+    await expect(gitPushRef(a, net, null, 'gh-pages', { expected: first })).rejects.toThrow()
+    expect(git(remote, 'show', 'gh-pages:index.html')).toBe('<h1>v2</h1>')
+    await expect(gitPushRef(a, net, null, 'gh-pages', { expected: 'HEAD~1' })).rejects.toThrow()
+    for (const bad of ['-x', 'https://user:token@github.com/a/b.git', 'ext::sh -c x', 'file:///tmp/x'])
+      await expect(gitPushRef(a, net, null, 'gh-pages', { remote: bad })).rejects.toThrow(/адрес|address/)
+    await gitPushRef(a, net, null, 'gh-pages', { expected: second })
+    expect(git(remote, 'branch', '--list', 'gh-pages').trim()).toBe('')
+    await gitPushRef(a, net, second, 'gh-pages', { force: true })
+
     // unpublish: the branch goes away (twice is fine); the project's own branch cannot be deleted
     await gitPushRef(a, net, null, 'gh-pages')
     expect(git(remote, 'branch', '--list', 'gh-pages').trim()).toBe('')

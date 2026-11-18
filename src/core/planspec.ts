@@ -1992,9 +1992,14 @@ function roomsModeSegments(
       if (s1 - s0 <= MAX_GAP) {
         const probe = vAdd(vAdd(E.p0, vMul(E.e, (s0 + s1) / 2)), vMul(E.n, 30))
         let near = 0
+        // near rooms reaching past the edge's line on its outer side (a neighbour in the room's notch)
+        let nearBeyond = 0
         roomPolys.forEach((poly, ri) => {
           if (!poly || ri === E.room) return
-          if (pointInPoly(probe, poly) || distToPolyBoundary(probe, poly) <= MAX_GAP) near++
+          if (pointInPoly(probe, poly) || distToPolyBoundary(probe, poly) <= MAX_GAP) {
+            near++
+            if (poly.some((v) => vDot(vSub(v, E.p0), E.n) > 1)) nearBeyond++
+          }
         })
         const touchesVertex = s0 < 0.5 || s1 > E.L - 0.5
         if (near >= 2 || (!touchesVertex && near >= 1)) continue
@@ -2013,8 +2018,9 @@ function roomsModeSegments(
         if (h0 >= 0 && h1 >= 0 && h0 !== h1) continue
         // the corner square at a reflex vertex between the room and a neighbour in its notch: the
         // junction of the two walls around the neighbour, not the outside (an outer wall here went
-        // a wall thickness into the neighbour's floor)
-        if (near >= 1 && (h0 === E.room || h1 === E.room)) continue
+        // a wall thickness into the neighbour's floor). Only a neighbour past the edge's line is in
+        // the notch: one beside the room's lower arm leaves the edge outside, and its wall stays
+        if (nearBeyond >= 1 && (h0 === E.room || h1 === E.room)) continue
       }
       E.kept.push([s0, s1])
     }
@@ -2242,8 +2248,30 @@ type Via = { lambda: number; point: Vec2; o: Seg; oEnd: 'a' | 'b' }
 function joinEnds(segs: Seg[], mergeMm: number): void {
   const onAnother = (p: Vec2, self: Seg): boolean =>
     segs.some((o) => o !== self && projectOnSeg(p, o.a, o.b).dist <= 0.5)
-  type Move = { s: Seg; end: 'a' | 'b'; p: Vec2; lambda: number }
+  type Move = { s: Seg; end: 'a' | 'b'; p: Vec2; lambda: number; corner?: boolean }
   const same = (p: Vec2, q: Vec2) => Math.abs(p.x - q.x) < 1e-6 && Math.abs(p.y - q.y) < 1e-6
+  // an end past a crossing wall's axis but still inside its body (an edge wall reaching the face of
+  // the wall it meets) is joined already: the trim below takes it back to the axis. Extended on out
+  // of that body, it ran through the wall to a corner beyond (a thick wall end pulled 300 mm into the
+  // next room); a target still inside the body (a thin glazing end reaching a partition within a
+  // thick corner) is met as before. Returns how far along the end the body reaches, or null
+  const overshot = (s: Seg, p: Vec2, dir: Vec2): number | null => {
+    let face: number | null = null
+    for (const o of segs) {
+      if (o === s || (o.cut && !s.cut)) continue
+      const od = vSub(o.b, o.a)
+      const oL = vLen(od)
+      if (oL < 1 || o.t < 1) continue
+      const odn = vMul(od, 1 / oL)
+      const sin = Math.abs(vCross(dir, odn))
+      if (sin < 0.3) continue
+      const h = lineHit(p, dir, o.a, odn)
+      if (!h || h.lambda >= -0.5 || h.lambda < -(o.t / 2 + 0.5) || h.mu <= 0.5 || h.mu >= oL - 0.5) continue
+      const f = h.lambda + o.t / 2 / sin
+      if (face === null || f > face) face = f
+    }
+    return face
+  }
   // extension, repeated until chained corners settle
   for (let pass = 0; pass < 6; pass++) {
     const moves: Move[] = []
@@ -2256,6 +2284,7 @@ function joinEnds(segs: Seg[], mergeMm: number): void {
         if (onAnother(p, s)) continue
         const other = end === 'a' ? s.b : s.a
         const dir = vNorm(vSub(p, other))
+        const inBody = overshot(s, p, dir)
         // a hit through the body of another wall stops the extension (nearest wins);
         // otherwise (ends meeting near a corner) the thickest target wins, then the nearest
         let body: { lambda: number; point: Vec2 } | null = null
@@ -2300,8 +2329,12 @@ function joinEnds(segs: Seg[], mergeMm: number): void {
         }
         const best = body ?? corner
         if (!best) continue
+        // an end inside a crossing wall's body does not drag a settled wall end (one standing on a third
+        // wall) out to a corner past that body: both stay, the trim joins this end on the axis
+        const settled = !body && !!corner?.beyond && onAnother(corner.o[corner.oEnd], corner.o)
+        if (settled && inBody !== null && best.lambda > inBody + 0.5) continue
         const q = V(r3(best.point.x), r3(best.point.y))
-        moves.push({ s, end, p: q, lambda: best.lambda })
+        moves.push({ s, end, p: q, lambda: best.lambda, corner: !body })
         if (body && via.some((v) => v.lambda < body!.lambda - 0.5)) detours.push({ s, end, body: body.lambda, via })
         // a corner beyond the other wall's end, which sits on a third wall (a separator) and so never
         // moves itself: bring that end to the corner too, or the two walls never meet
@@ -2323,10 +2356,19 @@ function joinEnds(segs: Seg[], mergeMm: number): void {
       return Math.sign(side(om.s[om.end])) !== Math.sign(side(om.p)) && Math.abs(side(om.p)) > 0.5
     }
     const stops = new Map<Move, Via>()
+    // a thicker wall end crossing a thin detour's way on the way to a corner stops on the thin wall's
+    // line instead, and the thin wall runs on to its body (as when the thin wall was joined first: a
+    // thick separator end run on past a partition went into the corner of the room below)
+    const yields = new Map<Move, Seg>()
     for (const d of detours) {
       let stop: Via | null = null
       for (const v of d.via) {
         if (v.lambda >= d.body - 0.5 || (stop && v.lambda >= stop.lambda) || !crossing(d, v)) continue
+        const om = moveOf(v.o, v.oEnd)
+        if (om?.corner && !om.s.cut && !d.s.cut && v.o.t > d.s.t + 1e-6) {
+          yields.set(om, d.s)
+          continue
+        }
         const back = detours.find((x) => x.s === v.o && x.end === v.oEnd)
         const mutual = back?.via.some((w) => w.o === d.s && w.oEnd === d.end && w.lambda < back.body - 0.5 && crossing(back, w))
         if (mutual && Math.abs(rank(v.o) - rank(d.s)) < 1e-6) continue
@@ -2339,6 +2381,34 @@ function joinEnds(segs: Seg[], mergeMm: number): void {
       m.p = V(r3(v.point.x), r3(v.point.y))
       m.lambda = v.lambda
     }
+    for (const [m, thin] of yields) {
+      const from = m.s[m.end]
+      const dir = vNorm(vSub(m.p, from))
+      const td = vSub(thin.b, thin.a)
+      const h = lineHit(from, dir, thin.a, vMul(td, 1 / vLen(td)))
+      if (!h || h.lambda < 0.5 || h.lambda > m.lambda - 0.5) continue
+      m.p = V(r3(h.point.x), r3(h.point.y))
+      m.lambda = h.lambda
+    }
+    // an end another wall runs over in the same pass (that wall's end moves along its line past this
+    // point) stays where it is: it will stand on that wall, as when that wall was joined first. Two
+    // ends running over each other: the longer wall (then the thicker) runs on. A wall end stopping
+    // on this end (a corner) does not hold it
+    const runsOver = (m: Move, q: Vec2): boolean => {
+      const fixed = m.end === 'a' ? m.s.b : m.s.a
+      return projectOnSeg(q, fixed, m.p).dist <= 0.5 && projectOnSeg(q, m.s.a, m.s.b).dist > 0.5 && vDist(q, m.p) > 0.5
+    }
+    const stays = new Set<Move>()
+    for (const m of moves) {
+      if (same(m.s[m.end], m.p)) continue
+      for (const o of moves) {
+        if (o.s === m.s || same(o.s[o.end], o.p) || !runsOver(o, m.s[m.end])) continue
+        if (runsOver(m, o.s[o.end]) && rank(o.s) <= rank(m.s) + 1e-6) continue
+        stays.add(m)
+        break
+      }
+    }
+    for (const m of stays) m.p = m.s[m.end]
     // an end pulled by several walls goes to the nearest corner (then the lowest point, for a tie)
     const pulled = new Map<string, Move>()
     for (const m of pulls) {
@@ -3063,14 +3133,15 @@ function boundaryDeviation(a: Vec2[][], b: Vec2[][], skip?: (s: Vec2, side: Vec2
  * The number of holes of a built face as the checked shape sees them: holes sharing a piece of a side
  * are one hole (partly adjacent cutouts, each with its own void), and a hole sharing a side with the
  * outer ring is a notch of the outline (a shaft against a column at the outline). Holes meeting at a
- * single point stay apart, as the checked shape keeps them.
+ * single point stay apart, as the checked shape keeps them. `least`: the shortest shared piece that
+ * joins two rings (by default the shape tolerance)
  */
-function holeGroups(outer: Vec2[], holes: Vec2[][]): number {
+function holeGroups(outer: Vec2[], holes: Vec2[][], least = BUILT_SHAPE_TOL): number {
   const rings = [outer, ...holes]
   const up = rings.map((_, i) => i)
   const find = (i: number): number => (up[i] === i ? i : (up[i] = find(up[i])))
   for (let i = 0; i < rings.length; i++)
-    for (let j = i + 1; j < rings.length; j++) if (sharesSide(rings[i], rings[j])) up[find(i)] = find(j)
+    for (let j = i + 1; j < rings.length; j++) if (sharesSide(rings[i], rings[j], least)) up[find(i)] = find(j)
   return rings.filter((_, i) => find(i) === i && find(i) !== find(0)).length
 }
 
@@ -3079,7 +3150,7 @@ function holeGroups(outer: Vec2[], holes: Vec2[][]): number {
  * piece must be longer than the shape tolerance: a snapped wall (a 95 mm gap built 100) moves a reflex
  * corner a few mm along the hole beside it, which is no shared side
  */
-function sharesSide(a: Vec2[], b: Vec2[]): boolean {
+function sharesSide(a: Vec2[], b: Vec2[], least = BUILT_SHAPE_TOL): boolean {
   for (let i = 0; i < a.length; i++) {
     const p = a[i]
     const q = a[(i + 1) % a.length]
@@ -3094,7 +3165,7 @@ function sharesSide(a: Vec2[], b: Vec2[]): boolean {
       if (off(r) > 1 || off(s) > 1) continue
       const t0 = vDot(vSub(r, p), u)
       const t1 = vDot(vSub(s, p), u)
-      if (Math.min(len, Math.max(t0, t1)) - Math.max(0, Math.min(t0, t1)) > BUILT_SHAPE_TOL) return true
+      if (Math.min(len, Math.max(t0, t1)) - Math.max(0, Math.min(t0, t1)) > least) return true
     }
   }
   return false
@@ -3359,8 +3430,14 @@ export function validatePlanSpecDetailed(input: PlanSpec): PlanValidation {
         got.every((g) => distToPolyBoundary(p, g) > 0.8) && pointInPoly(p, f.polygon) && !f.holes.some((h) => pointInPoly(p, h))
       const inner = (s: Vec2, side: Vec2) => !floorAt(vAdd(s, vMul(side, 2))) && !floorAt(vAdd(s, vMul(side, -2)))
       const dev = Math.max(boundaryDeviation(got, want, inner), boundaryDeviation(want, got))
+      // (a hole sharing even a few mm of side with another hole or the outline is one with it in the
+      // checked shape, which is the union of the cutouts: a column touching a shaft flush to the outline
+      // over 1–25 mm is part of that notch there, and the hole it builds is no hole missing or extra)
       const nHoles = holeGroups(f.polygon, f.holes)
-      const holesOk = nHoles === want.length - 1 || (sh?.holeParts !== undefined && nHoles === sh.holeParts)
+      const holesOk =
+        nHoles === want.length - 1 ||
+        (sh?.holeParts !== undefined && nHoles === sh.holeParts) ||
+        holeGroups(f.polygon, f.holes, 0.25) === want.length - 1
       if (dev <= BUILT_SHAPE_TOL && holesOk) return
       const area = (sh ? sh.area : Math.abs(signedArea(polys[i]!))) / 1e6
       const holes = !holesOk ? `, вырезов-отверстий ${nHoles} вместо ${want.length - 1}` : ''

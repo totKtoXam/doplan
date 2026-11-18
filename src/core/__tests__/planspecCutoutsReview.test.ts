@@ -352,6 +352,43 @@ describe('planspec cutouts: review round 2', () => {
     expect(shafts.every((r) => r.name === 'Шахта' && r.type === 'other')).toBe(true)
   })
 
+  it('#7 a column sharing 1–25 mm of side with a shaft flush to the outline passes, in every orientation (night review 3)', () => {
+    const turn = (r: number[], o: number): number[] => {
+      const f = ([x, y]: number[]): number[] => {
+        const [mx, my] = o >= 4 ? [-x, y] : [x, y]
+        const k = o % 4
+        return k === 0 ? [mx, my] : k === 1 ? [-my, mx] : k === 2 ? [-mx, -my] : [my, -mx]
+      }
+      const [a, b] = [f([r[0], r[1]]), f([r[0] + r[2], r[1] + r[3]])]
+      return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1])]
+    }
+    for (const ov of [1, 5, 10, 15, 20, 25])
+      for (let o = 0; o < 8; o++) {
+        const s = parsePlanSpec({
+          version: 1,
+          units: 'mm',
+          defaults: { exteriorThickness: 300, partitionThickness: 100, loadBearingThickness: 200 },
+          rooms: [
+            {
+              id: 'a',
+              type: 'living',
+              rect: turn([0, 0, 3750, 5150], o),
+              cutouts: [
+                { rect: turn([2700, 2730, 500, 1100], o), kind: 'column' },
+                { rect: turn([3200 - ov, 3830, 550 + ov, 650], o), kind: 'shaft' },
+              ],
+            },
+          ],
+          openings: [],
+        })
+        const v = validatePlanSpecDetailed(s)
+        expect(v.ok, `ov ${ov}, orientation ${o}: ${v.issues.map((i) => i.message).join('; ')}`).toBe(true)
+        const res = compilePlanSpecDetailed(s)
+        const a = derivePlan(res.doc, res.levelId).rooms.find((x) => x.roomId === res.roomIds.a)!
+        expect(a.area, `ov ${ov}, orientation ${o}`).toBeCloseTo(3.75 * 5.15 - 0.55 - ((550 + ov) / 1000) * 0.65, 2)
+      }
+  })
+
   it('#7 a hole really missing from the built floor is still an error', () => {
     // a cutout that cannot become a hole (its void is swallowed) must not pass as two touching holes
     const spec = base([{ id: 'a', type: 'living', rect: [0, 0, 4000, 3000], cutouts: [{ rect: [1000, 1000, 500, 500] }] }])
@@ -536,6 +573,43 @@ describe('editor: technical voids and islands, review round 4', () => {
         expect(room.holes, `${side} ${off}`).toHaveLength(1)
         // 4.8 × 3.8 minus the box footprint (900 × 900, as before the overlap rule)
         expect(room.area, `${side} ${off}`).toBeCloseTo(18.24 - 0.81, 2)
+      }
+    }
+  })
+
+  // night review 3 #2: a void keeps all its nodes on the room face that took its floor when one of
+  // its walls goes (4 of that face's 8 nodes), and so took the whole room, deleting the room record
+  it('removing any one wall of a void gives its floor to the room beside it (never the room to the void)', () => {
+    const CASES: [string, unknown, string][] = [
+      ['box at the exterior wall', { version: 1, units: 'mm', defaults: { exteriorThickness: 300, partitionThickness: 100 }, rooms: [{ id: 'a', type: 'kitchen', name: 'Кухня', rect: [0, 0, 3000, 3000], cutouts: [{ rect: [1000, 2400, 800, 600], kind: 'box' }] }], openings: [] }, 'Кухня'],
+      ['shaft at the exterior wall', { version: 1, units: 'mm', defaults: { exteriorThickness: 300, partitionThickness: 100 }, rooms: [{ id: 'a', type: 'living', name: 'Гостиная', rect: [0, 0, 4000, 4000], cutouts: [{ rect: [1000, 0, 1500, 1000], kind: 'shaft' }] }], openings: [] }, 'Гостиная'],
+      ['box at the partition to a hall', { version: 1, units: 'mm', defaults: { exteriorThickness: 300, partitionThickness: 100 }, rooms: [{ id: 'a', type: 'bathroom', name: 'Санузел', rect: [0, 0, 2000, 2000], cutouts: [{ rect: [600, 1500, 800, 500], kind: 'box' }] }, { id: 'b', type: 'hall', name: 'Коридор', rect: [0, 2100, 2000, 1500] }], openings: [] }, 'Коридор'],
+    ]
+    for (const [name, spec, keep] of CASES) {
+      const res = compilePlanSpecDetailed(parsePlanSpec(spec))
+      const doc = parseDoc(serializeDoc(res.doc))
+      normalize(doc)
+      syncRooms(doc)
+      const lv = res.levelId
+      const plan = derivePlan(doc, lv)
+      const before = summarizeLevelRooms(doc, plan.rooms)
+      const voidFace = plan.rooms.find((f) => doc.rooms[f.roomId]?.technical)!
+      expect(voidFace, name).toBeTruthy()
+      for (const wid of [...new Set(voidFace.edges.map((e) => e.wallId))]) {
+        const d = structuredClone(doc)
+        removeEntities(d, [{ kind: 'wall', id: wid }])
+        normalize(d)
+        syncRooms(d)
+        const faces = derivePlan(d, lv).rooms
+        const sum = summarizeLevelRooms(d, faces)
+        const tag = `${name}, wall ${wid}`
+        expect(sum.count, tag).toBe(before.count)
+        // (the exterior wall behind it gone, the void is open to the street: outside, not floor)
+        expect(sum.total, tag).toBeGreaterThanOrEqual(before.total - 1e-9)
+        expect(sum.technicalCount, tag).toBe(0)
+        const kept = faces.find((f) => d.rooms[f.roomId]?.name === keep)
+        expect(kept, tag).toBeTruthy()
+        expect(d.rooms[kept!.roomId].technical, tag).toBeFalsy()
       }
     }
   })

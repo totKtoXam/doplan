@@ -389,7 +389,9 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
   // technical voids follow their walls: a void record knows the nodes of its face (syncRooms) and
   // takes the face sharing most of them (Jaccard ≥ ½), wherever the walls were dragged and wherever
   // its anchor was left. A void none of whose faces is left (its walls removed) takes no face: the
-  // void is floor of the room again, not a shaft the size of the room
+  // void is floor of the room again, not a shaft the size of the room. Nor does a void one wall of
+  // which is removed: its nodes are all still on the room's face that took its floor (4 of the 8
+  // nodes of a rect with a notch), but that face is far larger than the void's own outline was
   const claimed = new Map<Face, { r: Room; score: number }>()
   const byNodes = new Set<Room>()
   for (const r of records) {
@@ -398,8 +400,12 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
     if (!r.voidNodes.some((id) => doc.nodes[id]?.levelId === levelId)) continue
     byNodes.add(r)
     const want = new Set(r.voidNodes)
+    // the void's outline on the wall axes, where its nodes stand now (a face inside it is smaller)
+    const ring = r.voidNodes.map((id) => doc.nodes[id]).filter((n) => !!n && n.levelId === levelId)
+    const outline = ring.length >= 3 ? Math.abs(polygonArea(ring)) : 0
     let best: { face: Face; area: number; score: number } | null = null
     for (const p of prepared) {
+      if (outline > 0 && p.face.ringArea > outline * 1.5 + 1e5) continue
       let common = 0
       for (const id of p.face.nodeIds) if (want.has(id)) common++
       if (!common) continue

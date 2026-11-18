@@ -108,3 +108,49 @@ describe('planspec pinwheel corners: exact rooms in every orientation', () => {
     expect(untwistRing(simple)).toBe(simple)
   })
 })
+
+// Plain corners from review night 3, each built in every orientation (4 turns × mirror). Every listed
+// area is the spec's exact floor except where noted, which is what a56f5f4 built there
+const NIGHT3: [string, (number[] | number[][] | null)[], number, Record<string, number>, boolean, string[]?][] = [
+  // the 700 mm arm of an L beside a neighbour 150 mm shorter keeps its outer wall (it was dropped: ROOM_OPEN)
+  ['an L arm beside a slightly shorter neighbour', [[[0, 0], [3000, 0], [3000, 3000], [700, 3000], [700, 2000], [0, 2000]], null, [-3150, 0, 3000, 1850]], 300, { a: 8.3, c: 5.55 }, true],
+  // a thick wall end inside the crossing wall's body is not dragged on to a corner past it (a lost 405 × 380)
+  ['three rooms at a 580 mm corner (case A)', [[0, 0, 4350, 4250], [0, -3350, 3950, 2650], [4190, -3100, 3700, 2900]], 580, { a: 18.4875, b: 10.4543, c: 10.7155 }, true],
+  // a wall end run over by another wall's end stays on it (it ran out into the next loggia)
+  ['a room and two loggias at a 620 mm corner (case B)', [null, [0, 5320, 5350, 3250], [0, 8990, 1550, 1400], [-1050, 8810, 1050, 1400]], 620, { b: 17.3825, c: 2.17, d: 1.47 }, true, ['living', 'bedroom', 'loggia', 'loggia']],
+  // a thick separator end crossing a partition's way stops on it (it ran into the corner of the room
+  // below); room c keeps a56f5f4's 6.4416, and the gate says so
+  ['a 690 mm separator above a partition (corpus 400099)', [[0, 0, 3550, 2600], [-210, 2640, 3550, 2700], [4030, 2640, 2400, 2700]], 320, { a: 9.23, b: 9.585, c: 6.4416 }, false],
+  // a wall end another wall's end stops on (a corner) still moves on (the notch room stayed open)
+  ['a room in an L notch (ofuzz 400052)', [[[0, 0], [1700, 0], [1700, 2050], [3300, 2050], [3300, 3100], [0, 3100]], [0, -1700, 3100, 1600], [3600, 0, 2400, 3350], [2210, 0, 1090, 1540]], 300, { a: 6.95, b: 4.96, c: 8.04, d: 1.6786 }, true],
+]
+function turnRoom(r: number[] | number[][] | null, o: number): number[] | number[][] | null {
+  if (!r || typeof r[0] === 'number') return r && turnRect(r as number[], o)
+  return (r as number[][]).map(([x, y]) => {
+    const [mx, my] = o >= 4 ? [-x, y] : [x, y]
+    const k = o % 4
+    return k === 0 ? [mx, my] : k === 1 ? [-my, mx] : k === 2 ? [-mx, -my] : [my, -mx]
+  })
+}
+
+describe('planspec review night 3: plain corners in every orientation', () => {
+  for (const [name, rooms, T, areas, ok, types] of NIGHT3) {
+    it(name, () => {
+      for (let o = 0; o < 8; o++) {
+        const s = spec(
+          rooms.map((r) => turnRoom(r, o)),
+          T,
+        )
+        if (types) s.rooms.forEach((r) => (r.type = types['abcde'.indexOf(r.id)] as typeof r.type))
+        const res = compilePlanSpecDetailed(s)
+        const faces = derivePlan(res.doc, res.levelId).rooms
+        expect(faces.length, `closed areas, orientation ${o}`).toBe(Object.keys(areas).length)
+        for (const [id, a] of Object.entries(areas)) {
+          const f = faces.find((x) => x.roomId === res.roomIds[id])
+          expect(f?.area ?? -1, `room ${id}, orientation ${o}`).toBeCloseTo(a, 4)
+        }
+        expect(validatePlanSpecDetailed(s).ok, `gate, orientation ${o}`).toBe(ok)
+      }
+    })
+  }
+})

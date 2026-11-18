@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PagesConfig, PagesPublishRequest, RepoRef } from '@shared/pagesSite'
-import { markerId } from '@shared/pagesSite'
+import { docTag, markerDoc, markerId } from '@shared/pagesSite'
 
 const base = mkdtempSync(join(tmpdir(), 'doplan-pages-flow-'))
 const userData = join(base, 'userData')
@@ -30,6 +30,7 @@ const gh = {
   userPlan: 'free' as string | undefined,
   orgPlans: {} as Record<string, string | undefined>,
   failEnable: false,
+  failPush: 0,
   calls: [] as string[],
   seq: 0,
 }
@@ -97,6 +98,10 @@ vi.mock('./pagesGit', () => ({
   pushSite: async (_r: unknown, siteDir: string, remote: string, _b: string, _m: string, expected: string | null) => {
     const key = fromRemote(remote)
     gh.calls.push(`push ${key}`)
+    if (gh.failPush > 0) {
+      gh.failPush--
+      throw new Error('could not resolve host: github.com')
+    }
     const r = repo(key)
     if (r.branchSha !== expected) throw new Error('stale info')
     r.branchSha = nextSha()
@@ -137,7 +142,9 @@ beforeEach(() => {
   gh.userPlan = 'free'
   gh.orgPlans = {}
   gh.failEnable = false
+  gh.failPush = 0
   rmSync(join(userData, 'pages.json'), { force: true })
+  rmSync(join(userData, 'pages-repos.json'), { force: true })
   setOrigin('https://github.com/me/flat.git')
 })
 
@@ -266,18 +273,118 @@ describe('the Pages rule follows the repository owner', () => {
 })
 
 describe('the record follows its document', () => {
-  it('finds a record kept under the creation-time key once the file has an id, and reuses its repository', async () => {
+  it('finds a record kept under the file key once the file has an id, and reuses its repository', async () => {
     setOrigin(null)
-    await publishPlan(req({ docId: 'created:abc', target: 'separate' }))
+    await publishPlan(req({ docId: 'file:abc', target: 'separate' }))
     expect(gh.calls[0]).toMatch(/^create me\/flat-[0-9a-f]{6}-view$/)
     const name = gh.calls[0].slice('create me/'.length)
 
     expect((await status('p_newid')).record).toBeNull()
-    const st = await status('p_newid', ['created:abc'])
+    const st = await status('p_newid', ['file:abc'])
     expect(st.record?.repo).toBe(name)
     gh.calls = []
-    await publishPlan(req({ docId: 'p_newid', aliases: ['created:abc'], target: 'separate' }))
+    await publishPlan(req({ docId: 'p_newid', aliases: ['file:abc'], target: 'separate' }))
     expect(gh.calls).toEqual([`push me/${name}`, `pages me/${name} keep`])
-    expect((await status('created:abc')).record).toBeNull()
+    expect((await status('file:abc')).record).toBeNull()
+    // the marker now carries the new key's tag
+    expect(markerDoc(repo(`me/${name}`).marker)).toBe(docTag('p_newid'))
+  })
+
+  it('without a local record (another computer, a lost pages.json) recognises its own site and updates it', async () => {
+    gh.repos.set('me/flat', fresh())
+    const first = await publishPlan(req())
+    expect(markerDoc(repo('me/flat').marker)).toBe(docTag('doc1'))
+    rmSync(join(userData, 'pages.json'), { force: true })
+
+    const st = await status()
+    expect(st.record).toMatchObject({ owner: 'me', repo: 'flat', separate: false, pubId: first.record.pubId, url: 'https://me.github.io/flat/' })
+    expect(st.outdated).toBe(true)
+    expect(st.project).toBeNull()
+    gh.calls = []
+    const res = await publishPlan(req())
+    expect(res.record).toMatchObject({ owner: 'me', repo: 'flat', pubId: first.record.pubId })
+    expect(gh.calls).toEqual(['push me/flat', 'pages me/flat keep'])
+
+    // and when the record is lost again it can be unpublished from here
+    rmSync(join(userData, 'pages.json'), { force: true })
+    await status()
+    await unpublishPlan('doc1')
+    expect(repo('me/flat').branchSha).toBeNull()
+    expect(repo('me/flat').pages).toBeNull()
+  })
+
+  it('the same for a separate repository: found by its marker, no second -view', async () => {
+    setOrigin(null)
+    await publishPlan(req({ target: 'separate' }))
+    const name = gh.calls[0].slice('create me/'.length)
+    rmSync(join(userData, 'pages.json'), { force: true })
+    rmSync(join(userData, 'pages-repos.json'), { force: true })
+    gh.calls = []
+    expect((await status()).record).toMatchObject({ repo: name, separate: true })
+    rmSync(join(userData, 'pages.json'), { force: true })
+    await publishPlan(req({ target: 'separate' }))
+    expect(gh.calls.filter((c) => c.startsWith('create'))).toEqual([])
+    expect(gh.calls.filter((c) => c.startsWith('push'))).toEqual([`push me/${name}`])
+  })
+
+  it('another plan published into the project repository is called that, not "not made by doplan"', async () => {
+    gh.repos.set('me/flat', fresh())
+    await publishPlan(req({ docId: 'other' }))
+    const st = await status('doc1')
+    expect(st.record).toBeNull()
+    expect(st.project?.occupied).toBe('plan')
+    await expect(publishPlan(req())).rejects.toThrow(/другой план doplan/)
+  })
+})
+
+describe('doplan reuses the separate repository it made', () => {
+  it('a failed push leaves the new repository written down, and the retry goes into it', async () => {
+    setOrigin(null)
+    gh.failPush = 1
+    await expect(publishPlan(req({ target: 'separate' }))).rejects.toThrow(/resolve host/)
+    const name = gh.calls[0].slice('create me/'.length)
+    expect((await status()).separateName).toBe(name)
+    gh.calls = []
+    const res = await publishPlan(req({ target: 'separate' }))
+    expect(res.record.repo).toBe(name)
+    expect(gh.calls).toEqual([`push me/${name}`, `pages me/${name} new`])
+    expect([...gh.repos.keys()]).toEqual([`me/${name}`])
+  })
+
+  it('GitHub refusing Pages: the branch is taken back and the retry reuses the repository', async () => {
+    setOrigin(null)
+    gh.failEnable = true
+    await expect(publishPlan(req({ target: 'separate' }))).rejects.toThrow(/422/)
+    gh.failEnable = false
+    gh.calls = []
+    await publishPlan(req({ target: 'separate' }))
+    expect(gh.calls.filter((c) => c.startsWith('create'))).toEqual([])
+    expect(gh.repos.size).toBe(1)
+  })
+
+  it('unpublish and publish again, many times: always the same repository and link', async () => {
+    setOrigin(null)
+    const first = await publishPlan(req({ target: 'separate' }))
+    for (let i = 0; i < 25; i++) {
+      await unpublishPlan('doc1')
+      expect((await status()).separateName).toBe(first.record.repo)
+      const res = await publishPlan(req({ target: 'separate' }))
+      expect(res.record.url).toBe(first.record.url)
+    }
+    expect(gh.repos.size).toBe(1)
+    expect(gh.calls.filter((c) => c.startsWith('create'))).toHaveLength(1)
+  })
+
+  it('an empty -view repository doplan made for another plan is not taken', async () => {
+    gh.repos.set('me/flat', fresh({ branchSha: 'f'.repeat(40) }))
+    const first = await publishPlan(req({ target: 'separate' }))
+    expect(first.record.repo).toBe('flat-view')
+    await unpublishPlan('doc1')
+    // another plan of the same project: flat-view is empty now, but it is doc1's
+    expect((await status('doc2')).separateName).toBe('flat-view-2')
+    const other = await publishPlan(req({ docId: 'doc2', target: 'separate' }))
+    expect(other.record.repo).toBe('flat-view-2')
+    // doc1 goes back into its own
+    expect((await publishPlan(req({ target: 'separate' }))).record.repo).toBe('flat-view')
   })
 })

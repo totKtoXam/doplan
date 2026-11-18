@@ -120,10 +120,37 @@ export interface SiteContent {
 }
 
 /**
+ * The fields of a catalog entry a public site carries: what the viewer renders with, its name and the
+ * credits line (author / licence / source). Everything else stays home: library materials and models
+ * carry the user's product card (vendor, article, shop link, price, note), estimate specs, tags and
+ * thumbnails.
+ */
+export const SITE_CATALOG_FIELDS = {
+  materials: [
+    'id', 'name', 'nameRu', 'category', 'color', 'roughness', 'metalness', 'maps', 'sizeMm', 'pattern',
+    'transmission', 'opacity', 'ior', 'sheen', 'clearcoat', 'emissive', 'emissiveIntensity', 'normalScale',
+    'source', 'licence',
+  ],
+  assets: [
+    'id', 'name', 'nameRu', 'category', 'kind', 'src', 'procedural', 'size', 'mount', 'elevation', 'slots',
+    'defaultParams', 'source', 'licence', 'author',
+  ],
+  hdris: ['id', 'name', 'src', 'kind', 'source', 'licence'],
+} as const
+
+function pickFields(e: Entry, fields: readonly string[]): Entry {
+  const src = e as unknown as Record<string, unknown>
+  const out: Record<string, unknown> = {}
+  for (const k of fields) if (src[k] !== undefined) out[k] = src[k]
+  return out as unknown as Entry
+}
+
+/**
  * The plan's site content: which catalog entries it uses (ids mentioned anywhere in the document,
  * plus the default materials of the models used), with every doplan-asset:// URL rewritten to a
- * relative site URL and listed in `files`. Thumbnails of catalog entries are dropped (the viewer has
- * no catalog browser). `builtinIds` are entries every viewer already has (colours, procedural models).
+ * relative site URL and listed in `files`. Only SITE_CATALOG_FIELDS of an entry go out (no product
+ * cards, thumbnails or tags). `builtinIds` are entries every viewer already has (colours, procedural
+ * models).
  */
 export function planSite(doc: unknown, catalog: CatalogLike, builtinIds: ReadonlySet<string> = new Set()): SiteContent {
   const used = collectStrings(doc)
@@ -145,19 +172,15 @@ export function planSite(doc: unknown, catalog: CatalogLike, builtinIds: Readonl
     if (!files.has(f.path)) files.set(f.path, f)
     return siteUrlOf(f.path)
   }
-  const stripThumb = (e: Entry): Entry => {
-    const { thumb: _thumb, ...rest } = e
-    return rest
-  }
   const notDownloaded = [...assets, ...materials, ...hdris].filter((e) => e.remote).map((e) => e.id)
 
   return {
     doc: mapStrings(doc, rewrite),
     catalog: {
       version: catalog.version ?? 1,
-      materials: materials.map((e) => mapStrings(stripThumb(e), rewrite)),
-      assets: assets.map((e) => mapStrings(stripThumb(e), rewrite)),
-      hdris: hdris.map((e) => mapStrings(stripThumb(e), rewrite)),
+      materials: materials.map((e) => mapStrings(pickFields(e, SITE_CATALOG_FIELDS.materials), rewrite)),
+      assets: assets.map((e) => mapStrings(pickFields(e, SITE_CATALOG_FIELDS.assets), rewrite)),
+      hdris: hdris.map((e) => mapStrings(pickFields(e, SITE_CATALOG_FIELDS.hdris), rewrite)),
     },
     files: [...files.values()],
     notDownloaded,
@@ -275,15 +298,26 @@ export function hashString(str: string, seed = 0): string {
 }
 
 /**
- * Keys of the publication record of a document. A file from before project ids has none until its
- * first save: until then it is keyed by its creation time, which a rename does not change, and once
- * the id is there the record moves over to it (migrateRecordKey with these aliases). `name:` is the
- * key the first builds of this feature used.
+ * Keys of the publication record of a document: its id. A file from before project ids has none
+ * until its first save; until then it is keyed by its file (path + creation time), so copies of it
+ * on disk never share a record. Its first plain save gives it an id at the same path, and the record
+ * moves over (migrateRecordKey with these aliases); a Save As copy gets a new id at a new path and
+ * does not match, so it never takes over the original's publication.
  */
-export function publicationKeys(meta: { id?: string; name: string; createdAt: string }): { key: string; aliases: string[] } {
-  const created = `created:${hashString(meta.createdAt || meta.name)}`
-  const key = meta.id ?? created
-  return { key, aliases: [created, `name:${hashString(`${meta.name}|${meta.createdAt}`)}`].filter((a) => a !== key) }
+export function publicationKeys(meta: { id?: string; name: string; createdAt: string }, filePath?: string | null): { key: string; aliases: string[] } {
+  const path = (filePath ?? '').replace(/\\/g, '/').toLowerCase()
+  const file = `file:${hashString(`${path}|${meta.createdAt || meta.name}`)}`
+  const key = meta.id ?? file
+  return { key, aliases: file !== key ? [file] : [] }
+}
+
+/**
+ * The document tag a site's marker carries (a salted hash of the record key, not the id itself): lets
+ * doplan recognise its own publication of this document when it has no local record (another
+ * computer with the same project, a lost pages.json).
+ */
+export function docTag(docKey: string): string {
+  return hashString(`doplan-pages|${docKey}`)
 }
 
 /** canonical JSON (sorted keys) so equal documents hash equally whatever the key order */
@@ -446,8 +480,15 @@ export function viewRepoCandidate(base: string, n: number): string {
  */
 export const PAGES_MARKER = '.doplan-pages.json'
 
-export function pagesMarker(pubId: string): string {
-  return `${JSON.stringify({ doplan: 'pages', id: pubId })}\n`
+export function pagesMarker(pubId: string, doc?: string): string {
+  return `${JSON.stringify({ doplan: 'pages', id: pubId, ...(doc ? { doc } : {}) })}\n`
+}
+
+/** the document tag (docTag) in a doplan marker file, or null */
+export function markerDoc(text: string | null | undefined): string | null {
+  if (!markerId(text)) return null
+  const m = JSON.parse(text as string) as Obj
+  return typeof m.doc === 'string' && m.doc ? m.doc : null
 }
 
 /** the publication id in a marker file, or null */
@@ -547,8 +588,11 @@ export interface PagesTarget {
   isPrivate: boolean
   /** a private repository on GitHub Free cannot have Pages: the user has to choose */
   needsChoice: boolean
-  /** the repository already has a gh-pages branch or a Pages site doplan did not make */
-  occupied?: 'branch' | 'site'
+  /**
+   * in the way: a gh-pages branch doplan did not make ('branch') or that holds another doplan plan
+   * ('plan'), or a Pages site of the repository's own ('site')
+   */
+  occupied?: 'branch' | 'plan' | 'site'
 }
 
 export interface PagesStatus {

@@ -13,7 +13,13 @@
  *
  * Published plans are remembered in userData/pages.json by document id: the repository, the address,
  * the publication id and the content hash, so the dialog can say "published / outdated". An update
- * always goes to the recorded repository, whatever the project's origin points to now.
+ * always goes to the recorded repository, whatever the project's origin points to now. Without a
+ * record (another computer, a lost pages.json) a site whose marker carries this document's tag is
+ * recognised as this plan's and the record is restored.
+ *
+ * Separate repositories doplan creates are written down (userData/pages-repos.json) the moment they
+ * exist, before anything is pushed: a failed publish, or unpublish and publish again, goes back into
+ * the same repository instead of leaving another empty public `<name>-view-N` behind.
  */
 import { randomBytes } from 'node:crypto'
 import { promises as fsp } from 'node:fs'
@@ -21,7 +27,10 @@ import { join } from 'node:path'
 import { app } from 'electron'
 import {
   canPublishInto,
+  docTag,
   hashString,
+  markerDoc,
+  markerId,
   migrateRecordKey,
   originUrlFromGitConfig,
   PAGES_BRANCH,
@@ -30,6 +39,7 @@ import {
   pagesMarker,
   pagesNeedsChoice,
   pagesOwnership,
+  pagesUrlOf,
   parseGithubRemote,
   planSlug,
   viewRepoCandidate,
@@ -76,6 +86,47 @@ const recordsFile = () => join(paths.userData, 'pages.json')
 const workDir = (docId: string) => join(paths.userData, 'pages', hashString(docId))
 
 type Records = Record<string, PagesRecord>
+/** document key → "owner/repo" (lower case) of the separate repositories doplan created for it */
+type Made = Record<string, string[]>
+
+const madeFile = () => join(paths.userData, 'pages-repos.json')
+const repoKey = (ref: RepoRef) => `${ref.owner}/${ref.repo}`.toLowerCase()
+
+async function loadMade(docId: string, aliases: readonly string[]): Promise<Made> {
+  const r = await readJson<unknown>(madeFile(), {})
+  const made = r && typeof r === 'object' && !Array.isArray(r) ? (r as Made) : {}
+  if (migrateRecordKey(made, docId, aliases)) await atomicWrite(madeFile(), JSON.stringify(made, null, 2))
+  return made
+}
+
+/** remembers a repository doplan just created for the document (before anything is pushed into it) */
+async function rememberMade(docId: string, ref: RepoRef): Promise<void> {
+  const made = await loadMade(docId, [])
+  const list = (made[docId] ??= [])
+  if (!list.includes(repoKey(ref))) list.push(repoKey(ref))
+  await atomicWrite(madeFile(), JSON.stringify(made, null, 2))
+}
+
+const EMPTY: PagesInspection = { branchSha: null, marker: null, pages: null }
+const docTags = (docId: string, aliases: readonly string[]) => new Set([docId, ...aliases].map(docTag))
+const taggedFor = (insp: PagesInspection, tags: Set<string>) => {
+  const d = markerDoc(insp.marker)
+  return !!d && tags.has(d)
+}
+
+/** a record rebuilt from a site this document published (its marker carries the document's tag) */
+function adoptedRecord(ref: RepoRef, insp: PagesInspection, separate: boolean): PagesRecord {
+  return {
+    owner: ref.owner,
+    repo: ref.repo,
+    url: insp.pages?.url || pagesUrlOf(ref),
+    // unknown: shown as outdated, "Update" pushes the current plan
+    contentHash: '',
+    publishedAt: '',
+    separate,
+    pubId: markerId(insp.marker) ?? undefined,
+  }
+}
 
 async function loadRecords(): Promise<Records> {
   const r = await readJson<unknown>(recordsFile(), {})
@@ -131,27 +182,75 @@ async function targetOf(kind: PagesTargetKind, ref: RepoRef, login: string | und
   const plan = st.isPrivate ? await ownerPlan(ref.owner, login) : undefined
   const t: PagesTarget = { kind, ref, exists: true, isPrivate: st.isPrivate, needsChoice: pagesNeedsChoice(st.isPrivate, plan) }
   if (occupancy) {
-    // before the first publication any gh-pages branch or Pages site there is someone else's
-    const own = pagesOwnership(await inspectPages(ref), undefined, false)
-    if (own.branch === 'foreign') t.occupied = 'branch'
+    // before the first publication of this document any gh-pages branch or Pages site there belongs
+    // to someone else (or to another plan); its own one has been adopted as the record by then
+    const insp = await inspectPages(ref)
+    const own = pagesOwnership(insp, undefined, false)
+    if (own.branch === 'foreign') t.occupied = markerId(insp.marker) ? 'plan' : 'branch'
     else if (own.site === 'foreign') t.occupied = 'site'
   }
   return t
 }
 
-/** the first `<base>-view[-n]` name on the user's account no repository has taken */
-async function freeViewRepo(login: string, base: string): Promise<RepoRef> {
+interface ViewSlot {
+  ref: RepoRef
+  /** the repository is there already (doplan made it for this document) */
+  exists: boolean
+  insp: PagesInspection
+  /** its gh-pages branch is this document's site (marker with the document's tag) */
+  tagged: boolean
+}
+
+/**
+ * Where a separate publication of the document goes: the first `<base>-view[-n]` on the user's
+ * account that is free, or that doplan made for this document (written down, or its marker carries
+ * the document's tag) with nothing of anyone else's in it. A name taken by any other repository is
+ * skipped; doplan's own empty `-view` repository is used again, never a new one per attempt.
+ */
+async function viewRepoFor(login: string, base: string, docId: string, aliases: readonly string[], made: Made): Promise<ViewSlot> {
+  const tags = docTags(docId, aliases)
+  const mine = new Set([docId, ...aliases].flatMap((k) => made[k] ?? []))
   for (let n = 1; n <= 20; n++) {
     const ref = { owner: login, repo: viewRepoCandidate(base, n) }
-    if (!(await repoState(ref)).exists) return ref
+    const st = await repoState(ref)
+    if (!st.exists) return { ref, exists: false, insp: EMPTY, tagged: false }
+    if (st.isPrivate) continue
+    const insp = await inspectPages(ref)
+    const tagged = taggedFor(insp, tags)
+    if (!tagged && !mine.has(repoKey(ref))) continue
+    if (canPublishInto(pagesOwnership(insp, tagged ? (markerId(insp.marker) ?? undefined) : undefined, true))) return { ref, exists: true, insp, tagged }
   }
   throw new Error(msg(`Не нашлось свободного имени для репозитория ${viewRepoName(base)}.`, `No free name left for the repository ${viewRepoName(base)}.`))
 }
 
-function foreignError(ref: RepoRef, own: { branch: Ownership; site: Ownership }): Error {
+/**
+ * This document's own publication without a local record (another computer with the same project, a
+ * lost pages.json): a gh-pages branch of the project repository or of a `-view` repository whose
+ * marker carries the document's tag. The record is rebuilt from it, so the plan is updated or
+ * unpublished there instead of being published a second time.
+ */
+async function findOwn(project: RepoRef | null, login: string | undefined, base: string, docId: string, aliases: readonly string[], made: Made): Promise<PagesRecord | null> {
+  const tags = docTags(docId, aliases)
+  if (project && (await repoState(project)).exists) {
+    const insp = await inspectPages(project)
+    if (taggedFor(insp, tags)) return adoptedRecord(project, insp, false)
+  }
+  if (login) {
+    const slot = await viewRepoFor(login, base, docId, aliases, made).catch(() => null)
+    if (slot?.tagged) return adoptedRecord(slot.ref, slot.insp, true)
+  }
+  return null
+}
+
+function foreignError(ref: RepoRef, own: { branch: Ownership; site: Ownership }, insp?: PagesInspection): Error {
   const r = `${ref.owner}/${ref.repo}`
   return new Error(
-    own.branch === 'foreign'
+    own.branch === 'foreign' && markerId(insp?.marker)
+      ? msg(
+          `В ветке gh-pages репозитория ${r} опубликован другой план doplan. doplan её не трогает: опубликуйте этот план в отдельный репозиторий.`,
+          `The gh-pages branch of repository ${r} holds another doplan plan. doplan leaves it alone: publish this plan into a separate repository.`,
+        )
+      : own.branch === 'foreign'
       ? msg(
           `В репозитории ${r} есть ветка gh-pages, которую сделал не doplan. doplan её не трогает: снимите план с публикации и опубликуйте его в отдельный репозиторий.`,
           `Repository ${r} has a gh-pages branch doplan did not make. doplan leaves it alone: unpublish the plan and publish it into a separate repository.`,
@@ -181,25 +280,37 @@ export async function pagesStatus(q: PagesStatusQuery): Promise<PagesStatus> {
   const docId = String(q?.docId ?? '')
   const gh = await ghStatus(!!q?.fresh).catch(() => ({ installed: false, loggedIn: false }) as { installed: boolean; loggedIn: boolean; user?: string })
   const git = !!(await findGit())
+  const aliases = cleanAliases(q?.aliases)
   const records = await loadRecords()
-  if (migrateRecordKey(records, docId, cleanAliases(q?.aliases))) await saveRecords(records)
-  const record = records[docId] ?? null
+  if (migrateRecordKey(records, docId, aliases)) await saveRecords(records)
+  let record: PagesRecord | null = records[docId] ?? null
   const ref = await projectRepo()
   const base = separateBase(ref, String(q?.name ?? ''), docId)
-  let separateName = record?.separate ? record.repo : viewRepoName(base)
   let project: PagesTarget | null = null
   let recordTarget: PagesTarget | null = null
+  let separateName = viewRepoName(base)
   if (gh.loggedIn) {
+    const made = await loadMade(docId, aliases)
+    if (!record && docId) {
+      const found = await findOwn(ref, gh.user, base, docId, aliases, made).catch(() => null)
+      if (found) {
+        record = found
+        const latest = await loadRecords()
+        latest[docId] = found
+        await saveRecords(latest)
+      }
+    }
     if (record) {
       recordTarget = await targetOf(record.separate ? 'separate' : 'project', refOf(record), gh.user, false).catch(() => null)
     } else {
       if (ref) project = await targetOf('project', ref, gh.user, true).catch(() => null)
       if ((!project || !project.exists || project.needsChoice || project.occupied) && gh.user)
-        separateName = (await freeViewRepo(gh.user, base).catch(() => null))?.repo ?? separateName
+        separateName = (await viewRepoFor(gh.user, base, docId, aliases, made).catch(() => null))?.ref.repo ?? separateName
     }
   } else if (ref) {
     project = { kind: 'project', ref, exists: true, isPrivate: false, needsChoice: false }
   }
+  if (record?.separate) separateName = record.repo
   return {
     gh,
     git,
@@ -252,8 +363,12 @@ export async function publishPlan(req: PagesPublishRequest, emit: (p: PagesProgr
     const aliases = cleanAliases(req.aliases)
     const records = await loadRecords()
     if (migrateRecordKey(records, req.docId, aliases)) await saveRecords(records)
-    const prev = records[req.docId] ?? null
-    const pubId = prev?.pubId ?? randomBytes(12).toString('base64url')
+    const made = await loadMade(req.docId, aliases)
+    const project = await projectRepo()
+    const base = separateBase(project, req.info.title, req.docId)
+    // no record here: this document's own site made elsewhere is updated, not published twice
+    const prev = records[req.docId] ?? (await findOwn(project, gh.user, base, req.docId, aliases, made))
+    let pubId = prev?.pubId ?? randomBytes(12).toString('base64url')
 
     // ── the site ──
     emit({ step: 'build' })
@@ -279,11 +394,9 @@ export async function publishPlan(req: PagesPublishRequest, emit: (p: PagesProgr
       )
     if (built.bytes > PAGES_LIMITS.siteBytes)
       throw new Error(msg(`Сайт плана весит ${mb(built.bytes)}, а GitHub Pages принимает до 1 ГБ.`, `The plan site is ${mb(built.bytes)}; GitHub Pages takes up to 1 GB.`))
-    await fsp.writeFile(join(siteDir, PAGES_MARKER), pagesMarker(pubId))
 
     // ── the repository: everything is checked before anything is changed ──
     emit({ step: 'repo' })
-    const project = await projectRepo()
     const description = msg(`Просмотр плана «${req.info.title}» (doplan)`, `Viewing the plan “${req.info.title}” (doplan)`)
     // a plan published into its project repository that can no longer host it moves to a separate one
     const moveFrom = prev && !prev.separate && req.privateChoice === 'separate' ? refOf(prev) : null
@@ -307,6 +420,7 @@ export async function publishPlan(req: PagesPublishRequest, emit: (p: PagesProgr
             ),
           )
         ref = await createPublicRepo(ref.repo, description)
+        await rememberMade(req.docId, ref)
       } else if (t.needsChoice) {
         if (separate)
           throw new Error(msg(`Репозиторий ${ref.owner}/${ref.repo} стал приватным. Сделайте его публичным на GitHub или снимите план с публикации.`, `Repository ${ref.owner}/${ref.repo} became private. Make it public on GitHub or unpublish the plan.`))
@@ -315,7 +429,7 @@ export async function publishPlan(req: PagesPublishRequest, emit: (p: PagesProgr
       }
       insp = await inspectPages(ref)
       const own = pagesOwnership(insp, pubId, true)
-      if (!canPublishInto(own)) throw foreignError(ref, own)
+      if (!canPublishInto(own)) throw foreignError(ref, own, insp)
       if (toPublic) await makePublic(ref)
     } else if (!moveFrom && req.target === 'project' && req.privateChoice !== 'separate') {
       separate = false
@@ -327,18 +441,28 @@ export async function publishPlan(req: PagesPublishRequest, emit: (p: PagesProgr
         throw new Error(msg(`Репозиторий ${ref.owner}/${ref.repo} не найден на GitHub. Отправьте проект на GitHub или опубликуйте в отдельный репозиторий.`, `Repository ${ref.owner}/${ref.repo} was not found on GitHub. Push the project to GitHub or publish into a separate repository.`))
       insp = await inspectPages(ref)
       const own = pagesOwnership(insp, pubId, false)
-      if (!canPublishInto(own)) throw foreignError(ref, own)
+      if (!canPublishInto(own)) throw foreignError(ref, own, insp)
       if (t.needsChoice) {
         if (req.privateChoice !== 'makePublic') throw chooseError()
         await makePublic(ref)
       }
     } else {
-      // a new repository of the user's own: one doplan did not make is never reused
+      // a repository of the user's own: the one doplan made for this document, or a new one (written
+      // down at once, so a failed push or an unpublish never leads to another -view-N)
       separate = true
-      const free = await freeViewRepo(gh.user, moveFrom?.repo ?? separateBase(project, req.info.title, req.docId))
-      ref = await createPublicRepo(free.repo, description)
-      insp = { branchSha: null, marker: null, pages: null }
+      const slot = await viewRepoFor(gh.user, moveFrom?.repo ?? base, req.docId, aliases, made)
+      if (slot.exists) {
+        ref = slot.ref
+        insp = slot.insp
+        recorded = true
+        if (slot.tagged) pubId = markerId(insp.marker) ?? pubId
+      } else {
+        ref = await createPublicRepo(slot.ref.repo, description)
+        await rememberMade(req.docId, ref)
+        insp = EMPTY
+      }
     }
+    await fsp.writeFile(join(siteDir, PAGES_MARKER), pagesMarker(pubId, docTag(req.docId)))
 
     // ── push + Pages ──
     emit({ step: 'push' })

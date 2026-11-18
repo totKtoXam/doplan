@@ -16,6 +16,8 @@ import {
   canPublishInto,
   markerId,
   migrateRecordKey,
+  markerDoc,
+  docTag,
   pagesMarker,
   pagesNeedsChoice,
   pagesOwnership,
@@ -73,6 +75,27 @@ describe('planSite', () => {
     const copy = JSON.parse(JSON.stringify(doc))
     planSite(doc, catalog)
     expect(doc).toEqual(copy)
+  })
+
+  it('a library material or model keeps only what the viewer renders with: no product card, tags or estimate specs', () => {
+    const product = { vendor: 'ShopX', sku: 'A-1', url: 'https://shop.example/a1', price: 12345, priceUnit: 'м²', note: 'discount via Ivan' }
+    const lib = {
+      materials: [
+        {
+          id: 'm_lib', name: 'Tile', category: 'tile', color: '#eee', roughness: 0.4, metalness: 0, maps: { color: 'doplan-asset://library/materials/m_lib/color.png' },
+          sizeMm: [600, 600], product, wallpaper: { rollWidthMm: 530 }, paint: { coats: 2 }, colorCode: { system: 'RAL', code: '9010' }, tags: ['bath'], custom: true, thumb: 'x', licence: 'CC0',
+        },
+      ],
+      assets: [{ id: 'a_lib', name: 'Sofa', kind: 'model', src: 'doplan-asset://library/models/a_lib/m.glb', size: { w: 1, d: 1, h: 1 }, mount: 'floor', product, tags: ['x'], custom: true, author: 'Me' }],
+      hdris: [],
+    }
+    const site = planSite(viewDoc({ meta: { name: 'P' }, walls: { w1: { finishA: { materialId: 'm_lib' } } }, items: { i: { assetId: 'a_lib' } } }, { underlays: false }), lib)
+    const m = site.catalog.materials[0] as Record<string, unknown>
+    expect(Object.keys(m).sort()).toEqual(['category', 'color', 'id', 'licence', 'maps', 'metalness', 'name', 'roughness', 'sizeMm'])
+    expect((m.maps as { color: string }).color).toBe('./assets/l/materials/m_lib/color.png')
+    const a = site.catalog.assets[0] as Record<string, unknown>
+    expect(Object.keys(a).sort()).toEqual(['author', 'id', 'kind', 'mount', 'name', 'size', 'src'])
+    expect(JSON.stringify(site.catalog)).not.toMatch(/ShopX|12345|shop\.example|Ivan|A-1|bath|RAL/)
   })
 })
 
@@ -199,6 +222,16 @@ describe('whose a gh-pages branch and a Pages site are', () => {
     for (const t of [null, '', 'docs', '{"id":"pub1"}', '{"doplan":"other","id":"pub1"}', '{"doplan":"pages","id":""}']) expect(markerId(t)).toBeNull()
   })
 
+  it('a marker carries the tag of its document, not the id itself', () => {
+    const m = pagesMarker('pub1', docTag('p_abc'))
+    expect(markerId(m)).toBe('pub1')
+    expect(markerDoc(m)).toBe(docTag('p_abc'))
+    expect(m).not.toContain('p_abc')
+    expect(docTag('p_abc')).not.toBe(docTag('p_abd'))
+    expect(markerDoc(pagesMarker('pub1'))).toBeNull()
+    expect(markerDoc('{"doplan":"other","id":"x","doc":"t"}')).toBeNull()
+  })
+
   it('is ours only with our marker; any other branch or site is foreign', () => {
     expect(pagesOwnership({ branchSha: null, marker: null, pages: null }, 'pub1', false)).toEqual({ branch: 'none', site: 'none' })
     expect(pagesOwnership({ branchSha: sha, marker: pagesMarker('pub1'), pages: site }, 'pub1', false)).toEqual({ branch: 'ours', site: 'ours' })
@@ -232,16 +265,27 @@ describe('whose a gh-pages branch and a Pages site are', () => {
 })
 
 describe('publication keys', () => {
-  it('keys a file without an id by its creation time, so a rename keeps the key', () => {
-    const a = publicationKeys({ name: 'Foo', createdAt: '2020-01-01T00:00:00.000Z' })
-    const b = publicationKeys({ name: 'Bar', createdAt: '2020-01-01T00:00:00.000Z' })
-    expect(a.key).toMatch(/^created:/)
-    expect(b.key).toBe(a.key)
+  const T = '2020-01-01T00:00:00.000Z'
+
+  it('keys a file without an id by its file: a renamed plan keeps the key, a copy on disk gets its own', () => {
+    const a = publicationKeys({ name: 'Foo', createdAt: T }, 'C:\\plans\\flat.doplan')
+    expect(a.key).toMatch(/^file:/)
+    expect(publicationKeys({ name: 'Bar', createdAt: T }, 'c:/plans/flat.doplan').key).toBe(a.key)
+    expect(publicationKeys({ name: 'Foo', createdAt: T }, 'C:\\plans\\flat-v2.doplan').key).not.toBe(a.key)
   })
 
-  it('moves the record to the id the first save gives the file', () => {
-    const before = publicationKeys({ name: 'Foo', createdAt: '2020-01-01T00:00:00.000Z' })
-    const after = publicationKeys({ id: 'p_new', name: 'Foo', createdAt: '2020-01-01T00:00:00.000Z' })
+  it('a Save As copy (new id at a new path) does not take over the original publication', () => {
+    const original = publicationKeys({ name: 'Flat', createdAt: T }, '/p/flat.doplan')
+    const copy = publicationKeys({ id: 'p_copy', name: 'Flat', createdAt: T }, '/p/flat copy.doplan')
+    const records: Record<string, { repo: string }> = { [original.key]: { repo: 'flat-view' } }
+    expect(copy.aliases).not.toContain(original.key)
+    expect(migrateRecordKey(records, copy.key, copy.aliases)).toBe(false)
+    expect(records).toEqual({ [original.key]: { repo: 'flat-view' } })
+  })
+
+  it('moves the record to the id the first save gives the file at the same path', () => {
+    const before = publicationKeys({ name: 'Foo', createdAt: T }, '/p/foo.doplan')
+    const after = publicationKeys({ id: 'p_new', name: 'Foo', createdAt: T }, '/p/foo.doplan')
     expect(after.key).toBe('p_new')
     expect(after.aliases).toContain(before.key)
     const records: Record<string, { repo: string }> = { [before.key]: { repo: 'foo-view' } }

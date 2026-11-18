@@ -75,6 +75,8 @@ addTranslations('en', {
   'Сделать публичным': 'Make public',
   'Снять план с публикации?': 'Unpublish the plan?',
   'Сайт перестанет открываться по ссылке. Ветка gh-pages, созданная doplan, будет удалена.': 'The link stops working. The gh-pages branch doplan made is deleted.',
+  'В ветке gh-pages репозитория {r} уже опубликован другой план doplan. Её не тронем: сайт пойдёт в отдельный публичный репозиторий {s}.':
+    'The gh-pages branch of {r} already holds another doplan plan. It stays as it is: the site goes into a separate public repository {s}.',
   'В репозитории {r} уже есть ветка gh-pages, которую сделал не doplan. Её не тронем: сайт пойдёт в отдельный публичный репозиторий {s}.':
     'Repository {r} already has a gh-pages branch doplan did not make. It stays as it is: the site goes into a separate public repository {s}.',
   'У репозитория {r} уже есть свой сайт GitHub Pages. Его не тронем: план пойдёт в отдельный публичный репозиторий {s}.':
@@ -139,6 +141,7 @@ function Choice({ checked, onSelect, title, children }: { checked: boolean; onSe
 export function PublishDialog({ open, onClose }: DialogPropsBase) {
   const t = useT()
   const doc = useDoc((s) => s.doc)
+  const filePath = useDoc((s) => s.filePath)
   const [status, setStatus] = useState<PagesStatus | null>(null)
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState<PagesProgress['step'] | 'unpublish' | null>(null)
@@ -147,7 +150,7 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
   const [choice, setChoice] = useState<PagesPrivateChoice>('separate')
   const [underlays, setUnderlays] = useState(false)
 
-  const { key, aliases } = publicationKeys(doc.meta)
+  const { key, aliases } = publicationKeys(doc.meta, filePath)
   const aliasKey = aliases.join('|')
   const underlayCount = visibleUnderlayCount(doc)
   const withUnderlays = underlays && underlayCount > 0
@@ -379,7 +382,9 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
             <div className="text-[11px] font-semibold tracking-wide text-[var(--muted)] uppercase">{t('Где будет сайт')}</div>
             {project?.occupied && (
               <Note kind="warn">
-                {project.occupied === 'branch'
+                {project.occupied === 'plan'
+                  ? t('В ветке gh-pages репозитория {r} уже опубликован другой план doplan. Её не тронем: сайт пойдёт в отдельный публичный репозиторий {s}.', { r: `${project.ref.owner}/${project.ref.repo}`, s: separateRef })
+                  : project.occupied === 'branch'
                   ? t('В репозитории {r} уже есть ветка gh-pages, которую сделал не doplan. Её не тронем: сайт пойдёт в отдельный публичный репозиторий {s}.', { r: `${project.ref.owner}/${project.ref.repo}`, s: separateRef })
                   : t('У репозитория {r} уже есть свой сайт GitHub Pages. Его не тронем: план пойдёт в отдельный публичный репозиторий {s}.', { r: `${project.ref.owner}/${project.ref.repo}`, s: separateRef })}
               </Note>

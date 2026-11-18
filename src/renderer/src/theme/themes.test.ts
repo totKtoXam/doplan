@@ -215,6 +215,11 @@ describe('colour themes', () => {
       const bg = hex(r.plan.bg)
       expect(contrast(hex(r.plan.dim), bg), t.id).toBeGreaterThanOrEqual(3)
       expect(contrast(hex(r.plan.dimAuto), bg), t.id).toBeGreaterThanOrEqual(3)
+      // measured and stale automatic dimensions too
+      expect(contrast(hex(r.plan.ok), bg), `${t.id} ok`).toBeGreaterThanOrEqual(3)
+      expect(contrast(hex(r.plan.warn), bg), `${t.id} warn`).toBeGreaterThanOrEqual(3)
+      // and keep the theme's own colour where it reads already
+      if (contrast(r.ui.success, bg) >= 3) expect(hex(r.plan.ok), t.id).toBe(r.ui.success.toLowerCase())
       seen.add(hex(r.plan.dim))
     }
     // not one grey for all: the themes differ

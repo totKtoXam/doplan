@@ -429,8 +429,11 @@ function planPalette(kind: ThemeKind, ui: UiTokens, colors: Record<string, strin
     p.lightOff = N(mutedPlan)
     p.underlayFrame = N(mix(text, bg, 0.5))
     p.danger = N(ui.danger)
-    p.ok = N(ui.success)
-    p.warn = N(ui.warning)
+    // measured and stale dimension numbers sit on the same halo as the others: the theme's colour,
+    // darkened (lightened on a dark plan) until it reads
+    const onPlan = (c: string) => [0, 0.12, 0.24, 0.36, 0.5].map((k) => mix(c, dark ? '#ffffff' : '#000000', k)).find(reads) ?? text
+    p.ok = N(onPlan(ui.success))
+    p.warn = N(onPlan(ui.warning))
   }
   // explicit plan colours: "doplan.plan.wall": "#…"
   for (const [k, v] of Object.entries(colors)) {

@@ -5,7 +5,9 @@
  * openings) and the live dimensions shown while a point is moved. Pure geometry on the document,
  * plan millimetres: x, y as on the plan, z = height above the level floor.
  */
-import type { Doc, ElectricKind, ElectricPoint, Id, Opening, Wall } from './types'
+import type { DerivedRoom, Doc, ElectricKind, ElectricPoint, Id, Opening, Wall } from './types'
+import { pointInPolygon } from './geom'
+import { openingRects } from './openingParts'
 import {
   ELECTRIC_HEIGHT_PRESETS,
   electricGangs,
@@ -61,43 +63,87 @@ export function levelCeiling(doc: Pick<Doc, 'levels' | 'settings'>, levelId: Id)
 }
 
 /**
- * The nearest surface a ray hits on a level: a face of a mountable, visible wall (from its front,
- * within the wall height), else the floor or the ceiling plane. `surfaces` limits what counts.
+ * The ceiling height of a room, mm, as the 3D view draws it: the room's own ceiling height, else
+ * the lowest wall or partition around it, else the level ceiling.
  */
-export function rayElectricSurface(
-  doc: Pick<Doc, 'nodes' | 'walls' | 'levels' | 'settings'> & Partial<Pick<Doc, 'layers' | 'groupFlags'>>,
+export function roomCeilingHeight(
+  doc: Pick<Doc, 'walls' | 'levels' | 'settings'> & Partial<Pick<Doc, 'rooms'>>,
+  room: Pick<DerivedRoom, 'roomId' | 'edges'>,
   levelId: Id,
-  ray: PlanRay,
-  surfaces: ReadonlySet<ElectricSurface> = new Set(['wall', 'floor', 'ceiling']),
-): ElectricSurfaceHit | null {
-  let best: ElectricSurfaceHit | null = null
-  const ceiling = levelCeiling(doc, levelId)
-  if (surfaces.has('wall')) {
-    for (const id in doc.walls) {
-      const w = doc.walls[id]
-      if (w.levelId !== levelId || !isMountableWall(w) || wallHidden(doc, w)) continue
-      for (const side of ['left', 'right'] as const) {
-        const hit = rayFace(doc, w, side, ray)
-        if (hit && (!best || hit.s < best.s)) best = hit
-      }
-    }
+): number {
+  const rec = doc.rooms?.[room.roomId]
+  if (rec?.ceiling?.height && rec.ceiling.height > 0) return rec.ceiling.height
+  let h = Infinity
+  for (const e of room.edges) {
+    const w = doc.walls[e.wallId]
+    if (w && (w.kind === 'wall' || w.kind === 'partition')) h = Math.min(h, w.height)
   }
-  const planes: Array<[ElectricSurface, number]> = [
-    ['floor', 0],
-    ['ceiling', ceiling],
-  ]
-  for (const [surface, z] of planes) {
-    if (!surfaces.has(surface) || Math.abs(ray.dz) < 1e-9) continue
-    // the floor is seen from above, the ceiling from below
-    if (surface === 'floor' ? ray.dz >= 0 || ray.oz < z : ray.dz <= 0 || ray.oz > z) continue
-    const s = (z - ray.oz) / ray.dz
-    if (s <= 0 || (best && s >= best.s)) continue
-    best = { surface, x: ray.ox + ray.dx * s, y: ray.oy + ray.dy * s, z, s }
-  }
-  return best
+  return Number.isFinite(h) ? h : levelCeiling(doc, levelId)
 }
 
-function rayFace(doc: Pick<Doc, 'nodes' | 'walls'>, w: Wall, side: 'left' | 'right', ray: PlanRay): ElectricSurfaceHit | null {
+export interface RaySurfaceOptions {
+  /** the surfaces a hit may be on; a nearer surface of another kind (a wall) still blocks the ray */
+  surfaces?: ReadonlySet<ElectricSurface>
+  /** the height a wall is shown at, mm (the orbit cut-away lowers near walls); default its height */
+  wallHeight?: (w: Wall) => number
+  /** the level's rooms: each has its own ceiling (roomCeilingHeight), none outside them; not given = the level ceiling everywhere */
+  rooms?: readonly Pick<DerivedRoom, 'roomId' | 'edges' | 'polygon' | 'holes'>[]
+  /** the ceiling is hit from above too (orbit: looking down through the hidden ceiling) */
+  ceilingFromAbove?: boolean
+}
+
+type RayDoc = Pick<Doc, 'nodes' | 'walls' | 'levels' | 'settings'> &
+  Partial<Pick<Doc, 'layers' | 'groupFlags' | 'openings' | 'rooms'>>
+
+const ALL_SURFACES: ReadonlySet<ElectricSurface> = new Set(['wall', 'floor', 'ceiling'])
+
+/**
+ * The nearest surface a ray hits on a level: a face of a mountable, visible wall (from its front,
+ * up to its shown height; a ray through a door or window hole passes on), else the floor or a
+ * ceiling. Walls always block the ray: when the nearest hit is not one of `surfaces`, there is none.
+ */
+export function rayElectricSurface(doc: RayDoc, levelId: Id, ray: PlanRay, opts: RaySurfaceOptions = {}): ElectricSurfaceHit | null {
+  const surfaces = opts.surfaces ?? ALL_SURFACES
+  let best: ElectricSurfaceHit | null = null
+  for (const id in doc.walls) {
+    const w = doc.walls[id]
+    if (w.levelId !== levelId || !isMountableWall(w) || wallHidden(doc, w)) continue
+    const top = opts.wallHeight ? opts.wallHeight(w) : w.height
+    for (const side of ['left', 'right'] as const) {
+      const hit = rayFace(doc, w, side, ray, top)
+      if (hit && (!best || hit.s < best.s)) best = hit
+    }
+  }
+  const consider = (surface: ElectricSurface, z: number, inside?: (x: number, y: number) => boolean): void => {
+    if (Math.abs(ray.dz) < 1e-9) return
+    // the floor is seen from above, the ceiling from below (or from above in orbit)
+    if (surface === 'floor') {
+      if (ray.dz >= 0 || ray.oz < z) return
+    } else if (!(ray.dz > 0 && ray.oz <= z) && !(opts.ceilingFromAbove && ray.dz < 0 && ray.oz >= z)) return
+    const s = (z - ray.oz) / ray.dz
+    if (s <= 0 || (best && s >= best.s)) return
+    const x = ray.ox + ray.dx * s
+    const y = ray.oy + ray.dy * s
+    if (inside && !inside(x, y)) return
+    best = { surface, x, y, z, s }
+  }
+  consider('floor', 0)
+  if (opts.rooms && opts.rooms.length) {
+    for (const r of opts.rooms) {
+      consider('ceiling', roomCeilingHeight(doc, r, levelId), (x, y) => pointInPolygon({ x, y }, r.polygon, r.holes))
+    }
+  } else consider('ceiling', levelCeiling(doc, levelId))
+  const hit = best as ElectricSurfaceHit | null
+  return hit && surfaces.has(hit.surface) ? hit : null
+}
+
+function rayFace(
+  doc: Pick<Doc, 'nodes' | 'walls'> & Partial<Pick<Doc, 'openings'>>,
+  w: Wall,
+  side: 'left' | 'right',
+  ray: PlanRay,
+  top: number,
+): ElectricSurfaceHit | null {
   const f0 = wallFacePoint(doc, w.id, side, 0)
   const a = doc.nodes[w.a]
   const b = doc.nodes[w.b]
@@ -114,17 +160,24 @@ function rayFace(doc: Pick<Doc, 'nodes' | 'walls'>, w: Wall, side: 'left' | 'rig
   const x = ray.ox + ray.dx * s
   const y = ray.oy + ray.dy * s
   const z = ray.oz + ray.dz * s
-  if (z < 0 || z > w.height) return null
+  if (z < 0 || z > top) return null
   const t = (x - f0.point.x) * ux + (y - f0.point.y) * uy
   const range = wallFaceRange(doc, w.id, side, 0)
   if (!range || t < range.lo - 1 || t > range.hi + 1) return null
+  // through a door or window hole the ray passes on
+  const openings = doc.openings ?? {}
+  for (const id in openings) {
+    const o = openings[id]
+    if (o.wallId !== w.id) continue
+    for (const r of openingRects(o)) if (t > o.offset + r.x0 && t < o.offset + r.x1 && z > r.v0 && z < r.v1) return null
+  }
   return { surface: 'wall', x, y, z, s, wallId: w.id, side, t }
 }
 
 /**
  * The door or window opening of a wall that a wall point at `t` (along the wall from node a),
  * `h` (centre height) would overlap, `gap` mm clearance included. Openings cut the wall through,
- * so both faces count.
+ * so both faces count; a balcony block is its door and its window part (openingRects).
  */
 export function openingAtWallPoint(
   doc: Pick<Doc, 'openings'>,
@@ -139,9 +192,11 @@ export function openingAtWallPoint(
   for (const id in doc.openings) {
     const o = doc.openings[id]
     if (o.wallId !== wallId) continue
-    if (Math.abs(t - o.offset) >= o.width / 2 + hw) continue
-    if (h + hh <= o.sill || h - hh >= o.sill + o.height) continue
-    return o
+    for (const r of openingRects(o)) {
+      if (t + hw <= o.offset + r.x0 || t - hw >= o.offset + r.x1) continue
+      if (h + hh <= r.v0 || h - hh >= r.v1) continue
+      return o
+    }
   }
   return null
 }
@@ -170,6 +225,8 @@ export interface ElectricSnapOptions {
   tol: number
   /** neighbours further than this along the wall are not aligned with, mm */
   reach?: number
+  /** snap the height (default); false keeps a height set explicitly (keys, the height field) */
+  snapHeight?: boolean
 }
 
 /**
@@ -177,7 +234,8 @@ export interface ElectricSnapOptions {
  * the type's height and the heights of points on the same face; the position along the wall to the
  * points on the same face (one above another), to clearances from the room corners and from the
  * opening edges (ELECTRIC_CLEARANCES, measured to the point's edge). `t` is kept on the face
- * (wallFaceRange). `blocked` tells when the point would be in an opening.
+ * (wallFaceRange). `blocked` tells when the point would be in an opening; a snap that would move a
+ * free spot into an opening is dropped (the height snap, the position snap, or both).
  */
 export function snapElectricOnWall(
   doc: Pick<Doc, 'nodes' | 'walls' | 'openings'> & Partial<Pick<Doc, 'electrical'>>,
@@ -211,12 +269,14 @@ export function snapElectricOnWall(
         out.hSnap = { kind, value, id }
       }
     }
-    for (const pr of ELECTRIC_HEIGHT_PRESETS) tryH(pr.h, 'preset')
-    const ty = electricType(p.kind)
-    if (ty.mount === 'wall') tryH(ty.elevation, 'default')
-    for (const q of neighbours) {
-      const qt = faceT(doc, q, wallId)
-      if (qt !== null && Math.abs(qt - tt) <= reach) tryH(q.elevation, 'neighbour', q.id)
+    if (opts.snapHeight !== false) {
+      for (const pr of ELECTRIC_HEIGHT_PRESETS) tryH(pr.h, 'preset')
+      const ty = electricType(p.kind)
+      if (ty.mount === 'wall') tryH(ty.elevation, 'default')
+      for (const q of neighbours) {
+        const qt = faceT(doc, q, wallId)
+        if (qt !== null && Math.abs(qt - tt) <= reach) tryH(q.elevation, 'neighbour', q.id)
+      }
     }
     if (out.hSnap) hh = out.hSnap.value
     // along the wall
@@ -243,9 +303,13 @@ export function snapElectricOnWall(
     for (const id in doc.openings) {
       const o = doc.openings[id]
       if (o.wallId !== wallId) continue
-      for (const c of ELECTRIC_CLEARANCES) {
-        tryT(o.offset - o.width / 2 - c - half, 'opening', o.id)
-        tryT(o.offset + o.width / 2 + c + half, 'opening', o.id)
+      // the edges of the holes at the point's height (under a balcony window only the door counts)
+      for (const r of openingRects(o)) {
+        if (hh + halfH <= r.v0 || hh - halfH >= r.v1) continue
+        for (const c of ELECTRIC_CLEARANCES) {
+          tryT(o.offset + r.x0 - c - half, 'opening', o.id)
+          tryT(o.offset + r.x1 + c + half, 'opening', o.id)
+        }
       }
     }
     if (out.tSnap) tt = out.tSnap.value
@@ -253,6 +317,26 @@ export function snapElectricOnWall(
   out.t = tt
   out.h = hh
   out.blocked = openingAtWallPoint(doc, wallId, tt, hh, p)
+  if (out.blocked && (out.hSnap || out.tSnap)) {
+    // a snap must not move a free spot into an opening: drop the height snap, then the position one
+    const rawT = range ? Math.min(range.hi, Math.max(range.lo, t)) : t
+    const rawH = Math.min(maxH, Math.max(halfH, h))
+    const tries: Array<[number, number, boolean, boolean]> = [
+      [tt, rawH, false, true],
+      [rawT, hh, true, false],
+      [rawT, rawH, false, false],
+    ]
+    for (const [t1, h1, keepH, keepT] of tries) {
+      if ((keepH && !out.hSnap) || (keepT && !out.tSnap)) continue
+      if (openingAtWallPoint(doc, wallId, t1, h1, p)) continue
+      out.t = t1
+      out.h = h1
+      if (!keepH) delete out.hSnap
+      if (!keepT) delete out.tSnap
+      out.blocked = null
+      break
+    }
+  }
   return out
 }
 
@@ -287,7 +371,7 @@ export interface ElectricDim {
 /**
  * Dimensions of a wall point at (t, h) on a face, as shown while it is moved: the height of its
  * centre above the floor, the clear distance from its edges to the nearest obstacle along the wall
- * on both sides (a room corner or an opening edge), and the centre distance to the nearest point
+ * on both sides (a room corner or the edge of an opening the point is level with), and the centre distance to the nearest point
  * on the same face.
  */
 export function electricWallDims(
@@ -303,15 +387,20 @@ export function electricWallDims(
   const half = electricHalfWidth(p)
   const r = wallFaceRange(doc, wallId, side, 0)
   if (!r) return out
+  const halfH = electricHalfHeight(p)
   let lo: { t: number; kind: ElectricDim['kind'] } = { t: r.lo, kind: 'corner' }
   let hi: { t: number; kind: ElectricDim['kind'] } = { t: r.hi, kind: 'corner' }
   for (const id in doc.openings) {
     const o = doc.openings[id]
     if (o.wallId !== wallId) continue
-    const e0 = o.offset - o.width / 2
-    const e1 = o.offset + o.width / 2
-    if (e1 <= t - half + 0.5 && e1 > lo.t) lo = { t: e1, kind: 'opening' }
-    if (e0 >= t + half - 0.5 && e0 < hi.t) hi = { t: e0, kind: 'opening' }
+    // only the holes the point is level with (a point under a window measures past it)
+    for (const rc of openingRects(o)) {
+      if (h + halfH <= rc.v0 || h - halfH >= rc.v1) continue
+      const e0 = o.offset + rc.x0
+      const e1 = o.offset + rc.x1
+      if (e1 <= t - half + 0.5 && e1 > lo.t) lo = { t: e1, kind: 'opening' }
+      if (e0 >= t + half - 0.5 && e0 < hi.t) hi = { t: e0, kind: 'opening' }
+    }
   }
   const left = t - half - lo.t
   const right = hi.t - (t + half)

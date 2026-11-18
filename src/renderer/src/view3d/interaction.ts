@@ -48,6 +48,7 @@ import { t } from '@/i18n'
 import { getShared } from './quality'
 import { walkPointerLocked } from './walkInput'
 import { createElectricPlace } from './electricPlace'
+import { CUT_HEIGHT } from './build/architecture'
 import { type HandleSpec, ResizeHandles, worldPerPixel } from './resizeHandles'
 
 const DEG = Math.PI / 180
@@ -1553,7 +1554,7 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
   const onDoubleClick = (e: MouseEvent): void => {
     if (disposed || shared.stillBusy) return
     const ui = uiStore.getState()
-    if (ui.tool === 'item' || ui.tool === 'paint' || ui.tool === 'eyedropper' || ui.tool === 'erase') return
+    if (ui.tool === 'item' || ui.tool === 'paint' || ui.tool === 'eyedropper' || ui.tool === 'erase' || ui.tool === 'electric') return
     setRay(e)
     const hit = pick()
     if (!hit) return
@@ -1573,6 +1574,19 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
     return tool !== 'item' && tool !== 'paint' && tool !== 'eyedropper' && tool !== 'erase'
   }
 
+  /** a wall in the scene: shown at all, and lowered by the orbit cut-away (its low copy is shown) */
+  function wallCut(id: Id): { shown: boolean; lowered: boolean } {
+    const list = objectsOf({ kind: 'wall', id })
+    if (list.length === 0) return { shown: true, lowered: false }
+    for (const o of list) {
+      // the low copy is built on demand next to the full wall (build/architecture), maybe after the index
+      const near = [o, ...o.children, ...(o.parent?.children ?? [])]
+      const low = near.find((c) => c.userData?.lowered === true)
+      if (low && isShown(low)) return { shown: true, lowered: true }
+    }
+    return { shown: list.some(isShown), lowered: false }
+  }
+
   // electric points: the «Электроточка» tool and moving points (view3d/electricPlace) see the pointer first
   const electric = createElectricPlace({
     ctx,
@@ -1582,7 +1596,11 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
     setHint,
     setCursor,
     lockControls,
-    wallShown: (id) => entityVisible({ kind: 'wall', id }),
+    wallShown: (id) => wallCut(id).shown,
+    wallHeight: (w) => (wallCut(w.id).lowered ? Math.min(CUT_HEIGHT, w.height) : w.height),
+    rooms: () => planOf()?.rooms ?? [],
+    toggleSelect,
+    editable: (ref) => editable(docStore.getState().doc, ref),
     pickElectric() {
       const hit = pick()
       const ref = hit?.ref
@@ -1594,7 +1612,13 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
 
   const onPointerDown = (e: PointerEvent): void => {
     if (disposed || shared.stillBusy) return
-    if (electric.pointerDown(e)) {
+    // the resize handles and the gizmo of the selection win over an electric point under them
+    const handleFirst =
+      e.button === 0 &&
+      uiStore.getState().tool === 'select' &&
+      !walkPointerLocked(canvas) &&
+      (!!resizeHandles.hit(e.clientX, e.clientY, camera, canvas.getBoundingClientRect()) || (setRay(e), gizmoHit() !== null))
+    if (!handleFirst && electric.pointerDown(e)) {
       down = null
       pending = null
       try {

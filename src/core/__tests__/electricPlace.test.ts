@@ -10,8 +10,10 @@ import {
   levelCeiling,
   openingAtWallPoint,
   rayElectricSurface,
+  roomCeilingHeight,
   snapElectricOnWall,
 } from '../electricPlace'
+import { derivePlan } from '../derive'
 import type { Doc, Id, Wall } from '../types'
 
 /** a 4000 × 3000 room (wall centrelines), walls 200 thick; `top` is the wall along y = 0 */
@@ -67,13 +69,56 @@ describe('rayElectricSurface', () => {
     expect(hit?.wallId).not.toBe(top.id)
   })
 
-  it('skips hidden walls and honours the surface filter', () => {
+  it('skips hidden walls; a wall in front blocks the floor and the ceiling', () => {
     const { doc, L, top } = room()
     const ray = { ox: 1000, oy: 1500, oz: 1500, dx: 0, dy: -1, dz: -0.1 }
-    expect(rayElectricSurface(doc, L, ray, new Set(['floor']))!.surface).toBe('floor')
+    expect(rayElectricSurface(doc, L, ray, { surfaces: new Set(['floor']) })).toBeNull()
+    expect(rayElectricSurface(doc, L, { ...ray, dz: 0.3 }, { surfaces: new Set(['ceiling']) })).toBeNull()
+    expect(rayElectricSurface(doc, L, { ...ray, dz: 0.3 })!.wallId).toBe(top.id)
     doc.walls[top.id].hidden = true
     const hit = rayElectricSurface(doc, L, ray)!
     expect(hit.wallId).not.toBe(top.id)
+    expect(rayElectricSurface(doc, L, ray, { surfaces: new Set(['floor']) })!.surface).toBe('floor')
+  })
+
+  it('passes over a wall the cut-away shows lowered', () => {
+    const { doc, L, top } = room()
+    const ray = { ox: 1000, oy: -3000, oz: 1200, dx: 0, dy: 1, dz: 0 }
+    expect(rayElectricSurface(doc, L, ray)!.wallId).toBe(top.id)
+    const hit = rayElectricSurface(doc, L, ray, { wallHeight: (w) => (w.id === top.id ? 1000 : w.height) })!
+    expect(hit.wallId).not.toBe(top.id)
+    expect(hit.y).toBeCloseTo(2900)
+  })
+
+  it('aims through a door and hits the wall above it', () => {
+    const { doc, L, top } = room()
+    addOpening(doc, top.id, 'door', tAt(doc, top, 2000), { width: 800, height: 2100, sill: 0 })
+    const through = rayElectricSurface(doc, L, { ox: 2000, oy: -3000, oz: 1000, dx: 0, dy: 1, dz: 0 })!
+    expect(through.wallId).not.toBe(top.id)
+    expect(through.y).toBeCloseTo(2900)
+    expect(rayElectricSurface(doc, L, { ox: 2000, oy: -3000, oz: 2300, dx: 0, dy: 1, dz: 0 })!.wallId).toBe(top.id)
+    // beside the door the wall is solid
+    expect(rayElectricSurface(doc, L, { ox: 2600, oy: -3000, oz: 1000, dx: 0, dy: 1, dz: 0 })!.wallId).toBe(top.id)
+  })
+
+  it('aims at the ceiling of the room under the ray, from above in orbit', () => {
+    const { doc, L, top } = room()
+    doc.walls[top.id].height = 2500
+    const rooms = derivePlan(doc, L).rooms
+    expect(rooms.length).toBe(1)
+    expect(roomCeilingHeight(doc, rooms[0], L)).toBe(2500)
+    const up = rayElectricSurface(doc, L, { ox: 2000, oy: 1500, oz: 1600, dx: 0, dy: 0, dz: 1 }, { rooms })!
+    expect(up.surface).toBe('ceiling')
+    expect(up.z).toBe(2500)
+    // the room's own ceiling height wins
+    ;(doc.rooms as Record<string, unknown>)[rooms[0].roomId] = { ceiling: { height: 2400 } }
+    expect(rayElectricSurface(doc, L, { ox: 2000, oy: 1500, oz: 1600, dx: 0, dy: 0, dz: 1 }, { rooms })!.z).toBe(2400)
+    // no ceiling outside the rooms
+    expect(rayElectricSurface(doc, L, { ox: 6000, oy: 1500, oz: 1600, dx: 0, dy: 0, dz: 1 }, { rooms })).toBeNull()
+    // from above: only when asked
+    const down = { ox: 2000, oy: 1500, oz: 8000, dx: 0, dy: 0, dz: -1 }
+    expect(rayElectricSurface(doc, L, down, { rooms, surfaces: new Set(['ceiling']) })).toBeNull()
+    expect(rayElectricSurface(doc, L, down, { rooms, ceilingFromAbove: true })!.z).toBe(2400)
   })
 })
 
@@ -98,11 +143,32 @@ describe('openings', () => {
     expect(openingAtWallPoint(doc, top.id, t, 1000, { kind: 'switch1' })).not.toBeNull()
   })
 
+  it('a balcony block: wall under its window part, a door from the threshold', () => {
+    const { doc, L, top } = room()
+    const t = tAt(doc, top, 2000)
+    const id = addOpening(doc, top.id, 'balconyBlock', t, { width: 2000, height: 2100, sill: 0, hinge: 'a' })
+    const o = doc.openings[id]
+    // hinge a: the door at the node-a end, the window part over an apron
+    const dir = tAt(doc, top, 0) < 1 ? 1 : -1
+    const p = { kind: 'socket' as const }
+    expect(openingAtWallPoint(doc, top.id, o.offset + 500 * dir, 300, p)).toBeNull()
+    expect(openingAtWallPoint(doc, top.id, o.offset - 600 * dir, 300, p)?.id).toBe(id)
+    expect(openingAtWallPoint(doc, top.id, o.offset + 500 * dir, 1200, p)?.id).toBe(id)
+    // a ray under the window hits the wall, through the door it passes
+    const x = (t2: number): number => (dir > 0 ? t2 : 4000 - t2)
+    expect(rayElectricSurface(doc, L, { ox: x(o.offset + 500 * dir), oy: -3000, oz: 400, dx: 0, dy: 1, dz: 0 })!.wallId).toBe(top.id)
+    expect(rayElectricSurface(doc, L, { ox: x(o.offset - 600 * dir), oy: -3000, oz: 400, dx: 0, dy: 1, dz: 0 })!.wallId).not.toBe(top.id)
+    // the dimension under the window measures past it to the door part
+    const side = rayElectricSurface(doc, L, { ox: 2000, oy: 1500, oz: 300, dx: 0, dy: -1, dz: 0 })!.side!
+    const dims = electricWallDims(doc, top.id, side, o.offset + 500 * dir, 300, p)
+    expect(dims.filter((d) => d.kind === 'opening').length).toBe(1)
+  })
+
   it('reports a snapped position in an opening as blocked', () => {
     const { doc, top } = room()
     const t = tAt(doc, top, 2000)
     addOpening(doc, top.id, 'door', t, { width: 800, height: 2100, sill: 0 })
-    const side = rayElectricSurface(doc, doc.levelOrder[0], { ox: 2000, oy: 1500, oz: 500, dx: 0, dy: -1, dz: 0 })!.side!
+    const side = rayElectricSurface(doc, doc.levelOrder[0], { ox: 1000, oy: 1500, oz: 500, dx: 0, dy: -1, dz: 0 })!.side!
     expect(snapElectricOnWall(doc, top.id, side, t, 900, { kind: 'switch1' }, { tol: 0 }).blocked).not.toBeNull()
   })
 })
@@ -154,6 +220,27 @@ describe('snapElectricOnWall', () => {
     const near = snapElectricOnWall(doc, top.id, side, t - 400 - 150 - half - 7, 1000, p, { tol: 20 })
     expect(near.t).toBeCloseTo(t - 400 - 150 - half)
     expect(near.tSnap).toMatchObject({ kind: 'opening', id: o })
+  })
+
+  it('keeps an explicit height (snapHeight: false)', () => {
+    const { doc, top, side } = face()
+    const t = tAt(doc, top, 1500)
+    expect(snapElectricOnWall(doc, top.id, side, t, 310, { kind: 'socket' }, { tol: 20 }).h).toBe(300)
+    const s = snapElectricOnWall(doc, top.id, side, t, 310, { kind: 'socket' }, { tol: 20, snapHeight: false })
+    expect(s.h).toBe(310)
+    expect(s.hSnap).toBeUndefined()
+  })
+
+  it('does not let a snap move a free spot into an opening', () => {
+    const { doc, top, side } = face()
+    const t = tAt(doc, top, 2000)
+    addOpening(doc, top.id, 'window', t, { width: 1200, height: 1400, sill: 900 })
+    const p = { kind: 'switch1' as const }
+    // 830 is under the sill; the 900 switch height would put the frame into the window
+    const s = snapElectricOnWall(doc, top.id, side, t, 830, p, { tol: 80 })
+    expect(s.blocked).toBeNull()
+    expect(s.h).toBe(830)
+    expect(s.hSnap).toBeUndefined()
   })
 
   it('keeps the point on the face and inside the wall height', () => {

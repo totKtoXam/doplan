@@ -12,7 +12,10 @@
  *  - keys: PgUp / PgDn height ±50 mm (Shift ±10), Home — the type's height, [ / ] previous / next type,
  *    + / − posts in the frame. For the tool (its next point) or for the selected point (one entry each);
  *  - walk mode with the mouse captured: everything aims with the centre crosshair, a click places,
- *    holding the button on a point and turning the view moves it. With the cursor free: at the cursor.
+ *    holding the button on a point and turning the view moves it (losing the capture, Esc, cancels
+ *    the move). With the cursor free, on touch / pen or when the capture is refused: at the cursor;
+ *  - the ray sees what the scene shows: walls lowered by the cut-away at their low height, through
+ *    door and window holes; a wall in front hides the floor and the ceilings (each room its own).
  *
  * Kept out of interaction.ts: it only forwards pointer events here first (see createElectricPlace).
  */
@@ -24,9 +27,10 @@ import {
   cycleElectricKind,
   electricHalfWidth,
   electricType,
+  alongWall,
   electricWallDims,
-  levelCeiling,
   nearestWallFace,
+  openingAtWallPoint,
   placeElectricOnWall,
   rayElectricSurface,
   snapElectricOnWall,
@@ -37,7 +41,7 @@ import {
   type PlanRay,
 } from '@core'
 import { electricHalfHeight } from '@core'
-import type { Doc, ElectricKind, ElectricPoint, Id } from '@core/types'
+import type { DerivedRoom, Doc, ElectricKind, ElectricPoint, EntityRef, Id, Wall } from '@core/types'
 import type { EngineContext } from '@/contracts'
 import type { ElectricToolState } from '@/editor2d/tools/electric'
 import { formatLen } from '@/editor2d/format'
@@ -77,6 +81,7 @@ const CLICK_SLOP = 4 // px
 const SNAP_PX = 10 // snap distance at the cursor, screen px
 const HEIGHT_STEP = 50 // mm, PgUp / PgDn (Shift: 10)
 const FACE_OFF = 4 // mm off the wall face for the dimension lines
+const DOUBLE_MS = 400 // a second click this soon at the same spot is a double click
 
 export interface ElectricPlaceHost {
   ctx: EngineContext
@@ -89,6 +94,14 @@ export interface ElectricPlaceHost {
   lockControls(lock: boolean): void
   /** walls cut away / hidden in the scene are looked through */
   wallShown(id: Id): boolean
+  /** the height a wall is shown at, mm (the orbit cut-away lowers near walls) */
+  wallHeight(w: Wall): number
+  /** the rooms of the active level (their ceilings) */
+  rooms(): readonly DerivedRoom[]
+  /** a click on an object: select it alone, or add / remove it (additive) */
+  toggleSelect(ref: EntityRef, additive: boolean): void
+  /** not locked or hidden (layers) */
+  editable(ref: EntityRef): boolean
   /** the electric point under the ray (the ray must be set), if it can be edited */
   pickElectric(): { id: Id; point: THREE.Vector3 } | null
   walkMode(): boolean
@@ -137,6 +150,8 @@ interface Drag {
   moved: number
   applied: boolean
   last: Target | null
+  /** the press had Shift / Ctrl: a click toggles the point in the selection, a drag adds it */
+  additive: boolean
 }
 
 export function createElectricPlace(host: ElectricPlaceHost): ElectricPlace {
@@ -351,6 +366,10 @@ export function createElectricPlace(host: ElectricPlaceHost): ElectricPlace {
   let target: Target | null = null
   let mods = { shift: false, alt: false }
   let disposed = false
+  /** the last placement (a double click places once) */
+  let lastPlace: { time: number; x: number; y: number } | null = null
+  /** the browser refused to capture the mouse (pointerlockerror): clicks place at the cursor */
+  let lockRefused = false
 
   const ui = () => uiStore.getState()
   const toolState = (): ElectricToolState => ui() as unknown as ElectricToolState
@@ -416,8 +435,9 @@ export function createElectricPlace(host: ElectricPlaceHost): ElectricPlace {
     const lid = host.levelId()
     const vdoc = visibleDoc(doc)
     const ray = planRay()
+    const seen = { wallHeight: host.wallHeight, rooms: host.rooms() }
     if (p.mount === 'wall') {
-      let hit = rayElectricSurface(vdoc, lid, ray)
+      let hit = rayElectricSurface(vdoc, lid, ray, seen)
       if (hit && hit.surface !== 'wall') {
         // looking at the floor / ceiling next to a wall: the nearest face (as in 2D)
         const f = nearestWallFace(vdoc, lid, { x: hit.x, y: hit.y }, 400, { skipHidden: true, prefer: off?.wallId })
@@ -427,19 +447,19 @@ export function createElectricPlace(host: ElectricPlaceHost): ElectricPlace {
       const sameWall = off && off.wallId === hit.wallId
       const rawT = hit.t - (sameWall ? off.t : 0)
       const rawH = height === 'cursor' ? hit.z - (off?.h ?? 0) : height
-      const snap = snapElectricOnWall(doc, hit.wallId, hit.side, rawT, rawH, p, { tol: alt ? 0 : tolAt(hit.x, hit.y, hit.z), selfId })
+      // a height given as a number (the panel, the keys) is kept as it is
+      const snap = snapElectricOnWall(doc, hit.wallId, hit.side, rawT, rawH, p, {
+        tol: alt ? 0 : tolAt(hit.x, hit.y, hit.z),
+        selfId,
+        snapHeight: height === 'cursor',
+      })
       const f = wallFacePoint(doc, hit.wallId, hit.side, snap.t)
       if (!f) return null
       return { surface: 'wall', x: f.point.x, y: f.point.y, h: snap.h, rotation: f.rotation, wallId: hit.wallId, side: hit.side, t: snap.t, snap, blocked: !!snap.blocked }
     }
     const surface: ElectricSurface = p.mount === 'ceiling' ? 'ceiling' : 'floor'
-    let hit = rayElectricSurface(vdoc, lid, ray, new Set([surface]))
-    if (!hit && surface === 'ceiling') {
-      // the orbit view looks down through the cut-away ceilings: aim at the ceiling plane from above
-      const z = levelCeiling(doc, lid)
-      const s = ray.dz < -1e-9 && ray.oz > z ? (z - ray.oz) / ray.dz : -1
-      if (s > 0) hit = { surface, x: ray.ox + ray.dx * s, y: ray.oy + ray.dy * s, z, s }
-    }
+    // the orbit view looks down through the hidden ceilings: a ceiling is aimed at from above too
+    const hit = rayElectricSurface(vdoc, lid, ray, { ...seen, surfaces: new Set([surface]), ceilingFromAbove: surface === 'ceiling' })
     if (!hit) return null
     let x = hit.x - (off?.x ?? 0)
     let y = hit.y - (off?.y ?? 0)
@@ -447,7 +467,7 @@ export function createElectricPlace(host: ElectricPlaceHost): ElectricPlace {
       x = Math.round(x / 10) * 10
       y = Math.round(y / 10) * 10
     }
-    return { surface, x, y, h: surface === 'ceiling' ? levelCeiling(doc, lid) : 0, rotation: 0, blocked: false }
+    return { surface, x, y, h: surface === 'ceiling' ? hit.z : 0, rotation: 0, blocked: false }
   }
 
   function snapNote(s: ElectricSnap | undefined): string {
@@ -496,6 +516,11 @@ export function createElectricPlace(host: ElectricPlaceHost): ElectricPlace {
     updatePlacement()
     const tg = target
     if (!tg) return
+    // the second click of a double click puts no second point on top of the first
+    const now = performance.now()
+    const at = lastPointer
+    if (lastPlace && now - lastPlace.time < DOUBLE_MS && (locked() || (at && Math.hypot(at.clientX - lastPlace.x, at.clientY - lastPlace.y) <= CLICK_SLOP))) return
+    lastPlace = { time: now, x: at?.clientX ?? 0, y: at?.clientY ?? 0 }
     if (tg.blocked) {
       toast(t('В проёме точку не поставить'), 'warning')
       return
@@ -505,14 +530,25 @@ export function createElectricPlace(host: ElectricPlaceHost): ElectricPlace {
     const gangs = toolGangs()
     let id: Id | null = null
     docStore.getState().transact(t('Электроточка'), (d) => {
-      id = addElectric(d, lid, kind, tg.x, tg.y, tg.surface === 'wall' ? { wallId: tg.wallId, side: tg.side, gangs, elevation: tg.h, snap: 0 } : { gangs })
+      id = addElectric(
+        d,
+        lid,
+        kind,
+        tg.x,
+        tg.y,
+        tg.surface === 'wall'
+          ? { wallId: tg.wallId, side: tg.side, gangs, elevation: tg.h, snap: 0 }
+          : tg.surface === 'ceiling'
+            ? { gangs, elevation: tg.h } // the ceiling of the room it is in
+            : { gangs },
+      )
     })
     if (id && docStore.getState().doc.electrical?.[id]) ui().select([{ kind: 'electric', id }])
     updatePlacement()
   }
 
   // ── moving a point ──
-  function beginDrag(id: Id, grab: THREE.Vector3, e: PointerEvent): void {
+  function beginDrag(id: Id, grab: THREE.Vector3, e: PointerEvent, additive: boolean): void {
     const doc = docStore.getState().doc
     const p = doc.electrical?.[id]
     if (!p) return
@@ -547,6 +583,7 @@ export function createElectricPlace(host: ElectricPlaceHost): ElectricPlace {
       moved: 0,
       applied: false,
       last: null,
+      additive,
     }
   }
 
@@ -590,6 +627,8 @@ export function createElectricPlace(host: ElectricPlaceHost): ElectricPlace {
         } else {
           if (Math.abs(q.x - tg.x) > 1e-6) q.x = tg.x
           if (Math.abs(q.y - tg.y) > 1e-6) q.y = tg.y
+          // into another room: its ceiling height
+          if (tg.surface === 'ceiling' && Math.abs(q.elevation - tg.h) > 1e-6) q.elevation = tg.h
         }
       },
       { transient: true },
@@ -634,9 +673,11 @@ export function createElectricPlace(host: ElectricPlaceHost): ElectricPlace {
     const hit = host.pickElectric()
     if (!hit) return false
     const ref = { kind: 'electric' as const, id: hit.id }
-    const sel = ui().selection
-    if (!sel.some((s) => s.kind === 'electric' && s.id === hit.id)) ui().select([ref], e.shiftKey || e.ctrlKey || e.metaKey)
-    beginDrag(hit.id, hit.point, e)
+    const additive = e.shiftKey || e.ctrlKey || e.metaKey
+    // a plain press on another point selects it alone (it is dragged as it is); with Shift / Ctrl
+    // the selection changes on the release (a click toggles) or when the drag starts (adds)
+    if (!additive && !ui().selection.some((s) => s.kind === 'electric' && s.id === hit.id)) ui().select([ref])
+    beginDrag(hit.id, hit.point, e, additive)
     // a captured mouse keeps turning the view: the point follows the crosshair
     if (!locked()) {
       host.lockControls(true)
@@ -658,6 +699,7 @@ export function createElectricPlace(host: ElectricPlaceHost): ElectricPlace {
         const dist = locked() ? (drag.moved += Math.abs(e.movementX) + Math.abs(e.movementY)) : Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0)
         if (dist <= CLICK_SLOP) return true
         drag.armed = false
+        if (drag.additive && !ui().selection.some((s) => s.kind === 'electric' && s.id === drag!.id)) ui().select([{ kind: 'electric', id: drag.id }], true)
         host.setCursor('grabbing')
       }
       if (!locked()) updateDrag()
@@ -675,8 +717,10 @@ export function createElectricPlace(host: ElectricPlaceHost): ElectricPlace {
     if (disposed) return false
     if (drag) {
       if (e.pointerId !== drag.pointerId) return true
-      // a click on a point only selected it (done on the press)
+      const d = drag
       endDrag(e.type !== 'pointercancel')
+      // a click (no drag): as a click on any object — narrows the selection to it, Shift / Ctrl toggles it
+      if (d.armed && e.type !== 'pointercancel') host.toggleSelect({ kind: 'electric', id: d.id }, d.additive)
       return true
     }
     const p = press
@@ -685,8 +729,9 @@ export function createElectricPlace(host: ElectricPlaceHost): ElectricPlace {
     if (e.type === 'pointercancel' || e.button !== 0) return true
     const moved = locked() ? p.moved : Math.hypot(e.clientX - p.x, e.clientY - p.y)
     if (moved > CLICK_SLOP) return true // the view was turned
-    // walk mode: the first click captures the mouse (controls), it places nothing
-    if (host.walkMode() && !locked() && walkPrefs.getState().captureMouse) return true
+    // walk mode: the first mouse click captures the mouse (controls), it places nothing; touch / pen
+    // and a refused capture place at the cursor
+    if (host.walkMode() && !locked() && walkPrefs.getState().captureMouse && e.pointerType === 'mouse' && !lockRefused) return true
     mods = { shift: p.shift, alt: p.alt }
     if (!locked()) lastPointer = { clientX: e.clientX, clientY: e.clientY }
     place()
@@ -716,9 +761,20 @@ export function createElectricPlace(host: ElectricPlaceHost): ElectricPlace {
     return docStore.getState().doc.electrical?.[sel[0].id] ?? null
   }
 
+  /** changes the selected point (one history entry); not when it is locked or the result would be in an opening */
   function editPoint(label: string, fn: (q: ElectricPoint, d: Doc) => void): void {
     const p = selectedPoint()
-    if (!p) return
+    if (!p || !host.editable({ kind: 'electric', id: p.id })) return
+    const doc = docStore.getState().doc
+    if (p.mount === 'wall' && p.wallId) {
+      const q = { ...p }
+      fn(q, doc)
+      const tt = alongWall(doc, p.wallId, q)
+      if (tt !== null && openingAtWallPoint(doc, p.wallId, tt, q.elevation, q)) {
+        toast(t('В проёме точку не поставить'), 'warning')
+        return
+      }
+    }
     docStore.getState().transact(t(label), (d) => {
       const q = d.electrical?.[p.id]
       if (q) fn(q, d)
@@ -820,16 +876,25 @@ export function createElectricPlace(host: ElectricPlaceHost): ElectricPlace {
     }
   })
   const onLockChange = (): void => {
-    if (!locked() && !drag) {
+    if (locked()) lockRefused = false
+    // the capture ends (Esc, M, another window) or starts during a move: the move is cancelled
+    if (drag) {
+      endDrag(false)
+      return
+    }
+    if (!locked()) {
       hideGhost()
       clearDims()
     }
-    if (drag && !locked() && !drag.armed) endDrag(true)
+  }
+  const onLockError = (): void => {
+    lockRefused = true
   }
 
   window.addEventListener('keydown', onKeyDown, true)
   window.addEventListener('keyup', onKeyUp, true)
   document.addEventListener('pointerlockchange', onLockChange)
+  document.addEventListener('pointerlockerror', onLockError)
 
   return {
     pointerDown,
@@ -845,6 +910,7 @@ export function createElectricPlace(host: ElectricPlaceHost): ElectricPlace {
       window.removeEventListener('keydown', onKeyDown, true)
       window.removeEventListener('keyup', onKeyUp, true)
       document.removeEventListener('pointerlockchange', onLockChange)
+      document.removeEventListener('pointerlockerror', onLockError)
       ghost.removeFromParent()
       overlay.remove()
       okMat.dispose()

@@ -37,6 +37,9 @@ export interface Palette {
   ok: number
   /** amber: needs checking (stale / unmeasured dimensions) */
   warn: number
+  /** the plate of a warning badge (the theme's own warning colour) and the text on it */
+  warnBadge: number
+  warnBadgeText: number
   guide: number
   badgeBg: number
   badgeText: number
@@ -85,6 +88,8 @@ export const DARK: Palette = {
   danger: 0xff5d5d,
   ok: 0x4cd08a,
   warn: 0xffb547,
+  warnBadge: 0xffb547,
+  warnBadgeText: 0x1b1300,
   guide: 0xff4fd8,
   badgeBg: 0x10131a,
   badgeText: 0xffffff,
@@ -132,6 +137,8 @@ export const LIGHT: Palette = {
   danger: 0xe03131,
   ok: 0x1f9d57,
   warn: 0xc76a00,
+  warnBadge: 0xc76a00,
+  warnBadgeText: 0x1b1300,
   guide: 0xd61fb0,
   badgeBg: 0x1d2129,
   badgeText: 0xffffff,

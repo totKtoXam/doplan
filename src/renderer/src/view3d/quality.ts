@@ -217,6 +217,35 @@ export function effectiveDpr(preset: QualityPreset, deviceDpr: number, moving = 
   return Math.max(0.5, Math.min(deviceDpr || 1, cap))
 }
 
+/**
+ * How a page that only shows the scene (the published viewer) trades sharpness for speed: at rest
+ * the device's own pixel ratio up to `restMax`, while moving not below `movingMin` until the frame
+ * rate stays low. Applies to `high` and `ultra`; the app keeps the presets' iGPU budget (null).
+ */
+export interface DprPolicy {
+  restMax: number
+  movingMin: number
+}
+
+let dprPolicy: DprPolicy | null = null
+
+export function setDprPolicy(p: DprPolicy | null): void {
+  dprPolicy = p
+}
+
+/**
+ * Pixel ratio of one frame. `dynScale` (≤ 1) is the engine's adaptive factor: it drops only while
+ * frames take longer than ~25 ms; the policy's floor gives way after it dropped twice.
+ */
+export function frameDpr(preset: QualityPreset, deviceDpr: number, moving: boolean, dynScale = 1, policy: DprPolicy | null = dprPolicy): number {
+  const q = getQuality(preset)
+  const sharp = !!policy && (q.preset === 'high' || q.preset === 'ultra')
+  const rest = sharp ? Math.max(q.dprCap, policy.restMax) : q.dprCap
+  let cap = moving ? Math.min(rest, q.dprMoving * dynScale) : rest
+  if (moving && sharp && dynScale > 0.8) cap = Math.max(cap, Math.min(rest, policy.movingMin))
+  return Math.max(0.5, Math.min(deviceDpr || 1, cap))
+}
+
 /** True when the renderer runs on the real WebGPU backend (not the WebGL2 fallback). */
 export function isWebGPU(renderer: any): boolean {
   return !!renderer && !!renderer.backend && renderer.backend.isWebGPUBackend === true

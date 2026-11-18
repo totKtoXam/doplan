@@ -33,6 +33,8 @@ import { useStatus3d } from '@/view3d/status'
 import { parseViewerParams, viewerQuery, type SiteInfo, type ViewerCam, type ViewerParams, type ViewerView } from '@shared/pagesSite'
 import { installEditGuard, lockViewerTool, viewerEdit } from './guard'
 import { loadSite } from './load'
+import { currentDevice, rememberQuality, storedQuality, viewerQuality } from './quality'
+import { setDprPolicy } from '@/view3d/quality'
 import { WalkStick } from './WalkStick'
 
 addTranslations('en', {
@@ -75,14 +77,6 @@ const QUALITY: QualityPreset[] = ['low', 'medium', 'high', 'ultra']
 const QUALITY_NAMES: Record<QualityPreset, string> = { low: 'Низкое', medium: 'Среднее', high: 'Высокое', ultra: 'Ультра' }
 const PT_TARGET = 256
 
-const coarsePointer = (): boolean => typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
-
-/** viewers get a lighter preset on phones; the author's own choice is the ceiling elsewhere */
-function autoQuality(author: QualityPreset | undefined): QualityPreset {
-  const small = typeof window !== 'undefined' && Math.min(window.innerWidth, window.innerHeight) < 600
-  if (coarsePointer() || small) return 'low'
-  return author === 'low' ? 'low' : 'medium'
-}
 
 interface Booted {
   info: SiteInfo | null
@@ -106,7 +100,9 @@ async function boot(params: ViewerParams): Promise<Booted> {
     cameraMode: params.cam,
   })
   lockViewerTool(uiStore)
-  viewerEdit(() => uiStore.getState().setQuality(autoQuality(d.render.quality)))
+  viewerEdit(() => uiStore.getState().setQuality(viewerQuality(d.render.quality, currentDevice(), storedQuality())))
+  // sharp at rest (the device's own pixel ratio), not soft while walking
+  setDprPolicy({ restMax: 2, movingMin: 1 })
   document.title = `${site.info?.title || d.meta.name || 'doplan'} — doplan`
   const cat = site.catalog
   const credits = [...(cat.assets ?? []), ...(cat.materials ?? []), ...(cat.hdris ?? [])]
@@ -460,6 +456,7 @@ function Toolbar3D({ engine, cam, onCam }: { engine: Engine3DHandle; cam: Viewer
   const setQuality = (q: QualityPreset) => {
     viewerEdit(() => uiStore.getState().setQuality(q))
     engine.setQuality(q)
+    rememberQuality(q)
   }
   const startPt = () => {
     uiStore.getState().set({ pathTracing: { active: true, samples: 0, target: PT_TARGET } })

@@ -38,7 +38,7 @@ import { createPathTracer, type InteractivePathTracer } from './pathtracer'
 import { createPost } from './post'
 import { createProceduralFactory } from './procedural'
 import { mountPerfOverlay, perfBegin, perfBeginOnce, perfEnabled, perfEnd, perfPending, perfRecord, perfTime } from './perf'
-import { getQuality, getShared } from './quality'
+import { frameDpr, getQuality, getShared } from './quality'
 import { createMeasure3D } from './measure3d'
 import { isViewOnly } from '@/store/viewOnly'
 
@@ -453,10 +453,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
 
   // ── sizing / adaptive DPR ──
   function targetDpr(moving: boolean): number {
-    const q = getQuality(ctx.quality)
-    const device = window.devicePixelRatio || 1
-    const cap = moving ? Math.min(q.dprCap, q.dprMoving * dynScale) : q.dprCap
-    return Math.max(0.5, Math.min(device, cap))
+    return frameDpr(ctx.quality, window.devicePixelRatio || 1, moving, dynScale)
   }
   function applySize(dpr: number): void {
     const w = container.clientWidth

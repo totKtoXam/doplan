@@ -47,6 +47,8 @@ import { uiStore } from '@/store/ui'
 import { t } from '@/i18n'
 import { getShared } from './quality'
 import { walkPointerLocked } from './walkInput'
+import { createElectricPlace } from './electricPlace'
+import { CUT_HEIGHT } from './build/architecture'
 import { type HandleSpec, ResizeHandles, worldPerPixel } from './resizeHandles'
 
 const DEG = Math.PI / 180
@@ -1552,7 +1554,7 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
   const onDoubleClick = (e: MouseEvent): void => {
     if (disposed || shared.stillBusy) return
     const ui = uiStore.getState()
-    if (ui.tool === 'item' || ui.tool === 'paint' || ui.tool === 'eyedropper' || ui.tool === 'erase') return
+    if (ui.tool === 'item' || ui.tool === 'paint' || ui.tool === 'eyedropper' || ui.tool === 'erase' || ui.tool === 'electric') return
     setRay(e)
     const hit = pick()
     if (!hit) return
@@ -1572,9 +1574,62 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
     return tool !== 'item' && tool !== 'paint' && tool !== 'eyedropper' && tool !== 'erase'
   }
 
+  /** a wall in the scene: shown at all, and lowered by the orbit cut-away (its low copy is shown) */
+  function wallCut(id: Id): { shown: boolean; lowered: boolean } {
+    const list = objectsOf({ kind: 'wall', id })
+    if (list.length === 0) return { shown: true, lowered: false }
+    for (const o of list) {
+      // the low copy is built on demand next to the full wall (build/architecture), maybe after the index
+      const near = [o, ...o.children, ...(o.parent?.children ?? [])]
+      const low = near.find((c) => c.userData?.lowered === true)
+      if (low && isShown(low)) return { shown: true, lowered: true }
+    }
+    return { shown: list.some(isShown), lowered: false }
+  }
+
+  // electric points: the «Электроточка» tool and moving points (view3d/electricPlace) see the pointer first
+  const electric = createElectricPlace({
+    ctx,
+    raycaster,
+    setRay,
+    levelId,
+    setHint,
+    setCursor,
+    lockControls,
+    wallShown: (id) => wallCut(id).shown,
+    wallHeight: (w) => (wallCut(w.id).lowered ? Math.min(CUT_HEIGHT, w.height) : w.height),
+    rooms: () => planOf()?.rooms ?? [],
+    toggleSelect,
+    editable: (ref) => editable(docStore.getState().doc, ref),
+    pickElectric() {
+      const hit = pick()
+      const ref = hit?.ref
+      if (!hit || ref?.kind !== 'electric' || !editable(docStore.getState().doc, ref)) return null
+      return { id: ref.id, point: hit.point }
+    },
+    walkMode: () => controls.mode === 'walk' || uiStore.getState().cameraMode === 'walk',
+  })
+
   const onPointerDown = (e: PointerEvent): void => {
+    if (disposed || shared.stillBusy) return
+    // the resize handles and the gizmo of the selection win over an electric point under them
+    const handleFirst =
+      e.button === 0 &&
+      uiStore.getState().tool === 'select' &&
+      !walkPointerLocked(canvas) &&
+      (!!resizeHandles.hit(e.clientX, e.clientY, camera, canvas.getBoundingClientRect()) || (setRay(e), gizmoHit() !== null))
+    if (!handleFirst && electric.pointerDown(e)) {
+      down = null
+      pending = null
+      try {
+        canvas.focus({ preventScroll: true })
+      } catch {
+        /* focus is a nicety */
+      }
+      return
+    }
     // a captured mouse (walk mode Pointer Lock) only turns the view
-    if (disposed || shared.stillBusy || walkPointerLocked(canvas)) return
+    if (walkPointerLocked(canvas)) return
     try {
       canvas.focus({ preventScroll: true })
     } catch {
@@ -1700,7 +1755,12 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
   }
 
   const onPointerMove = (e: PointerEvent): void => {
-    if (disposed || shared.stillBusy || walkPointerLocked(canvas)) return
+    if (disposed || shared.stillBusy) return
+    if (electric.pointerMove(e)) {
+      if (hoverHit) setHover(null)
+      return
+    }
+    if (walkPointerLocked(canvas)) return
     lastMove = e
     lastPointer = e
     if (!frame) frame = requestAnimationFrame(processMove)
@@ -1708,6 +1768,11 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
 
   const onPointerUp = (e: PointerEvent): void => {
     if (disposed) return
+    if (electric.pointerUp(e)) {
+      down = null
+      pending = null
+      return
+    }
     try {
       canvas.releasePointerCapture(e.pointerId)
     } catch {
@@ -1748,6 +1813,7 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
   const onPointerLeave = (): void => {
     pointerInside = false
     lastPointer = null
+    electric.pointerLeave()
     if (!drag) {
       setHover(null)
       hideGhost()
@@ -1981,6 +2047,7 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
     dispose() {
       if (disposed) return
       if (drag) endDrag(false)
+      electric.dispose()
       disposed = true
       if (frame) cancelAnimationFrame(frame)
       lockControls(false)

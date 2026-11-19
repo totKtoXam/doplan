@@ -3,7 +3,6 @@
  * Everything here works in world metres (Y-up) unless a name says `Mm`.
  */
 import * as THREE from 'three'
-import { EndType, JoinType, inflatePathsD } from 'clipper2-ts'
 import { toWorld } from '@core'
 import type { EntityRef, Vec2 } from '@core/types'
 
@@ -197,44 +196,8 @@ export function distToSegment(p: Vec2, a: Vec2, b: Vec2): number {
   return Math.hypot(p.x - (a.x + dx * t), p.y - (a.y + dy * t))
 }
 
-/** removes consecutive duplicates and collinear points */
-export function cleanPolygon(pts: Vec2[], eps = 0.5): Vec2[] {
-  const out: Vec2[] = []
-  for (const p of pts) {
-    const last = out[out.length - 1]
-    if (!last || Math.hypot(p.x - last.x, p.y - last.y) > eps) out.push(p)
-  }
-  while (out.length > 2 && Math.hypot(out[0].x - out[out.length - 1].x, out[0].y - out[out.length - 1].y) <= eps) out.pop()
-  return out
-}
-
-/**
- * Insets a polygon by `d` (same unit as the points). Returns the largest resulting loop,
- * or null when the polygon collapses.
- */
-export function insetPolygon(pts: Vec2[], d: number): Vec2[] | null {
-  const src = cleanPolygon(pts)
-  if (src.length < 3 || d <= 0) return null
-  // clipper treats positive-area paths as outer contours; orientation is normalised first
-  const path = signedArea(src) >= 0 ? src.map((p) => ({ x: p.x, y: p.y })) : src.map((p) => ({ x: p.x, y: p.y })).reverse()
-  try {
-    const res = inflatePathsD([path], -d, JoinType.Miter, EndType.Polygon, 4, 2)
-    let best: Vec2[] | null = null
-    let bestArea = 0
-    for (const loop of res) {
-      const poly = loop.map((p) => ({ x: p.x, y: p.y }))
-      const a = Math.abs(signedArea(poly))
-      if (a > bestArea) {
-        bestArea = a
-        best = poly
-      }
-    }
-    if (!best || best.length < 3 || bestArea < 1e-9) return null
-    return cleanPolygon(best, Math.max(1e-6, d * 1e-4))
-  } catch {
-    return null
-  }
-}
+// insetting is shared with core/ceiling (a multilevel ceiling's border ring)
+export { cleanPolygon, insetPolygon } from '@core/inset'
 
 /** intervals where the horizontal / vertical line crosses the polygon interior */
 export function scanIntervals(pts: Vec2[], axis: 'x' | 'y', value: number): P2[] {

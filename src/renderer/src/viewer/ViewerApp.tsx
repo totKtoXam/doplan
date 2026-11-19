@@ -17,7 +17,7 @@ import {
   TriangleExclamationPoint,
   X,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { type RefObject, useEffect, useMemo, useRef, useState } from 'react'
 import { builtinCatalog, mergeCatalog, parseDoc } from '@core'
 import { layerIndex } from '@core/layers'
 import type { Catalog, Doc, QualityPreset } from '@core/types'
@@ -31,12 +31,12 @@ import { uiStore, useUi } from '@/store/ui'
 import { AppLogo } from '@/ui/shell/AppLogo'
 import { MiniSelect, Segmented } from '@/ui/shell/primitives'
 import { WalkLockHint } from '@/ui/shell/WalkLockHint'
-import { useStatus3d } from '@/view3d/status'
+import { status3dStore, useStatus3d } from '@/view3d/status'
 import { parseViewerParams, viewerQuery, type SiteInfo, type ViewerCam, type ViewerParams, type ViewerView } from '@shared/pagesSite'
 import { installEditGuard, lockViewerTool, viewerEdit } from './guard'
 import { downloadableDoc } from './exporters'
 import { loadSite } from './load'
-import { capToBackend, currentDevice, rememberQuality, storedQuality, viewerQuality } from './quality'
+import { capToBackend, currentDevice, lighter, rememberQuality, storedQuality, viewerQuality } from './quality'
 import { setDprPolicy } from '@/view3d/quality'
 import { WalkStick } from './WalkStick'
 import { unlockAll } from './hideState'
@@ -386,6 +386,7 @@ function Scene3D({ hidden, cam, onCam }: { hidden: boolean; cam: ViewerCam; onCa
     let disposed = false
     let handle: Engine3DHandle | null = null
     let ro: ResizeObserver | null = null
+    let unsub: (() => void) | null = null
     setError(null)
     setEngine(null)
     publishBackend(backend)
@@ -407,6 +408,15 @@ function Scene3D({ hidden, cam, onCam }: { hidden: boolean; cam: ViewerCam; onCa
           viewerEdit(() => uiStore.getState().setQuality(capped))
           h.setQuality(capped)
         }
+        // adaptive quality: slow frames at the lowest resolution take the preset a step down (for
+        // this visit only: a remembered choice stays the visitor's own)
+        unsub = status3dStore.subscribe((s, p) => {
+          if (s.struggling === p.struggling) return
+          const next = lighter(docStore.getState().doc.render.quality ?? 'high')
+          if (!next) return
+          viewerEdit(() => uiStore.getState().setQuality(next))
+          h.setQuality(next)
+        })
         h.setCameraMode(uiStore.getState().cameraMode)
         ro = new ResizeObserver((entries) => {
           const r = entries[0]?.contentRect
@@ -423,6 +433,7 @@ function Scene3D({ hidden, cam, onCam }: { hidden: boolean; cam: ViewerCam; onCa
     return () => {
       disposed = true
       ro?.disconnect()
+      unsub?.()
       if (handle) {
         setHandle('engine3d', null)
         setHost3d(null)
@@ -443,6 +454,7 @@ function Scene3D({ hidden, cam, onCam }: { hidden: boolean; cam: ViewerCam; onCa
   return (
     <div className={hidden ? 'hidden' : 'absolute inset-0 overflow-hidden bg-viewport'}>
       <div ref={host} className="absolute inset-0" />
+      {!error && cam !== 'walk' && <PreviewPicture ready={!!engine} host={host} />}
       {!engine && !error && (
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 text-xs text-muted">
           <LoaderCircle size={22} className="dp-spin text-accent" />
@@ -472,6 +484,46 @@ function Scene3D({ hidden, cam, onCam }: { hidden: boolean; cam: ViewerCam; onCa
       {engine && !hidden && <WalkLockHint host={host} active={cam === 'walk'} />}
       {engine && !hidden && cam === 'walk' && <WalkStick />}
     </div>
+  )
+}
+
+/**
+ * The overview picture taken when publishing (assets/preview.webp), shown at once while the 3D view
+ * loads its code, the scene and the models; it fades out when they are there or at the first touch.
+ * Only the first time, and never for an older site without one.
+ */
+function PreviewPicture({ ready, host }: { ready: boolean; host: RefObject<HTMLDivElement | null> }) {
+  const pending = useStatus3d((s) => s.modelsPending)
+  const [gone, setGone] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const [fading, setFading] = useState(false)
+  useEffect(() => {
+    const el = host.current
+    if (!el || gone) return
+    const off = () => setFading(true)
+    el.addEventListener('pointerdown', off, { once: true })
+    el.addEventListener('wheel', off, { once: true, passive: true })
+    return () => {
+      el.removeEventListener('pointerdown', off)
+      el.removeEventListener('wheel', off)
+    }
+  }, [host, gone])
+  // the first frame with the models in it: a short pause lets it reach the screen
+  useEffect(() => {
+    if (!ready || pending > 0 || gone) return
+    const id = setTimeout(() => setFading(true), 250)
+    return () => clearTimeout(id)
+  }, [ready, pending, gone])
+  if (gone || failed) return null
+  return (
+    <img
+      src="assets/preview.webp"
+      alt=""
+      draggable={false}
+      onError={() => setFailed(true)}
+      onTransitionEnd={() => fading && setGone(true)}
+      className={`pointer-events-none absolute inset-0 h-full w-full object-cover transition-opacity duration-500 ${fading ? 'opacity-0' : 'opacity-100'}`}
+    />
   )
 }
 

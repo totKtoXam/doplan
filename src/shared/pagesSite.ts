@@ -31,6 +31,8 @@ export interface SiteFile {
   rel: string
   /** destination inside the plan folder, e.g. `assets/c/models/x/x.glb` */
   path: string
+  /** the file's bytes when they were made lighter before publishing (written instead of copying the source) */
+  data?: Uint8Array
 }
 
 /** a clean relative path: no empty, `.` or `..` segments, no drive letters or backslashes */

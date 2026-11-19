@@ -42,6 +42,7 @@ import { frameDpr, getQuality, getShared } from './quality'
 import { createMeasure3D } from './measure3d'
 import { isViewOnly, keepsHole } from '@/store/viewOnly'
 import { createViewerPick, type ViewerPick } from './viewerPick'
+import { markStruggling } from './status'
 
 type CameraMode = 'orbit' | 'walk' | 'top'
 
@@ -495,6 +496,11 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
           dynScale = Math.min(1, dynScale + 0.06)
           if (dynScale >= 1) dprFloor = true
           lastDynChange = now
+        } else if (frameEma > 33 && dynScale <= 0.6 && now - lastDynChange > 3000) {
+          // the lowest resolution and still slow: the preset itself is too heavy here
+          lastDynChange = now
+          frameEma = 25
+          markStruggling()
         }
       }
     }

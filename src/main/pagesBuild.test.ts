@@ -75,6 +75,30 @@ describe('buildSite', () => {
     expect(r.bytes).toBeGreaterThan(64 + 32 + 16 + 8)
   })
 
+  it('writes files made lighter before publishing from their bytes, with nothing to follow', async () => {
+    const dir = join(tmp, 'data')
+    const { viewerDir, roots } = await fixture(dir)
+    const glb = new Uint8Array([103, 108, 84, 70, 2, 0, 0, 0])
+    const content = {
+      doc: {},
+      catalog: { version: 1, materials: [], assets: [], hdris: [] },
+      notDownloaded: [],
+      files: [
+        // the source .gltf would bring its .bin and texture along; the .glb made of it has them inside
+        { host: 'library' as const, rel: 'lamp/lamp.gltf', path: 'assets/l/lamp/lamp.glb', data: glb },
+        { host: 'project' as const, rel: 'preview.webp', path: 'assets/preview.webp', data: new Uint8Array([1, 2, 3]) },
+        { host: 'project' as const, rel: 'x', path: '../outside.webp', data: new Uint8Array([1]) },
+      ],
+    }
+    const out = join(dir, 'site')
+    const r = await buildSite({ outDir: out, viewerDir, content, info, roots })
+    expect(new Uint8Array(await fsp.readFile(join(out, 'assets/l/lamp/lamp.glb')))).toEqual(glb)
+    expect(existsSync(join(out, 'assets/preview.webp'))).toBe(true)
+    expect(existsSync(join(out, 'assets/l/lamp/lamp.bin'))).toBe(false)
+    expect(existsSync(join(dir, 'outside.webp'))).toBe(false)
+    expect(r.missing).toEqual(['../outside.webp'])
+  })
+
   it('never reads outside the asset roots', async () => {
     const dir = join(tmp, 'escape')
     const { viewerDir, roots } = await fixture(dir)

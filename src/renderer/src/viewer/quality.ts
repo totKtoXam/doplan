@@ -46,6 +46,12 @@ export function capToBackend(q: QualityPreset, backend: string): QualityPreset {
   return backend !== 'webgpu' && rank(q) > rank('high') ? 'high' : q
 }
 
+/** one step lighter when frames stay slow at the lowest resolution; null at `low` */
+export function lighter(q: QualityPreset): QualityPreset | null {
+  const i = rank(q)
+  return i > 0 ? ORDER[i - 1] : null
+}
+
 export function currentDevice(): ViewerDevice {
   const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
   const s = typeof screen !== 'undefined' ? Math.min(screen.width || 0, screen.height || 0) : 0

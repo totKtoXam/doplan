@@ -18,9 +18,19 @@ interface Status3D {
   /** item models still loading / started since the last time none was loading */
   modelsPending: number
   modelsTotal: number
+  /**
+   * Bumped each time frames stay slow (over ~30 fps) although the resolution is already at its
+   * lowest: the quality preset is too heavy for this GPU. The viewer lowers it a step; the editor
+   * leaves the choice to the user.
+   */
+  struggling: number
 }
 
-export const status3dStore = createStore<Status3D>()(() => ({ ptStage: 'idle', modelsPending: 0, modelsTotal: 0 }))
+export const status3dStore = createStore<Status3D>()(() => ({ ptStage: 'idle', modelsPending: 0, modelsTotal: 0, struggling: 0 }))
+
+export function markStruggling(): void {
+  status3dStore.setState({ struggling: status3dStore.getState().struggling + 1 })
+}
 
 export function setPtStage(stage: PtStage): void {
   if (status3dStore.getState().ptStage !== stage) status3dStore.setState({ ptStage: stage })

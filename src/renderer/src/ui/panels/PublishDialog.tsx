@@ -22,6 +22,7 @@ import {
 } from '@shared/pagesSite'
 import type { Catalog } from '@core/types'
 import { addTranslations, useT } from '@/i18n'
+import { prepareSite } from '@/publish/prepare'
 import { api } from '@/store/api'
 import { useDoc } from '@/store/document'
 import { generation, isCurrentGeneration } from '@/store/github'
@@ -73,6 +74,9 @@ addTranslations('en', {
   'Скачать и обновить': 'Download and update',
   'Скачать и опубликовать': 'Download and publish',
   'Скачиваю недостающее…': 'Downloading what is missing…',
+  'Облегчаю модели и текстуры: {done} из {total}…': 'Making models and textures lighter: {done} of {total}…',
+  'Облегчаю модели и текстуры…': 'Making models and textures lighter…',
+  'Снимаю превью 3D…': 'Taking the 3D preview…',
   'Не удалось скачать: {list}.': 'Could not download: {list}.',
   'Собираю сайт…': 'Building the site…',
   'Готовлю репозиторий…': 'Preparing the repository…',
@@ -176,7 +180,8 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
   const loadId = useDoc((s) => s.loadId)
   const [status, setStatus] = useState<PagesStatus | null>(null)
   const [loading, setLoading] = useState(false)
-  const [busy, setBusy] = useState<PagesProgress['step'] | 'unpublish' | 'download' | null>(null)
+  const [busy, setBusy] = useState<PagesProgress['step'] | 'unpublish' | 'download' | 'optimize' | 'preview' | null>(null)
+  const [optimized, setOptimized] = useState<{ done: number; total: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<PagesPublishResult | null>(null)
   const [choice, setChoice] = useState<PagesPrivateChoice>('separate')
@@ -267,13 +272,20 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
       )
       if (!ok || !isCurrentGeneration(gen)) return
     }
-    setBusy('build')
+    setBusy('optimize')
     setError(null)
     setResult(null)
     try {
+      // lighter models and textures, and the picture shown while the 3D loads
+      const prepared = await prepareSite(built, {
+        optimize: (done, total) => setOptimized({ done, total }),
+        preview: () => setBusy('preview'),
+      })
+      if (!isCurrentGeneration(gen)) return
+      setBusy('build')
       const res = await api.pages.publish({
         docId: key,
-        content: built,
+        content: prepared.content,
         info: { title: doc.meta.name, publishedAt: new Date().toISOString(), contentHash: hash, app: `doplan ${api.version}`, ...(download ? { download: true } : {}) },
         target: privateChoice === 'separate' ? 'separate' : target,
         ...(privateChoice ? { privateChoice } : {}),
@@ -289,6 +301,7 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
       if (isCurrentGeneration(gen)) setError((e as Error).message)
     } finally {
       setBusy(null)
+      setOptimized(null)
     }
   }
 
@@ -354,6 +367,8 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
     done: t('Готово'),
     unpublish: t('Снять с публикации'),
     download: t('Скачиваю недостающее…'),
+    optimize: optimized && optimized.total > 0 ? t('Облегчаю модели и текстуры: {done} из {total}…', optimized) : t('Облегчаю модели и текстуры…'),
+    preview: t('Снимаю превью 3D…'),
   }
 
   const desktop = typeof window !== 'undefined' && !!(window as { doplan?: unknown }).doplan

@@ -37,9 +37,12 @@ addTranslations('en', {
   'Опубликовать для просмотра…': 'Publish for viewing…',
   'Проверяю GitHub…': 'Checking GitHub…',
   'Проверить снова': 'Check again',
+  'GitHub CLI (gh) долго не отвечает — компьютер сейчас сильно загружен (например, антивирус проверяет файлы). Подождите немного и проверьте снова: повторный вход не нужен.':
+    'GitHub CLI (gh) is taking too long to answer — the computer is very busy right now (e.g. an antivirus scan). Wait a little and check again: there is no need to sign in again.',
   'Нужна программа GitHub CLI (gh): установите её (https://cli.github.com) и войдите командой «gh auth login».':
     'GitHub CLI (gh) is needed: install it (https://cli.github.com) and sign in with “gh auth login”.',
   'Войдите в GitHub: выполните в терминале «gh auth login».': 'Sign in to GitHub: run “gh auth login” in a terminal.',
+  'Не удалось связаться с GitHub, чтобы проверить вход. Проверьте подключение к интернету и попробуйте ещё раз: повторный вход не нужен.': 'Could not reach GitHub to check the sign-in. Check your internet connection and try again: there is no need to sign in again.',
   'Нужен Git (https://git-scm.com).': 'Git is needed (https://git-scm.com).',
   'Опубликовано {d}': 'Published {d}',
   'Устарело: план изменился после публикации': 'Outdated: the plan changed after publishing',
@@ -394,7 +397,9 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
           <Note kind="warn">
             <div className="flex flex-col gap-2">
               {!status.gh.installed && <span>{t('Нужна программа GitHub CLI (gh): установите её (https://cli.github.com) и войдите командой «gh auth login».')}</span>}
-              {status.gh.installed && !status.gh.loggedIn && <span>{t('Войдите в GitHub: выполните в терминале «gh auth login».')}</span>}
+              {status.gh.installed && status.gh.slow && <span>{t('GitHub CLI (gh) долго не отвечает — компьютер сейчас сильно загружен (например, антивирус проверяет файлы). Подождите немного и проверьте снова: повторный вход не нужен.')}</span>}
+              {status.gh.installed && status.gh.offline && <span>{t('Не удалось связаться с GitHub, чтобы проверить вход. Проверьте подключение к интернету и попробуйте ещё раз: повторный вход не нужен.')}</span>}
+              {status.gh.installed && !status.gh.loggedIn && !status.gh.slow && !status.gh.offline && <span>{t('Войдите в GitHub: выполните в терминале «gh auth login».')}</span>}
               {!status.git && <span>{t('Нужен Git (https://git-scm.com).')}</span>}
               <div>
                 <Button size="sm" icon={<RefreshCw size={12} />} disabled={loading} onClick={() => void refresh(true)}>

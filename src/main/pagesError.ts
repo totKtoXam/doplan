@@ -3,24 +3,19 @@
  * (translated) message. No imports: the flow tests throw these from their fakes.
  */
 
-export type PagesErrorKind = 'auth' | 'forbidden' | 'notFound' | 'network' | 'unknown'
+/** limited: GitHub's rate limit (try later); token: the token lacks a permission (sign in again) */
+export type PagesErrorKind = 'auth' | 'forbidden' | 'limited' | 'token' | 'notFound' | 'network' | 'unknown'
 
-/** a GitHub refusal from gh; the message is for the user */
+/** a GitHub refusal of a Pages call; the message is for the user */
 export class PagesGhError extends Error {
   constructor(
     message: string,
     readonly kind: PagesErrorKind,
-    /** the HTTP status gh reported, when it did */
+    /** the HTTP status GitHub answered with */
     readonly status?: number,
   ) {
     super(message)
   }
-}
-
-/** the HTTP status in gh's output ("HTTP 403", "(HTTP 403)") */
-export function httpStatus(out: string): number | undefined {
-  const m = /\bHTTP (\d{3})\b/.exec(out)
-  return m ? Number(m[1]) : undefined
 }
 
 /**

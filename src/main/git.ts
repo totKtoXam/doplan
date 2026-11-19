@@ -13,6 +13,7 @@ import fsp from 'node:fs/promises'
 import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path'
 import { app } from 'electron'
 import type { UnsafeGitConfig } from '../shared/ipc'
+import { classifyError } from '../shared/github'
 import { msg } from './settings'
 import { entryKind, lstatNoFollowSync, redirectsSync, type EntryKind } from './fsutil'
 
@@ -905,12 +906,16 @@ export async function gitHead(root: string): Promise<string | null> {
 
 /** how git reaches a remote */
 export interface GitNet {
-  /** `-c` flags placed before the command (the credential helper: github.gitCredentialArgs) */
+  /** `-c` flags placed before the command (the credential helper: github.gitCredentials) */
   config: string[]
+  /** environment variables (the token header for github.com: github.gitCredentials) */
+  env?: Record<string, string>
   /** an action the user started: the user's own credential manager may show its sign-in window */
   interactive: boolean
   /** ms; default 10 minutes for an action the user started, 90 s for a look in the background */
   timeout?: number
+  /** GitHub refused the sign-in: fresh credentials, the command repeated once (github.gitCredentials) */
+  refresh?: () => Promise<{ config: string[]; env?: Record<string, string> }>
 }
 
 /** test hook: extra `-c` flags for network commands (a local repository standing in for GitHub) */
@@ -930,12 +935,30 @@ function netArgs(net: GitNet): string[] {
   ]
 }
 
-function runNet(root: string, args: string[], net: GitNet, opts: RunOpts = {}): Promise<RunResult> {
+/**
+ * A network command. GitHub refusing a token that changed since it was read: the credentials are
+ * read again and the command repeated, once per GitNet (the later commands of the action use them).
+ */
+async function runNet(root: string, args: string[], net: GitNet, opts: RunOpts = {}): Promise<RunResult> {
+  try {
+    return await runNetOnce(root, args, net, opts)
+  } catch (err) {
+    const refresh = net.refresh
+    if (!refresh || !(err instanceof GitError) || classifyError(`${err.stderr}\n${err.message}`) !== 'auth') throw err
+    net.refresh = undefined
+    const c = await refresh()
+    net.config = c.config
+    net.env = c.env
+    return runNetOnce(root, args, net, opts)
+  }
+}
+
+function runNetOnce(root: string, args: string[], net: GitNet, opts: RunOpts): Promise<RunResult> {
   return run(root, args, {
     ...opts,
     config: [...netArgs(net), ...(opts.config ?? [])],
     // a sign-in window of the user's credential manager only for an action the user started
-    env: { GCM_INTERACTIVE: net.interactive ? 'auto' : 'never' },
+    env: { ...net.env, GCM_INTERACTIVE: net.interactive ? 'auto' : 'never' },
     timeout: opts.timeout ?? net.timeout ?? (net.interactive ? 10 * 60_000 : 90_000),
   })
 }
@@ -962,16 +985,118 @@ export async function gitRemoteUrls(root: string, remote = 'origin'): Promise<st
   return r.code === 0 ? trimOut(r).split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : []
 }
 
+const URL_RULE = 'url\\..*\\.(push)?insteadof'
+/** credential.username and credential.<url>.username: an account the user picked for an address */
+const USER_NAME = 'credential(\\..*)?\\.username'
+
+type UrlRule = { base: string; prefix: string }
+
+/** `git config --get-regexp` (every scope) as key/value pairs, with the flags network commands see */
+async function configMatching(root: string | null, pattern: string): Promise<ConfigEntry[]> {
+  // netTestConfig: tests stand a local folder in for GitHub through an insteadOf rule
+  const opts = { allowFail: true, config: [...netTestConfig] }
+  const args = ['config', '--get-regexp', pattern]
+  const r = root ? await run(root, args, opts) : await runOutside(args, opts)
+  if (r.code !== 0) return []
+  return trimOut(r)
+    .split(/\r?\n/)
+    .flatMap((line) => {
+      const m = /^(\S+)\s+(.*)$/.exec(line.trim())
+      return m ? [{ key: m[1], value: m[2].trim() }] : []
+    })
+}
+
+/**
+ * `urls` as written and as every insteadOf / pushInsteadOf rule among `entries` rewrites them (a rule
+ * of the user's own may carry credentials, e.g. a token in the global config). Every matching rule
+ * counts, not only the one git would pick: a superset, for deciding what to send along.
+ */
+function urlRules(entries: ConfigEntry[]): UrlRule[] {
+  return entries.flatMap(({ key, value }) => {
+    const m = /^url\.(.+)\.(?:push)?insteadof$/i.exec(key)
+    return m && value ? [{ base: m[1], prefix: value }] : []
+  })
+}
+
+function rewritten(urls: readonly string[], rules: UrlRule[]): string[] {
+  const out = new Set(urls)
+  for (const u of urls) for (const r of rules) if (u.startsWith(r.prefix)) out.add(r.base + u.slice(r.prefix.length))
+  return [...out]
+}
+
+/**
+ * A user name for github.com in the credential config (credential.username, or
+ * credential.<url>.username whose address is on github.com): the user picked an account of their own
+ * there (a credential manager holding several), which gh's token must not replace. A user name for
+ * another host does not count.
+ */
+function ownAccount(entries: ConfigEntry[]): boolean {
+  return entries.some(({ key, value }) => {
+    if (!value) return false
+    if (/^credential\.username$/i.test(key)) return true
+    const m = /^credential\.(.+)\.username$/i.exec(key)
+    if (!m) return false
+    try {
+      const u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(m[1]) ? m[1] : `https://${m[1]}`)
+      return u.hostname.toLowerCase() === 'github.com'
+    } catch {
+      return false
+    }
+  })
+}
+
+/** what decides gh's part in a network command (github.gitCredentials) */
+export interface NetAddresses {
+  /** every address git may talk to: as written, and rewritten by the insteadOf rules (see rewritten()) */
+  effective: string[]
+  /** a user name for github.com in the credential config (see ownAccount()) */
+  ownAccount: boolean
+}
+
+/** every address git may use for `urls` outside any repository (gh-pages pushes), in one git call */
+export async function gitEffectiveUrls(root: string | null, urls: readonly string[]): Promise<NetAddresses> {
+  const entries = await configMatching(root, `^(${URL_RULE}|${USER_NAME})$`)
+  return { effective: rewritten(urls, urlRules(entries)), ownAccount: ownAccount(entries) }
+}
+
+export interface RemoteAddresses extends NetAddresses {
+  /** remote.<name>.url as `config --get-all` lists them (the order git uses) */
+  urls: string[]
+  /** remote.<name>.pushurl */
+  push: string[]
+  /** the insteadOf / pushInsteadOf rules read along (gitAddressesFor) */
+  rules: UrlRule[]
+}
+
+/**
+ * The remote's addresses from every config scope (a pushurl in the global config too) and the
+ * insteadOf rules, in one git call. A folder whose own config has a pushurl or url.* rule never gets
+ * here (unsafeRepoConfig).
+ */
+export async function gitRemoteAddresses(root: string, remote = 'origin'): Promise<RemoteAddresses> {
+  const name = remote.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const entries = await configMatching(root, `^(remote\\.${name}\\.(url|pushurl)|${URL_RULE}|${USER_NAME})$`)
+  const urls = entries.filter((e) => e.key.toLowerCase() === `remote.${remote.toLowerCase()}.url`).map((e) => e.value)
+  const push = entries.filter((e) => e.key.toLowerCase() === `remote.${remote.toLowerCase()}.pushurl`).map((e) => e.value)
+  const rules = urlRules(entries)
+  return { urls, push, rules, effective: rewritten([...urls, ...push], rules), ownAccount: ownAccount(entries) }
+}
+
+/** the addresses once the remote's url is `urls` (connecting it: no second config read) */
+export function gitAddressesFor(a: RemoteAddresses, urls: readonly string[]): RemoteAddresses {
+  return { ...a, urls: [...urls], effective: rewritten([...urls, ...a.push], a.rules) }
+}
+
 /** the remote's address git fetches from (the first one; `config --get` would give the last) */
 export async function gitRemoteUrl(root: string, remote = 'origin'): Promise<string | null> {
   return (await gitRemoteUrls(root, remote))[0] ?? null
 }
 
-/** adds the remote or changes its address */
-export async function gitSetRemote(root: string, url: string, remote = 'origin'): Promise<void> {
+/** adds the remote or changes its address (`had`: whether it has one, when the caller already read it) */
+export async function gitSetRemote(root: string, url: string, remote = 'origin', had?: boolean): Promise<void> {
   if (/^-|[\0\r\n]/.test(url)) throw new Error(msg('Недопустимый адрес репозитория', 'Invalid repository address'))
   // one address afterwards, even where the folder had several (set-url refuses to choose among them)
-  if (await gitRemoteUrl(root, remote)) await run(root, ['config', '--replace-all', `remote.${remote}.url`, url])
+  if (had ?? (await gitRemoteUrl(root, remote))) await run(root, ['config', '--replace-all', `remote.${remote}.url`, url])
   else await run(root, ['remote', 'add', remote, url])
 }
 

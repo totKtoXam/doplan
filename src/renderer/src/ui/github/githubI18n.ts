@@ -77,6 +77,15 @@ addTranslations('en', {
   'Инструкция по установке': 'Install instructions',
   'Открылось окно установки. Когда оно закончит работу, нажмите «Проверить снова».': 'An install window opened. When it is done, press “Check again”.',
   'Проверить снова': 'Check again',
+  'Проверяю…': 'Checking…',
+  'GitHub CLI (gh) долго не отвечает — компьютер сейчас сильно загружен (например, антивирус проверяет файлы). Подождите немного и проверьте снова: повторный вход не нужен.':
+    'GitHub CLI (gh) is taking too long to answer — the computer is very busy right now (e.g. an antivirus scan). Wait a little and check again: there is no need to sign in again.',
+  'Не удалось связаться с GitHub, чтобы проверить вход. Проверьте подключение к интернету и попробуйте ещё раз: повторный вход не нужен.':
+    'Could not reach GitHub to check the sign-in. Check your internet connection and try again: there is no need to sign in again.',
+  'Проверяю вход в GitHub…': 'Checking the GitHub sign-in…',
+  'Создаю репозиторий на GitHub…': 'Creating the repository on GitHub…',
+  'Отправляю проект…': 'Sending the project…',
+  '{n} из 3': '{n} of 3',
   'Не хотите устанавливать? Создайте репозиторий на github.com сами и выберите «Вставить ссылку».':
     'Rather not install it? Create the repository on github.com yourself and choose “Paste a link”.',
   'Вход в GitHub': 'Signing in to GitHub',

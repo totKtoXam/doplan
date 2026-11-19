@@ -60,6 +60,7 @@ vi.mock('./ipc', () => ({ handleIpc: () => undefined }))
 vi.mock('./window', () => ({ sendToRenderer: () => undefined }))
 vi.mock('./git', () => ({
   findGit: async () => 'git',
+  gitEffectiveUrls: async (_root: unknown, urls: string[]) => ({ effective: urls, ownAccount: false }),
   gitInit: async () => undefined,
   gitRemoteUrls: async () => gh.syncUrls,
   gitUpstreamBranch: async () => gh.syncBranch,
@@ -79,7 +80,9 @@ vi.mock('./github', () => ({
   ghStatus: async () => ({ installed: true, loggedIn: true, user: 'me' }),
   ghMissingText: () => 'gh missing',
   ghLoginText: () => 'gh login',
-  gitCredentialArgs: async () => [],
+  ghSlowText: () => 'gh slow',
+  ghOfflineText: () => 'gh offline',
+  gitCredentials: async () => ({ config: [], env: {} }),
 }))
 vi.mock('./projectFolder', () => ({ getProjectRoot: () => project }))
 vi.mock('./pagesBuild', () => ({
@@ -92,7 +95,9 @@ vi.mock('./pagesGh', () => ({
   openPagesUrl: async () => undefined,
   repoState: async (ref: RepoRef) => {
     const r = gh.repos.get(k(ref))
-    return r ? { exists: true, isPrivate: r.private, canPush: r.push !== false, defaultBranch: r.defaultBranch ?? 'main' } : { exists: false, isPrivate: false }
+    return r
+      ? { exists: true, isPrivate: r.private, canPush: r.push !== false, admin: (r.admin ?? r.push) !== false, defaultBranch: r.defaultBranch ?? 'main' }
+      : { exists: false, isPrivate: false }
   },
   ownerPlan: async (owner: string, login: string | undefined) => (owner === login ? gh.userPlan : gh.orgPlans[owner]),
   inspectPages: async (ref: RepoRef) => {
@@ -117,7 +122,7 @@ vi.mock('./pagesGh', () => ({
   },
   disablePages: async (ref: RepoRef) => {
     gh.calls.push(`nopages ${k(ref)}`)
-    // what pagesGh.ghError makes of 'gh: Must have admin rights to Repository. (HTTP 403)': translated text, typed kind
+    // what pagesGh.pagesError makes of GitHub's 403 'Must have admin rights to Repository.': translated text, typed kind
     const { PagesGhError } = await import('./pagesError')
     if ((repo(k(ref)).admin ?? repo(k(ref)).push) === false)
       throw new PagesGhError('Не удалось выключить GitHub Pages: у этой учётной записи GitHub нет прав администратора репозитория.', 'forbidden', 403)
@@ -218,7 +223,8 @@ describe('publishing never takes over what doplan did not make', () => {
     expect(gh.calls).toEqual(['push me/flat', 'pages me/flat new', 'push me/flat', 'pages me/flat keep'])
 
     await unpublishPlan('doc1')
-    expect(gh.calls.slice(4)).toEqual(['nopages me/flat', 'delete me/flat'])
+    // the branch goes first, Pages are turned off after it (an emptying push may turn them on again)
+    expect(gh.calls.slice(4)).toEqual(['delete me/flat', 'nopages me/flat'])
     expect((await status()).record).toBeNull()
 
     // published again, then someone replaced the branch with their own: unpublish leaves both alone
@@ -262,7 +268,7 @@ describe('updates go to the recorded repository', () => {
     const res = await publishPlan(req({ privateChoice: 'separate' }))
     expect(res.record).toMatchObject({ owner: 'me', repo: 'flat-view', separate: true })
     // the old site in the now private repository is taken down
-    expect(gh.calls).toEqual(['create me/flat-view', 'push me/flat-view', 'pages me/flat-view new', 'nopages me/flat', 'delete me/flat'])
+    expect(gh.calls).toEqual(['create me/flat-view', 'push me/flat-view', 'pages me/flat-view new', 'delete me/flat', 'nopages me/flat'])
     expect((await status()).record?.repo).toBe('flat-view')
   })
 
@@ -363,7 +369,7 @@ describe('the record follows its document', () => {
     gh.calls = []
     await unpublishPlan('doc1')
     // the default branch cannot be deleted: one commit with only the marker replaces the site
-    expect(gh.calls).toEqual([`nopages ${ref}`, `push ${ref}`])
+    expect(gh.calls).toEqual([`push ${ref}`, `nopages ${ref}`])
     expect(repo(ref).pages).toBeNull()
     expect(markerId(repo(ref).marker)).toBe(first.record.pubId)
     expect(readFileSync(join(userData, 'pages.json'), 'utf8')).not.toContain('doc1')
@@ -432,6 +438,10 @@ describe('the record follows its document', () => {
     await publishPlan(req())
     repo('acme/plans').admin = false
     await expect(unpublishPlan('doc1')).rejects.toThrow(/Нет прав/)
+    expect(JSON.parse(readFileSync(join(userData, 'pages.json'), 'utf8')).doc1).toBeUndefined()
+    // the site is still up and tagged for this plan, but without admin rights it is not taken back
+    expect(repo('acme/plans').pages).not.toBeNull()
+    expect((await status()).record).toBeNull()
     expect(JSON.parse(readFileSync(join(userData, 'pages.json'), 'utf8')).doc1).toBeUndefined()
   })
 

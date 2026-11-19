@@ -60,8 +60,8 @@ import {
 } from '@shared/pagesSite'
 import { CH } from './channels'
 import { atomicWrite, readJson } from './fsutil'
-import { findGit, gitInit, gitPushRef, gitRemoteUrls, gitUpstreamBranch } from './git'
-import { ghLoginText, ghMissingText, ghStatus, gitCredentialArgs } from './github'
+import { findGit, gitEffectiveUrls, gitInit, gitPushRef, gitRemoteUrls, gitUpstreamBranch } from './git'
+import { ghLoginText, ghMissingText, ghOfflineText, ghSlowText, ghStatus, gitCredentials } from './github'
 import { handleIpc } from './ipc'
 import { buildSite } from './pagesBuild'
 import { createPublicRepo, disablePages, enablePages, inspectPages, makePublic, openPagesUrl, ownerPlan, repoState } from './pagesGh'
@@ -214,7 +214,22 @@ async function gitRunner(): Promise<GitRunner> {
   const git = await findGit()
   if (!git) throw new Error(msg('Git не найден. Установите Git (https://git-scm.com), чтобы публиковать планы.', 'Git not found. Install Git (https://git-scm.com) to publish plans.'))
   await fsp.mkdir(hooksDir(), { recursive: true })
-  return { git, hooksDir: hooksDir(), config: await gitCredentialArgs() }
+  return { git, hooksDir: hooksDir() }
+}
+
+/**
+ * gh's credentials for `remote` as git will reach it (an insteadOf rule of the user's with
+ * credentials, or an account named for github.com in the credential config: no token header)
+ */
+async function credentialsFor(remote: string) {
+  const a = await gitEffectiveUrls(null, [remote]).catch(() => null)
+  return gitCredentials(a?.effective ?? [], a?.ownAccount ?? false)
+}
+
+/** the runner with gh's credentials for `remote`, read right before the push (after any 401 of the API calls) */
+async function withCredentials(r: GitRunner, remote: string): Promise<GitRunner> {
+  const c = await credentialsFor(remote)
+  return { ...r, config: c.config, env: c.env, refresh: c.refresh }
 }
 
 const remoteOf = (ref: RepoRef) => `https://github.com/${ref.owner}/${ref.repo}.git`
@@ -228,12 +243,12 @@ const separateBase = (project: RepoRef | null, name: string, docId: string) => p
 async function targetOf(kind: PagesTargetKind, ref: RepoRef, login: string | undefined, occupancy: boolean): Promise<PagesTarget> {
   const st = await repoState(ref)
   if (!st.exists) return { kind, ref, exists: false, isPrivate: false, needsChoice: false }
-  const plan = st.isPrivate ? await ownerPlan(ref.owner, login) : undefined
+  // the owner's plan and what the repository holds: asked at once
+  const [plan, insp] = await Promise.all([st.isPrivate ? ownerPlan(ref.owner, login) : undefined, occupancy ? inspectPages(ref) : null])
   const t: PagesTarget = { kind, ref, exists: true, isPrivate: st.isPrivate, needsChoice: pagesNeedsChoice(st.isPrivate, plan) }
-  if (occupancy) {
+  if (insp) {
     // before the first publication of this document any gh-pages branch or Pages site there belongs
     // to someone else (or to another plan); its own one has been adopted as the record by then
-    const insp = await inspectPages(ref)
     const own = pagesOwnership(insp, undefined, false)
     if (own.branch === 'foreign') t.occupied = markerId(insp.marker) ? 'plan' : 'branch'
     else if (own.site === 'foreign') t.occupied = 'site'
@@ -281,16 +296,20 @@ async function viewRepoFor(login: string, base: string, docId: string, aliases: 
 async function findOwn(project: RepoRef | null, login: string | undefined, base: string, docId: string, aliases: readonly string[], made: Made): Promise<PagesRecord | null> {
   const tags = docTags(docId, aliases)
   // the tag travels with the file: a clone of someone else's project carries it too, so only a
-  // repository the user can push to is taken as theirs
-  const st = project ? await repoState(project) : null
-  if (project && st?.exists && (st.canPush || sameName(project.owner, login))) {
+  // repository the user administers is taken as theirs (a collaborator, or an owner who lost admin
+  // rights, could neither turn the site off nor publish there: the record would come back after
+  // "unpublish" dropped it for lack of access, and keep the plan from being published elsewhere).
+  // Only a live site: a branch left after unpublishing is not a publication.
+  const inProject = async (): Promise<PagesRecord | null> => {
+    const st = project ? await repoState(project) : null
+    if (!project || !st?.exists || st.admin !== true) return null
     const insp = await inspectPages(project)
-    if (taggedFor(insp, tags) && insp.pages) return adoptedRecord(project, insp, false)
+    return taggedFor(insp, tags) && insp.pages ? adoptedRecord(project, insp, false) : null
   }
-  if (login) {
-    const slot = await viewRepoFor(login, base, docId, aliases, made).catch(() => null)
-    if (slot?.tagged && slot.insp.pages) return adoptedRecord(slot.ref, slot.insp, true)
-  }
+  // both places at once (read-only); the project repository wins
+  const [own, slot] = await Promise.all([inProject(), login ? viewRepoFor(login, base, docId, aliases, made).catch(() => null) : null])
+  if (own) return own
+  if (slot?.tagged && slot.insp.pages) return adoptedRecord(slot.ref, slot.insp, true)
   return null
 }
 
@@ -327,7 +346,7 @@ async function removeBranch(work: string, ref: RepoRef, expected: string): Promi
   await fsp.mkdir(dir, { recursive: true })
   try {
     await gitInit(dir)
-    await gitPushRef(dir, { config: await gitCredentialArgs(), interactive: true }, null, PAGES_BRANCH, { remote: remoteOf(ref), expected })
+    await gitPushRef(dir, { ...(await credentialsFor(remoteOf(ref))), interactive: true }, null, PAGES_BRANCH, { remote: remoteOf(ref), expected })
   } finally {
     await fsp.rm(dir, { recursive: true, force: true }).catch(() => undefined)
   }
@@ -361,6 +380,8 @@ async function emptyBranch(work: string, ref: RepoRef, head: string, marker: str
   await fsp.rm(dir, { recursive: true, force: true })
   await fsp.mkdir(dir, { recursive: true })
   try {
+    // the same marker: the repository stays doplan's and this plan's to publish into again; with
+    // Pages off (turned off after this push) it is never taken for a live site
     await fsp.writeFile(join(dir, PAGES_MARKER), marker)
     await fsp.writeFile(
       join(dir, 'README.md'),
@@ -385,8 +406,10 @@ async function takeDown(work: string, ref: RepoRef, pubId: string | undefined): 
   if (!st.exists) return
   const insp = await inspectPages(ref)
   const own = pagesOwnership(insp, pubId, true)
-  if (own.site === 'ours') await disablePages(ref)
+  // the branch first: a push that empties it may make GitHub turn Pages on again by itself, so they
+  // are turned off after it
   if (own.branch === 'ours' && insp.branchSha) await dropBranch(work, ref, insp.branchSha, insp.marker ?? '', st.defaultBranch)
+  if (own.site === 'ours') await disablePages(ref)
 }
 
 // ───────────── status ─────────────
@@ -394,11 +417,14 @@ async function takeDown(work: string, ref: RepoRef, pubId: string | undefined): 
 export async function pagesStatus(q: PagesStatusQuery): Promise<PagesStatus> {
   checkProject(q?.root)
   const docId = String(q?.docId ?? '')
-  const gh = await ghStatus(!!q?.fresh).catch(() => ({ installed: false, loggedIn: false }) as { installed: boolean; loggedIn: boolean; user?: string })
-  const git = !!(await findGit())
-  const { records, aliases } = await settleRecord(docId, cleanAliases(q?.aliases), cleanFile(q?.file))
+  // independent of each other: asked at once
+  const [gh, git, { records, aliases }, ref] = await Promise.all([
+    ghStatus(!!q?.fresh).catch(() => ({ installed: false, loggedIn: false }) as { installed: boolean; loggedIn: boolean; user?: string; slow?: boolean; offline?: boolean }),
+    findGit().then((g) => !!g),
+    settleRecord(docId, cleanAliases(q?.aliases), cleanFile(q?.file)),
+    projectRepo(),
+  ])
   let record: PagesRecord | null = records[docId] ?? null
-  const ref = await projectRepo()
   const base = separateBase(ref, String(q?.name ?? ''), docId)
   let project: PagesTarget | null = null
   let recordTarget: PagesTarget | null = null
@@ -474,8 +500,11 @@ export async function publishPlan(req: PagesPublishRequest, emit: (p: PagesProgr
   busy = true
   const work = workDir(req.docId)
   try {
-    const gh = await ghStatus(true)
+    // the state the window has just shown (cached): no second start of gh; a slow gh is not "signed out"
+    const gh = await ghStatus()
     if (!gh.installed) throw new Error(ghMissingText())
+    if (gh.slow) throw new Error(ghSlowText())
+    if (gh.offline) throw new Error(ghOfflineText())
     if (!gh.loggedIn || !gh.user) throw new Error(ghLoginText())
     const runner = await gitRunner()
     const file = cleanFile(req.file)
@@ -586,7 +615,7 @@ export async function publishPlan(req: PagesPublishRequest, emit: (p: PagesProgr
     // ── push + Pages ──
     emit({ step: 'push' })
     const own = pagesOwnership(insp, pubId, recorded)
-    const sha = await pushSite(runner, siteDir, remoteOf(ref), PAGES_BRANCH, msg('Опубликованный план (doplan)', 'Published plan (doplan)'), insp.branchSha)
+    const sha = await pushSite(await withCredentials(runner, remoteOf(ref)), siteDir, remoteOf(ref), PAGES_BRANCH, msg('Опубликованный план (doplan)', 'Published plan (doplan)'), insp.branchSha)
     emit({ step: 'pages' })
     let url: string
     try {
@@ -657,8 +686,10 @@ export async function unpublishPlan(docId: string): Promise<void> {
     )
   }
   try {
-    const gh = await ghStatus(true)
+    const gh = await ghStatus()
     if (!gh.installed) throw new Error(ghMissingText())
+    if (gh.slow) throw new Error(ghSlowText())
+    if (gh.offline) throw new Error(ghOfflineText())
     if (!gh.loggedIn) throw new Error(ghLoginText())
     const st = await repoState(refOf(rec))
     if (st.exists && st.canPush === false && !sameName(rec.owner, gh.user)) throw await noAccess()

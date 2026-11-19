@@ -326,6 +326,7 @@ function createFallbackApi(): DoplanApi {
       async create() {
         throw new Error(webSync.reason)
       },
+      onCreateStep: noopUnsub,
       async push() {
         throw new Error(webSync.reason)
       },

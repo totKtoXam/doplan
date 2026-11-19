@@ -217,18 +217,18 @@ async function gitRunner(): Promise<GitRunner> {
 }
 
 /**
- * gh's credentials for `remote` as git will reach it (an insteadOf rule of the user's with
- * credentials, or an account named for github.com in the credential config: no token header)
+ * gh's credentials for `remote` as git will reach it from the repository `repoDir` the push runs in
+ * (an insteadOf rule of the user's with credentials, or an account named for github.com in the
+ * credential config, an include for that folder too: no token header)
  */
-async function credentialsFor(remote: string) {
-  const a = await gitEffectiveUrls(null, [remote]).catch(() => null)
+async function credentialsFor(remote: string, repoDir: string) {
+  const a = await gitEffectiveUrls(repoDir, [remote]).catch(() => null)
   return gitCredentials(a?.effective ?? [], a?.ownAccount ?? false)
 }
 
-/** the runner with gh's credentials for `remote`, read right before the push (after any 401 of the API calls) */
-async function withCredentials(r: GitRunner, remote: string): Promise<GitRunner> {
-  const c = await credentialsFor(remote)
-  return { ...r, config: c.config, env: c.env, refresh: c.refresh }
+/** the runner with gh's credentials for `remote`, read in the site's repository right before the push (after any 401 of the API calls) */
+function withCredentials(r: GitRunner, remote: string): GitRunner {
+  return { ...r, credentials: (repoDir) => credentialsFor(remote, repoDir) }
 }
 
 const remoteOf = (ref: RepoRef) => `https://github.com/${ref.owner}/${ref.repo}.git`
@@ -341,7 +341,7 @@ async function removeBranch(work: string, ref: RepoRef, expected: string): Promi
   await fsp.mkdir(dir, { recursive: true })
   try {
     await gitInit(dir)
-    await gitPushRef(dir, { ...(await credentialsFor(remoteOf(ref))), interactive: true }, null, PAGES_BRANCH, { remote: remoteOf(ref), expected })
+    await gitPushRef(dir, { ...(await credentialsFor(remoteOf(ref), dir)), interactive: true }, null, PAGES_BRANCH, { remote: remoteOf(ref), expected })
   } finally {
     await fsp.rm(dir, { recursive: true, force: true }).catch(() => undefined)
   }
@@ -556,7 +556,7 @@ export async function publishPlan(req: PagesPublishRequest, emit: (p: PagesProgr
     // ── push + Pages ──
     emit({ step: 'push' })
     const own = pagesOwnership(insp, pubId, recorded)
-    const sha = await pushSite(await withCredentials(runner, remoteOf(ref)), siteDir, remoteOf(ref), PAGES_BRANCH, msg('Опубликованный план (doplan)', 'Published plan (doplan)'), insp.branchSha)
+    const sha = await pushSite(withCredentials(runner, remoteOf(ref)), siteDir, remoteOf(ref), PAGES_BRANCH, msg('Опубликованный план (doplan)', 'Published plan (doplan)'), insp.branchSha)
     emit({ step: 'pages' })
     let url: string
     try {

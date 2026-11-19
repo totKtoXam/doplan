@@ -22,6 +22,11 @@ export interface GitRunner {
   timeoutMs?: number
   /** GitHub refused the sign-in: fresh credentials, the command repeated once (github.gitCredentials) */
   refresh?: () => Promise<{ config: string[]; env?: Record<string, string> }>
+  /**
+   * The credentials read inside the repository the push runs in, once it exists (an include of the
+   * user's may depend on where it is: includeIf "gitdir:…"); they replace config, env and refresh
+   */
+  credentials?: (repoDir: string) => Promise<{ config: string[]; env?: Record<string, string>; refresh?: GitRunner['refresh'] }>
 }
 
 export class PagesGitError extends Error {
@@ -120,14 +125,19 @@ function checkRemote(remote: string): void {
  * it was checked to be doplan's (null: the branch must not exist). Someone else's branch that
  * appeared or changed meanwhile is never overwritten. Resolves with the commit sha.
  */
-export async function pushSite(r: GitRunner, siteDir: string, remote: string, branch: string, message: string, expected: string | null): Promise<string> {
+export async function pushSite(runner: GitRunner, siteDir: string, remote: string, branch: string, message: string, expected: string | null): Promise<string> {
   checkRemote(remote)
   const expect = lease(expected)
   const { args, env: e } = repoArgs(siteDir)
   await fsp.rm(join(siteDir, '.git'), { recursive: true, force: true })
   // no template: nothing from the user's init.templateDir (hooks) lands in the repository
-  await run(r, siteDir, ['init', '-q', '--template=', `--initial-branch=${branch}`, resolve(siteDir)], e)
+  await run(runner, siteDir, ['init', '-q', '--template=', `--initial-branch=${branch}`, resolve(siteDir)], e)
   try {
+    let r = runner
+    if (r.credentials) {
+      const c = await r.credentials(siteDir)
+      r = { ...r, config: c.config, env: c.env, refresh: c.refresh, credentials: undefined }
+    }
     await run(r, siteDir, [...args, 'add', '-A', '--', '.'], e)
     await run(r, siteDir, [...args, 'commit', '-q', '--no-verify', '-m', message], e)
     const sha = (await run(r, siteDir, [...args, 'rev-parse', 'HEAD'], e)).trim()

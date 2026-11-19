@@ -200,6 +200,17 @@ export async function addRecent(path: string, name?: string): Promise<void> {
   emit(next)
 }
 
+/** drops a project from the recent list; resolves true when it was there */
+export async function removeRecent(path: string): Promise<boolean> {
+  const cur = await load()
+  const recent = cur.recent.filter((r) => r.path.toLowerCase() !== path.toLowerCase())
+  if (recent.length === cur.recent.length) return false
+  const next = { ...cur, recent }
+  await persist(next)
+  emit(next)
+  return true
+}
+
 export async function isRecentPath(path: string): Promise<boolean> {
   const cur = await load()
   return cur.recent.some((r) => r.path.toLowerCase() === path.toLowerCase())

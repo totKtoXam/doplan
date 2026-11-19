@@ -8,6 +8,7 @@ import { DEFAULT_AI_SETTINGS } from '@shared/aiChat'
 import { releasePageUrl } from '@shared/updater'
 import { DEFAULT_FEEDS } from '@shared/feeds'
 import { ghInstallHint, type GithubSyncStatus } from '@shared/github'
+import { setItemMakingRoom, WEB_RECENT_PREFIX, webRecent } from './webRecent'
 
 /** the web build has no git: GitHub sync lives in the desktop app */
 const webSync: GithubSyncStatus = { state: 'unavailable', reason: 'GitHub sync is available in the doplan desktop app', ahead: 0, behind: 0 }
@@ -40,7 +41,8 @@ function readLocalSettings(): AppSettings {
 
 function writeLocalSettings(s: AppSettings): void {
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(s))
+    // settings go before the copies of recent documents (webRecent)
+    setItemMakingRoom(SETTINGS_KEY, JSON.stringify(s))
   } catch {
     /* storage unavailable */
   }
@@ -108,6 +110,9 @@ function createFallbackApi(): DoplanApi {
     version: WEB_VERSION,
     project: {
       async open(path?: string) {
+        // a project from the welcome screen's list: the copy this browser kept
+        const kept = path?.startsWith(WEB_RECENT_PREFIX) ? webRecent.doc(path) : null
+        if (path && kept) return { path, doc: JSON.parse(kept), kind: 'json' as const }
         let file: File | undefined = path ? pickedFiles.get(path) : undefined
         if (!file) {
           const picked = await pickInBrowser([{ name: 'doplan JSON', extensions: ['json'] }])
@@ -120,13 +125,14 @@ function createFallbackApi(): DoplanApi {
         return { path: path ?? file.name, doc: JSON.parse(text) }
       },
       async save(doc: unknown, path: string | null) {
-        const name = path && !path.startsWith('browser:') ? path : 'project.doplan.json'
+        const name = path && !/^(browser|web):/.test(path) ? path : 'project.doplan.json'
         download(name.split(/[\\/]/).pop() ?? name, JSON.stringify(doc), 'application/json')
         return { path: name }
       },
       async autosave(doc: unknown) {
         try {
-          localStorage.setItem('doplan.recovery', JSON.stringify(doc))
+          // the crash-recovery copy goes before the copies of recent documents (webRecent)
+          setItemMakingRoom('doplan.recovery', JSON.stringify(doc))
         } catch {
           /* quota */
         }
@@ -249,6 +255,18 @@ function createFallbackApi(): DoplanApi {
         return ''
       },
       onProgress: noopUnsub,
+    },
+    recent: {
+      async list() {
+        return webRecent.list()
+      },
+      async remove(path: string) {
+        webRecent.remove(path)
+      },
+      async setThumb() {}, // the web build keeps thumbnails with the documents (webRecent.remember)
+      async launch() {
+        return { file: false }
+      },
     },
     settings: {
       async get() {

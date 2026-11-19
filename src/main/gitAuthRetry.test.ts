@@ -195,6 +195,36 @@ describe.skipIf(systemHasRules)('addresses as git will use them (the global url.
       ['github.com', 'https://github.com/anna/flat.git'],
       ['github.com/anna', 'https://github.com/anna/flat.git'],
       ['github.com/anna/flat.git', 'https://github.com/anna/flat.git'],
+      // a context without a scheme: git decodes it all (%2F too) and drops leading and trailing "/"
+      ['github.com/anna/flat.git/', 'https://github.com/anna/flat.git'],
+      ['github.com/anna/flat.git//', 'https://github.com/anna/flat.git'],
+      ['github.com/anna/flat', 'https://github.com/anna/flat/'],
+      ['github.com/anna/flat.git', 'https://github.com/anna/flat.git/'],
+      ['github.com/anna/flat.git', 'https://github.com//anna/flat.git'],
+      ['github.com//anna/flat.git', 'https://github.com/anna/flat.git'],
+      ['github.com/anna%2Fflat.git', 'https://github.com/anna/flat.git'],
+      ['github.com/anna/flat.git', 'https://github.com/anna%2Fflat.git'],
+      ['github.com/anna/fl%61t.git', 'https://github.com/anna/flat.git'],
+      ['github.com/anna/flat.git?x', 'https://github.com/anna/flat.git'],
+      ['github.com/anna/flat.git#x', 'https://github.com/anna/flat.git'],
+      ['github.com/an na/flat.git', 'https://github.com/an%20na/flat.git'],
+      // …and its host with the port as written, case-sensitive
+      ['github.com:443', 'https://github.com:443/anna/flat.git'],
+      ['github.com:443', 'https://github.com/anna/flat.git'],
+      ['github.com', 'https://github.com:443/anna/flat.git'],
+      ['GitHub.com', 'https://github.com/anna/flat.git'],
+      ['github.com', 'https://GitHub.com/anna/flat.git'],
+      // a context with a scheme: the url's path as git reads it (decoded, no leading or trailing "/")
+      ['https://github.com/anna', 'https://github.com/anna%2Fflat.git'],
+      ['https://github.com/anna', 'https://github.com//anna/flat.git'],
+      ['https://github.com/anna/flat.git', 'https://github.com/anna/flat.git/'],
+      ['https://github.com/anna/flat.git/', 'https://github.com/anna/flat.git//'],
+      ['https://github.com/anna%2Fflat.git', 'https://github.com/anna/flat.git'],
+      ['https://github.com/anna/flat.git', 'https://github.com/anna/flat.git?x=1'],
+      ['https://github.com/anna?x', 'https://github.com/anna/flat.git'],
+      ['https://github.com/an na', 'https://github.com/an%20na/flat.git'],
+      ['https://github.com.', 'https://github.com/anna/flat.git'],
+      ['https://github.com', 'https://github.com./anna/flat.git'],
     ]
     for (const useHttpPath of [false, true]) {
       for (const [ctx, target] of cases) {
@@ -203,6 +233,14 @@ describe.skipIf(systemHasRules)('addresses as git will use them (the global url.
         expect({ ctx, target, useHttpPath, own: (await gitEffectiveUrls(null, [target])).ownAccount }).toEqual({ ctx, target, useHttpPath, own: git })
       }
     }
+  })
+
+  it('an address git cannot be asked about safely (a stray % in its user name) never breaks the read', async () => {
+    globalConfig('[credential "me@github.com"]\n\tusername = acct\n')
+    const odd = 'https://a%ZZ@github.com/anna/flat.git'
+    expect((await gitEffectiveUrls(null, [odd])).ownAccount).toBe(false)
+    globalConfig('[credential "https://me@github.com"]\n\tusername = acct\n')
+    expect((await gitEffectiveUrls(null, [odd])).ownAccount).toBe(false)
   })
 
   it('a user name for another host does not count', async () => {

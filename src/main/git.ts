@@ -995,15 +995,10 @@ type UrlRule = { base: string; prefix: string }
 async function configMatching(root: string | null, pattern: string): Promise<ConfigEntry[]> {
   // netTestConfig: tests stand a local folder in for GitHub through an insteadOf rule
   const opts = { allowFail: true, config: [...netTestConfig] }
-  const args = ['config', '--get-regexp', pattern]
+  // -z: a key may hold spaces (credential.github.com/an na.username), a value too
+  const args = ['config', '-z', '--get-regexp', pattern]
   const r = root ? await run(root, args, opts) : await runOutside(args, opts)
-  if (r.code !== 0) return []
-  return trimOut(r)
-    .split(/\r?\n/)
-    .flatMap((line) => {
-      const m = /^(\S+)\s+(.*)$/.exec(line.trim())
-      return m ? [{ key: m[1], value: m[2].trim() }] : []
-    })
+  return r.code === 0 ? configRecords(r.out) : []
 }
 
 /**
@@ -1037,50 +1032,87 @@ function accountContexts(entries: ConfigEntry[]): string[] {
   })
 }
 
-/** %XX of an unreserved character as the character itself, as git's url_normalize does */
-const unescapedPath = (p: string) => p.replace(/%([0-9a-f]{2})/gi, (all, h: string) => (/[A-Za-z0-9\-._~]/.test(String.fromCharCode(parseInt(h, 16))) ? String.fromCharCode(parseInt(h, 16)) : all.toUpperCase()))
+/** every %XX as its byte (UTF-8), as git's url_decode does; never throws */
+function urlDecode(s: string): string {
+  const src = Buffer.from(s, 'utf8')
+  const out: number[] = []
+  for (let i = 0; i < src.length; i++) {
+    const hex = src[i] === 0x25 && i + 2 < src.length ? String.fromCharCode(src[i + 1], src[i + 2]) : ''
+    if (/^[0-9a-f]{2}$/i.test(hex)) {
+      out.push(parseInt(hex, 16))
+      i += 2
+    } else out.push(src[i])
+  }
+  return Buffer.from(out).toString('utf8')
+}
+
+/** a url's parts as git's credential_from_url reads them: decoded, the path without leading or trailing "/" */
+interface CredentialParts {
+  protocol?: string
+  user?: string
+  host?: string
+  path?: string
+}
+
+function credentialParts(url: string): CredentialParts {
+  const protoEnd = url.indexOf('://')
+  const cp = protoEnd > 0 ? url.slice(protoEnd + 3) : url
+  const slash = cp.search(/[/?#]/) < 0 ? cp.length : cp.search(/[/?#]/)
+  const auth = cp.slice(0, slash)
+  const at = auth.indexOf('@')
+  const out: CredentialParts = {}
+  if (protoEnd > 0) out.protocol = url.slice(0, protoEnd)
+  if (at >= 0) {
+    const colon = auth.indexOf(':')
+    out.user = urlDecode(colon >= 0 && colon < at ? auth.slice(0, colon) : auth.slice(0, at))
+  }
+  out.host = urlDecode(auth.slice(at + 1))
+  const path = cp.slice(slash).replace(/^\/+/, '')
+  if (path) out.path = urlDecode(path).replace(/(.)\/+$/, '$1')
+  return out
+}
+
+/** a path for comparing: every escape but %2F decoded (git decodes unreserved ones; more is only safer) */
+const credentialPath = (p: string) => p.split(/%2F/i).map(urlDecode).join('%2F')
+
+const bareHost = (h: string) => h.toLowerCase().replace(/\.$/, '')
 
 /**
- * Whether git applies credential.<context>.* to `url` (git's urlmatch, checked against
- * `git credential fill`): the same scheme, host (a `*` matching one whole label), port and user name
- * when the context names one; its path a prefix of the url's path at a "/" (case-sensitive). A context
- * without a scheme (`github.com`, `github.com/org/repo.git`) matches the host and, when it has a path,
- * that whole path. credential.useHttpPath does not change it: git drops the path only after reading
- * the config.
+ * Whether git applies credential.<context>.* to `url` (git's credential_apply_config, checked against
+ * `git credential fill`). The url is read as git reads it (credential_from_url: decoded, a %2F a "/"
+ * too, no leading or trailing "/"). A context with a scheme goes through urlmatch: the same scheme,
+ * host (a `*` for one whole label), port and user name when it names one, no query, its path a prefix
+ * of the url's path at a "/" (case-sensitive). A context without a scheme is a partial url
+ * (credential_match): its host (with the port as written, case-sensitive), user name and path, each
+ * decoded the same way, equal to the url's. credential.useHttpPath does not change it: git drops the
+ * path only after reading the config. Anything that cannot be read counts as a match: gh then stays out.
  */
 function credentialContextMatches(context: string, url: string): boolean {
-  let t: URL
   try {
-    t = new URL(url)
+    const t = credentialParts(url)
+    if (!t.protocol || !t.host) return false
+    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(context)) {
+      const want = credentialParts(context)
+      if (want.user !== undefined && want.user !== t.user) return false
+      if (want.host && want.host !== t.host) return false
+      return want.path === undefined || want.path === t.path
+    }
+    const c = new URL(context)
+    // the url as git writes it for urlmatch (credential_format): the path encoded again, "/" as is
+    const enc = (t.path ?? '').replace(/[^A-Za-z0-9\-._~/]/g, (ch) => [...Buffer.from(ch, 'utf8')].map((b) => `%${b.toString(16).toUpperCase().padStart(2, '0')}`).join(''))
+    const u = new URL(`${t.protocol}://${t.host}/${enc}`)
+    if (c.search || c.hash) return false
+    if (c.protocol !== u.protocol || c.port !== u.port) return false
+    if (c.username && urlDecode(c.username) !== t.user) return false
+    const want = bareHost(c.hostname).split('.')
+    const have = bareHost(u.hostname).split('.')
+    if (want.length !== have.length || want.some((l, i) => l !== '*' && l !== have[i])) return false
+    const p = credentialPath(c.pathname).replace(/\/+$/, '')
+    const tPath = credentialPath(u.pathname)
+    return !p || tPath === p || tPath.startsWith(`${p}/`)
   } catch {
-    return false
+    return true
   }
-  const tPath = unescapedPath(t.pathname)
-  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(context)) {
-    const slash0 = context.indexOf('/')
-    const at = context.lastIndexOf('@', slash0 < 0 ? context.length : slash0)
-    const user = at < 0 ? '' : context.slice(0, at)
-    const rest = context.slice(at + 1)
-    const slash = rest.indexOf('/')
-    const host = slash < 0 ? rest : rest.slice(0, slash)
-    const path = slash < 0 ? '' : rest.slice(slash + 1)
-    if (user && decodeURIComponent(t.username) !== user) return false
-    if (host.toLowerCase() !== t.host.toLowerCase()) return false
-    return !path || unescapedPath(path) === tPath.slice(1)
-  }
-  let c: URL
-  try {
-    c = new URL(context)
-  } catch {
-    return false
-  }
-  if (c.protocol !== t.protocol || c.port !== t.port) return false
-  if (c.username && c.username !== t.username) return false
-  const want = c.hostname.split('.')
-  const have = t.hostname.split('.')
-  if (want.length !== have.length || want.some((l, i) => l !== '*' && l !== have[i])) return false
-  const p = unescapedPath(c.pathname).replace(/\/+$/, '')
-  return !p || tPath === p || tPath.startsWith(`${p}/`)
 }
 
 /**

@@ -4,6 +4,8 @@
  * through doplan-asset:// URLs.
  */
 import type { SiteContent, SiteFile } from '@shared/pagesSite'
+import { BAKE_DIR } from '@/view3d/bake/manifest'
+import { captureBake } from './bake'
 import { browserCodec } from './browserCodec'
 import { type OptimizeReport, optimizeSite } from './optimize'
 import { capturePreview, PREVIEW_PATH } from './preview'
@@ -24,9 +26,16 @@ async function readSource(f: SiteFile): Promise<Uint8Array> {
 export interface PrepareSteps {
   optimize(done: number, total: number): void
   preview(): void
+  /** baking the light, 0…1 */
+  bake(part: number): void
 }
 
-export async function prepareSite(content: SiteContent, steps: PrepareSteps): Promise<{ content: SiteContent; report: OptimizeReport | null }> {
+export interface PrepareOptions {
+  /** bake the light of the walls, floors and ceilings */
+  bake: boolean
+}
+
+export async function prepareSite(content: SiteContent, steps: PrepareSteps, opts: PrepareOptions = { bake: false }): Promise<{ content: SiteContent; report: OptimizeReport | null }> {
   let out = content
   let report: OptimizeReport | null = null
   try {
@@ -40,6 +49,12 @@ export async function prepareSite(content: SiteContent, steps: PrepareSteps): Pr
   steps.preview()
   const preview = await capturePreview()
   if (preview) out = { ...out, files: [...out.files.filter((f) => f.path !== PREVIEW_PATH), { host: 'project', rel: 'preview.webp', path: PREVIEW_PATH, data: preview }] }
+  out = { ...out, files: out.files.filter((f) => !f.path.startsWith(`${BAKE_DIR}/`)) }
+  if (opts.bake) {
+    steps.bake(0)
+    const baked = await captureBake(steps.bake)
+    if (baked) out = { ...out, files: [...out.files, ...baked.files.map((f) => ({ host: 'project' as const, rel: f.path.slice('assets/'.length), path: f.path, data: f.data }))] }
+  }
   if (report) console.info('[doplan] publish: models and textures', report)
   return { content: out, report }
 }

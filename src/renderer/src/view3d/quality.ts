@@ -9,6 +9,7 @@
 import type * as THREE from 'three'
 import type { QualityPreset } from '@core/types'
 import type { EngineContext } from '@/contracts'
+import type { BakeLights } from './bake/trace'
 
 export type ShadowKind = 'basic' | 'pcf' | 'vsm'
 export type AntiAliasing = 'fxaa' | 'traa'
@@ -297,6 +298,15 @@ export interface RenderShared {
    * drawn during a path tracing session (camera moving, document edited) and returns the undo.
    */
   rasterLook: (() => () => void) | null
+  /**
+   * The walls, floors and ceilings show a baked light map: the sun and the lamps stop casting
+   * shadow maps, the window lights and the screen-space occlusion are off (they are in the map).
+   */
+  baked: boolean
+  onBakedChanged(cb: (on: boolean) => void): () => void
+  setBaked(on: boolean): void
+  /** set by the lighting rig: every light of the shown level for a bake, as the live view has them */
+  bakeLights: (() => BakeLights) | null
   onLightingChanged(cb: (c: LightingChange) => void): () => void
   emitLightingChanged(c: LightingChange): void
   onQualityChanged(cb: (q: QualityPreset) => void): () => void
@@ -335,6 +345,7 @@ export function getShared(ctx: EngineContext): RenderShared {
   const lighting = emitter<LightingChange>()
   const quality = emitter<QualityPreset>()
   const tracing = emitter<boolean>()
+  const baked = emitter<boolean>()
   const shared: RenderShared = {
     post: null,
     controls: null,
@@ -342,6 +353,14 @@ export function getShared(ctx: EngineContext): RenderShared {
     pathTracing: false,
     rasterLook: null,
     stillBusy: false,
+    baked: false,
+    onBakedChanged: baked.on,
+    setBaked(on) {
+      if (shared.baked === on) return
+      shared.baked = on
+      baked.emit(on)
+    },
+    bakeLights: null,
     onLightingChanged: lighting.on,
     emitLightingChanged: lighting.emit,
     onQualityChanged: quality.on,

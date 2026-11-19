@@ -77,6 +77,10 @@ addTranslations('en', {
   'Облегчаю модели и текстуры: {done} из {total}…': 'Making models and textures lighter: {done} of {total}…',
   'Облегчаю модели и текстуры…': 'Making models and textures lighter…',
   'Снимаю превью 3D…': 'Taking the 3D preview…',
+  'Запекаю свет: {p}%…': 'Baking the light: {p}%…',
+  'Запечь свет': 'Bake the light',
+  'Свет и тени на стенах, полу и потолке считаются заранее: 3D на сайте открывается быстрее и выглядит лучше на слабых устройствах. Посетитель может включить живой свет. Занимает от нескольких секунд до пары минут.':
+    'Light and shadows on the walls, floor and ceiling are worked out in advance: the 3D view on the site opens faster and looks better on weak devices. A visitor can switch to the live light. Takes from a few seconds to a couple of minutes.',
   'Не удалось скачать: {list}.': 'Could not download: {list}.',
   'Собираю сайт…': 'Building the site…',
   'Готовлю репозиторий…': 'Preparing the repository…',
@@ -180,7 +184,9 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
   const loadId = useDoc((s) => s.loadId)
   const [status, setStatus] = useState<PagesStatus | null>(null)
   const [loading, setLoading] = useState(false)
-  const [busy, setBusy] = useState<PagesProgress['step'] | 'unpublish' | 'download' | 'optimize' | 'preview' | null>(null)
+  const [busy, setBusy] = useState<PagesProgress['step'] | 'unpublish' | 'download' | 'optimize' | 'preview' | 'bake' | null>(null)
+  const [bakeLight, setBakeLight] = useState(true)
+  const [bakePart, setBakePart] = useState(0)
   const [optimized, setOptimized] = useState<{ done: number; total: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<PagesPublishResult | null>(null)
@@ -277,10 +283,18 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
     setResult(null)
     try {
       // lighter models and textures, and the picture shown while the 3D loads
-      const prepared = await prepareSite(built, {
-        optimize: (done, total) => setOptimized({ done, total }),
-        preview: () => setBusy('preview'),
-      })
+      const prepared = await prepareSite(
+        built,
+        {
+          optimize: (done, total) => setOptimized({ done, total }),
+          preview: () => setBusy('preview'),
+          bake: (part) => {
+            setBusy('bake')
+            setBakePart(part)
+          },
+        },
+        { bake: bakeLight },
+      )
       if (!isCurrentGeneration(gen)) return
       setBusy('build')
       const res = await api.pages.publish({
@@ -369,6 +383,7 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
     download: t('Скачиваю недостающее…'),
     optimize: optimized && optimized.total > 0 ? t('Облегчаю модели и текстуры: {done} из {total}…', optimized) : t('Облегчаю модели и текстуры…'),
     preview: t('Снимаю превью 3D…'),
+    bake: t('Запекаю свет: {p}%…', { p: Math.round(bakePart * 100) }),
   }
 
   const desktop = typeof window !== 'undefined' && !!(window as { doplan?: unknown }).doplan
@@ -519,6 +534,17 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
                 </span>
               </label>
             )}
+            <label className="flex cursor-pointer items-start gap-2">
+              <input type="checkbox" className="mt-0.5" checked={bakeLight} disabled={!!busy} onChange={(e) => setBakeLight(e.currentTarget.checked)} />
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="font-medium">{t('Запечь свет')}</span>
+                {bakeLight && (
+                  <span className="text-[var(--muted)]">
+                    {t('Свет и тени на стенах, полу и потолке считаются заранее: 3D на сайте открывается быстрее и выглядит лучше на слабых устройствах. Посетитель может включить живой свет. Занимает от нескольких секунд до пары минут.')}
+                  </span>
+                )}
+              </span>
+            </label>
             <label className="flex cursor-pointer items-start gap-2">
               <input type="checkbox" className="mt-0.5" checked={download} disabled={!!busy} onChange={(e) => setDownload(e.currentTarget.checked)} />
               <span className="flex min-w-0 flex-col gap-0.5">

@@ -26,6 +26,7 @@ import { visibleDoc, visiblePlan } from '@core/layers'
 import { docStore } from '@/store/document'
 import { isLiveResizing, onLiveResizeEnd } from '@/store/liveResize'
 import { uiStore } from '@/store/ui'
+import { createBakedLight } from './bake/apply'
 import { Architecture } from './build/architecture'
 import { ElectricalBuilder } from './build/electrical'
 import { createControls } from './controls'
@@ -236,6 +237,35 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     scheduleCollect()
     invalidate()
   }
+  const baked = createBakedLight(ctx, shared, {
+    shown() {
+      const doc = visibleDoc(docStore.getState().doc)
+      return { doc, levelId: activeLevel(doc) }
+    },
+    flush: () => flushSync(),
+    ceilingsShown: () => arch.ceilingsShown(),
+    whenIdle: () => lib.whenIdle(8000),
+    withFullScene(ceilings, fn) {
+      arch.setExportMode(true)
+      arch.setCeilingsShown(ceilings)
+      try {
+        return fn()
+      } finally {
+        arch.setExportMode(false)
+        arch.updateVisibility(camera, uiStore.getState().cameraMode, docStore.getState().doc.render, bounds)
+        invalidate(3)
+      }
+    },
+  })
+  // the path tracer reads the live materials
+  let ptHold: (() => void) | null = null
+  const unsubPtHold = uiStore.subscribe((s) => {
+    if (s.pathTracing.active && !ptHold) ptHold = baked.hold()
+    else if (!s.pathTracing.active && ptHold) {
+      ptHold()
+      ptHold = null
+    }
+  })
   const items = new ItemsLayer(ctx, lib, factory, afterSceneChange)
   const electrical = new ElectricalBuilder(roots.electrical)
   const thumbs = new ThumbRenderer(ctx, lib, items)
@@ -417,6 +447,8 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     if (replaced || levelChanged || (hasContent && !hadContent)) wantsFit = true
     hadContent = hasContent
 
+    // the published light shows while the plan is what was baked
+    if (archDirty || sceneChanged || lightsDirty || levelChanged) baked.refresh()
     if (!mods) return
     if (sceneChanged || moved) {
       emitSceneChanged()
@@ -857,6 +889,8 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       if (liveTimer) clearTimeout(liveTimer)
       offLiveResize()
       if (collectTimer) clearTimeout(collectTimer)
+      unsubPtHold()
+      baked.dispose()
       document.removeEventListener('visibilitychange', onVisibility)
       dprQuery?.removeEventListener('change', onDprChange)
       if (mods) disposeSubModules(mods)
@@ -972,6 +1006,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     async exportGlb() {
       flushSync()
       await lib.whenIdle(8000)
+      const release = baked.hold()
       // full-height walls, ceilings and everything a cut-away pass has hidden
       arch.setExportMode(true)
       const shown: THREE.Object3D[] = []
@@ -985,10 +1020,17 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
         return await exportSceneGlb([roots.architecture, roots.items, roots.electrical])
       } finally {
         for (const o of shown) o.visible = false
+        release()
         arch.setExportMode(false)
         arch.updateVisibility(camera, uiStore.getState().cameraMode, docStore.getState().doc.render, bounds)
         invalidate(3)
       }
+    },
+    bakeLighting(opts) {
+      return baked.bake(opts)
+    },
+    setBakedLight(bake) {
+      baked.set(bake)
     },
     renderAssetThumb(asset: Asset, size: number) {
       return thumbs.renderAsset(asset, size)

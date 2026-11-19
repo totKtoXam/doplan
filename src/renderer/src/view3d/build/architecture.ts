@@ -337,6 +337,17 @@ export class Architecture {
     }
   }
 
+  /** baking in export mode: the ceilings in place or left out */
+  setCeilingsShown(on: boolean): void {
+    for (const rec of this.rooms.values()) rec.build.ceiling.visible = on
+  }
+
+  /** any ceiling on screen (walk, or the ceiling shown from below it) */
+  ceilingsShown(): boolean {
+    for (const rec of this.rooms.values()) if (rec.build.ceiling.visible) return true
+    return false
+  }
+
   objectsFor(ref: EntityRef): THREE.Object3D[] {
     if (ref.kind === 'wall') {
       const rec = this.walls.get(ref.id)

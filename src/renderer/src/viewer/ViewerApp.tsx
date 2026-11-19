@@ -5,6 +5,7 @@ import {
   Footprints,
   Info,
   LampCeiling,
+  Lightbulb,
   Link2,
   LoaderCircle,
   Map as MapIcon,
@@ -21,7 +22,7 @@ import { type RefObject, useEffect, useMemo, useRef, useState } from 'react'
 import { builtinCatalog, mergeCatalog, parseDoc } from '@core'
 import { layerIndex } from '@core/layers'
 import type { Catalog, Doc, QualityPreset } from '@core/types'
-import type { Editor2DHandle, Engine3DHandle } from '@/contracts'
+import type { BakeManifest, Editor2DHandle, Engine3DHandle } from '@/contracts'
 import { addTranslations, useT } from '@/i18n'
 import { docStore, useDoc } from '@/store/document'
 import { setHandle } from '@/store/handles'
@@ -30,7 +31,8 @@ import { uiStore, useUi } from '@/store/ui'
 import { AppLogo } from '@/ui/shell/AppLogo'
 import { MiniSelect, Segmented } from '@/ui/shell/primitives'
 import { WalkLockHint } from '@/ui/shell/WalkLockHint'
-import { status3dStore, useStatus3d } from '@/view3d/status'
+import { BAKE_MANIFEST, parseBakeManifest } from '@/view3d/bake/manifest'
+import { type BakedState, status3dStore, useStatus3d } from '@/view3d/status'
 import { parseViewerParams, viewerQuery, type SiteInfo, type ViewerCam, type ViewerParams, type ViewerView } from '@shared/pagesSite'
 import { installEditGuard, lockViewerTool, viewerEdit } from './guard'
 import { downloadableDoc } from './exporters'
@@ -75,6 +77,10 @@ addTranslations('en', {
   'Загрузка моделей': 'Loading models',
   Этаж: 'Level',
   'Перетаскивайте, чтобы осмотреться': 'Drag to look around',
+  'Свет: запечённый. Нажмите, чтобы считать свет вживую': 'Light: baked. Click to light the scene live',
+  'Свет: живой. Нажмите, чтобы показать запечённый': 'Light: live. Click to show the baked light',
+  'Запечённый свет загружается…': 'Loading the baked light…',
+  'Запечённый свет сделан для плана целиком: пока скрыты объекты, выключен свет или открыт другой этаж, свет считается вживую': 'The baked light was made for the whole plan: while objects are hidden, a light is off or another level is shown, the light is live',
 })
 
 const QUALITY: QualityPreset[] = ['low', 'medium', 'high', 'ultra']
@@ -404,6 +410,24 @@ function Scene3D({
   const [error, setError] = useState<string | null>(null)
   const [backend, setBackend] = useState<'webgpu' | 'webgl'>('webgpu')
   const [attempt, setAttempt] = useState(0)
+  // the light baked when publishing (none on sites published without it)
+  const [bake, setBake] = useState<BakeManifest | null>(null)
+  const [liveLight, setLiveLight] = useState(false)
+  useEffect(() => {
+    let off = false
+    fetch(BAKE_MANIFEST)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json: unknown) => {
+        if (!off) setBake(parseBakeManifest(json))
+      })
+      .catch(() => undefined)
+    return () => {
+      off = true
+    }
+  }, [])
+  useEffect(() => {
+    engine?.setBakedLight?.(bake ? { manifest: bake, base: document.baseURI, live: liveLight } : null)
+  }, [engine, bake, liveLight])
 
   useEffect(() => {
     const el = host.current
@@ -521,7 +545,7 @@ function Scene3D({
         </div>
       )}
       {engine && !hidden && <MeasureOverlay view="3d" />}
-      {engine && <Toolbar3D engine={engine} cam={cam} onCam={onCam} />}
+      {engine && <Toolbar3D engine={engine} cam={cam} onCam={onCam} onToggleLight={() => setLiveLight((v) => !v)} />}
       {engine && !hidden && <Busy />}
       {engine && !hidden && <WalkLockHint host={host} active={cam === 'walk'} />}
       {engine && !hidden && cam === 'walk' && <WalkStick />}
@@ -569,8 +593,9 @@ function PreviewPicture({ ready, host }: { ready: boolean; host: RefObject<HTMLD
   )
 }
 
-function Toolbar3D({ engine, cam, onCam }: { engine: Engine3DHandle; cam: ViewerCam; onCam(c: ViewerCam): void }) {
+function Toolbar3D({ engine, cam, onCam, onToggleLight }: { engine: Engine3DHandle; cam: ViewerCam; onCam(c: ViewerCam): void; onToggleLight(): void }) {
   const t = useT()
+  const baked = useStatus3d((s) => s.baked)
   const quality = useDoc((s) => s.doc.render.quality)
   const cutaway = useDoc((s) => s.doc.render.wallCutaway)
   const ceiling = useDoc((s) => s.doc.render.ceilingVisible)
@@ -619,6 +644,7 @@ function Toolbar3D({ engine, cam, onCam }: { engine: Engine3DHandle; cam: Viewer
         <ToolBtn label={t('Сбросить камеру')} onClick={() => engine.resetCamera()}>
           <RotateCcw size={14} />
         </ToolBtn>
+        <BakedLightBtn state={baked} onClick={onToggleLight} />
       </div>
       <div className="pointer-events-auto ml-auto flex items-center gap-1 rounded-lg border border-border bg-panel/90 p-1 shadow-pop backdrop-blur">
         <MiniSelect title={t('Качество')} value={quality} options={QUALITY.map((q) => ({ value: q, label: t(QUALITY_NAMES[q]) }))} onChange={setQuality} />
@@ -648,6 +674,28 @@ function Toolbar3D({ engine, cam, onCam }: { engine: Engine3DHandle; cam: Viewer
           ))}
       </div>
     </div>
+  )
+}
+
+const BAKED_TITLES: Record<Exclude<BakedState, 'none'>, string> = {
+  on: 'Свет: запечённый. Нажмите, чтобы считать свет вживую',
+  live: 'Свет: живой. Нажмите, чтобы показать запечённый',
+  loading: 'Запечённый свет загружается…',
+  mismatch: 'Запечённый свет сделан для плана целиком: пока скрыты объекты, выключен свет или открыт другой этаж, свет считается вживую',
+}
+
+/** baked or live light; only on sites published with it */
+function BakedLightBtn({ state, onClick }: { state: BakedState; onClick(): void }) {
+  const t = useT()
+  if (state === 'none') return null
+  return (
+    <ToolBtn label={t(BAKED_TITLES[state])} active={state === 'on'} onClick={onClick}>
+      {state === 'loading' ? (
+        <LoaderCircle size={14} className="dp-spin" />
+      ) : (
+        <Lightbulb size={14} className={state === 'mismatch' ? 'opacity-50' : undefined} />
+      )}
+    </ToolBtn>
   )
 }
 

@@ -202,6 +202,13 @@ export interface Engine3DHandle {
   pickAt?(clientX: number, clientY: number): EntityPick | null
   /** viewer: world point (metres) → client px, null behind the camera */
   projectPoint?(p: readonly [number, number, number]): [number, number] | null
+  /** editor: bakes the light of the shown level's walls, floors and ceilings; null when it has none */
+  bakeLighting?(opts?: { onProgress?(done: number, total: number): void; signal?: AbortSignal }): Promise<BakeOutput | null>
+  /**
+   * viewer: the published light (pages relative to `base`); `live` shows the live light instead.
+   * null forgets it.
+   */
+  setBakedLight?(bake: { manifest: BakeManifest; base: string; live: boolean } | null): void
   /** square PNG thumbnail of an asset / material sphere on neutral background */
   renderAssetThumb(asset: Asset, size: number): Promise<Blob>
   renderMaterialThumb(material: Material, size: number): Promise<Blob>
@@ -211,6 +218,49 @@ export interface Engine3DHandle {
     size: { w: number; d: number; h: number }
     slots: string[]
   }>
+}
+
+/**
+ * The ceilings in place (walk, the ceiling shown) or left out (the dollhouse views, where the sun
+ * and the sky come in from above): one page each, laid out the same way.
+ */
+export type BakeVariant = 'closed' | 'open'
+
+export interface BakedPage {
+  /** the page, relative to the site */
+  file: string
+  /** brightness of a full texel */
+  scale: number
+}
+
+/**
+ * One level's baked light, as published (assets/bake/bake.json): pages of light for the walls,
+ * floors and ceilings, and what they were made for. The viewer lays the pages out again from the
+ * same geometry and shows them only while all of it still matches.
+ */
+export interface BakedLevel extends Record<BakeVariant, BakedPage> {
+  layout: { density: number; maxSize: number; minSize: number; pad: number }
+  /** where the charts went */
+  layoutHash: string
+  /** the receivers' keys and triangles */
+  geometry: string
+  /** the lights and the sky */
+  lights: string
+  /** what throws shadows besides the walls and rooms */
+  casters: string
+}
+
+export interface BakeManifest {
+  version: 1
+  levels: Record<string, BakedLevel>
+}
+
+/** a bake of the shown level: the manifest entry without its pages, and the pages as 8-bit sRGB */
+export interface BakeOutput {
+  levelId: string
+  level: Omit<BakedLevel, BakeVariant>
+  size: number
+  pages: Record<BakeVariant, { rgba: Uint8ClampedArray; scale: number }>
 }
 
 /** view3d/index.ts — lazy-loaded chunk */

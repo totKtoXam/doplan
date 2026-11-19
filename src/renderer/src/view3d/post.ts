@@ -94,9 +94,10 @@ export function createPost(ctx: EngineContext): PostPipeline {
     const gpu = isWebGPU(renderer)
     const temporal = q.antialias === 'traa' && gpu
     return {
-      ao: q.ao && r.ao !== false,
+      // a baked light map already holds the occlusion of the walls and floors
+      ao: q.ao && r.ao !== false && !shared.baked,
       // SSGI is tuned for temporal accumulation; without TRAA it is too noisy to show
-      ssgi: q.ssgi && r.ssgi === true && gpu && temporal,
+      ssgi: q.ssgi && r.ssgi === true && gpu && temporal && !shared.baked,
       ssr: q.ssr && r.ssr === true && gpu,
       bloom: q.bloom && r.bloom !== false,
       traa: temporal,

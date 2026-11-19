@@ -432,6 +432,9 @@ export function createMaterialLibrary(ctx: EngineContext): MaterialLibrary {
           if (!mat) return
           if (Array.isArray(mat)) for (const m of mat) alive.add(m)
           else alive.add(mat)
+          // a receiver showing the baked light keeps its own material for the live light
+          const live = o.userData.liveMaterial as THREE.Material | undefined
+          if (live) alive.add(live)
         })
       }
       for (const e of Array.from(entries.values())) {

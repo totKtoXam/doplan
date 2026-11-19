@@ -28,7 +28,7 @@ process.env['USERPROFILE'] = home
 delete process.env['XDG_CONFIG_HOME']
 const globalConfig = (text: string) => (text ? writeFileSync(join(home, '.gitconfig'), text) : rmSync(join(home, '.gitconfig'), { force: true }))
 
-const { findGit, gitEffectiveUrls, gitRemoteAddresses, gitRemoteHeads, netTestConfig } = await import('./git')
+const { findGit, gitAddressesFor, gitEffectiveUrls, gitRemoteAddresses, gitRemoteHeads, netTestConfig } = await import('./git')
 const { tokenHeaderFits } = await import('./github')
 const { pushSite } = await import('./pagesGit')
 
@@ -151,6 +151,58 @@ describe.skipIf(systemHasRules)('addresses as git will use them (the global url.
     globalConfig('[credential]\n\tusername = work-acct\n')
     expect((await gitRemoteAddresses(root)).ownAccount).toBe(true)
     expect((await gitEffectiveUrls(null, [plain])).ownAccount).toBe(true)
+  })
+
+  it('a user name for one owner\'s path (credential.https://github.com/work-org) counts only under that path', async () => {
+    globalConfig('[credential "https://github.com/work-org"]\n\tusername = work-acct\n')
+    const a = await gitRemoteAddresses(root)
+    expect(a.ownAccount).toBe(false)
+    expect((await gitEffectiveUrls(null, [plain])).ownAccount).toBe(false)
+    expect((await gitEffectiveUrls(null, ['https://github.com/work-org/site.git'])).ownAccount).toBe(true)
+    // connecting another repository: worked out from what was read, no second read
+    expect(gitAddressesFor(a, ['https://github.com/work-org/site.git']).ownAccount).toBe(true)
+    expect(gitAddressesFor(a, ['https://github.com/work-org2/site.git']).ownAccount).toBe(false)
+  })
+
+  // git's own answer: the user name `git credential fill` ends up with (a helper that names none: "none")
+  const HELPER = '!f() { u=; while read l; do case "$l" in username=*) u=1;; esac; done; [ -z "$u" ] && echo username=none; echo password=p; }; f'
+  function gitUserFor(target: string): string {
+    const out = execFileSync('git', ['-c', 'credential.helper=', '-c', `credential.helper=${HELPER}`, 'credential', 'fill'], {
+      input: `url=${target}\n\n`,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      windowsHide: true,
+    })
+    return /^username=(.*)$/m.exec(out.toString())?.[1] ?? ''
+  }
+
+  it('a user name counts exactly where git itself applies it (git credential fill)', async () => {
+    const cases: [string, string][] = [
+      ['https://github.com/work-org', 'https://github.com/work-org/repo.git'],
+      ['https://github.com/work-org', 'https://github.com/anna/flat.git'],
+      ['https://github.com/work-org', 'https://github.com/work-org2/repo.git'],
+      ['https://github.com/work-org/', 'https://github.com/work-org/repo.git'],
+      ['https://github.com/Work-Org', 'https://github.com/work-org/repo.git'],
+      ['https://github.com/an%6Ea', 'https://github.com/anna/flat.git'],
+      ['https://github.com/anna/flat', 'https://github.com/anna/flat.git'],
+      ['https://github.com/anna/flat.git/', 'https://github.com/anna/flat.git'],
+      ['https://github.com/', 'https://github.com/anna/flat.git'],
+      ['https://GitHub.com', 'https://github.com/anna/flat.git'],
+      ['https://github.com:443', 'https://github.com/anna/flat.git'],
+      ['http://github.com', 'https://github.com/anna/flat.git'],
+      ['https://me@github.com', 'https://github.com/anna/flat.git'],
+      ['https://*.github.com', 'https://github.com/anna/flat.git'],
+      ['https://*.github.com', 'https://gist.github.com/anna/flat.git'],
+      ['github.com', 'https://github.com/anna/flat.git'],
+      ['github.com/anna', 'https://github.com/anna/flat.git'],
+      ['github.com/anna/flat.git', 'https://github.com/anna/flat.git'],
+    ]
+    for (const useHttpPath of [false, true]) {
+      for (const [ctx, target] of cases) {
+        globalConfig(`[credential]\n\tuseHttpPath = ${useHttpPath}\n[credential "${ctx}"]\n\tusername = acct\n`)
+        const git = gitUserFor(target) === 'acct'
+        expect({ ctx, target, useHttpPath, own: (await gitEffectiveUrls(null, [target])).ownAccount }).toEqual({ ctx, target, useHttpPath, own: git })
+      }
+    }
   })
 
   it('a user name for another host does not count', async () => {

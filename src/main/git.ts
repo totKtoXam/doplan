@@ -1025,38 +1025,88 @@ function rewritten(urls: readonly string[], rules: UrlRule[]): string[] {
 }
 
 /**
- * A user name for github.com in the credential config (credential.username, or
- * credential.<url>.username whose address is on github.com): the user picked an account of their own
- * there (a credential manager holding several), which gh's token must not replace. A user name for
- * another host does not count.
+ * The addresses of the user names in the credential config: '' for credential.username (every
+ * address), the <url> of credential.<url>.username otherwise
  */
-function ownAccount(entries: ConfigEntry[]): boolean {
-  return entries.some(({ key, value }) => {
-    if (!value) return false
-    if (/^credential\.username$/i.test(key)) return true
+function accountContexts(entries: ConfigEntry[]): string[] {
+  return entries.flatMap(({ key, value }) => {
+    if (!value) return []
+    if (/^credential\.username$/i.test(key)) return ['']
     const m = /^credential\.(.+)\.username$/i.exec(key)
-    if (!m) return false
-    try {
-      const u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(m[1]) ? m[1] : `https://${m[1]}`)
-      return u.hostname.toLowerCase() === 'github.com'
-    } catch {
-      return false
-    }
+    return m ? [m[1]] : []
   })
+}
+
+/** %XX of an unreserved character as the character itself, as git's url_normalize does */
+const unescapedPath = (p: string) => p.replace(/%([0-9a-f]{2})/gi, (all, h: string) => (/[A-Za-z0-9\-._~]/.test(String.fromCharCode(parseInt(h, 16))) ? String.fromCharCode(parseInt(h, 16)) : all.toUpperCase()))
+
+/**
+ * Whether git applies credential.<context>.* to `url` (git's urlmatch, checked against
+ * `git credential fill`): the same scheme, host (a `*` matching one whole label), port and user name
+ * when the context names one; its path a prefix of the url's path at a "/" (case-sensitive). A context
+ * without a scheme (`github.com`, `github.com/org/repo.git`) matches the host and, when it has a path,
+ * that whole path. credential.useHttpPath does not change it: git drops the path only after reading
+ * the config.
+ */
+function credentialContextMatches(context: string, url: string): boolean {
+  let t: URL
+  try {
+    t = new URL(url)
+  } catch {
+    return false
+  }
+  const tPath = unescapedPath(t.pathname)
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(context)) {
+    const slash0 = context.indexOf('/')
+    const at = context.lastIndexOf('@', slash0 < 0 ? context.length : slash0)
+    const user = at < 0 ? '' : context.slice(0, at)
+    const rest = context.slice(at + 1)
+    const slash = rest.indexOf('/')
+    const host = slash < 0 ? rest : rest.slice(0, slash)
+    const path = slash < 0 ? '' : rest.slice(slash + 1)
+    if (user && decodeURIComponent(t.username) !== user) return false
+    if (host.toLowerCase() !== t.host.toLowerCase()) return false
+    return !path || unescapedPath(path) === tPath.slice(1)
+  }
+  let c: URL
+  try {
+    c = new URL(context)
+  } catch {
+    return false
+  }
+  if (c.protocol !== t.protocol || c.port !== t.port) return false
+  if (c.username && c.username !== t.username) return false
+  const want = c.hostname.split('.')
+  const have = t.hostname.split('.')
+  if (want.length !== have.length || want.some((l, i) => l !== '*' && l !== have[i])) return false
+  const p = unescapedPath(c.pathname).replace(/\/+$/, '')
+  return !p || tPath === p || tPath.startsWith(`${p}/`)
+}
+
+/**
+ * A user name in the credential config that git applies to one of `urls` (credential.username, or
+ * credential.<url>.username matching as git matches it: credentialContextMatches): the user picked an
+ * account of their own there (a credential manager holding several), which gh's token must not replace.
+ * A user name for another host or another owner's path (credential.https://github.com/work-org) does
+ * not count for other addresses.
+ */
+function ownAccount(contexts: readonly string[], urls: readonly string[]): boolean {
+  return contexts.some((ctx) => ctx === '' || urls.some((u) => credentialContextMatches(ctx, u)))
 }
 
 /** what decides gh's part in a network command (github.gitCredentials) */
 export interface NetAddresses {
   /** every address git may talk to: as written, and rewritten by the insteadOf rules (see rewritten()) */
   effective: string[]
-  /** a user name for github.com in the credential config (see ownAccount()) */
+  /** a user name in the credential config that git applies to one of these addresses (see ownAccount()) */
   ownAccount: boolean
 }
 
 /** every address git may use for `urls` outside any repository (gh-pages pushes), in one git call */
 export async function gitEffectiveUrls(root: string | null, urls: readonly string[]): Promise<NetAddresses> {
   const entries = await configMatching(root, `^(${URL_RULE}|${USER_NAME})$`)
-  return { effective: rewritten(urls, urlRules(entries)), ownAccount: ownAccount(entries) }
+  const effective = rewritten(urls, urlRules(entries))
+  return { effective, ownAccount: ownAccount(accountContexts(entries), effective) }
 }
 
 export interface RemoteAddresses extends NetAddresses {
@@ -1066,6 +1116,8 @@ export interface RemoteAddresses extends NetAddresses {
   push: string[]
   /** the insteadOf / pushInsteadOf rules read along (gitAddressesFor) */
   rules: UrlRule[]
+  /** the addresses of the user names in the credential config (gitAddressesFor) */
+  accounts: string[]
 }
 
 /**
@@ -1079,12 +1131,15 @@ export async function gitRemoteAddresses(root: string, remote = 'origin'): Promi
   const urls = entries.filter((e) => e.key.toLowerCase() === `remote.${remote.toLowerCase()}.url`).map((e) => e.value)
   const push = entries.filter((e) => e.key.toLowerCase() === `remote.${remote.toLowerCase()}.pushurl`).map((e) => e.value)
   const rules = urlRules(entries)
-  return { urls, push, rules, effective: rewritten([...urls, ...push], rules), ownAccount: ownAccount(entries) }
+  const accounts = accountContexts(entries)
+  const effective = rewritten([...urls, ...push], rules)
+  return { urls, push, rules, accounts, effective, ownAccount: ownAccount(accounts, effective) }
 }
 
 /** the addresses once the remote's url is `urls` (connecting it: no second config read) */
 export function gitAddressesFor(a: RemoteAddresses, urls: readonly string[]): RemoteAddresses {
-  return { ...a, urls: [...urls], effective: rewritten([...urls, ...a.push], a.rules) }
+  const effective = rewritten([...urls, ...a.push], a.rules)
+  return { ...a, urls: [...urls], effective, ownAccount: ownAccount(a.accounts, effective) }
 }
 
 /** the remote's address git fetches from (the first one; `config --get` would give the last) */

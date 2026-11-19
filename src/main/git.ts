@@ -1055,8 +1055,9 @@ interface CredentialParts {
 }
 
 function credentialParts(url: string): CredentialParts {
+  // "://host" too: git skips the separator wherever it is (credential_from_url_1)
   const protoEnd = url.indexOf('://')
-  const cp = protoEnd > 0 ? url.slice(protoEnd + 3) : url
+  const cp = protoEnd >= 0 ? url.slice(protoEnd + 3) : url
   const slash = cp.search(/[/?#]/) < 0 ? cp.length : cp.search(/[/?#]/)
   const auth = cp.slice(0, slash)
   const at = auth.indexOf('@')
@@ -1097,6 +1098,10 @@ function credentialContextMatches(context: string, url: string): boolean {
       if (want.host && want.host !== t.host) return false
       return want.path === undefined || want.path === t.path
     }
+    // a context git cannot normalise (no host, %XX in the host, a port that is no number) goes
+    // through git's looser partial match: counted as the user's own, gh stays out
+    const hostPort = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i.exec(context)![1].replace(/^.*@/, '')
+    if (!/^(\[[^\]%]*\]|[^:[\]%]+)(:\d*)?$/.test(hostPort)) return true
     const c = new URL(context)
     // the url as git writes it for urlmatch (credential_format): the path encoded again, "/" as is
     const enc = (t.path ?? '').replace(/[^A-Za-z0-9\-._~/]/g, (ch) => [...Buffer.from(ch, 'utf8')].map((b) => `%${b.toString(16).toUpperCase().padStart(2, '0')}`).join(''))
@@ -1134,7 +1139,10 @@ export interface NetAddresses {
   ownAccount: boolean
 }
 
-/** every address git may use for `urls` outside any repository (gh-pages pushes), in one git call */
+/**
+ * Every address git may use for `urls`, in one git call: in the repository `root` the push runs from
+ * (an include of the user's may depend on where it is: includeIf "gitdir:…"), or outside any
+ */
 export async function gitEffectiveUrls(root: string | null, urls: readonly string[]): Promise<NetAddresses> {
   const entries = await configMatching(root, `^(${URL_RULE}|${USER_NAME})$`)
   const effective = rewritten(urls, urlRules(entries))
@@ -1146,32 +1154,21 @@ export interface RemoteAddresses extends NetAddresses {
   urls: string[]
   /** remote.<name>.pushurl */
   push: string[]
-  /** the insteadOf / pushInsteadOf rules read along (gitAddressesFor) */
-  rules: UrlRule[]
-  /** the addresses of the user names in the credential config (gitAddressesFor) */
-  accounts: string[]
 }
 
 /**
- * The remote's addresses from every config scope (a pushurl in the global config too) and the
- * insteadOf rules, in one git call. A folder whose own config has a pushurl or url.* rule never gets
- * here (unsafeRepoConfig).
+ * The remote's addresses from every config scope (a pushurl in the global config too), the
+ * insteadOf rules and the credential user names, in one git call. Read again whenever the remote
+ * changes: an include of the user's may depend on it (includeIf "hasconfig:remote.*.url:…"). A folder
+ * whose own config has a pushurl or url.* rule never gets here (unsafeRepoConfig).
  */
 export async function gitRemoteAddresses(root: string, remote = 'origin'): Promise<RemoteAddresses> {
   const name = remote.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const entries = await configMatching(root, `^(remote\\.${name}\\.(url|pushurl)|${URL_RULE}|${USER_NAME})$`)
   const urls = entries.filter((e) => e.key.toLowerCase() === `remote.${remote.toLowerCase()}.url`).map((e) => e.value)
   const push = entries.filter((e) => e.key.toLowerCase() === `remote.${remote.toLowerCase()}.pushurl`).map((e) => e.value)
-  const rules = urlRules(entries)
-  const accounts = accountContexts(entries)
-  const effective = rewritten([...urls, ...push], rules)
-  return { urls, push, rules, accounts, effective, ownAccount: ownAccount(accounts, effective) }
-}
-
-/** the addresses once the remote's url is `urls` (connecting it: no second config read) */
-export function gitAddressesFor(a: RemoteAddresses, urls: readonly string[]): RemoteAddresses {
-  const effective = rewritten([...urls, ...a.push], a.rules)
-  return { ...a, urls: [...urls], effective, ownAccount: ownAccount(a.accounts, effective) }
+  const effective = rewritten([...urls, ...push], urlRules(entries))
+  return { urls, push, effective, ownAccount: ownAccount(accountContexts(entries), effective) }
 }
 
 /** the remote's address git fetches from (the first one; `config --get` would give the last) */

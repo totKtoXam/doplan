@@ -202,6 +202,76 @@ describe('floor kinds', () => {
   })
 })
 
+describe('wall ends block the ray as the 3D view draws them (the wall outlines)', () => {
+  type Seg = { from: [number, number]; to: [number, number]; thickness: number; height?: number; kind?: Wall['kind'] }
+  /** walls on an empty level; the ray sees the floor everywhere (no rooms) */
+  function walls(segs: Seg[]) {
+    const doc = createEmptyDoc()
+    const L = doc.levelOrder[0]
+    const ids = segs.map((w) =>
+      addWall(doc, L, { x: w.from[0], y: w.from[1] }, { x: w.to[0], y: w.to[1] }, { thickness: w.thickness, height: w.height ?? 2700, kind: w.kind ?? 'wall' }),
+    )
+    edit(doc)
+    const shoot = (ox: number, oy: number, dx: number, dy: number) => rayElectricSurface(doc, L, { ox, oy, oz: 1500, dx, dy, dz: -0.05 })
+    return { doc, ids, shoot }
+  }
+
+  it('a T junction with a lower stem: the notch of the tall wall above the stem is a face', () => {
+    const { shoot } = walls([
+      { from: [1000, 3000], to: [3000, 3000], thickness: 100 },
+      { from: [3000, 3000], to: [5000, 3000], thickness: 100 },
+      { from: [3000, 3000], to: [3000, 5000], thickness: 100, height: 900, kind: 'parapet' },
+    ])
+    for (const x of [2900, 2980, 3000, 3020, 3100]) {
+      const hit = shoot(x, 4500, 0, -1)!
+      expect(hit.surface, `x=${x}`).toBe('wall')
+      expect(hit.y, `x=${x}`).toBeGreaterThan(2940)
+    }
+  })
+
+  it('a T junction with one lower arm: above it, the tall arm and the stem are faces', () => {
+    const { shoot } = walls([
+      { from: [1000, 3000], to: [3000, 3000], thickness: 100, height: 900, kind: 'parapet' },
+      { from: [3000, 3000], to: [5000, 3000], thickness: 100 },
+      { from: [3000, 3000], to: [3000, 5000], thickness: 100 },
+    ])
+    for (const y of [2970, 2990, 3010, 3030]) {
+      const hit = shoot(1500, y, 1, 0)!
+      expect(hit.surface, `y=${y}`).toBe('wall')
+      expect(hit.x, `y=${y}`).toBeLessThan(3060)
+    }
+  })
+
+  it('a thinner wall continuing a thicker one: the shoulders of the thick end are faces', () => {
+    const { ids, shoot } = walls([
+      { from: [1000, 3000], to: [3000, 3000], thickness: 200 },
+      { from: [3000, 3000], to: [5000, 3000], thickness: 100 },
+    ])
+    for (const y of [3075, 2925]) {
+      const hit = shoot(6000, y, -1, 0)!
+      expect(hit.surface, `y=${y}`).toBe('wall')
+      expect(hit.wallId).toBe(ids[0][0])
+      expect(hit.x).toBeCloseTo(3000)
+    }
+    // inside the thin wall's width: its free end
+    const end = shoot(6000, 3020, -1, 0)!
+    expect(end.wallId).toBe(ids[1][0])
+    expect(end.x).toBeCloseTo(5000)
+  })
+
+  it('an acute junction: the bevel is a face', () => {
+    const { shoot } = walls([
+      { from: [1000, 3000], to: [3000, 3000], thickness: 200 },
+      { from: [3000, 3000], to: [1000, 3536], thickness: 200 },
+    ])
+    for (const y of [2920, 2960, 3000, 3040, 3080]) {
+      const hit = shoot(4000, y, -1, 0)!
+      expect(hit.surface, `y=${y}`).toBe('wall')
+      expect(hit.x, `y=${y}`).toBeGreaterThan(2890)
+    }
+  })
+})
+
 describe('electricEditAllowed (keys on the selected point)', () => {
   function withWindow() {
     const { doc, L } = room()

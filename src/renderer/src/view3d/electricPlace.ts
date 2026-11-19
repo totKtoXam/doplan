@@ -40,7 +40,7 @@ import {
   type PlanRay,
 } from '@core'
 import { electricHalfHeight } from '@core'
-import type { DerivedRoom, Doc, ElectricKind, ElectricPoint, EntityRef, Id, Wall } from '@core/types'
+import type { DerivedRoom, Doc, ElectricKind, ElectricPoint, EntityRef, Id, Wall, WallGeom } from '@core/types'
 import type { EngineContext } from '@/contracts'
 import type { ElectricToolState } from '@/editor2d/tools/electric'
 import { formatLen } from '@/editor2d/format'
@@ -98,6 +98,8 @@ export interface ElectricPlaceHost {
   wallHeight(w: Wall): number
   /** the rooms of the active level (their ceilings) */
   rooms(): readonly DerivedRoom[]
+  /** the wall outlines of the active level, as the scene draws them (their end faces block the ray) */
+  wallGeoms(): Readonly<Record<Id, WallGeom>> | undefined
   /** a click on an object: select it alone, or add / remove it (additive) */
   toggleSelect(ref: EntityRef, additive: boolean): void
   /** not locked or hidden (layers) */
@@ -435,7 +437,7 @@ export function createElectricPlace(host: ElectricPlaceHost): ElectricPlace {
     const lid = host.levelId()
     const vdoc = visibleDoc(doc)
     const ray = planRay()
-    const seen = { wallHeight: host.wallHeight, rooms: host.rooms() }
+    const seen = { wallHeight: host.wallHeight, rooms: host.rooms(), wallGeoms: host.wallGeoms() }
     if (p.mount === 'wall') {
       let hit = rayElectricSurface(vdoc, lid, ray, seen)
       if (hit && hit.surface !== 'wall') {

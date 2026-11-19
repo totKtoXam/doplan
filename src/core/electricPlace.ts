@@ -5,8 +5,9 @@
  * openings) and the live dimensions shown while a point is moved. Pure geometry on the document,
  * plan millimetres: x, y as on the plan, z = height above the level floor.
  */
-import type { DerivedRoom, Doc, ElectricKind, ElectricPoint, Id, Opening, Wall } from './types'
-import { pointInPolygon } from './geom'
+import type { DerivedRoom, Doc, ElectricKind, ElectricPoint, Id, Opening, Vec2, Wall, WallGeom } from './types'
+import { pointInPolygon, projectOnSegment } from './geom'
+import { computeWallGeoms } from './joins'
 import { openingRects } from './openingParts'
 import { ceilingBaseHeight, ceilingHeights, ceilingSurfaceAt, levelCeiling } from './ceiling'
 import {
@@ -85,6 +86,8 @@ export interface RaySurfaceOptions {
   rooms?: readonly Pick<DerivedRoom, 'roomId' | 'edges' | 'polygon' | 'holes'>[]
   /** the ceiling is hit from above too (orbit: looking down through the hidden ceiling) */
   ceilingFromAbove?: boolean
+  /** the wall outlines of the level (derived plan); not given = computed from the document */
+  wallGeoms?: Readonly<Record<Id, WallGeom>>
 }
 
 type RayDoc = Pick<Doc, 'nodes' | 'walls' | 'levels' | 'settings'> &
@@ -94,43 +97,30 @@ const ALL_SURFACES: ReadonlySet<ElectricSurface> = new Set(['wall', 'floor', 'ce
 
 /**
  * The nearest surface a ray hits on a level: a face of a mountable, visible wall (from its front,
- * up to its shown height; a ray through a door or window hole passes on), its top or a free end
- * (a stub of a partition), else the floor
+ * up to its shown height; a ray through a door or window hole passes on), its top or an end, as the
+ * 3D view draws them (view3d/build/walls): the wall's mitred outline (core/joins) with every edge
+ * that is not on a face standing up as an end face to the wall's shown height (a free end, the
+ * notch over a lower wall at a junction, the shoulder of a thicker wall, a bevel); else the floor
  * or a ceiling. Walls always block the ray: when the nearest hit is not one of `surfaces`, there is none.
  */
 export function rayElectricSurface(doc: RayDoc, levelId: Id, ray: PlanRay, opts: RaySurfaceOptions = {}): ElectricSurfaceHit | null {
   const surfaces = opts.surfaces ?? ALL_SURFACES
   let best: ElectricSurfaceHit | null = null
-  // the solid, shown walls at each node with their shown height: a wall end is covered up to the
-  // tallest other one (a virtual border, a hidden wall or a lower parapet leaves the end face seen)
-  const shown = new Map<Id, number>()
-  const atNode = new Map<Id, { id: Id; top: number }[]>()
+  const geoms = opts.wallGeoms ?? computeWallGeoms(doc, levelId)
   for (const id in doc.walls) {
     const w = doc.walls[id]
     if (w.levelId !== levelId || !isMountableWall(w) || wallHidden(doc, w)) continue
     const top = opts.wallHeight ? opts.wallHeight(w) : w.height
-    shown.set(id, top)
-    for (const n of [w.a, w.b]) {
-      let l = atNode.get(n)
-      if (!l) atNode.set(n, (l = []))
-      l.push({ id, top })
-    }
-  }
-  for (const [id, top] of shown) {
-    const w = doc.walls[id]
     for (const side of ['left', 'right'] as const) {
       const hit = rayFace(doc, w, side, ray, top)
       if (hit && (!best || hit.s < best.s)) best = hit
     }
-    const cap = rayCap(doc, w, ray, top)
+    const g = geoms[id]
+    if (!g || g.polygon.length < 3) continue
+    const cap = rayCap(doc, w, g, ray, top)
     if (cap && (!best || cap.s < best.s)) best = cap
-    for (const end of ['a', 'b'] as const) {
-      const hit = rayEnd(doc, w, end, ray, top)
-      if (!hit || (best && hit.s >= best.s)) continue
-      // another wall at the node as tall as the hit hides this end there
-      if ((atNode.get(w[end]) ?? []).some((o) => o.id !== id && o.top >= hit.z)) continue
-      best = hit
-    }
+    const end = rayEnds(doc, w, g, ray, top)
+    if (end && (!best || end.s < best.s)) best = end
   }
   const consider = (surface: ElectricSurface, z: number, inside?: (x: number, y: number) => boolean): void => {
     if (Math.abs(ray.dz) < 1e-9) return
@@ -180,50 +170,68 @@ function nearerSide(doc: Pick<Doc, 'nodes' | 'walls'>, w: Wall, ray: PlanRay, t:
   return side
 }
 
-/** the free end of a wall seen from beyond it: blocks the ray (a wall hit on the face towards the ray) */
-function rayEnd(doc: Pick<Doc, 'nodes' | 'walls'>, w: Wall, end: 'a' | 'b', ray: PlanRay, top: number): ElectricSurfaceHit | null {
-  const a = doc.nodes[w.a]
-  const b = doc.nodes[w.b]
-  if (!a || !b) return null
-  const len = Math.hypot(b.x - a.x, b.y - a.y)
-  if (len < 1e-6) return null
-  const ux = (b.x - a.x) / len
-  const uy = (b.y - a.y) / len
-  // the end face: across the wall at the node, facing away from the wall
-  const o = end === 'a' ? a : b
-  const nx = end === 'a' ? -ux : ux
-  const ny = end === 'a' ? -uy : uy
-  const denom = ray.dx * nx + ray.dy * ny
-  if (denom > -1e-9) return null
-  const s = ((o.x - ray.ox) * nx + (o.y - ray.oy) * ny) / denom
-  if (s <= 0) return null
-  const x = ray.ox + ray.dx * s
-  const y = ray.oy + ray.dy * s
-  const z = ray.oz + ray.dz * s
-  if (z < 0 || z > top) return null
-  const n = -(x - o.x) * uy + (y - o.y) * ux
-  if (Math.abs(n) > w.thickness / 2) return null
-  const t = end === 'a' ? 0 : len
-  return { surface: 'wall', x, y, z, s, wallId: w.id, side: nearerSide(doc, w, ray, t), t }
+function signedArea(pts: readonly Vec2[]): number {
+  let sum = 0
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i]
+    const q = pts[(i + 1) % pts.length]
+    sum += p.x * q.y - q.x * p.y
+  }
+  return sum / 2
 }
 
-/** the top of a wall seen from above: blocks the ray (a wall hit on the face towards the ray) */
-function rayCap(doc: Pick<Doc, 'nodes' | 'walls'>, w: Wall, ray: PlanRay, top: number): ElectricSurfaceHit | null {
+/** the distance along a wall from node a of a plan point, clamped to the wall */
+function alongAxis(g: WallGeom, x: number, y: number): number {
+  const pr = projectOnSegment({ x, y }, g.a, g.b)
+  return Math.max(0, Math.min(g.length, pr.t * g.length))
+}
+
+/**
+ * The end faces of a wall seen from outside: the edges of its outline that are not on a face, each
+ * a vertical face up to the wall's shown height (view3d/build/walls draws them the same way). A hit
+ * blocks the ray (a wall hit on the face towards the ray).
+ */
+function rayEnds(doc: Pick<Doc, 'nodes' | 'walls'>, w: Wall, g: WallGeom, ray: PlanRay, top: number): ElectricSurfaceHit | null {
+  const poly = g.polygon
+  const orient = signedArea(poly) >= 0 ? 1 : -1
+  const onFace = (p: Vec2, q: Vec2, f: readonly [Vec2, Vec2]): boolean =>
+    projectOnSegment(p, f[0], f[1]).dist < 0.6 && projectOnSegment(q, f[0], f[1]).dist < 0.6
+  let best: ElectricSurfaceHit | null = null
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i]
+    const q = poly[(i + 1) % poly.length]
+    const el = Math.hypot(q.x - p.x, q.y - p.y)
+    if (el < 0.6 || onFace(p, q, g.left) || onFace(p, q, g.right)) continue
+    const ex = (q.x - p.x) / el
+    const ey = (q.y - p.y) / el
+    // outward normal of the edge
+    const nx = ey * orient
+    const ny = -ex * orient
+    const denom = ray.dx * nx + ray.dy * ny
+    if (denom > -1e-9) continue // seen from inside the wall or along it
+    const s = ((p.x - ray.ox) * nx + (p.y - ray.oy) * ny) / denom
+    if (s <= 0 || (best && s >= best.s)) continue
+    const x = ray.ox + ray.dx * s
+    const y = ray.oy + ray.dy * s
+    const z = ray.oz + ray.dz * s
+    if (z < 0 || z > top) continue
+    const u = (x - p.x) * ex + (y - p.y) * ey
+    if (u < -1e-6 || u > el + 1e-6) continue
+    const t = alongAxis(g, x, y)
+    best = { surface: 'wall', x, y, z, s, wallId: w.id, side: nearerSide(doc, w, ray, t), t }
+  }
+  return best
+}
+
+/** the top of a wall (its outline) seen from above: blocks the ray (a wall hit on the face towards the ray) */
+function rayCap(doc: Pick<Doc, 'nodes' | 'walls'>, w: Wall, g: WallGeom, ray: PlanRay, top: number): ElectricSurfaceHit | null {
   if (ray.dz >= -1e-9 || ray.oz <= top) return null
-  const a = doc.nodes[w.a]
-  const b = doc.nodes[w.b]
-  if (!a || !b) return null
-  const len = Math.hypot(b.x - a.x, b.y - a.y)
-  if (len < 1e-6) return null
   const s = (top - ray.oz) / ray.dz
   if (s <= 0) return null
   const x = ray.ox + ray.dx * s
   const y = ray.oy + ray.dy * s
-  const ux = (b.x - a.x) / len
-  const uy = (b.y - a.y) / len
-  const t = (x - a.x) * ux + (y - a.y) * uy
-  const n = -(x - a.x) * uy + (y - a.y) * ux
-  if (t < 0 || t > len || Math.abs(n) > w.thickness / 2) return null
+  if (!pointInPolygon({ x, y }, g.polygon)) return null
+  const t = alongAxis(g, x, y)
   return { surface: 'wall', x, y, z: top, s, wallId: w.id, side: nearerSide(doc, w, ray, t), t }
 }
 

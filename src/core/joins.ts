@@ -156,7 +156,7 @@ function virtualEndPoint(v: Vec2, e: WallEnd, solid: WallEnd[]): Vec2 {
  * Mitred wall outlines for one level. Every wall of the level gets a WallGeom, including
  * degenerate ones (so lookups never fail).
  */
-export function computeWallGeoms(doc: Doc, levelId: Id): Record<Id, WallGeom> {
+export function computeWallGeoms(doc: Pick<Doc, 'nodes' | 'walls'>, levelId: Id): Record<Id, WallGeom> {
   const out: Record<Id, WallGeom> = {}
   const endsByNode = new Map<Id, WallEnd[]>()
   const endA = new Map<Id, WallEnd>()

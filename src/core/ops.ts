@@ -8,6 +8,7 @@ import { DEFAULT_MATERIALS, OPENING_DEFAULTS, ROOM_TYPE_NAMES, defaultRoom, defa
 import { EPS, dist, projectOnSegment, segIntersect } from './geom'
 import { newId } from './ids'
 import { computeWallGeoms } from './joins'
+import { type CeilingRoom, syncCeilingElectric } from './ceiling'
 import { MIN_ROOM_AREA_M2, detectRooms, isAutoRoomId } from './rooms'
 import { inheritVariantFinish, pruneVariants } from './variants'
 import type {
@@ -1038,7 +1039,8 @@ function nextRoomName(doc: Doc, levelId: Id): string {
  * Keeps Room records in sync with the detected faces (anchor-based identity):
  *  - a record whose anchor lies in a face keeps describing that face; its anchor moves to the label point;
  *  - faces without a record get a default record (faces under 0.1 m² are treated as voids);
- *  - records whose anchor is in no face (or that lost a face to another record) are deleted.
+ *  - records whose anchor is in no face (or that lost a face to another record) are deleted;
+ *  - ceiling electric points are put on the ceiling above them (core/ceiling syncCeilingElectric).
  */
 export function syncRooms(doc: Doc): void {
   const levelIds = new Set<Id>(doc.levelOrder)
@@ -1047,8 +1049,10 @@ export function syncRooms(doc: Doc): void {
   for (const levelId of levelIds) {
     if (!doc.levels[levelId]) continue
     const derived = detectRooms(doc, levelId, computeWallGeoms(doc, levelId))
+    const ceilings: CeilingRoom[] = []
     for (const d of derived) {
       const rec = isAutoRoomId(d.roomId) ? undefined : doc.rooms[d.roomId]
+      ceilings.push({ room: d, spec: rec?.ceiling })
       if (rec) {
         if (!rec.anchor || Math.hypot(rec.anchor.x - d.labelPoint.x, rec.anchor.y - d.labelPoint.y) > 0.01) {
           rec.anchor = { x: d.labelPoint.x, y: d.labelPoint.y }
@@ -1061,7 +1065,10 @@ export function syncRooms(doc: Doc): void {
       room.name = nextRoomName(doc, levelId)
       doc.rooms[room.id] = room
       keep.add(room.id)
+      ceilings[ceilings.length - 1].spec = room.ceiling
     }
+    // ceiling points stay on the ceiling above them (its height, the walls, the level may have changed)
+    syncCeilingElectric(doc, levelId, ceilings)
   }
   for (const id in doc.rooms) if (!keep.has(id)) delete doc.rooms[id]
   // inactive furnishing variants forget finishes of records that are gone

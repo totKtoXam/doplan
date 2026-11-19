@@ -27,10 +27,9 @@ import {
   cycleElectricKind,
   electricHalfWidth,
   electricType,
-  alongWall,
+  electricEditAllowed,
   electricWallDims,
   nearestWallFace,
-  openingAtWallPoint,
   placeElectricOnWall,
   rayElectricSurface,
   snapElectricOnWall,
@@ -53,6 +52,7 @@ import { addTranslations, t } from '@/i18n'
 import { buildElectricPoint } from './build/electrical'
 import { worldPerPixel } from './resizeHandles'
 import { walkPointerLocked } from './walkInput'
+import { createLockRefusals } from './lockRefusals'
 
 addTranslations('en', {
   Электроточка: 'Electric point',
@@ -368,8 +368,8 @@ export function createElectricPlace(host: ElectricPlaceHost): ElectricPlace {
   let disposed = false
   /** the last placement (a double click places once) */
   let lastPlace: { time: number; x: number; y: number } | null = null
-  /** the browser refused to capture the mouse (pointerlockerror): clicks place at the cursor */
-  let lockRefused = false
+  /** the browser keeps refusing to capture the mouse: clicks place at the cursor */
+  const lockRefusals = createLockRefusals()
 
   const ui = () => uiStore.getState()
   const toolState = (): ElectricToolState => ui() as unknown as ElectricToolState
@@ -730,8 +730,8 @@ export function createElectricPlace(host: ElectricPlaceHost): ElectricPlace {
     const moved = locked() ? p.moved : Math.hypot(e.clientX - p.x, e.clientY - p.y)
     if (moved > CLICK_SLOP) return true // the view was turned
     // walk mode: the first mouse click captures the mouse (controls), it places nothing; touch / pen
-    // and a refused capture place at the cursor
-    if (host.walkMode() && !locked() && walkPrefs.getState().captureMouse && e.pointerType === 'mouse' && !lockRefused) return true
+    // and a capture the browser keeps refusing place at the cursor (one refusal, e.g. right after Esc, does not)
+    if (host.walkMode() && !locked() && walkPrefs.getState().captureMouse && e.pointerType === 'mouse' && !lockRefusals.persistent()) return true
     mods = { shift: p.shift, alt: p.alt }
     if (!locked()) lastPointer = { clientX: e.clientX, clientY: e.clientY }
     place()
@@ -761,19 +761,19 @@ export function createElectricPlace(host: ElectricPlaceHost): ElectricPlace {
     return docStore.getState().doc.electrical?.[sel[0].id] ?? null
   }
 
-  /** changes the selected point (one history entry); not when it is locked or the result would be in an opening */
+  /**
+   * Changes the selected point (one history entry); not when it is locked, nor when the result would
+   * be in an opening — a point already in one may still be stepped out (core electricEditAllowed).
+   */
   function editPoint(label: string, fn: (q: ElectricPoint, d: Doc) => void): void {
     const p = selectedPoint()
     if (!p || !host.editable({ kind: 'electric', id: p.id })) return
     const doc = docStore.getState().doc
-    if (p.mount === 'wall' && p.wallId) {
-      const q = { ...p }
-      fn(q, doc)
-      const tt = alongWall(doc, p.wallId, q)
-      if (tt !== null && openingAtWallPoint(doc, p.wallId, tt, q.elevation, q)) {
-        toast(t('В проёме точку не поставить'), 'warning')
-        return
-      }
+    const q = { ...p }
+    fn(q, doc)
+    if (!electricEditAllowed(doc, p, q)) {
+      toast(t('В проёме точку не поставить'), 'warning')
+      return
     }
     docStore.getState().transact(t(label), (d) => {
       const q = d.electrical?.[p.id]
@@ -876,7 +876,7 @@ export function createElectricPlace(host: ElectricPlaceHost): ElectricPlace {
     }
   })
   const onLockChange = (): void => {
-    if (locked()) lockRefused = false
+    if (locked()) lockRefusals.locked()
     // the capture ends (Esc, M, another window) or starts during a move: the move is cancelled
     if (drag) {
       endDrag(false)
@@ -888,7 +888,7 @@ export function createElectricPlace(host: ElectricPlaceHost): ElectricPlace {
     }
   }
   const onLockError = (): void => {
-    lockRefused = true
+    lockRefusals.refused()
   }
 
   window.addEventListener('keydown', onKeyDown, true)

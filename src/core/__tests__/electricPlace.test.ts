@@ -7,13 +7,13 @@ import {
   cycleElectricKind,
   electricHalfHeight,
   electricWallDims,
-  levelCeiling,
   openingAtWallPoint,
   rayElectricSurface,
   roomCeilingHeight,
   snapElectricOnWall,
 } from '../electricPlace'
 import { derivePlan } from '../derive'
+import { levelCeiling } from '../ceiling'
 import type { Doc, Id, Wall } from '../types'
 
 /** a 4000 × 3000 room (wall centrelines), walls 200 thick; `top` is the wall along y = 0 */

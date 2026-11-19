@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import { frameDpr } from '@/view3d/quality'
-import { viewerQuality } from './quality'
+import { capToBackend, viewerQuality } from './quality'
+
+describe('the backend actually running', () => {
+  it('caps a WebGL 2 fallback at high (a blocklisted GPU still offers navigator.gpu)', () => {
+    expect(capToBackend('ultra', 'webgl2')).toBe('high')
+    expect(capToBackend('high', 'webgl2')).toBe('high')
+    expect(capToBackend('low', 'webgl2')).toBe('low')
+    expect(capToBackend('ultra', 'webgpu')).toBe('ultra')
+  })
+})
 
 const desktop = { coarse: false, screenMin: 1080 }
 const phone = { coarse: true, screenMin: 390 }

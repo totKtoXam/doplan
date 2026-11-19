@@ -3,7 +3,7 @@ import { addItem, addOpening, addRectRoom, createEmptyDoc, derivePlan, isHidden,
 import type { Asset, Material } from '@core/types'
 import { gapBetween, planGap, pointGap, shapeOf } from './distance'
 import { elementInfo, type InfoEnv } from './elementInfo'
-import { downloadableDoc } from './exporters'
+import { downloadableDoc, inlineSiteFiles } from './exporters'
 import { applyHidden, EMPTY_HIDE, hiddenRefs, hideHash, parseHideHash, toggleCat, toggleRef } from './hideState'
 
 const velvet = { id: 'velvet', name: 'Velvet', nameRu: 'Бархат', category: 'fabric', color: '#888888', roughness: 1, metalness: 0, product: { price: 1000 } } as unknown as Material
@@ -181,14 +181,46 @@ describe('hiding in the URL hash', () => {
 })
 
 describe('the downloadable plan', () => {
-  it("carries the site's catalogue entries in its own tables, with absolute file URLs", () => {
+  it("carries the author's library entries in its own tables; catalogue ones stay the visitor's", () => {
     const p = plan()
-    const libSofa = { ...sofa, id: 'lib-sofa', src: './assets/l/models/s%20a.glb' }
+    const libSofa = { ...sofa, id: 'lib-sofa', src: './assets/l/models/s%20a.glb', custom: true }
+    const packChair = { ...sofa, id: 'pack-chair', src: './assets/c/models/chair.glb' }
+    const libTex = { ...velvet, id: 'lib-tex', custom: true, maps: { albedo: './assets/l/tex/a.webp' } }
     p.doc.items[p.sofa].assetId = 'lib-sofa'
-    const out = downloadableDoc(p.doc, { assets: [libSofa], materials: [velvet] }, 'https://me.github.io/flat/')
+    const out = downloadableDoc(p.doc, { assets: [libSofa, packChair], materials: [velvet, libTex] }, 'https://me.github.io/flat/')
     expect(out.assets['lib-sofa']).toMatchObject({ id: 'lib-sofa', src: 'https://me.github.io/flat/assets/l/models/s%20a.glb' })
-    expect(out.materials.velvet).toMatchObject({ id: 'velvet' })
+    expect(out.materials['lib-tex']).toMatchObject({ maps: { albedo: 'https://me.github.io/flat/assets/l/tex/a.webp' } })
+    // a copy of a catalogue entry would win over the visitor's working one
+    expect(out.assets['pack-chair']).toBeUndefined()
+    expect(out.materials.velvet).toBeUndefined()
     // the document itself is not changed
     expect(p.doc.assets['lib-sofa']).toBeUndefined()
+  })
+
+  it('carries the library files inside as data: URLs (the desktop app loads no https files)', async () => {
+    const p = plan()
+    const base = 'https://me.github.io/flat/'
+    const doc = downloadableDoc(
+      p.doc,
+      {
+        assets: [
+          { ...sofa, id: 'lib-sofa', src: './assets/l/s.glb', custom: true },
+          { ...sofa, id: 'lib-gltf', src: './assets/l/g/g.gltf', custom: true },
+          { ...sofa, id: 'lib-gone', src: './assets/l/gone.glb', custom: true },
+        ],
+      },
+      base,
+    )
+    const asked: string[] = []
+    const load = async (u: string) => {
+      asked.push(u)
+      return u.endsWith('gone.glb') ? new Response('', { status: 404 }) : new Response(new Uint8Array([103, 108, 84, 70]))
+    }
+    const out = await inlineSiteFiles(doc, base, load)
+    expect(out.assets['lib-sofa'].src).toBe('data:model/gltf-binary;base64,Z2xURg==')
+    // a .gltf has separate buffers: a link; a file that failed: a link
+    expect(out.assets['lib-gltf'].src).toBe(`${base}assets/l/g/g.gltf`)
+    expect(out.assets['lib-gone'].src).toBe(`${base}assets/l/gone.glb`)
+    expect(asked.sort()).toEqual([`${base}assets/l/gone.glb`, `${base}assets/l/s.glb`])
   })
 })

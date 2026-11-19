@@ -38,6 +38,14 @@ export function viewerQuality(author: QualityPreset | undefined, device: ViewerD
   return clamp(own, device.webgpu === false ? 'medium' : 'high', cap)
 }
 
+/**
+ * The preset once the 3D view runs: navigator.gpu only says the browser offers WebGPU; a blocklisted
+ * GPU or the visitor's "run on WebGL" still ends on WebGL 2, which gets `high` at most.
+ */
+export function capToBackend(q: QualityPreset, backend: string): QualityPreset {
+  return backend !== 'webgpu' && rank(q) > rank('high') ? 'high' : q
+}
+
 export function currentDevice(): ViewerDevice {
   const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
   const s = typeof screen !== 'undefined' ? Math.min(screen.width || 0, screen.height || 0) : 0

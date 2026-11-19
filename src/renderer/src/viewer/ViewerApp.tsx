@@ -36,7 +36,7 @@ import { parseViewerParams, viewerQuery, type SiteInfo, type ViewerCam, type Vie
 import { installEditGuard, lockViewerTool, viewerEdit } from './guard'
 import { downloadableDoc } from './exporters'
 import { loadSite } from './load'
-import { currentDevice, rememberQuality, storedQuality, viewerQuality } from './quality'
+import { capToBackend, currentDevice, rememberQuality, storedQuality, viewerQuality } from './quality'
 import { setDprPolicy } from '@/view3d/quality'
 import { WalkStick } from './WalkStick'
 import { unlockAll } from './hideState'
@@ -400,6 +400,13 @@ function Scene3D({ hidden, cam, onCam }: { hidden: boolean; cam: ViewerCam; onCa
         setHandle('engine3d', h)
         setHost3d(el)
         uiStore.setState({ backend: h.backend })
+        // the backend actually running decides the cap, not what the browser offered
+        const q = docStore.getState().doc.render.quality ?? 'high'
+        const capped = capToBackend(q, h.backend)
+        if (capped !== q) {
+          viewerEdit(() => uiStore.getState().setQuality(capped))
+          h.setQuality(capped)
+        }
         h.setCameraMode(uiStore.getState().cameraMode)
         ro = new ResizeObserver((entries) => {
           const r = entries[0]?.contentRect

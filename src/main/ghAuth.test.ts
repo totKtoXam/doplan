@@ -99,7 +99,7 @@ describe('gh is started once per session', () => {
     expect(ref).toEqual({ owner: 'anna', repo: 'flat', ssh: false })
     const cred = await github.gitCredentials(['https://github.com/anna/flat.git'])
     expect(cred.env.GIT_CONFIG_KEY_0).toBe('http.https://github.com/.extraheader')
-    expect(await pagesGh.repoState({ owner: 'anna', repo: 'flat' })).toEqual({ exists: true, isPrivate: true, canPush: true })
+    expect(await pagesGh.repoState({ owner: 'anna', repo: 'flat' })).toEqual({ exists: true, isPrivate: true, canPush: true, admin: true, defaultBranch: 'main' })
     expect(await pagesGh.ownerPlan('anna', 'anna')).toBe('free')
     expect(await pagesGh.inspectPages({ owner: 'anna', repo: 'flat' })).toEqual({ branchSha: null, marker: null, pages: null })
     expect(await github.repoInfo('anna', 'flat')).toEqual({ visibility: 'private', defaultBranch: 'main', permission: 'ADMIN' })

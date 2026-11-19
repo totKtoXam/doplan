@@ -111,9 +111,11 @@ export async function sceneGlb(engine: Engine3DHandle): Promise<Blob> {
 }
 
 /**
- * The plan as a self-contained .doplan: the catalogue entries the site carries (the author's library
- * models and materials, downloaded catalogue ones) go into the document's own tables, and the site's
- * relative file URLs become absolute ones (they work while the plan stays published).
+ * The plan as a .doplan another doplan opens: the author's own library entries (imported models and
+ * materials, `custom`), which no visitor has, go into the document's own tables. Catalogue entries
+ * do not: the visitor's app has them (or downloads them) by id, and a copy in the document would win
+ * over its working one. The site's relative file URLs become absolute ones; planFile then carries
+ * the library files themselves inside.
  */
 export function downloadableDoc(doc: Doc, site: { materials?: unknown[]; assets?: unknown[] }, base: string): Doc {
   const abs = (s: string) => {
@@ -129,13 +131,63 @@ export function downloadableDoc(doc: Doc, site: { materials?: unknown[]; assets?
     const next = { ...table }
     for (const e of list ?? []) {
       const id = (e as { id?: unknown })?.id
-      if (typeof id === 'string' && !Object.hasOwn(next, id)) next[id] = mapStrings(e as T, abs)
+      if (typeof id === 'string' && (e as { custom?: unknown }).custom === true && !Object.hasOwn(next, id)) next[id] = mapStrings(e as T, abs)
     }
     return next
   }
   return { ...out, materials: embed(out.materials ?? {}, site.materials), assets: embed(out.assets ?? {}, site.assets) }
 }
 
-export function planFile(doc: Doc): Blob {
-  return new Blob([serializeDoc(doc)], { type: 'application/json' })
+/** one file larger than this stays a link to the site (a data: URL of it would bloat the plan file) */
+const INLINE_MAX = 40 * 1024 * 1024
+const MIME: Record<string, string> = { glb: 'model/gltf-binary', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', ktx2: 'image/ktx2', hdr: 'image/vnd.radiance' }
+
+async function dataUrl(b: Blob, url: string): Promise<string> {
+  const ext = /\.([a-z0-9]+)(?:[?#]|$)/i.exec(new URL(url).pathname)?.[1]?.toLowerCase() ?? ''
+  const type = MIME[ext] ?? (b.type || 'application/octet-stream')
+  const bytes = new Uint8Array(await b.arrayBuffer())
+  let bin = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  return `data:${type};base64,${btoa(bin)}`
+}
+
+/**
+ * The site's files the document's own tables point at, carried inside as data: URLs, so the plan
+ * opens in the desktop app (which loads no https files) and after the plan is unpublished. A .gltf
+ * stays a link: its buffers and textures are separate files. A file that fails to load stays a link.
+ */
+export async function inlineSiteFiles(doc: Doc, base: string, load: (url: string) => Promise<Response> = (u) => fetch(u)): Promise<Doc> {
+  let root: string
+  try {
+    root = new URL('./assets/', base).href
+  } catch {
+    return doc
+  }
+  const urls = new Set<string>()
+  const collect = (s: string) => {
+    if (s.startsWith(root) && !/\.gltf(?:[?#]|$)/i.test(s)) urls.add(s)
+    return s
+  }
+  mapStrings(doc.assets, collect)
+  mapStrings(doc.materials, collect)
+  const data = new Map<string, string>()
+  await Promise.all(
+    [...urls].map(async (u) => {
+      try {
+        const r = await load(u)
+        if (!r.ok) return
+        const b = await r.blob()
+        if (b.size <= INLINE_MAX) data.set(u, await dataUrl(b, u))
+      } catch {
+        // stays a link
+      }
+    }),
+  )
+  if (!data.size) return doc
+  const swap = (s: string) => data.get(s) ?? s
+  return { ...doc, assets: mapStrings(doc.assets, swap), materials: mapStrings(doc.materials, swap) }
+}
+
+export async function planFile(doc: Doc, base = typeof location !== 'undefined' ? location.href : ''): Promise<Blob> {
+  return new Blob([serializeDoc(await inlineSiteFiles(doc, base))], { type: 'application/json' })
 }

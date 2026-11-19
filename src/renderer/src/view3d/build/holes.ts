@@ -5,6 +5,7 @@
  * Units: millimetres. `s` runs along the wall axis from node `a`, `v` is the height above the floor.
  */
 import type { Opening } from '@core/types'
+import { balconyParts } from '@core/openingParts'
 
 export interface Hole {
   openingId: string
@@ -23,37 +24,8 @@ export interface Hole {
   sill: boolean
 }
 
-/** default apron height under the window part of a balcony block */
-const BALCONY_APRON = 850
-/** door leaf width inside a balcony block */
-export function balconyDoorWidth(o: Opening): number {
-  return Math.max(550, Math.min(800, o.width * 0.4))
-}
-
-export interface BalconyParts {
-  /** local x ranges relative to the opening centre, mm */
-  door: { x0: number; x1: number; v0: number; v1: number }
-  window: { x0: number; x1: number; v0: number; v1: number }
-}
-
-export function balconyParts(o: Opening): BalconyParts {
-  const top = o.sill + o.height
-  const dw = Math.min(balconyDoorWidth(o), o.width - 300)
-  // a small `sill` is the door threshold; a large one is the window sill height of the block
-  const threshold = o.sill <= 400 ? Math.max(0, o.sill) : 0
-  const apron = Math.max(threshold, Math.min(o.sill > 400 ? o.sill : BALCONY_APRON, Math.max(0, top - 400)))
-  const half = o.width / 2
-  if (o.hinge === 'a') {
-    return {
-      door: { x0: -half, x1: -half + dw, v0: threshold, v1: top },
-      window: { x0: -half + dw, x1: half, v0: apron, v1: top },
-    }
-  }
-  return {
-    door: { x0: half - dw, x1: half, v0: threshold, v1: top },
-    window: { x0: -half, x1: half - dw, v0: apron, v1: top },
-  }
-}
+// the balcony block split lives in core (electric points check against the same holes)
+export { balconyDoorWidth, balconyParts, type BalconyParts } from '@core/openingParts'
 
 /**
  * Holes of one opening, clipped to the wall (`wallLen`, `wallHeight`).

@@ -227,7 +227,7 @@ export const AI_TOOL_SHAPES = {
   place_electric: {
     kind: electricKind,
     ...electricWall,
-    elevation: mm('Высота центра от пола (по умолчанию — типовая для вида)').min(0).max(10000).optional(),
+    elevation: mm('Высота центра от пола (по умолчанию — типовая для вида); у потолочной точки не задаётся — она на потолке комнаты').min(0).max(10000).optional(),
     gangs: z.number().int().min(1).max(5).optional().describe('Постов в рамке 1–5 (розетки, выключатели, слаботочка)'),
     vertical: z.boolean().optional().describe('Многопостовая рамка вертикально'),
     rotation: finite().min(-360).max(360).optional().describe('Поворот точки без стены (пол, потолок), градусы по часовой'),
@@ -238,7 +238,7 @@ export const AI_TOOL_SHAPES = {
     electricId: id('id электроточки (e_…)'),
     kind: electricKind.optional(),
     ...electricWall,
-    elevation: mm('Высота центра от пола').min(0).max(10000).optional(),
+    elevation: mm('Высота центра от пола; у потолочной точки не задаётся — она на потолке комнаты').min(0).max(10000).optional(),
     gangs: z.number().int().min(1).max(5).optional(),
     vertical: z.boolean().optional(),
     rotation: finite().min(-360).max(360).optional().describe('Поворот точки без стены'),

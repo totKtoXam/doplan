@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -248,6 +248,8 @@ vi.mock('electron', () => ({
 vi.mock('./ipc', () => ({ handleIpc: vi.fn() }))
 vi.mock('./window', () => ({ sendToRenderer: vi.fn(), getMainWindow: () => null }))
 const created: string[] = []
+/** what each git network command got credentials for (github.gitCredentials) */
+const credCalls: { remotes: readonly string[]; ownAccount: boolean }[] = []
 /** visibility of the test repositories on "GitHub" (private unless listed) */
 const visibility: Record<string, 'public' | 'private'> = {}
 vi.mock('./github', async (orig) => {
@@ -255,7 +257,10 @@ vi.mock('./github', async (orig) => {
   return {
     ...real,
     // gh is not used: the test "GitHub" needs no credentials
-    gitCredentials: async () => ({ config: [], env: {} }),
+    gitCredentials: async (remotes: readonly string[] = [], ownAccount = false) => {
+      credCalls.push({ remotes, ownAccount })
+      return { config: [], env: {} }
+    },
     ghToken: async () => null,
     ghStatus: async () => ({ installed: true, loggedIn: true, user: 'me', install: ghInstallHint('win32', false) }),
     createRepo: async (name: string) => {
@@ -309,6 +314,42 @@ const useRoot = (root: string) => setProjectRoot(root)
 const hasGit = !!(await findGit())
 
 describe.skipIf(!hasGit)('project sync', { timeout: 180_000 }, () => {
+  it('connecting reads the credential config once the new address is set (an include that depends on it counts)', async () => {
+    // a home of the test's own: the global config with an include for one "organisation"
+    const home = join(base, 'home-include')
+    mkdirSync(home, { recursive: true })
+    const fwd = realpathSync.native(home).replace(/\\/g, '/')
+    writeFileSync(join(home, 'work.gitconfig'), '[credential "https://github.com"]\n\tusername = work-acct\n')
+    writeFileSync(join(home, '.gitconfig'), `[includeIf "hasconfig:remote.*.url:https://github.com/me/work-**"]\n\tpath = ${fwd}/work.gitconfig\n`)
+    const saved = { HOME: process.env['HOME'], USERPROFILE: process.env['USERPROFILE'], XDG_CONFIG_HOME: process.env['XDG_CONFIG_HOME'] }
+    process.env['HOME'] = home
+    process.env['USERPROFILE'] = home
+    delete process.env['XDG_CONFIG_HOME']
+    try {
+      const a = await project('Include')
+      useRoot(a)
+      // first connection, into the work organisation: its account, no gh
+      credCalls.length = 0
+      await sync.connect(bare('work-one'))
+      expect(credCalls.length).toBeGreaterThan(0)
+      expect(credCalls.every((c) => c.ownAccount)).toBe(true)
+      // moved to a repository outside it: gh again
+      credCalls.length = 0
+      await sync.connect(bare('plain-one'))
+      expect(credCalls.length).toBeGreaterThan(0)
+      expect(credCalls.every((c) => !c.ownAccount)).toBe(true)
+      // and back into it from there
+      credCalls.length = 0
+      await sync.connect(bare('work-two'))
+      expect(credCalls.every((c) => c.ownAccount)).toBe(true)
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+    }
+  })
+
   it('is unavailable without a project folder, disconnected before connecting', async () => {
     setProjectRoot(null)
     expect((await sync.syncStatus()).state).toBe('unavailable')

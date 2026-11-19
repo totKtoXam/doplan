@@ -47,7 +47,6 @@ import {
   gitRelated,
   gitRemoteHeads,
   gitRemoteUrl,
-  gitAddressesFor,
   gitRemoteAddresses,
   type RemoteAddresses,
   gitRemoveRemote,
@@ -454,13 +453,13 @@ async function connectLocked(url: unknown, opts: ConnectOpts = {}): Promise<Conn
   const root = await requireRoot()
   await commitPending(root, msg('Подготовка к отправке на GitHub', 'Preparing to send to GitHub'))
   if (!(await gitHead(root))) throw new Error(msg('В проекте нет сохранённых версий', 'The project has no saved versions'))
-  // one config read: the address to restore on failure and the credentials for the new one
-  const before = await gitRemoteAddresses(root, REMOTE)
-  const previous = before.urls[0] ?? null
+  const previous = await gitRemoteUrl(root, REMOTE)
   await gitSetRemote(root, remoteUrlOf(ref), REMOTE, previous !== null)
   let sent = false
   try {
-    const n = await net(true, gitAddressesFor(before, [remoteUrlOf(ref)]))
+    // read once the new address is set: an include of the user's may depend on it
+    // (includeIf "hasconfig:remote.*.url:https://github.com/work-org/**" naming the work account)
+    const n = await net(true, await gitRemoteAddresses(root, REMOTE))
     // just created: certainly empty, one network command less
     const heads = opts.fresh ? { empty: true, head: null, branches: [] } : await gitRemoteHeads(root, n, REMOTE)
     noteCheck(root)

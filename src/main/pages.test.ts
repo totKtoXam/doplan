@@ -65,8 +65,9 @@ vi.mock('./git', () => ({
   gitRemoteUrls: async () => gh.syncUrls,
   gitUpstreamBranch: async () => gh.syncBranch,
   // only deletes here (the site itself goes up through pagesGit.pushSite)
-  gitPushRef: async (_root: string, _net: unknown, src: string | null, _branch: string, opts: { remote: string; expected?: string }) => {
+  gitPushRef: async (_root: string, net: { config?: string[] }, src: string | null, _branch: string, opts: { remote: string; expected?: string }) => {
     if (src !== null || !opts.expected) throw new Error('pages: a delete with the checked head only')
+    if (!net.config?.includes('credential.helper=gh')) throw new Error("fatal: could not read Username for 'https://github.com': terminal prompts disabled")
     const key = fromRemote(opts.remote)
     gh.calls.push(`delete ${key}`)
     const r = repo(key)
@@ -132,10 +133,19 @@ vi.mock('./pagesGh', () => ({
   },
 }))
 vi.mock('./pagesGit', () => ({
-  pushSite: async (runner: { config?: string[] }, siteDir: string, remote: string, _b: string, _m: string, expected: string | null) => {
+  pushSite: async (
+    runner: { config?: string[]; credentials?: (dir: string) => Promise<{ config: string[] }> },
+    siteDir: string,
+    remote: string,
+    _b: string,
+    _m: string,
+    expected: string | null,
+  ) => {
     const key = fromRemote(remote)
     gh.calls.push(`push ${key}`)
-    if (!runner.config?.includes('credential.helper=gh')) throw new Error("fatal: could not read Username for 'https://github.com': terminal prompts disabled")
+    // as pagesGit does: the credentials are read inside the site's repository
+    const net = runner.credentials ? await runner.credentials(siteDir) : runner
+    if (!net.config?.includes('credential.helper=gh')) throw new Error("fatal: could not read Username for 'https://github.com': terminal prompts disabled")
     if (gh.failPush > 0) {
       gh.failPush--
       throw new Error('could not resolve host: github.com')

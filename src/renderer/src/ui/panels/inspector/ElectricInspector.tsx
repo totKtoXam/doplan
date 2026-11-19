@@ -101,11 +101,15 @@ export function ElectricInspector({ id }: { id: Id }) {
 
   const setMount = (mt: ElectricMount) =>
     set('Монтаж электроточки', (x, d) => {
+      const from = x.mount
       x.mount = mt
       if (mt === 'floor') x.elevation = 0
+      // the ceiling above it (store sync: syncRooms puts ceiling points on their room ceiling)
       else if (mt === 'ceiling') x.elevation = d.levels[x.levelId]?.height || d.settings.wallHeight
       else {
-        if (x.elevation <= 0 || x.elevation >= (d.levels[x.levelId]?.height ?? 2700)) x.elevation = electricType(x.kind).elevation || 300
+        // from the floor or the ceiling: the standard height of the type (the ceiling height a
+        // ceiling point had is no wall height)
+        if (from !== 'wall' || x.elevation <= 0 || x.elevation >= (d.levels[x.levelId]?.height ?? 2700)) x.elevation = electricType(x.kind).elevation || 300
         const hit = nearestWallFace(d, x.levelId, x, 600, { skipHidden: true })
         if (hit) placeElectricOnWall(d, id, hit.wallId, hit.side, clampOnFace(d, hit.wallId, hit.side, hit.t, electricHalfWidth(x)))
       }

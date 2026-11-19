@@ -14,7 +14,7 @@ import { MM, disposeGeometries } from './util'
 import { type WallInput, buildWall } from './walls'
 
 /** height walls are lowered to in cut-away mode, mm */
-const CUT_HEIGHT = 1000
+export const CUT_HEIGHT = 1000
 
 interface WallRec {
   sig: string

@@ -36,6 +36,31 @@ async function room(): Promise<string> {
 describe('electrical AI tools', () => {
   beforeEach(() => st().load(createEmptyDoc('T'), null))
 
+  it('a ceiling point stays on the room ceiling: an elevation for it is reported as not applied', async () => {
+    await room()
+    const rid = Object.keys(st().doc.rooms)[0]
+    st().transact('ceiling', (d) => {
+      d.rooms[rid].ceiling.height = 2500
+    })
+    const put = await executeTool(host, 'place_electric', { kind: 'outLight', at: { x: 2000, y: 1500 }, elevation: 2200 })
+    expect(put.result.ok, put.result.text).toBe(true)
+    const p = points()[0]
+    expect(p.mount).toBe('ceiling')
+    expect(p.elevation).toBe(2500)
+    expect(put.result.text).toContain('elevation не применена')
+    // only a height: refused with the reason
+    const only = await executeTool(host, 'set_electric', { electricId: p.id, elevation: 2400 })
+    expect(only.result.ok).toBe(false)
+    expect(only.result.text).toContain('на потолке комнаты')
+    // with another change: that one is applied, the height is said not to be
+    const both = await executeTool(host, 'set_electric', { electricId: p.id, elevation: 2400, comment: 'люстра' })
+    expect(both.result.ok, both.result.text).toBe(true)
+    expect(both.result.text).toContain('elevation не применена')
+    expect(both.changes?.join(' ')).not.toContain('2400')
+    expect(points()[0].elevation).toBe(2500)
+    expect(points()[0].comment).toBe('люстра')
+  })
+
   it('the shared kind list matches the core catalog', () => {
     expect([...ELECTRIC_KIND_IDS]).toEqual([...ELECTRIC_KINDS])
     expect(MUTATING_TOOLS.has('place_electric')).toBe(true)

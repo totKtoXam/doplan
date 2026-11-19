@@ -6,6 +6,7 @@
 import { buildDisplayList, serializeDoc, toSvg } from '@core'
 import type { Doc, Id } from '@core/types'
 import type { Editor2DHandle, Engine3DHandle } from '@/contracts'
+import { mapStrings } from '@shared/pagesSite'
 
 export function fileName(title: string, suffix: string): string {
   // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are not allowed in file names
@@ -74,10 +75,20 @@ export function pdfLayout(widthMm: number, heightMm: number): { page: [number, n
   return { page, x: (page[0] - w) / 2, y: (page[1] - h) / 2, w, h }
 }
 
+/** drawing scales a plan is printed at, the first whose sheet fits A3 wins */
+export const PDF_SCALES = [100, 200, 250, 500, 1000] as const
+
 /** the plan of the level with dimensions, areas and furniture, light theme, on an A4 / A3 page */
 export async function planPdf(doc: Doc, levelId: Id, title: string): Promise<Blob> {
-  const dl = buildDisplayList(doc, levelId, { dimensions: true, areas: true, furniture: true, labels: true, grid: false, titleBlock: true, theme: 'light' })
-  const { svg, widthMm, heightMm } = toSvg(dl, { scale: 100, marginMm: 10, title })
+  // a true scale: a plan too big for A3 at 1:100 is drawn at 1:200 (…) and says so, never shrunk
+  let sheet: ReturnType<typeof toSvg> | null = null
+  for (const scale of PDF_SCALES) {
+    const dl = buildDisplayList(doc, levelId, { dimensions: true, areas: true, furniture: true, labels: true, grid: false, titleBlock: true, theme: 'light', scale })
+    sheet = toSvg(dl, { scale, marginMm: 10, title })
+    if (pdfLayout(sheet.widthMm, sheet.heightMm).w >= sheet.widthMm - 0.01) break
+  }
+  if (!sheet) throw new Error('PDF')
+  const { svg, widthMm, heightMm } = sheet
   // a raster page: the browser draws the text with its own fonts (Cyrillic included)
   const canvas = await rasterize(svg, widthMm, heightMm, Math.min(8, 8000 / Math.max(widthMm, heightMm, 1)))
   const lay = pdfLayout(widthMm, heightMm)
@@ -97,6 +108,32 @@ export function scenePng(engine: Engine3DHandle, host: HTMLElement): Promise<Blo
 
 export async function sceneGlb(engine: Engine3DHandle): Promise<Blob> {
   return new Blob([await engine.exportGlb()], { type: 'model/gltf-binary' })
+}
+
+/**
+ * The plan as a self-contained .doplan: the catalogue entries the site carries (the author's library
+ * models and materials, downloaded catalogue ones) go into the document's own tables, and the site's
+ * relative file URLs become absolute ones (they work while the plan stays published).
+ */
+export function downloadableDoc(doc: Doc, site: { materials?: unknown[]; assets?: unknown[] }, base: string): Doc {
+  const abs = (s: string) => {
+    if (!s.startsWith('./assets/')) return s
+    try {
+      return new URL(s, base).href
+    } catch {
+      return s
+    }
+  }
+  const out = mapStrings(doc, abs)
+  const embed = <T extends { id: string }>(table: Record<string, T>, list: unknown[] | undefined) => {
+    const next = { ...table }
+    for (const e of list ?? []) {
+      const id = (e as { id?: unknown })?.id
+      if (typeof id === 'string' && !Object.hasOwn(next, id)) next[id] = mapStrings(e as T, abs)
+    }
+    return next
+  }
+  return { ...out, materials: embed(out.materials ?? {}, site.materials), assets: embed(out.assets ?? {}, site.assets) }
 }
 
 export function planFile(doc: Doc): Blob {

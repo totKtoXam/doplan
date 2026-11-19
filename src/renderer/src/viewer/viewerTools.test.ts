@@ -3,6 +3,7 @@ import { addItem, addOpening, addRectRoom, createEmptyDoc, derivePlan, isHidden,
 import type { Asset, Material } from '@core/types'
 import { gapBetween, planGap, pointGap, shapeOf } from './distance'
 import { elementInfo, type InfoEnv } from './elementInfo'
+import { downloadableDoc } from './exporters'
 import { applyHidden, EMPTY_HIDE, hiddenRefs, hideHash, parseHideHash, toggleCat, toggleRef } from './hideState'
 
 const velvet = { id: 'velvet', name: 'Velvet', nameRu: 'Бархат', category: 'fabric', color: '#888888', roughness: 1, metalness: 0, product: { price: 1000 } } as unknown as Material
@@ -135,6 +136,14 @@ describe('hiding in the URL hash', () => {
     expect(hideHash(toggleRef(s, { kind: 'item', id: 'a1' }, false), '')).toBe('#hide=wall:w_2&cats=furniture&ceil=0')
   })
 
+  it('a link naming what every object has (__proto__, constructor) hides nothing and breaks nothing', () => {
+    expect(parseHideHash('#hide=item:__proto__,wall:constructor,room:toString,item:a1').refs).toEqual([{ kind: 'item', id: 'a1' }])
+    const p = plan()
+    expect(elementInfo({ kind: 'item', id: '__proto__' }, envOf(p))).toBeNull()
+    expect(elementInfo({ kind: 'wall', id: 'constructor' }, envOf(p))).toBeNull()
+    expect(shapeOf({ kind: 'item', id: '__proto__' }, p.doc, p.derived)).toBeNull()
+  })
+
   it('ignores junk in an edited link', () => {
     expect(parseHideHash('#hide=bogus:1,item:,:x,item:a,item:a&cats=furniture,nope,furniture&ceil=maybe')).toEqual({
       refs: [{ kind: 'item', id: 'a' }],
@@ -168,5 +177,18 @@ describe('hiding in the URL hash', () => {
     applyHidden(b, [], author)
     expect(isHidden(b, { kind: 'item', id: p.sofa })).toBe(false)
     expect(isHidden(b, { kind: 'item', id: p.lamp })).toBe(true)
+  })
+})
+
+describe('the downloadable plan', () => {
+  it("carries the site's catalogue entries in its own tables, with absolute file URLs", () => {
+    const p = plan()
+    const libSofa = { ...sofa, id: 'lib-sofa', src: './assets/l/models/s%20a.glb' }
+    p.doc.items[p.sofa].assetId = 'lib-sofa'
+    const out = downloadableDoc(p.doc, { assets: [libSofa], materials: [velvet] }, 'https://me.github.io/flat/')
+    expect(out.assets['lib-sofa']).toMatchObject({ id: 'lib-sofa', src: 'https://me.github.io/flat/assets/l/models/s%20a.glb' })
+    expect(out.materials.velvet).toMatchObject({ id: 'velvet' })
+    // the document itself is not changed
+    expect(p.doc.assets['lib-sofa']).toBeUndefined()
   })
 })

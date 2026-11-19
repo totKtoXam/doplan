@@ -573,10 +573,11 @@ export function HiddenPanel({ show3d }: { show3d: boolean }) {
   const hide = useTools((s) => s.hide)
   const env = useInfoEnv()
   const ceiling = useDoc((s) => s.doc.render.ceilingVisible)
+  // the categories of the level on screen: switching levels counts again
+  const lid = useUi((s) => s.activeLevelId)
   const counts = useMemo(() => {
     const out: Record<HideCat, number> = { furniture: 0, lighting: 0, doors: 0, windows: 0, electric: 0 }
     const asset = assetOf(env.doc)
-    const lid = uiStore.getState().activeLevelId
     const tables: [EntityRef['kind'], Record<Id, { levelId?: Id; wallId?: Id }> | undefined][] = [
       ['item', env.doc.items],
       ['light', env.doc.lights],
@@ -592,7 +593,7 @@ export function HiddenPanel({ show3d }: { show3d: boolean }) {
         if (c) out[c]++
       }
     return out
-  }, [env.doc])
+  }, [env.doc, lid])
   if (!open) return null
   const set = (fn: (h: HideState) => HideState) => toolsStore.setState((s) => ({ hide: fn(s.hide) }))
   const nameOf = (r: EntityRef) => {

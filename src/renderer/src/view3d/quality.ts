@@ -235,14 +235,22 @@ export function setDprPolicy(p: DprPolicy | null): void {
 
 /**
  * Pixel ratio of one frame. `dynScale` (≤ 1) is the engine's adaptive factor: it drops only while
- * frames take longer than ~25 ms; the policy's floor gives way after it dropped twice.
+ * frames take longer than ~25 ms; the policy's floor gives way after it dropped twice. `floor` lets
+ * the engine keep the floor off until the factor is back to 1 (hysteresis: no sharp/soft swings).
  */
-export function frameDpr(preset: QualityPreset, deviceDpr: number, moving: boolean, dynScale = 1, policy: DprPolicy | null = dprPolicy): number {
+export function frameDpr(
+  preset: QualityPreset,
+  deviceDpr: number,
+  moving: boolean,
+  dynScale = 1,
+  policy: DprPolicy | null = dprPolicy,
+  floor = dynScale > 0.8,
+): number {
   const q = getQuality(preset)
   const sharp = !!policy && (q.preset === 'high' || q.preset === 'ultra')
   const rest = sharp ? Math.max(q.dprCap, policy.restMax) : q.dprCap
   let cap = moving ? Math.min(rest, q.dprMoving * dynScale) : rest
-  if (moving && sharp && dynScale > 0.8) cap = Math.max(cap, Math.min(rest, policy.movingMin))
+  if (moving && sharp && floor) cap = Math.max(cap, Math.min(rest, policy.movingMin))
   return Math.max(0.5, Math.min(deviceDpr || 1, cap))
 }
 

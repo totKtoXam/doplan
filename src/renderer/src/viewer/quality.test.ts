@@ -23,8 +23,22 @@ describe('viewer quality', () => {
 
   it("the viewer's own choice wins; junk in storage is ignored", () => {
     expect(viewerQuality('ultra', desktop, 'medium')).toBe('medium')
-    expect(viewerQuality('low', phone, 'high')).toBe('high')
+    expect(viewerQuality('ultra', tablet, 'low')).toBe('low')
     expect(viewerQuality('ultra', desktop, 'max')).toBe('ultra')
+  })
+
+  it('a remembered preset above the device cap is not used (it may be the one that crashed the tab)', () => {
+    expect(viewerQuality('low', phone, 'ultra')).toBe('low')
+    expect(viewerQuality('low', tablet, 'high')).toBe('medium')
+    expect(viewerQuality('low', phone, 'low')).toBe('low')
+  })
+
+  it('desktop without WebGPU (no TRAA): medium to high, never ultra', () => {
+    const webgl = { ...desktop, webgpu: false }
+    expect(viewerQuality('ultra', webgl, null)).toBe('high')
+    expect(viewerQuality('high', webgl, null)).toBe('high')
+    expect(viewerQuality('low', webgl, null)).toBe('medium')
+    expect(viewerQuality(undefined, webgl, 'ultra')).toBe('high')
   })
 })
 
@@ -46,6 +60,8 @@ describe('frame pixel ratio', () => {
     // one adaptive step down (0.88) keeps the floor; a frame rate that stays low gets past it
     expect(frameDpr('high', 2, true, 0.88, sharp)).toBe(1)
     expect(frameDpr('high', 2, true, 0.6, sharp)).toBeCloseTo(0.6)
+    // recovering after a drop: the floor stays off until the engine turns it back on
+    expect(frameDpr('high', 2, true, 0.82, sharp, false)).toBeCloseTo(0.82)
     // a device below the floor is never upscaled
     expect(frameDpr('high', 0.9, true, 1, sharp)).toBe(0.9)
   })

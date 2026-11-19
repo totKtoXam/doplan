@@ -40,7 +40,7 @@ import { createProceduralFactory } from './procedural'
 import { mountPerfOverlay, perfBegin, perfBeginOnce, perfEnabled, perfEnd, perfPending, perfRecord, perfTime } from './perf'
 import { frameDpr, getQuality, getShared } from './quality'
 import { createMeasure3D } from './measure3d'
-import { isViewOnly } from '@/store/viewOnly'
+import { isViewOnly, keepsHole } from '@/store/viewOnly'
 import { createViewerPick, type ViewerPick } from './viewerPick'
 
 type CameraMode = 'orbit' | 'walk' | 'top'
@@ -159,7 +159,19 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
   let lastTime = 0
   let lastMoveAt = -1e9
   let currentDpr = 0
+  let holesFor: Doc['openings'] | null = null
+  let holesOut: Doc['openings'] = {}
+  /** the openings that cut walls in the viewer, the same object while the openings stay the same */
+  function holesOf(openings: Doc['openings']): Doc['openings'] {
+    if (openings !== holesFor) {
+      holesFor = openings
+      holesOut = Object.fromEntries(Object.entries(openings).filter(([id]) => keepsHole(id)))
+    }
+    return holesOut
+  }
   let dynScale = 1
+  // the moving-DPR floor, off from the second drop until the factor is back to 1
+  let dprFloor = true
   let frameEma = 16
   let lastDynChange = 0
   let pendingSync = true
@@ -330,8 +342,8 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     const levelId = activeLevel(doc)
     const fullPlan = ds.derived[levelId]
     const plan = fullPlan && visiblePlan(ds.doc, fullPlan)
-    // the viewer hides a door or a window but keeps its hole in the wall
-    const holes = isViewOnly() && doc.openings !== ds.doc.openings ? ds.doc.openings : undefined
+    // the viewer hides a door or a window but keeps its hole in the wall (not one the author hid)
+    const holes = isViewOnly() && doc.openings !== ds.doc.openings ? holesOf(ds.doc.openings) : undefined
 
     if (doc.render.quality && doc.render.quality !== lastDocQuality) {
       lastDocQuality = doc.render.quality
@@ -456,7 +468,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
 
   // ── sizing / adaptive DPR ──
   function targetDpr(moving: boolean): number {
-    return frameDpr(ctx.quality, window.devicePixelRatio || 1, moving, dynScale)
+    return frameDpr(ctx.quality, window.devicePixelRatio || 1, moving, dynScale, undefined, dprFloor)
   }
   function applySize(dpr: number): void {
     const w = container.clientWidth
@@ -476,10 +488,12 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       if (now - lastDynChange > 1500) {
         if (frameEma > 25 && dynScale > 0.6) {
           dynScale = Math.max(0.6, dynScale - 0.12)
+          if (dynScale <= 0.8) dprFloor = false
           lastDynChange = now
           frameEma = 18
         } else if (frameEma < 17.5 && dynScale < 1) {
           dynScale = Math.min(1, dynScale + 0.06)
+          if (dynScale >= 1) dprFloor = true
           lastDynChange = now
         }
       }

@@ -5,6 +5,7 @@
  */
 import { itemFootprint, pointInPolygon, projectOnSegment } from '@core'
 import type { DerivedPlan, Doc, EntityRef, Vec2 } from '@core/types'
+import { own } from './hideState'
 
 export interface Shape {
   /** footprint on the plan (a single point for lights and sockets) */
@@ -33,18 +34,18 @@ export interface Gap {
 export function shapeOf(ref: EntityRef, doc: Doc, plan: DerivedPlan | undefined): Shape | null {
   switch (ref.kind) {
     case 'item': {
-      const it = doc.items[ref.id]
+      const it = own(doc.items, ref.id)
       return it ? { poly: itemFootprint(it), z0: it.elevation, z1: it.elevation + it.size.h } : null
     }
     case 'wall': {
-      const w = doc.walls[ref.id]
+      const w = own(doc.walls, ref.id)
       const g = plan?.wallGeoms[ref.id]
       if (!w || !g) return null
       return { poly: g.polygon.length >= 3 ? g.polygon : [g.a, g.b], z0: 0, z1: w.height }
     }
     case 'opening': {
-      const o = doc.openings[ref.id]
-      const w = o && doc.walls[o.wallId]
+      const o = own(doc.openings, ref.id)
+      const w = o && own(doc.walls, o.wallId)
       const g = o && plan?.wallGeoms[o.wallId]
       if (!o || !w || !g || !(g.length > 0)) return null
       const ux = (g.b.x - g.a.x) / g.length
@@ -59,11 +60,11 @@ export function shapeOf(ref: EntityRef, doc: Doc, plan: DerivedPlan | undefined)
     case 'room': {
       const r = plan?.rooms.find((e) => e.roomId === ref.id)
       if (!r) return null
-      const h = doc.rooms[ref.id]?.ceiling?.height ?? doc.levels[r.levelId]?.height ?? 2700
+      const h = own(doc.rooms, ref.id)?.ceiling?.height ?? doc.levels[r.levelId]?.height ?? 2700
       return { poly: r.polygon, z0: 0, z1: h }
     }
     case 'light': {
-      const l = doc.lights[ref.id]
+      const l = own(doc.lights, ref.id)
       return l ? { poly: [{ x: l.x, y: l.y }], z0: l.elevation, z1: l.elevation } : null
     }
     case 'electric': {

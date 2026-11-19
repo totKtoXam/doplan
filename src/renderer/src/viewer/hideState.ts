@@ -34,6 +34,14 @@ const WINDOWS: readonly OpeningKind[] = ['window', 'frenchWindow', 'balconyBlock
 
 const sameRef = (a: EntityRef, b: EntityRef) => a.kind === b.kind && a.id === b.id
 
+/** an id as the editor makes them; never a name every object has (`__proto__`, `constructor`) */
+export const isSafeId = (id: string): boolean => /^[\w-]{1,64}$/.test(id) && !(id in Object.prototype)
+
+/** an entry of a document table by its own key only (an id from a link is not trusted) */
+export function own<T>(table: Record<string, T> | undefined, id: string): T | undefined {
+  return table && Object.hasOwn(table, id) ? table[id] : undefined
+}
+
 export function parseHideHash(hash: string): HideState {
   const q = new URLSearchParams(hash.replace(/^#/, ''))
   const refs: EntityRef[] = []
@@ -42,7 +50,7 @@ export function parseHideHash(hash: string): HideState {
     if (i <= 0) continue
     const kind = part.slice(0, i)
     const id = part.slice(i + 1)
-    if (KINDS.has(kind) && id && !refs.some((r) => r.kind === kind && r.id === id)) refs.push({ kind: kind as EntityKind, id })
+    if (KINDS.has(kind) && isSafeId(id) && !refs.some((r) => r.kind === kind && r.id === id)) refs.push({ kind: kind as EntityKind, id })
   }
   const cats = (q.get('cats') ?? '')
     .split(',')
@@ -79,14 +87,14 @@ export function toggleCat(state: HideState, cat: HideCat, hidden: boolean): Hide
 export function catOf(ref: EntityRef, doc: Doc, asset: (id: Id) => Pick<Asset, 'category'> | undefined): HideCat | null {
   switch (ref.kind) {
     case 'item': {
-      const it = doc.items[ref.id]
+      const it = own(doc.items, ref.id)
       if (!it) return null
       return asset(it.assetId)?.category === 'lighting' ? 'lighting' : 'furniture'
     }
     case 'light':
       return 'lighting'
     case 'opening': {
-      const o = doc.openings[ref.id]
+      const o = own(doc.openings, ref.id)
       return o ? (WINDOWS.includes(o.kind) ? 'windows' : 'doors') : null
     }
     case 'electric':

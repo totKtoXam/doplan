@@ -175,7 +175,8 @@ export function createPost(ctx: EngineContext): PostPipeline {
       aoNode.thickness.value = 1
       aoNode.useTemporalFiltering = f.traa
       let aoTexture: any = aoNode.getTextureNode()
-      if (!f.traa && q.aoDenoise) {
+      // a preset made for TRAA that runs without it (WebGL 2) gets the denoise pass instead of raw grain
+      if (!f.traa && (q.aoDenoise || q.antialias === 'traa')) {
         const smooth: any = track((denoise as any)(aoTexture, depth, normal, camera))
         smooth.radius.value = 4
         aoTexture = smooth

@@ -5,6 +5,7 @@
  */
 import { electricName, entityKind, ROOM_TYPE_NAMES } from '@core'
 import type { Catalog, DerivedPlan, Doc, EntityRef, Id, Opening, OpeningKind } from '@core/types'
+import { own } from './hideState'
 
 export interface InfoRow {
   label: string
@@ -78,12 +79,12 @@ function openingType(o: Opening, env: InfoEnv): string {
 }
 
 function ceilingOf(roomId: Id, env: InfoEnv): number | undefined {
-  const rec = env.doc.rooms[roomId]
+  const rec = own(env.doc.rooms, roomId)
   if (rec?.ceiling?.height) return rec.ceiling.height
   const derived = env.plan?.rooms.find((r) => r.roomId === roomId)
   let h = Infinity
   for (const e of derived?.edges ?? []) {
-    const w = env.doc.walls[e.wallId]
+    const w = own(env.doc.walls, e.wallId)
     if (w && (w.kind === 'wall' || w.kind === 'partition')) h = Math.min(h, w.height)
   }
   if (Number.isFinite(h)) return h
@@ -96,7 +97,7 @@ export function elementInfo(ref: EntityRef, env: InfoEnv): ElementInfo | null {
   const { doc, t } = env
   switch (ref.kind) {
     case 'item': {
-      const it = doc.items[ref.id]
+      const it = own(doc.items, ref.id)
       if (!it) return null
       const asset = doc.assets?.[it.assetId] ?? env.catalog.assets.find((a) => a.id === it.assetId)
       const rows: InfoRow[] = [{ label: t('Размеры (Ш × Г × В)'), value: sizeText(it.size.w, it.size.d, it.size.h, env) }]
@@ -106,7 +107,7 @@ export function elementInfo(ref: EntityRef, env: InfoEnv): ElementInfo | null {
       return { name: nameOf(ref, env) ?? it.assetId, type: asset ? t(categoryName(asset.category)) : t('Предмет'), rows }
     }
     case 'wall': {
-      const w = doc.walls[ref.id]
+      const w = own(doc.walls, ref.id)
       if (!w) return null
       const g = env.plan?.wallGeoms[ref.id]
       const a = doc.nodes[w.a]
@@ -121,7 +122,7 @@ export function elementInfo(ref: EntityRef, env: InfoEnv): ElementInfo | null {
       return { name: nameOf(ref, env) ?? t('Стена'), type: entityKind('wall')?.subtype?.(w, { doc, lang: env.lang }) ?? t('Стена'), rows }
     }
     case 'opening': {
-      const o = doc.openings[ref.id]
+      const o = own(doc.openings, ref.id)
       if (!o) return null
       const rows: InfoRow[] = [
         { label: t('Ширина'), value: mmText(o.width, env) },
@@ -133,7 +134,7 @@ export function elementInfo(ref: EntityRef, env: InfoEnv): ElementInfo | null {
     }
     case 'room': {
       const derived = env.plan?.rooms.find((r) => r.roomId === ref.id)
-      const rec = doc.rooms[ref.id]
+      const rec = own(doc.rooms, ref.id)
       if (!derived && !rec) return null
       const rows: InfoRow[] = []
       if (derived) {
@@ -152,7 +153,7 @@ export function elementInfo(ref: EntityRef, env: InfoEnv): ElementInfo | null {
       return { name: rec ? (nameOf(ref, env) ?? type) : type, type: t('Помещение'), rows }
     }
     case 'light': {
-      const l = doc.lights[ref.id]
+      const l = own(doc.lights, ref.id)
       if (!l) return null
       return {
         name: nameOf(ref, env) ?? t('Светильник'),

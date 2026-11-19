@@ -19,12 +19,14 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { builtinCatalog, mergeCatalog, parseDoc } from '@core'
+import { layerIndex } from '@core/layers'
 import type { Catalog, Doc, QualityPreset } from '@core/types'
 import type { Editor2DHandle, Engine3DHandle } from '@/contracts'
 import { createEditor2D } from '@/editor2d'
 import { addTranslations, useT } from '@/i18n'
 import { docStore, useDoc } from '@/store/document'
 import { setHandle } from '@/store/handles'
+import { setAuthorHiddenOpenings } from '@/store/viewOnly'
 import { uiStore, useUi } from '@/store/ui'
 import { AppLogo } from '@/ui/shell/AppLogo'
 import { MiniSelect, Segmented } from '@/ui/shell/primitives'
@@ -32,6 +34,7 @@ import { WalkLockHint } from '@/ui/shell/WalkLockHint'
 import { useStatus3d } from '@/view3d/status'
 import { parseViewerParams, viewerQuery, type SiteInfo, type ViewerCam, type ViewerParams, type ViewerView } from '@shared/pagesSite'
 import { installEditGuard, lockViewerTool, viewerEdit } from './guard'
+import { downloadableDoc } from './exporters'
 import { loadSite } from './load'
 import { currentDevice, rememberQuality, storedQuality, viewerQuality } from './quality'
 import { setDprPolicy } from '@/view3d/quality'
@@ -101,6 +104,9 @@ async function boot(params: ViewerParams): Promise<Booted> {
   const authorHidden = new Set<string>()
   for (const [kind, table] of [['item', d.items], ['wall', d.walls], ['opening', d.openings], ['room', d.rooms], ['light', d.lights], ['electric', d.electrical]] as const)
     for (const id in table ?? {}) if ((table?.[id] as { hidden?: boolean } | undefined)?.hidden) authorHidden.add(`${kind}:${id}`)
+  // an opening the plan hides (by itself, its layer or its group) leaves its wall solid in 3D
+  const layers = layerIndex(d)
+  setAuthorHiddenOpenings(new Set(Object.keys(d.openings).filter((id) => layers.hidden('opening', id))))
   viewerEdit(() => docStore.getState().transact('view', unlockAll))
   uiStore.getState().setCatalog(mergeCatalog(builtinCatalog(), site.catalog as Partial<Catalog>))
   uiStore.getState().set({
@@ -119,7 +125,7 @@ async function boot(params: ViewerParams): Promise<Booted> {
   const credits = [...(cat.assets ?? []), ...(cat.materials ?? []), ...(cat.hdris ?? [])]
     .filter((e) => e && (e.source || e.licence || ('author' in e && e.author)))
     .map((e) => ({ name: e.name, author: 'author' in e ? e.author : undefined, licence: e.licence, source: e.source }))
-  return { info: site.info, credits, pristine }
+  return { info: site.info, credits, pristine: downloadableDoc(pristine, site.catalog, location.href) }
 }
 
 export function ViewerApp() {

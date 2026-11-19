@@ -216,9 +216,13 @@ async function gitRunner(): Promise<GitRunner> {
   return { git, hooksDir: hooksDir() }
 }
 
-/** gh's credentials for `remote` as git will reach it (an insteadOf rule of the user's with credentials: no token header) */
+/**
+ * gh's credentials for `remote` as git will reach it (an insteadOf rule of the user's with
+ * credentials, or an account named for github.com in the credential config: no token header)
+ */
 async function credentialsFor(remote: string) {
-  return gitCredentials(await gitEffectiveUrls(null, [remote]).catch(() => []))
+  const a = await gitEffectiveUrls(null, [remote]).catch(() => null)
+  return gitCredentials(a?.effective ?? [], a?.ownAccount ?? false)
 }
 
 /** the runner with gh's credentials for `remote`, read right before the push (after any 401 of the API calls) */

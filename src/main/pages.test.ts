@@ -55,7 +55,7 @@ vi.mock('./ipc', () => ({ handleIpc: () => undefined }))
 vi.mock('./window', () => ({ sendToRenderer: () => undefined }))
 vi.mock('./git', () => ({
   findGit: async () => 'git',
-  gitEffectiveUrls: async (_root: unknown, urls: string[]) => urls,
+  gitEffectiveUrls: async (_root: unknown, urls: string[]) => ({ effective: urls, ownAccount: false }),
   gitInit: async () => undefined,
   // only deletes here (the site itself goes up through pagesGit.pushSite)
   gitPushRef: async (_root: string, _net: unknown, src: string | null, _branch: string, opts: { remote: string; expected?: string }) => {

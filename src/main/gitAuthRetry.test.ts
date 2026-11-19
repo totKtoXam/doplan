@@ -29,7 +29,7 @@ delete process.env['XDG_CONFIG_HOME']
 const globalConfig = (text: string) => (text ? writeFileSync(join(home, '.gitconfig'), text) : rmSync(join(home, '.gitconfig'), { force: true }))
 
 const { findGit, gitEffectiveUrls, gitRemoteAddresses, gitRemoteHeads, netTestConfig } = await import('./git')
-const { gitCredentials, tokenHeaderFits } = await import('./github')
+const { tokenHeaderFits } = await import('./github')
 const { pushSite } = await import('./pagesGit')
 
 const OLD = 'Basic ' + Buffer.from('x-access-token:old').toString('base64')
@@ -78,8 +78,28 @@ beforeEach(() => {
 // the token header as gitCredentials makes it, for the test server; no credential helper at all
 const creds = (h: string) => ['-c', 'credential.helper=', '-c', `http.extraHeader=Authorization: ${h}`]
 
+/**
+ * Rules in the system config (git's own installation) are read too and the test's home cannot hide
+ * them: the exact expectations below hold only where it has none.
+ */
+function systemRules(): boolean {
+  try {
+    const out = execFileSync('git', ['config', '--system', '--get-regexp', '^(url\\..*\\.(push)?insteadof|credential(\\..*)?\\.username|remote\\.origin\\.(url|pushurl))$'], {
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    return out.toString().trim() !== ''
+  } catch {
+    // exit 1: nothing found (or no system config at all)
+    return false
+  }
+}
+const systemHasRules = systemRules()
+if (systemHasRules) console.warn('gitAuthRetry: the system git config has url.*.insteadOf, credential.*.username or remote.origin rules — the address tests are skipped')
+
 // real git processes: slow on a loaded computer
-describe('addresses as git will use them (the global url.*.insteadOf / pushInsteadOf, pushurl)', { timeout: 60_000 }, () => {
+// skipped where git's system config has such rules of its own: they would change every expectation here
+describe.skipIf(systemHasRules)('addresses as git will use them (the global url.*.insteadOf / pushInsteadOf, pushurl, credential.username)', { timeout: 60_000 }, () => {
   const plain = 'https://github.com/anna/flat.git'
   let root = ''
   beforeAll(() => {
@@ -92,13 +112,13 @@ describe('addresses as git will use them (the global url.*.insteadOf / pushInste
   afterAll(() => globalConfig(''))
 
   it('no rules: the address as written, the header fits', async () => {
-    expect(await gitEffectiveUrls(null, [plain])).toEqual([plain])
-    expect(await gitRemoteAddresses(root)).toEqual({ urls: [plain], effective: [plain] })
+    expect(await gitEffectiveUrls(null, [plain])).toEqual({ effective: [plain], ownAccount: false })
+    expect(await gitRemoteAddresses(root)).toMatchObject({ urls: [plain], push: [], effective: [plain], ownAccount: false })
   })
 
   it("a global rule that adds the user's own token: no gh header (Pages and the project)", async () => {
     globalConfig('[url "https://x-access-token:PAT@github.com/"]\n\tinsteadOf = https://github.com/\n')
-    const urls = await gitEffectiveUrls(null, [plain])
+    const urls = (await gitEffectiveUrls(null, [plain])).effective
     expect(urls).toContain('https://x-access-token:PAT@github.com/anna/flat.git')
     expect(tokenHeaderFits(urls)).toBe(false)
     expect(tokenHeaderFits((await gitRemoteAddresses(root)).effective)).toBe(false)
@@ -120,10 +140,23 @@ describe('addresses as git will use them (the global url.*.insteadOf / pushInste
     expect(tokenHeaderFits(a.effective)).toBe(false)
   })
 
-  it('no header: no helper either — the user’s own credentials answer, gh is not asked', async () => {
-    // whatever gh would say: no flags, no environment for a user-named address
-    expect(await gitCredentials(['https://work-acct@github.com/anna/flat.git'])).toEqual({ config: [], env: {} })
-    expect(await gitCredentials(['https://gitlab.com/anna/flat.git'])).toEqual({ config: [], env: {} })
+  it('an account named for github.com in the credential config (several in the credential manager): gh stays out', async () => {
+    globalConfig('[credential "https://github.com"]\n\tusername = work-acct\n')
+    expect(await gitRemoteAddresses(root)).toMatchObject({ urls: [plain], effective: [plain], ownAccount: true })
+    expect((await gitEffectiveUrls(null, [plain])).ownAccount).toBe(true)
+    // without a scheme, as some guides write it
+    globalConfig('[credential "github.com"]\n\tusername = work-acct\n')
+    expect((await gitRemoteAddresses(root)).ownAccount).toBe(true)
+    // one user name for every host
+    globalConfig('[credential]\n\tusername = work-acct\n')
+    expect((await gitRemoteAddresses(root)).ownAccount).toBe(true)
+    expect((await gitEffectiveUrls(null, [plain])).ownAccount).toBe(true)
+  })
+
+  it('a user name for another host does not count', async () => {
+    globalConfig('[credential "https://gitlab.com"]\n\tusername = work-acct\n[credential "https://github.com.evil.example"]\n\tusername = x\n')
+    expect((await gitRemoteAddresses(root)).ownAccount).toBe(false)
+    expect((await gitEffectiveUrls(null, [plain])).ownAccount).toBe(false)
   })
 })
 

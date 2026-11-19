@@ -46,8 +46,9 @@ import {
   gitRelated,
   gitRemoteHeads,
   gitRemoteUrl,
+  gitAddressesFor,
   gitRemoteAddresses,
-  gitRemoteUrls,
+  type RemoteAddresses,
   gitRemoveRemote,
   gitRepoSize,
   gitSetRemote,
@@ -93,9 +94,13 @@ async function guard<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-/** gh's credentials for the remote of `root` (the token header only when every address git may use is plain https://github.com) */
-async function net(interactive: boolean, root?: string, addresses?: string[]): Promise<GitNet> {
-  const c = await gitCredentials(addresses ?? (root ? ((await gitRemoteAddresses(root, REMOTE).catch(() => null))?.effective ?? []) : []))
+/**
+ * gh's credentials for the remote's addresses, read once per operation (gitRemoteAddresses): the token
+ * header only when every address git may use is plain https://github.com and no account of the user's
+ * own is named for it
+ */
+async function net(interactive: boolean, addr: RemoteAddresses): Promise<GitNet> {
+  const c = await gitCredentials(addr.effective, addr.ownAccount)
   return { config: c.config, env: c.env, refresh: c.refresh, interactive }
 }
 
@@ -126,10 +131,14 @@ async function requireRoot(): Promise<string> {
   return r.root
 }
 
-/** the project's one GitHub address for a send or a get; several addresses (git would use them all) are refused */
-async function requireRemote(root: string): Promise<string> {
-  const urls = await gitRemoteUrls(root, REMOTE).catch(() => [])
-  if (!urls.length) throw new Error(msg('Проект не подключён к GitHub', 'The project is not connected to GitHub'))
+/**
+ * The project's one GitHub address for a send or a get; several addresses (git would use them all)
+ * are refused. The addresses come back for the operation's credentials: one git call for both.
+ */
+async function requireRemote(root: string): Promise<RemoteAddresses> {
+  const addr = await gitRemoteAddresses(root, REMOTE).catch(() => null)
+  const urls = addr?.urls ?? []
+  if (!addr || !urls.length) throw new Error(msg('Проект не подключён к GitHub', 'The project is not connected to GitHub'))
   if (urls.length > 1)
     throw new Error(
       msg(
@@ -137,7 +146,7 @@ async function requireRemote(root: string): Promise<string> {
         'The project connection has several addresses (remote.origin.url in .git/config), so it is unclear where to send. Disconnect the project from GitHub and connect it again by one link.',
       ),
     )
-  return urls[0]
+  return addr
 }
 
 /** commits whatever is not committed yet (creating the repository in a new folder); a merge left by a crash is dropped first */
@@ -193,11 +202,11 @@ export async function syncStatus(fetch = false): Promise<GithubSyncStatus> {
   // a look nobody asked for goes to github.com only, never to whatever host a received folder names
   // (with several addresses git would fetch from the first and push to all: no look at all then)
   // one git call: the addresses for this check and for the credentials
-  const addr = fetch ? await gitRemoteAddresses(root, REMOTE) : { urls: [], effective: [] }
-  const urls = addr.urls
-  if (urls.length === 1 && parseGithubUrl(stripUrlCredentials(urls[0]))) {
+  const addr = fetch ? await gitRemoteAddresses(root, REMOTE) : null
+  const urls = addr?.urls ?? []
+  if (addr && urls.length === 1 && parseGithubUrl(stripUrlCredentials(urls[0]))) {
     try {
-      await gitFetch(root, await net(false, root, addr.effective), REMOTE)
+      await gitFetch(root, await net(false, addr), REMOTE)
       noteCheck(root)
     } catch (err) {
       noteCheck(root, err)
@@ -274,9 +283,9 @@ export function push(): Promise<PushResult> {
   return exclusive(() =>
     guard(async () => {
       const root = await requireRoot()
-      await requireRemote(root)
+      const addr = await requireRemote(root)
       await commitPending(root, msg('Отправка на GitHub', 'Sent to GitHub'))
-      return pushLocked(root, await net(true, root))
+      return pushLocked(root, await net(true, addr))
     }),
   )
 }
@@ -326,9 +335,9 @@ export function pull(): Promise<PullResult> {
   return exclusive(() =>
     guard(async () => {
       const root = await requireRoot()
-      await requireRemote(root)
+      const addr = await requireRemote(root)
       await commitPending(root, msg('Перед получением изменений с GitHub', 'Before getting changes from GitHub'))
-      return pullLocked(root, await net(true, root))
+      return pullLocked(root, await net(true, addr))
     }),
   )
 }
@@ -370,9 +379,9 @@ export function resolveConflict(choice: ConflictChoice): Promise<ResolveResult> 
       if (choice !== 'mine' && choice !== 'theirs' && choice !== 'both') throw new Error('bad choice')
       const root = await requireRoot()
       // the same check as push and pull: one address, or nothing is fetched
-      await requireRemote(root)
+      const addr = await requireRemote(root)
       await commitPending(root, msg('Перед получением изменений с GitHub', 'Before getting changes from GitHub'))
-      const n = await net(true, root)
+      const n = await net(true, addr)
       await gitFetch(root, n, REMOTE)
       noteCheck(root)
       const branch = await targetBranch(root)
@@ -424,11 +433,13 @@ async function connectLocked(url: unknown, opts: ConnectOpts = {}): Promise<Conn
   const root = await requireRoot()
   await commitPending(root, msg('Подготовка к отправке на GitHub', 'Preparing to send to GitHub'))
   if (!(await gitHead(root))) throw new Error(msg('В проекте нет сохранённых версий', 'The project has no saved versions'))
-  const previous = await gitRemoteUrl(root, REMOTE)
-  await gitSetRemote(root, remoteUrlOf(ref), REMOTE)
+  // one config read: the address to restore on failure and the credentials for the new one
+  const before = await gitRemoteAddresses(root, REMOTE)
+  const previous = before.urls[0] ?? null
+  await gitSetRemote(root, remoteUrlOf(ref), REMOTE, previous !== null)
   let sent = false
   try {
-    const n = await net(true, root)
+    const n = await net(true, gitAddressesFor(before, [remoteUrlOf(ref)]))
     // just created: certainly empty, one network command less
     const heads = opts.fresh ? { empty: true, head: null, branches: [] } : await gitRemoteHeads(root, n, REMOTE)
     noteCheck(root)

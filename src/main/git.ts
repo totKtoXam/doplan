@@ -986,9 +986,13 @@ export async function gitRemoteUrls(root: string, remote = 'origin'): Promise<st
 }
 
 const URL_RULE = 'url\\..*\\.(push)?insteadof'
+/** credential.username and credential.<url>.username: an account the user picked for an address */
+const USER_NAME = 'credential(\\..*)?\\.username'
+
+type UrlRule = { base: string; prefix: string }
 
 /** `git config --get-regexp` (every scope) as key/value pairs, with the flags network commands see */
-async function configMatching(root: string | null, pattern: string): Promise<{ key: string; value: string }[]> {
+async function configMatching(root: string | null, pattern: string): Promise<ConfigEntry[]> {
   // netTestConfig: tests stand a local folder in for GitHub through an insteadOf rule
   const opts = { allowFail: true, config: [...netTestConfig] }
   const args = ['config', '--get-regexp', pattern]
@@ -1007,26 +1011,61 @@ async function configMatching(root: string | null, pattern: string): Promise<{ k
  * of the user's own may carry credentials, e.g. a token in the global config). Every matching rule
  * counts, not only the one git would pick: a superset, for deciding what to send along.
  */
-function rewritten(urls: readonly string[], entries: { key: string; value: string }[]): string[] {
-  const rules = entries.flatMap(({ key, value }) => {
+function urlRules(entries: ConfigEntry[]): UrlRule[] {
+  return entries.flatMap(({ key, value }) => {
     const m = /^url\.(.+)\.(?:push)?insteadof$/i.exec(key)
     return m && value ? [{ base: m[1], prefix: value }] : []
   })
+}
+
+function rewritten(urls: readonly string[], rules: UrlRule[]): string[] {
   const out = new Set(urls)
   for (const u of urls) for (const r of rules) if (u.startsWith(r.prefix)) out.add(r.base + u.slice(r.prefix.length))
   return [...out]
 }
 
-/** every address git may use for `urls` outside any repository (gh-pages pushes): see rewritten() */
-export async function gitEffectiveUrls(root: string | null, urls: readonly string[]): Promise<string[]> {
-  return rewritten(urls, await configMatching(root, `^${URL_RULE}$`))
+/**
+ * A user name for github.com in the credential config (credential.username, or
+ * credential.<url>.username whose address is on github.com): the user picked an account of their own
+ * there (a credential manager holding several), which gh's token must not replace. A user name for
+ * another host does not count.
+ */
+function ownAccount(entries: ConfigEntry[]): boolean {
+  return entries.some(({ key, value }) => {
+    if (!value) return false
+    if (/^credential\.username$/i.test(key)) return true
+    const m = /^credential\.(.+)\.username$/i.exec(key)
+    if (!m) return false
+    try {
+      const u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(m[1]) ? m[1] : `https://${m[1]}`)
+      return u.hostname.toLowerCase() === 'github.com'
+    } catch {
+      return false
+    }
+  })
 }
 
-export interface RemoteAddresses {
+/** what decides gh's part in a network command (github.gitCredentials) */
+export interface NetAddresses {
+  /** every address git may talk to: as written, and rewritten by the insteadOf rules (see rewritten()) */
+  effective: string[]
+  /** a user name for github.com in the credential config (see ownAccount()) */
+  ownAccount: boolean
+}
+
+/** every address git may use for `urls` outside any repository (gh-pages pushes), in one git call */
+export async function gitEffectiveUrls(root: string | null, urls: readonly string[]): Promise<NetAddresses> {
+  const entries = await configMatching(root, `^(${URL_RULE}|${USER_NAME})$`)
+  return { effective: rewritten(urls, urlRules(entries)), ownAccount: ownAccount(entries) }
+}
+
+export interface RemoteAddresses extends NetAddresses {
   /** remote.<name>.url as `config --get-all` lists them (the order git uses) */
   urls: string[]
-  /** every address git may talk to for the remote: url and pushurl entries, rewritten by the rules */
-  effective: string[]
+  /** remote.<name>.pushurl */
+  push: string[]
+  /** the insteadOf / pushInsteadOf rules read along (gitAddressesFor) */
+  rules: UrlRule[]
 }
 
 /**
@@ -1036,10 +1075,16 @@ export interface RemoteAddresses {
  */
 export async function gitRemoteAddresses(root: string, remote = 'origin'): Promise<RemoteAddresses> {
   const name = remote.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const entries = await configMatching(root, `^(remote\\.${name}\\.(url|pushurl)|${URL_RULE})$`)
+  const entries = await configMatching(root, `^(remote\\.${name}\\.(url|pushurl)|${URL_RULE}|${USER_NAME})$`)
   const urls = entries.filter((e) => e.key.toLowerCase() === `remote.${remote.toLowerCase()}.url`).map((e) => e.value)
   const push = entries.filter((e) => e.key.toLowerCase() === `remote.${remote.toLowerCase()}.pushurl`).map((e) => e.value)
-  return { urls, effective: rewritten([...urls, ...push], entries) }
+  const rules = urlRules(entries)
+  return { urls, push, rules, effective: rewritten([...urls, ...push], rules), ownAccount: ownAccount(entries) }
+}
+
+/** the addresses once the remote's url is `urls` (connecting it: no second config read) */
+export function gitAddressesFor(a: RemoteAddresses, urls: readonly string[]): RemoteAddresses {
+  return { ...a, urls: [...urls], effective: rewritten([...urls, ...a.push], a.rules) }
 }
 
 /** the remote's address git fetches from (the first one; `config --get` would give the last) */
@@ -1047,11 +1092,11 @@ export async function gitRemoteUrl(root: string, remote = 'origin'): Promise<str
   return (await gitRemoteUrls(root, remote))[0] ?? null
 }
 
-/** adds the remote or changes its address */
-export async function gitSetRemote(root: string, url: string, remote = 'origin'): Promise<void> {
+/** adds the remote or changes its address (`had`: whether it has one, when the caller already read it) */
+export async function gitSetRemote(root: string, url: string, remote = 'origin', had?: boolean): Promise<void> {
   if (/^-|[\0\r\n]/.test(url)) throw new Error(msg('Недопустимый адрес репозитория', 'Invalid repository address'))
   // one address afterwards, even where the folder had several (set-url refuses to choose among them)
-  if (await gitRemoteUrl(root, remote)) await run(root, ['config', '--replace-all', `remote.${remote}.url`, url])
+  if (had ?? (await gitRemoteUrl(root, remote))) await run(root, ['config', '--replace-all', `remote.${remote}.url`, url])
   else await run(root, ['remote', 'add', remote, url])
 }
 

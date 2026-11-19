@@ -268,7 +268,7 @@ vi.mock('./github', async (orig) => {
   }
 })
 
-const { netTestConfig, findGit, gitFetch, gitRemoteUrl, gitLog, gitOrphanCommit, gitPushRef, isSafeBranchName } = await import('./git')
+const { netTestConfig, findGit, gitFetch, gitRemoteAddresses, gitRemoteUrl, gitLog, gitOrphanCommit, gitPushRef, isSafeBranchName } = await import('./git')
 const { withSyncLock } = await import('./syncLock')
 const { saveProject } = await import('./project')
 const { grantPath } = await import('./access')
@@ -485,7 +485,7 @@ describe.skipIf(!hasGit)('project sync', { timeout: 180_000 }, () => {
     const a = await project('P')
     useRoot(a)
     await sync.connect(url)
-    const net = await sync.githubNet(false)
+    const net = await sync.githubNet(false, await gitRemoteAddresses(a))
     const first = await gitOrphanCommit(a, [
       { path: 'index.html', data: '<h1>v1</h1>' },
       { path: 'assets/m.bin', data: Buffer.from([0, 1, 2, 255]) },

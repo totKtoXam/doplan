@@ -300,10 +300,24 @@ describe('the token for git', () => {
     expect(github.tokenHeaderFits([])).toBe(false)
   })
 
-  it('a remote with credentials or a user name of its own: nothing from gh (no header, no helper)', async () => {
+  it('a remote with credentials or a user name of its own, another host: nothing from gh, and gh is not even started', async () => {
+    // gh signed in and answering: still no header, no helper — the user's own credentials answer
     expect(await github.gitCredentials(['https://user:ghp_x@github.com/other/repo.git'])).toEqual({ config: [], env: {} })
     expect(await github.gitCredentials(['https://work-acct@github.com/org/repo.git'])).toEqual({ config: [], env: {} })
+    expect(await github.gitCredentials(['https://gitlab.com/anna/flat.git'])).toEqual({ config: [], env: {} })
     expect(await github.gitCredentials([])).toEqual({ config: [], env: {} })
+    expect(gh.calls).toHaveLength(0)
+  })
+
+  it('an account named for github.com in the credential config: nothing from gh for a plain address', async () => {
+    expect(await github.gitCredentials(['https://github.com/anna/flat.git'], true)).toEqual({ config: [], env: {} })
+    expect(gh.calls).toHaveLength(0)
+  })
+
+  it('gh slow: an address it gives nothing to does not wait for it', async () => {
+    gh.answer = 'slow'
+    expect(await github.gitCredentials(['https://work-acct@github.com/org/repo.git'])).toEqual({ config: [], env: {} })
+    expect(gh.calls).toHaveLength(0)
   })
 
   it('gh slow, plain github.com address: its helper alone answers git', async () => {

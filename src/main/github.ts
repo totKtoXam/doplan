@@ -407,22 +407,25 @@ export function ghHelperArgs(exe: string): string[] {
 
 /**
  * Credentials for git network commands to `remotes` (every address git may use: git.gitRemoteAddresses).
+ * `ownAccount`: the user named an account for github.com in the credential config (git.NetAddresses).
  * gh signed in and every address plain https://github.com (tokenHeaderFits): gh's token as a header
  * (no gh started per command) and gh's helper for github.com (the helper list reset first, so no other
  * helper is asked or stores anything), which answers alone while gh is slow; a refused header is read
  * again once (`refresh`). Any other address (credentials or a user name of its own, an insteadOf rule
- * adding them, another host) or not signed in: nothing at all, the user's own credentials and
- * credential manager answer, as with plain git.
+ * adding them, another host, an account named in the credential config) or not signed in: nothing at
+ * all, the user's own credentials and credential manager answer, as with plain git.
  */
-export async function gitCredentials(remotes: readonly string[] = []): Promise<GitCredentials> {
+export async function gitCredentials(remotes: readonly string[] = [], ownAccount = false): Promise<GitCredentials> {
+  // decided first: an address gh gives nothing to never waits for gh (up to a minute while it is slow)
+  // the user's own account for that address (e.g. user@github.com in GCM): gh must not replace it
+  if (ownAccount || !tokenHeaderFits(remotes)) return { config: [], env: {} }
   const exe = findGh()
   if (!exe) return { config: [], env: {} }
-  return credentialsOf(exe, await tokenNow(), tokenHeaderFits(remotes))
+  return credentialsOf(exe, await tokenNow())
 }
 
-function credentialsOf(exe: string, s: TokenState, header: boolean): GitCredentials {
-  // the user's own account for that address (e.g. user@github.com in GCM): gh must not replace it
-  if (s.kind === 'none' || !header) return { config: [], env: {} }
+function credentialsOf(exe: string, s: TokenState): GitCredentials {
+  if (s.kind === 'none') return { config: [], env: {} }
   const config = ghHelperArgs(exe)
   if (s.kind !== 'token') return { config, env: {} }
   return {
@@ -431,7 +434,7 @@ function credentialsOf(exe: string, s: TokenState, header: boolean): GitCredenti
     refresh: async () => {
       // the token in memory is still the refused one: gh is asked again (not when another call already did)
       if (tokenState?.kind === 'token' && tokenState.token === s.token) forgetGhStatus()
-      const { config: c, env } = credentialsOf(exe, await tokenNow(), header)
+      const { config: c, env } = credentialsOf(exe, await tokenNow())
       return { config: c, env }
     },
   }

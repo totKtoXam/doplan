@@ -24,12 +24,21 @@ interface Status3D {
    * leaves the choice to the user.
    */
   struggling: number
+  /**
+   * Bumped when the renderer was made again after the GPU device was lost: the backend may have
+   * changed (a second loss falls back to WebGL 2), and what depends on it is decided again.
+   */
+  rendererSwaps: number
 }
 
-export const status3dStore = createStore<Status3D>()(() => ({ ptStage: 'idle', modelsPending: 0, modelsTotal: 0, struggling: 0 }))
+export const status3dStore = createStore<Status3D>()(() => ({ ptStage: 'idle', modelsPending: 0, modelsTotal: 0, struggling: 0, rendererSwaps: 0 }))
 
 export function markStruggling(): void {
   status3dStore.setState({ struggling: status3dStore.getState().struggling + 1 })
+}
+
+export function markRendererSwapped(): void {
+  status3dStore.setState({ rendererSwaps: status3dStore.getState().rendererSwaps + 1 })
 }
 
 export function setPtStage(stage: PtStage): void {

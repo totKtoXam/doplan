@@ -42,7 +42,7 @@ import { frameDpr, getQuality, getShared } from './quality'
 import { createMeasure3D } from './measure3d'
 import { isViewOnly, keepsHole } from '@/store/viewOnly'
 import { createViewerPick, type ViewerPick } from './viewerPick'
-import { markStruggling } from './status'
+import { markRendererSwapped, markStruggling } from './status'
 
 type CameraMode = 'orbit' | 'walk' | 'top'
 
@@ -707,6 +707,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
         camera.lookAt(target)
       }
       suspended = false
+      markRendererSwapped()
       currentDpr = 0
       applySize(targetDpr(false))
       emitSceneChanged()

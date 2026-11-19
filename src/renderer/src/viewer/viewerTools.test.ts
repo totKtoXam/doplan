@@ -223,4 +223,35 @@ describe('the downloadable plan', () => {
     expect(out.assets['lib-gone'].src).toBe(`${base}assets/l/gone.glb`)
     expect(asked.sort()).toEqual([`${base}assets/l/gone.glb`, `${base}assets/l/s.glb`])
   })
+
+  it('carries the published underlays inside too, first, and keeps links past the total budget', async () => {
+    const p = plan()
+    const base = 'https://me.github.io/flat/'
+    const withUnderlay = { ...p.doc, underlays: { u1: { id: 'u1', src: './assets/p/scan.png' } } } as unknown as typeof p.doc
+    const doc = downloadableDoc(
+      withUnderlay,
+      {
+        assets: [
+          { ...sofa, id: 'lib-a', src: './assets/l/a.glb', custom: true },
+          { ...sofa, id: 'lib-b', src: './assets/l/b.glb', custom: true },
+          { ...sofa, id: 'lib-big', src: './assets/l/big.glb', custom: true },
+        ],
+      },
+      base,
+    )
+    // the underlay became an https link of the site: the desktop app would not load it
+    expect((doc.underlays as Record<string, { src: string }>).u1.src).toBe(`${base}assets/p/scan.png`)
+    const sizes: Record<string, number> = { 'scan.png': 40, 'a.glb': 50, 'b.glb': 50, 'big.glb': 500 }
+    const load = async (u: string) => {
+      const n = sizes[u.slice(u.lastIndexOf('/') + 1)]
+      return new Response(new Uint8Array(n), { headers: { 'content-length': String(n) } })
+    }
+    const out = await inlineSiteFiles(doc, base, load, { file: 200, total: 100 })
+    const u1 = (out.underlays as Record<string, { src: string }>).u1.src
+    expect(u1.startsWith('data:image/png;base64,')).toBe(true)
+    const srcs = ['lib-a', 'lib-b', 'lib-big'].map((id) => out.assets[id].src)
+    // 40 bytes of underlay, then one 50-byte model fits; the other would pass 100, the large one passes 200
+    expect(srcs.filter((s) => s?.startsWith('data:'))).toHaveLength(1)
+    expect(srcs[2]).toBe(`${base}assets/l/big.glb`)
+  })
 })

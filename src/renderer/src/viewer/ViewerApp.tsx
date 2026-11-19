@@ -400,17 +400,22 @@ function Scene3D({ hidden, cam, onCam }: { hidden: boolean; cam: ViewerCam; onCa
         handle = h
         setHandle('engine3d', h)
         setHost3d(el)
-        uiStore.setState({ backend: h.backend })
-        // the backend actually running decides the cap, not what the browser offered
-        const q = docStore.getState().doc.render.quality ?? 'high'
-        const capped = capToBackend(q, h.backend)
-        if (capped !== q) {
-          viewerEdit(() => uiStore.getState().setQuality(capped))
-          h.setQuality(capped)
+        // the backend actually running decides the cap, not what the browser offered: at the start,
+        // and again when a lost GPU device made the renderer fall back to WebGL 2
+        const onBackend = () => {
+          uiStore.setState({ backend: h.backend })
+          const q = docStore.getState().doc.render.quality ?? 'high'
+          const capped = capToBackend(q, h.backend)
+          if (capped !== q) {
+            viewerEdit(() => uiStore.getState().setQuality(capped))
+            h.setQuality(capped)
+          }
         }
+        onBackend()
         // adaptive quality: slow frames at the lowest resolution take the preset a step down (for
         // this visit only: a remembered choice stays the visitor's own)
         unsub = status3dStore.subscribe((s, p) => {
+          if (s.rendererSwaps !== p.rendererSwaps) onBackend()
           if (s.struggling === p.struggling) return
           const next = lighter(docStore.getState().doc.render.quality ?? 'high')
           if (!next) return

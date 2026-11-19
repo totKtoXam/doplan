@@ -25,7 +25,7 @@ import { handles, setHandle } from '@/store/handles'
 import { pathTracingDone, uiStore, useUi } from '@/store/ui'
 import type { Engine3DHandle } from '@/contracts'
 import { prefs3dStore, usePrefs3d, type DenoiseMode, type TraceMode } from '@/view3d/prefs'
-import { useStatus3d } from '@/view3d/status'
+import { status3dStore, useStatus3d } from '@/view3d/status'
 import { IconBtn, MiniSelect, Segmented, TextBtn } from './primitives'
 import { WalkLockHint } from './WalkLockHint'
 import { Ai3DMenu } from '@/ai' // ai-chat
@@ -253,6 +253,7 @@ export function Viewport3D({ hidden }: { hidden?: boolean }) {
     let disposed = false
     let handle: Engine3DHandle | null = null
     let ro: ResizeObserver | null = null
+    let unsub: (() => void) | undefined
     setError(null)
     setEngine(null)
     publishBackendPref(uiStore.getState().backendPref)
@@ -267,6 +268,10 @@ export function Viewport3D({ hidden }: { hidden?: boolean }) {
         setHandle('engine3d', h)
         setEngine(h)
         uiStore.setState({ backend: h.backend })
+        // a lost GPU device may bring the renderer back on WebGL 2
+        unsub = status3dStore.subscribe((s, p) => {
+          if (s.rendererSwaps !== p.rendererSwaps) uiStore.setState({ backend: h.backend })
+        })
         h.setCameraMode(uiStore.getState().cameraMode)
         ro = new ResizeObserver((entries) => {
           const r = entries[0]?.contentRect
@@ -282,6 +287,7 @@ export function Viewport3D({ hidden }: { hidden?: boolean }) {
     return () => {
       disposed = true
       ro?.disconnect()
+      unsub?.()
       if (handle) {
         if (uiStore.getState().pathTracing.active) uiStore.getState().set({ pathTracing: { ...uiStore.getState().pathTracing, active: false } })
         if (handles.engine3d === handle) setHandle('engine3d', null)

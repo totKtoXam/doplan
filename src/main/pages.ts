@@ -296,13 +296,13 @@ async function viewRepoFor(login: string, base: string, docId: string, aliases: 
 async function findOwn(project: RepoRef | null, login: string | undefined, base: string, docId: string, aliases: readonly string[], made: Made): Promise<PagesRecord | null> {
   const tags = docTags(docId, aliases)
   // the tag travels with the file: a clone of someone else's project carries it too, so only a
-  // repository the user administers is taken as theirs (a collaborator, or an owner who lost admin
-  // rights, could neither turn the site off nor publish there: the record would come back after
-  // "unpublish" dropped it for lack of access, and keep the plan from being published elsewhere).
+  // repository the user may push to is taken as theirs. Updating needs no more (Pages are on already);
+  // taking the site down needs admin rights, and without them unpublish refuses before touching
+  // anything and keeps the record, so it never comes back here after being dropped.
   // Only a live site: a branch left after unpublishing is not a publication.
   const inProject = async (): Promise<PagesRecord | null> => {
     const st = project ? await repoState(project) : null
-    if (!project || !st?.exists || st.admin !== true) return null
+    if (!project || !st?.exists || st.canPush !== true) return null
     const insp = await inspectPages(project)
     return taggedFor(insp, tags) && insp.pages ? adoptedRecord(project, insp, false) : null
   }
@@ -387,7 +387,8 @@ async function emptyBranch(work: string, ref: RepoRef, head: string, marker: str
       join(dir, 'README.md'),
       msg('План, опубликованный здесь для просмотра в doplan, снят с публикации.\n', 'The plan published here for viewing with doplan was unpublished.\n'),
     )
-    await pushSite(await gitRunner(), dir, remoteOf(ref), PAGES_BRANCH, msg('План снят с публикации (doplan)', 'Plan unpublished (doplan)'), head)
+    // gh's credentials, as for publishing: git alone has none when the user signed in through gh only
+    await pushSite(await withCredentials(await gitRunner(), remoteOf(ref)), dir, remoteOf(ref), PAGES_BRANCH, msg('План снят с публикации (doplan)', 'Plan unpublished (doplan)'), head)
   } finally {
     await fsp.rm(dir, { recursive: true, force: true }).catch(() => undefined)
   }
@@ -400,12 +401,24 @@ async function dropBranch(work: string, ref: RepoRef, head: string, marker: stri
   else await removeBranch(work, ref, head)
 }
 
+/** may push, may not change the Pages settings (a collaborator): the site stays, and so does the record */
+const notAdminError = (ref: RepoRef) =>
+  new Error(
+    msg(
+      `Снять сайт в репозитории ${ref.owner}/${ref.repo} может только его администратор: у этой учётной записи GitHub есть право записи, но не права выключить GitHub Pages. Ничего не изменено, план по-прежнему опубликован. Попросите владельца выключить Pages или дать вам права администратора.`,
+      `Only an administrator of repository ${ref.owner}/${ref.repo} can take the site down: this GitHub account may push there but not turn GitHub Pages off. Nothing was changed; the plan is still published. Ask the owner to turn Pages off or to give you admin rights.`,
+    ),
+  )
+
 /** turns off doplan's own Pages site and takes doplan's own gh-pages branch away; anything else stays */
 async function takeDown(work: string, ref: RepoRef, pubId: string | undefined): Promise<void> {
   const st = await repoState(ref)
   if (!st.exists) return
   const insp = await inspectPages(ref)
   const own = pagesOwnership(insp, pubId, true)
+  // turning Pages off needs admin rights: without them nothing is touched (deleting the branch alone
+  // would leave Pages pointing at a branch that is gone)
+  if (own.site === 'ours' && st.admin === false) throw notAdminError(ref)
   // the branch first: a push that empties it may make GitHub turn Pages on again by itself, so they
   // are turned off after it
   if (own.branch === 'ours' && insp.branchSha) await dropBranch(work, ref, insp.branchSha, insp.marker ?? '', st.defaultBranch)

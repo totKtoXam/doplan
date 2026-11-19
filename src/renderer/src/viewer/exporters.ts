@@ -140,6 +140,14 @@ export function downloadableDoc(doc: Doc, site: { materials?: unknown[]; assets?
 
 /** one file larger than this stays a link to the site (a data: URL of it would bloat the plan file) */
 const INLINE_MAX = 40 * 1024 * 1024
+/**
+ * all files inside together: past it the rest stay links. Their base64 is a third larger and goes
+ * into one JSON string, which has a ceiling (about 512 M characters in V8); a phone runs out of
+ * memory much earlier, so the budget is well below that.
+ */
+const INLINE_TOTAL = 120 * 1024 * 1024
+/** files fetched at once: each is held as bytes, a binary string and base64 while it is converted */
+const INLINE_PARALLEL = 3
 const MIME: Record<string, string> = { glb: 'model/gltf-binary', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', ktx2: 'image/ktx2', hdr: 'image/vnd.radiance' }
 
 async function dataUrl(b: Blob, url: string): Promise<string> {
@@ -152,11 +160,18 @@ async function dataUrl(b: Blob, url: string): Promise<string> {
 }
 
 /**
- * The site's files the document's own tables point at, carried inside as data: URLs, so the plan
- * opens in the desktop app (which loads no https files) and after the plan is unpublished. A .gltf
- * stays a link: its buffers and textures are separate files. A file that fails to load stays a link.
+ * The site's files the document points at (underlays, its own models and materials), carried inside
+ * as data: URLs, so the plan opens in the desktop app (which loads no https files) and after the plan
+ * is unpublished. A .gltf stays a link: its buffers and textures are separate files. A file that fails
+ * to load, is too large, or would go past the total budget stays a link. Underlays come first (the
+ * plan is traced over them), then materials, then models.
  */
-export async function inlineSiteFiles(doc: Doc, base: string, load: (url: string) => Promise<Response> = (u) => fetch(u)): Promise<Doc> {
+export async function inlineSiteFiles(
+  doc: Doc,
+  base: string,
+  load: (url: string) => Promise<Response> = (u) => fetch(u),
+  budget: { file: number; total: number } = { file: INLINE_MAX, total: INLINE_TOTAL },
+): Promise<Doc> {
   let root: string
   try {
     root = new URL('./assets/', base).href
@@ -168,24 +183,38 @@ export async function inlineSiteFiles(doc: Doc, base: string, load: (url: string
     if (s.startsWith(root) && !/\.gltf(?:[?#]|$)/i.test(s)) urls.add(s)
     return s
   }
-  mapStrings(doc.assets, collect)
+  mapStrings(doc.underlays, collect)
   mapStrings(doc.materials, collect)
+  mapStrings(doc.assets, collect)
+  const queue = [...urls]
   const data = new Map<string, string>()
-  await Promise.all(
-    [...urls].map(async (u) => {
+  // bytes taken by files inside, and by files being fetched (their size as soon as it is known)
+  let used = 0
+  const fits = (n: number) => n <= budget.file && used + n <= budget.total
+  const worker = async () => {
+    for (let u = queue.shift(); u !== undefined; u = queue.shift()) {
+      let held = 0
       try {
         const r = await load(u)
-        if (!r.ok) return
+        if (!r.ok) continue
+        const told = Number(r.headers.get('content-length'))
+        if (told > 0 && !fits(told)) continue
         const b = await r.blob()
-        if (b.size <= INLINE_MAX) data.set(u, await dataUrl(b, u))
+        if (!fits(b.size)) continue
+        used += held = b.size
+        data.set(u, await dataUrl(b, u))
+        held = 0
       } catch {
         // stays a link
+      } finally {
+        used -= held
       }
-    }),
-  )
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(INLINE_PARALLEL, queue.length) }, worker))
   if (!data.size) return doc
   const swap = (s: string) => data.get(s) ?? s
-  return { ...doc, assets: mapStrings(doc.assets, swap), materials: mapStrings(doc.materials, swap) }
+  return { ...doc, underlays: mapStrings(doc.underlays, swap), assets: mapStrings(doc.assets, swap), materials: mapStrings(doc.materials, swap) }
 }
 
 export async function planFile(doc: Doc, base = typeof location !== 'undefined' ? location.href : ''): Promise<Blob> {

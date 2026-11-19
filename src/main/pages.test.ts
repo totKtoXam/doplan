@@ -82,7 +82,8 @@ vi.mock('./github', () => ({
   ghLoginText: () => 'gh login',
   ghSlowText: () => 'gh slow',
   ghOfflineText: () => 'gh offline',
-  gitCredentials: async () => ({ config: [], env: {} }),
+  // gh's token for git: without it a push fails (signed in through gh only, no git credential)
+  gitCredentials: async () => ({ config: ['-c', 'credential.helper=gh'], env: {} }),
 }))
 vi.mock('./projectFolder', () => ({ getProjectRoot: () => project }))
 vi.mock('./pagesBuild', () => ({
@@ -131,9 +132,10 @@ vi.mock('./pagesGh', () => ({
   },
 }))
 vi.mock('./pagesGit', () => ({
-  pushSite: async (_r: unknown, siteDir: string, remote: string, _b: string, _m: string, expected: string | null) => {
+  pushSite: async (runner: { config?: string[] }, siteDir: string, remote: string, _b: string, _m: string, expected: string | null) => {
     const key = fromRemote(remote)
     gh.calls.push(`push ${key}`)
+    if (!runner.config?.includes('credential.helper=gh')) throw new Error("fatal: could not read Username for 'https://github.com': terminal prompts disabled")
     if (gh.failPush > 0) {
       gh.failPush--
       throw new Error('could not resolve host: github.com')
@@ -432,17 +434,37 @@ describe('the record follows its document', () => {
     await expect(unpublishPlan('doc1')).rejects.toThrow(/Нет прав/)
     expect(gh.calls).toEqual([])
     expect((await status()).record).toBeNull()
+  })
 
-    // the refusal coming from GitHub itself: may push, may not change Pages (a collaborator)
-    repo('acme/plans').push = true
+  it('a collaborator (may push, not administer): updates the site of the project repository, and is told plainly that only an admin takes it down', async () => {
+    setOrigin('https://github.com/acme/plans.git')
+    gh.repos.set('acme/plans', fresh())
     await publishPlan(req())
+    // the same project on a teammate's computer: no record there, write access only
+    rmSync(join(userData, 'pages.json'), { force: true })
     repo('acme/plans').admin = false
-    await expect(unpublishPlan('doc1')).rejects.toThrow(/Нет прав/)
-    expect(JSON.parse(readFileSync(join(userData, 'pages.json'), 'utf8')).doc1).toBeUndefined()
-    // the site is still up and tagged for this plan, but without admin rights it is not taken back
+    const st = await status()
+    expect(st.record).toMatchObject({ owner: 'acme', repo: 'plans' })
+    expect(st.project?.occupied).toBeUndefined()
+    gh.calls = []
+    const res = await publishPlan(req())
+    expect(res.record).toMatchObject({ owner: 'acme', repo: 'plans', separate: false })
+    expect(gh.calls).toEqual(['push acme/plans', 'pages acme/plans keep'])
+
+    // unpublishing: refused before anything is touched, the record and the site stay
+    const sha = repo('acme/plans').branchSha
+    gh.calls = []
+    await expect(unpublishPlan('doc1')).rejects.toThrow(/только его администратор/)
+    expect(gh.calls).toEqual([])
+    expect(repo('acme/plans').branchSha).toBe(sha)
     expect(repo('acme/plans').pages).not.toBeNull()
+    expect((await status()).record).toMatchObject({ owner: 'acme', repo: 'plans' })
+
+    // with admin rights given, it comes down
+    repo('acme/plans').admin = true
+    await unpublishPlan('doc1')
+    expect(repo('acme/plans').pages).toBeNull()
     expect((await status()).record).toBeNull()
-    expect(JSON.parse(readFileSync(join(userData, 'pages.json'), 'utf8')).doc1).toBeUndefined()
   })
 
   it('another plan published into the project repository is called that, not "not made by doplan"', async () => {

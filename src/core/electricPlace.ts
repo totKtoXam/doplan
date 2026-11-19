@@ -101,18 +101,23 @@ const ALL_SURFACES: ReadonlySet<ElectricSurface> = new Set(['wall', 'floor', 'ce
 export function rayElectricSurface(doc: RayDoc, levelId: Id, ray: PlanRay, opts: RaySurfaceOptions = {}): ElectricSurfaceHit | null {
   const surfaces = opts.surfaces ?? ALL_SURFACES
   let best: ElectricSurfaceHit | null = null
-  // walls at each node: an end no other wall meets is a free end, its face is seen
-  const atNode = new Map<Id, number>()
-  for (const id in doc.walls) {
-    const w = doc.walls[id]
-    if (w.levelId !== levelId) continue
-    atNode.set(w.a, (atNode.get(w.a) ?? 0) + 1)
-    atNode.set(w.b, (atNode.get(w.b) ?? 0) + 1)
-  }
+  // the solid, shown walls at each node with their shown height: a wall end is covered up to the
+  // tallest other one (a virtual border, a hidden wall or a lower parapet leaves the end face seen)
+  const shown = new Map<Id, number>()
+  const atNode = new Map<Id, { id: Id; top: number }[]>()
   for (const id in doc.walls) {
     const w = doc.walls[id]
     if (w.levelId !== levelId || !isMountableWall(w) || wallHidden(doc, w)) continue
     const top = opts.wallHeight ? opts.wallHeight(w) : w.height
+    shown.set(id, top)
+    for (const n of [w.a, w.b]) {
+      let l = atNode.get(n)
+      if (!l) atNode.set(n, (l = []))
+      l.push({ id, top })
+    }
+  }
+  for (const [id, top] of shown) {
+    const w = doc.walls[id]
     for (const side of ['left', 'right'] as const) {
       const hit = rayFace(doc, w, side, ray, top)
       if (hit && (!best || hit.s < best.s)) best = hit
@@ -120,9 +125,11 @@ export function rayElectricSurface(doc: RayDoc, levelId: Id, ray: PlanRay, opts:
     const cap = rayCap(doc, w, ray, top)
     if (cap && (!best || cap.s < best.s)) best = cap
     for (const end of ['a', 'b'] as const) {
-      if ((atNode.get(w[end]) ?? 0) > 1) continue
       const hit = rayEnd(doc, w, end, ray, top)
-      if (hit && (!best || hit.s < best.s)) best = hit
+      if (!hit || (best && hit.s >= best.s)) continue
+      // another wall at the node as tall as the hit hides this end there
+      if ((atNode.get(w[end]) ?? []).some((o) => o.id !== id && o.top >= hit.z)) continue
+      best = hit
     }
   }
   const consider = (surface: ElectricSurface, z: number, inside?: (x: number, y: number) => boolean): void => {

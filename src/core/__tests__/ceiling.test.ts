@@ -161,6 +161,45 @@ describe('floor kinds', () => {
     // past the end the floor is seen
     expect(rayElectricSurface(doc, L, { ...ray, dx: 1000 }, { surfaces: new Set(['floor'] as const), rooms })?.surface).toBe('floor')
   })
+
+  it.each<[string, { kind?: Wall['kind']; height?: number; hidden?: boolean }]>([
+    ['a virtual border', { kind: 'virtual' }],
+    ['a hidden wall', { hidden: true }],
+    ['a parapet lower than the hit', { kind: 'parapet', height: 900 }],
+  ])('the end of a stub continued by %s still blocks the ray', (_name, cont) => {
+    const doc = createEmptyDoc()
+    const L = doc.levelOrder[0]
+    addRectRoom(doc, L, 0, 0, 6000, 6000, { thickness: 200, height: 2700 })
+    const [stub] = addWall(doc, L, { x: 3000, y: 0 }, { x: 3000, y: 3000 }, { thickness: 100, height: 2700 })
+    const [next] = addWall(doc, L, { x: 3000, y: 3000 }, { x: 3000, y: 4000 }, {
+      thickness: cont.kind === 'virtual' ? 0 : 100,
+      height: cont.height ?? 2700,
+      kind: cont.kind ?? 'wall',
+    })
+    if (cont.hidden) doc.walls[next].hidden = true
+    edit(doc)
+    expect(doc.walls[next].a === doc.walls[stub].b || doc.walls[next].b === doc.walls[stub].b).toBe(true)
+    const rooms = derivePlan(doc, L).rooms
+    const ray = { ox: 2500, oy: 4500, oz: 1600, dx: 500, dy: -1500, dz: -600 }
+    expect(rayElectricSurface(doc, L, ray, { surfaces: new Set(['floor'] as const), rooms })).toBeNull()
+    const hit = rayElectricSurface(doc, L, ray, { rooms })!
+    expect(hit.wallId).toBe(stub)
+    expect(hit.z).toBeCloseTo(1000)
+  })
+
+  it('a full-height wall continuing the stub covers its end', () => {
+    const doc = createEmptyDoc()
+    const L = doc.levelOrder[0]
+    addRectRoom(doc, L, 0, 0, 6000, 6000, { thickness: 200, height: 2700 })
+    const [stub] = addWall(doc, L, { x: 3000, y: 0 }, { x: 3000, y: 3000 }, { thickness: 100, height: 2700 })
+    addWall(doc, L, { x: 3000, y: 3000 }, { x: 5000, y: 3000 }, { thickness: 100, height: 2700 })
+    edit(doc)
+    // straight at the joined end from below-right of the corner: the other wall's face, not the stub's end
+    const ray = { ox: 3000, oy: 4500, oz: 1000, dx: 0, dy: -1, dz: 0 }
+    const hit = rayElectricSurface(doc, L, ray, { rooms: derivePlan(doc, L).rooms })!
+    expect(hit.surface).toBe('wall')
+    expect(hit.wallId).not.toBe(stub)
+  })
 })
 
 describe('electricEditAllowed (keys on the selected point)', () => {

@@ -23,7 +23,7 @@ const base = (rooms: unknown[], extra: Record<string, unknown> = {}): PlanSpec =
   }) as unknown as PlanSpec
 
 // the cutout compiler itself (compileCutoutSpec / validateCutoutSpec); the public entry sends plans
-// without cutouts to the base code and falls back to it when only the base accepts a plan
+// without cutouts to the base code and every plan with cutouts here
 const build = (spec: unknown) => {
   const res = compileCutoutSpec(parsePlanSpec(spec))
   const plan = derivePlan(res.doc, res.levelId)
@@ -566,22 +566,33 @@ describe('editor: technical voids and islands, review round 4', () => {
     expect(sum.technicalCount).toBe(1)
   })
 
-  it('#19 an island whose wall overlaps the room wall is still a hole of the room, on every side', () => {
-    for (const off of [50, 100, 120, 140]) {
-      for (const side of ['left', 'right', 'top', 'bottom'] as const) {
-        const doc = createEmptyDoc()
-        const lv = doc.levelOrder[0]
-        addRectRoom(doc, lv, 0, 0, 5000, 4000, { thickness: 200 })
-        const at = { left: [off, 1500], right: [5000 - off - 800, 1500], top: [2000, off], bottom: [2000, 4000 - off - 800] }[side]
-        addRectRoom(doc, lv, at[0], at[1], 800, 800, { thickness: 100 })
-        normalize(doc)
-        const plan = derivePlan(doc, lv)
-        const room = plan.rooms.reduce((a, b) => (a.area > b.area ? a : b))
-        expect(room.holes, `${side} ${off}`).toHaveLength(1)
-        // 4.8 × 3.8 minus the box footprint (900 × 900, as before the overlap rule)
-        expect(room.area, `${side} ${off}`).toBeCloseTo(18.24 - 0.81, 2)
+  // a level with a technical void places islands by their wall axes; a level without one keeps the
+  // a56f5f4 rule exactly (one point of the island's wall face: a hole or not, by where that point
+  // falls), so plans without cutouts do not change — planspecLegacy.test.ts checks that against a56f5f4
+  it('#19 an island whose wall overlaps the room wall is still a hole of the room, on every side (a level with a void)', () => {
+      for (const off of [50, 100, 120, 140]) {
+        for (const side of ['left', 'right', 'top', 'bottom'] as const) {
+          const doc = createEmptyDoc()
+          const lv = doc.levelOrder[0]
+          addRectRoom(doc, lv, 0, 0, 5000, 4000, { thickness: 200 })
+          {
+            addRectRoom(doc, lv, 40000, 40000, 600, 600, { thickness: 100 })
+            normalize(doc)
+            syncRooms(doc)
+            const far = derivePlan(doc, lv).rooms.find((f) => f.labelPoint.x > 30000)!
+            doc.rooms[far.roomId].technical = true
+          }
+          const at = { left: [off, 1500], right: [5000 - off - 800, 1500], top: [2000, off], bottom: [2000, 4000 - off - 800] }[side]
+          addRectRoom(doc, lv, at[0], at[1], 800, 800, { thickness: 100 })
+          normalize(doc)
+          const plan = derivePlan(doc, lv)
+          const room = plan.rooms.reduce((a, b) => (a.area > b.area ? a : b))
+          const msg = `${side} ${off}`
+          expect(room.holes, msg).toHaveLength(1)
+          // 4.8 × 3.8 minus the box footprint (900 × 900, as before the overlap rule)
+          expect(room.area, msg).toBeCloseTo(18.24 - 0.81, 2)
+        }
       }
-    }
   })
 
   // night review 3 #2: a void keeps all its nodes on the room face that took its floor when one of
@@ -814,4 +825,53 @@ describe('editor: technical voids copied, pasted and split, night review', () =>
     expect(s.count).toBe(1)
     expect(s.total).toBeCloseTo(15.35, 2)
   })
+})
+
+describe('editor: a void dragged over a room label never takes the room record, evening review #5', () => {
+  const spec = {
+    version: 1,
+    units: 'mm',
+    defaults: { exteriorThickness: 300 },
+    rooms: [
+      { id: 'a', name: 'A', type: 'living', rect: [0, 0, 2400, 3000], cutouts: [{ rect: [300, 0, 800, 2400], kind: 'shaft' }] },
+      { id: 'b', name: 'B', type: 'bedroom', rect: [2400, 0, 1000, 1200] },
+      { id: 'c', name: 'C', type: 'kitchen', rect: [2400, 1200, 1000, 1800] },
+    ],
+    openings: [],
+  }
+  const drag = (dx: number, dy: number) => {
+    const res = compileCutoutSpec(parsePlanSpec(spec))
+    const doc = res.doc
+    normalize(doc)
+    syncRooms(doc)
+    const shaft = Object.values(doc.rooms).find((r) => r.technical)!
+    expect(shaft.voidNodes?.length).toBe(4)
+    const moves = new Map(shaft.voidNodes!.map((id) => [id, { x: doc.nodes[id].x + dx, y: doc.nodes[id].y + dy }]))
+    moveNodes(doc, moves)
+    normalize(doc)
+    syncRooms(doc)
+    const plan = derivePlan(doc, res.levelId)
+    const ids = Object.values(res.roomIds)
+    return { doc, res, plan, fresh: plan.rooms.filter((f) => !ids.includes(f.roomId) && !doc.rooms[f.roomId]?.technical) }
+  }
+
+  it('the shaft moved 900 mm right over A’s label: A keeps its record, name and type', () => {
+    const { doc, res, plan, fresh } = drag(900, 0)
+    expect(fresh).toEqual([])
+    const a = doc.rooms[res.roomIds.a]
+    expect(a?.name).toBe('A')
+    expect(a?.type).toBe('living')
+    expect(plan.rooms.some((f) => f.roomId === res.roomIds.a)).toBe(true)
+    for (const k of ['b', 'c']) expect(doc.rooms[res.roomIds[k]]?.name).toBe(k.toUpperCase())
+  })
+
+  it('no drag of the shaft costs a room its record while a face is left for it', () => {
+    for (let dx = -300; dx <= 2500; dx += 100)
+      for (let dy = -600; dy <= 600; dy += 100) {
+        const { doc, res, fresh } = drag(dx, dy)
+        const lost = ['a', 'b', 'c'].filter((k) => !doc.rooms[res.roomIds[k]])
+        // a record is lost only when the dragged walls leave no face for it
+        expect(lost.length && fresh.length, `drag ${dx},${dy}`).toBe(0)
+      }
+  }, 120_000)
 })

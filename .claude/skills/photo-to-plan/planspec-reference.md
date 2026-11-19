@@ -137,8 +137,13 @@ File → «План из PlanSpec (JSON)…», and the CLI uses it in `pnpm dp s
     fill it, up to 640 mm thick each; a wider column keeps a small «Колонна» void inside. A project
     with technical voids is saved as file format 4 (doplan 0.14 and older refuse to open it rather
     than drop the flag).
+  - Which compiler: a spec with a cutout, a `technical` room or a `cutout: true` wall is built and
+    checked by the cutout compiler; a spec with none of them is built exactly as before cutouts
+    existed (no `CUTOUT_*` or `BUILT_SHAPE_MISMATCH` check). There is no fallback between them: when
+    the cutout check finds an error the spec is refused (`spec validate` reports it, the build gate
+    stays closed), it is never built the old way.
   - Not supported (refused by validate, the same in every orientation): a cutout side crossing a
-    reflex corner line (`CUTOUT_AT_CORNER`); and, with or without cutouts, a neighbour's edge that
+    reflex corner line (`CUTOUT_AT_CORNER`); and, in a spec with cutouts, a neighbour's edge that
     ends inside the gap between two perpendicular walls of ~500 mm and more
     (`BUILT_SHAPE_MISMATCH`): line the edge up with the wall face or the other room's corner.
   - Rooms must be orthogonal (rect or axis-aligned polygon) to have cutouts.
@@ -149,8 +154,12 @@ File → «План из PlanSpec (JSON)…», and the CLI uses it in `pnpm dp s
   every total whatever its size; it carries no `labelledArea`. `dp doc spec` writes it for the voids of
   cutouts; do not put it on a real room (a storeroom marked so would drop out of the totals). In the
   app a void keeps its mark by its walls (the file stores the void's wall nodes, `voidNodes`), not by a
-  point: dragging a shaft anywhere, even over the room's label, keeps it technical; deleting its walls
-  removes it. A free-standing shaft / column is a hole of the innermost room around it.
+  point: dragging a shaft anywhere, even over the room's label, keeps it technical, and the room keeps
+  its own record (name, type, finishes, `labelledArea`); deleting its walls removes it. On a level with
+  a technical void a free-standing shaft / column is a hole of the innermost room around it, found by
+  its wall axes. On a level without one (a plan without cutouts) an island is placed as it always was,
+  by one point of its outer wall face: a closed box drawn overlapping the room's wall may stay out of
+  the room's holes. Write such a box as a cutout to have it subtracted.
 - Round trip (`dp doc spec` → `dp spec build`): the walls around voids are written with
   `cutout: true` and `defaults.exteriorThickness` is the thickness of most of the outline, so the
   rebuild gives the same rooms, voids and areas without `WALL_THICKNESS_ODD` for columns. Rooms that
@@ -237,7 +246,7 @@ Issues have the shape `{severity, code, message, path?, ids?}`. Errors block `sp
 | CUTOUT_OVERLAP | two cutouts overlap: an L-shaped shaft is two touching rectangles |
 | CUTOUT_AT_CORNER | a cutout side runs partly on the outline and partly along the floor (it crosses the line of a reflex corner): move or trim the cutout so each side is wholly on the outline or wholly inside |
 | CUTOUT_SNAPPED | info: a cutout side within 30 mm of the outline or another cutout was moved onto it |
-| BUILT_SHAPE_MISMATCH | the built plan's floor (from the synthesized walls) differs from the checked shape: a wall end poking into the floor, a cutout that did not become a notch / hole, a floor strip swallowed by a wall. Error when the area differs by ≥ 0.05 m², a hole is missing or the outline is off by ≥ 300 mm; a smaller corner notch is a warning. Fix: make a cutout touch the outline exactly or keep it at least a wall thickness away from the outline and other cutouts, split an awkward one into rectangles, simplify the corner. If it persists, it is a compiler limitation: tell the user, `--force` only with their consent |
+| BUILT_SHAPE_MISMATCH | (specs with cutouts) the built plan's floor (from the synthesized walls) differs from the checked shape: a wall end poking into the floor, a cutout that did not become a notch / hole, a floor strip swallowed by a wall. Error when the area differs by ≥ 0.05 m², a hole is missing or the outline is off by ≥ 300 mm; a smaller corner notch is a warning. Fix: make a cutout touch the outline exactly or keep it at least a wall thickness away from the outline and other cutouts, split an awkward one into rectangles, simplify the corner. If it persists, it is a compiler limitation: tell the user, `--force` only with their consent |
 | CUTOUT_SPLITS_ROOM | cutouts cut the room into separate parts |
 | CUTOUT_UNSUPPORTED | cutouts on a non-orthogonal polygon (ignored) or on a room without rect/polygon |
 | CUTOUT_THIN | info: a cutout smaller than two walls; its walls were thinned |

@@ -376,12 +376,6 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
       if (best && f.ringArea >= best.ringArea) continue
       if (voidLevel ? byAxes(f) : pointInPolygon(probe, f.polygon)) best = f
     }
-    if (!best && !voidLevel)
-      for (const f of faces) {
-        if (f.cycle.comp === comp) continue
-        if (best && f.ringArea >= best.ringArea) continue
-        if (byAxes(f)) best = f
-      }
     if (!best) continue
     best.holes.push(ring)
     best.holeArea += area
@@ -413,6 +407,7 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
   const realAnchors = records.filter((x) => !x.technical && !!x.anchor && Number.isFinite(x.anchor.x) && Number.isFinite(x.anchor.y))
   const claimed = new Map<Face, { r: Room; score: number }>()
   const byNodes = new Set<Room>()
+  const voidRing = new Map<Room, Vec2[]>()
   for (const r of records) {
     if (!r.technical || !r.voidNodes?.length) continue
     // node ids of another level or of walls gone long ago (an old copy): the anchor decides
@@ -422,6 +417,7 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
     // the void's outline on the wall axes, where its nodes stand now (a face inside it is smaller)
     const ring = r.voidNodes.map((id) => doc.nodes[id]).filter((n) => !!n && n.levelId === levelId)
     const outline = ring.length >= 3 ? Math.abs(polygonArea(ring)) : 0
+    if (ring.length >= 3) voidRing.set(r, ring)
     let best: { face: Face; area: number; score: number } | null = null
     for (const p of prepared) {
       if (outline > 0 && p.face.ringArea > outline * 1.5 + 1e5) continue
@@ -456,6 +452,8 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
   // a void that won no face by its nodes (a copy over its original, a void cut in two) is matched by
   // its anchor like any record; the faces won by nodes are taken
   const byNodesWon = new Set([...claimed.values()].map((c) => c.r))
+  // records whose anchor a void that follows its walls has covered: matched after all the others
+  const covered: Room[] = []
   for (const r of records) {
     if (byNodesWon.has(r)) continue
     if (!r.anchor || !Number.isFinite(r.anchor.x) || !Number.isFinite(r.anchor.y)) continue
@@ -472,12 +470,18 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
         if (claimed.has(p.face) || (hit && p.area >= hit.area)) continue
         if (pointInPolygon(r.anchor, p.face.polygon)) hit = p
       }
-    // (a void at the outline dragged over the anchor has no face around it: the nearest free label)
-    if (!hit && prepared.some((p) => claimed.has(p.face) && pointInPolygon(r.anchor, p.face.polygon, p.face.holes)))
-      for (const p of prepared) {
-        if (claimed.has(p.face)) continue
-        if (!hit || dist(p.labelPoint, r.anchor) < dist(hit.labelPoint, r.anchor)) hit = p
-      }
+    // (a void at the outline dragged over the anchor has no face around it: the nearest free label,
+    // once every other record has its face)
+    if (
+      !hit &&
+      [...claimed].some(([face, c]) => {
+        const ring = voidRing.get(c.r)
+        return pointInPolygon(r.anchor, face.polygon, face.holes) || (!!ring && pointInPolygon(r.anchor, ring))
+      })
+    ) {
+      covered.push(r)
+      continue
+    }
     if (!hit) continue
     // two records in one face: the one closest to the label point survives
     if (closer(r, winner.get(hit.face), hit.labelPoint)) winner.set(hit.face, r)
@@ -508,6 +512,17 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
     } else winner.set(p.face, m.real)
   }
   for (const [face, c] of claimed) winner.set(face, c.r)
+  // a covered record takes the free face nearest its anchor, never a face another record holds: a
+  // void never costs a room its record (real rooms first, then the closest)
+  covered.sort((a, b) => Number(!!a.technical) - Number(!!b.technical) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  for (const r of covered) {
+    let hit: { face: Face; area: number; labelPoint: Vec2 } | null = null
+    for (const p of prepared) {
+      if (winner.has(p.face)) continue
+      if (!hit || dist(p.labelPoint, r.anchor) < dist(hit.labelPoint, r.anchor)) hit = p
+    }
+    if (hit) winner.set(hit.face, r)
+  }
 
   for (const p of prepared) {
     const f = p.face

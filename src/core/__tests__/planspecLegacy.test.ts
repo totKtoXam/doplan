@@ -16,8 +16,8 @@ const PUBLIC = api(validatePlanSpecDetailed, compilePlanSpecDetailed)
 
 describe('planspec without cutouts: exactly the a56f5f4 build', () => {
   const plans = (fixture as { plans: PlanDigest[] }).plans
-  it('the fixture covers 300+ plans', () => {
-    expect(plans.length).toBeGreaterThanOrEqual(300)
+  it('the fixture covers 480 plans', () => {
+    expect(plans.length).toBeGreaterThanOrEqual(480)
   })
   const chunk = 40
   for (let k = 0; k < plans.length; k += chunk) {

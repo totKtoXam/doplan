@@ -172,9 +172,11 @@ Codes are explained in `planspec-reference.md`.
 Only (5) — a difference you understand and cannot remove — goes into `areaNote` (`source.areaNote`
 for the total). An explained mismatch is reported as a warning instead of an error.
 
-`BUILT_SHAPE_MISMATCH` (error) means the walls the compiler synthesized do not give the floor you
-checked (a cutout too close to the outline or to another cutout, an awkward corner): the .doplan
-would show other areas. Move or split the cutout as the message says; never `areaNote` it.
+`BUILT_SHAPE_MISMATCH` (error, specs with cutouts) means the walls the compiler synthesized do not
+give the floor you checked (a cutout too close to the outline or to another cutout, an awkward
+corner): the .doplan would show other areas. Move or split the cutout as the message says; never
+`areaNote` it. A spec with cutouts that fails any cutout check (`CUTOUT_AT_CORNER`, `CUTOUT_OVERLAP`,
+`BUILT_SHAPE_MISMATCH`…) is refused, never built another way.
 
 `spec validate` ends with the **build gate** line: `spec build` refuses a spec with errors, including
 unexplained area mismatches above max(0.4 m², 5 %). `--force` overrides it (say so to the user);

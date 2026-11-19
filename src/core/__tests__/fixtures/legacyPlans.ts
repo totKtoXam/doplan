@@ -18,7 +18,11 @@ const orient =
 /** a seeded random plan: an L / T / rectangular main room, up to six neighbours on its sides or on each
  *  other's (open plan at 0 mm, partitions at 40–120 mm, exterior gaps up to 700 mm), balconies and
  *  loggias, some neighbours notched into an L, exterior walls 200–640 mm, doors, windows, labelled
- *  areas; the whole plan turned into one of the 8 orientations */
+ *  areas. On top (a second random stream, see addExtras): spec walls — closed boxes and columns free
+ *  in a room, set against its wall or overlapping it, open partitions, an L-shaped one —, fixtures,
+ *  edge walls of balconies, snap settings, dimension sources, and some plans drawn in walls mode (an
+ *  exterior loop, partitions, rooms by label point). The whole plan is turned into one of the 8
+ *  orientations */
 export function legacyPlan(seedIn: number): Record<string, unknown> {
   let seed = (seedIn * 7919 + 101) % 2147483648
   const rnd = (): number => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648
@@ -107,7 +111,9 @@ export function legacyPlan(seedIn: number): Record<string, unknown> {
     openings.push({ type: 'door', at: [(n.x0 + n.x1) / 2, n.y0], width: 800 })
   }
   if (rnd() < 0.2) a.labelledArea = Math.round(((W * H) / 1e6) * (0.85 + rnd() * 0.2) * 10) / 10
-  const f = orient(Math.floor(rnd() * 8))
+  const o8 = Math.floor(rnd() * 8)
+  const extra = addExtras(seedIn, rooms, boxes, main, T, part)
+  const f = orient(o8)
   for (const r of rooms) {
     if (r.rect) {
       const [x, y, w, h] = r.rect as number[]
@@ -118,13 +124,131 @@ export function legacyPlan(seedIn: number): Record<string, unknown> {
     if (r.polygon) r.polygon = (r.polygon as P[]).map(f)
   }
   for (const o of openings) o.at = f(o.at as P)
+  for (const r of extra.rooms) if (r.at) r.at = f(r.at as P)
+  for (const w of extra.walls) w.path = (w.path as P[]).map(f)
+  for (const x of extra.fixtures) {
+    const [rx, ry, rw, rh] = x.rect as number[]
+    const p = f([rx, ry])
+    const q = f([rx + rw, ry + rh])
+    x.rect = [Math.min(p[0], q[0]), Math.min(p[1], q[1]), Math.abs(p[0] - q[0]), Math.abs(p[1] - q[1])]
+  }
   return {
     version: 1,
     units: 'mm',
     defaults: { exteriorThickness: T, partitionThickness: part, loadBearingThickness: pick([200, 250, 300]) },
-    rooms,
+    ...(extra.snap ? { snap: extra.snap } : {}),
+    ...(extra.dimSource ? { dimSource: extra.dimSource } : {}),
+    ...(extra.walls.length ? { walls: extra.walls } : {}),
+    rooms: extra.rooms,
     openings,
+    ...(extra.fixtures.length ? { fixtures: extra.fixtures } : {}),
   }
+}
+
+type Rec = Record<string, unknown>
+/** the second random stream of legacyPlan (the rooms and openings of a seed stay as they were) */
+function addExtras(seedIn: number, rooms: Rec[], boxes: Box[], main: P[], T: number, part: number) {
+  let seed = (seedIn * 104729 + 7) % 2147483648
+  const rnd = (): number => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648
+  const pick = <X>(a: X[]): X => a[Math.floor(rnd() * a.length)]
+  const g = (lo: number, hi: number, st = 50): number => Math.round((lo + rnd() * (hi - lo)) / st) * st
+  const walls: Rec[] = []
+  const fixtures: Rec[] = []
+  let out = rooms
+  // walls mode: a rectangular main room drawn as an exterior loop split by a partition, the rooms
+  // found by their label points (what `dp doc spec` and hand-drawn projects give)
+  if (main.length === 4 && rnd() < 0.15) {
+    const { x1: W, y1: H } = boxes[0]
+    const X = g(1000, W - 1000)
+    walls.push({ id: 'ext', path: [[0, 0], [W, 0], [W, H], [0, H]], closed: true, align: 'inner', thickness: T, kind: 'exterior' })
+    walls.push({ id: 'p0', path: [[X, 0], [X, H]], thickness: part, kind: pick(['partition', 'loadBearing', 'glass']) })
+    out = [
+      { id: 'a', type: rooms[0].type, at: [X / 2, H / 2] },
+      { id: 'b', type: pick(['bedroom', 'kitchen', 'office']), at: [(X + W) / 2, H / 2] },
+    ]
+    boxes = [{ x0: 0, y0: 0, x1: X, y1: H }, { x0: X, y0: 0, x1: W, y1: H }]
+  }
+  // islands: closed boxes / columns free in a room, set against its wall, or overlapping it
+  const nIsl = rnd() < 0.45 ? 1 + Math.floor(rnd() * 3) : 0
+  for (let k = 0; k < nIsl; k++) {
+    const i = Math.floor(rnd() * boxes.length)
+    const b = boxes[i]
+    if (i === 0 && main.length !== 4) continue
+    const sw = g(300, 1200)
+    const sh = g(300, 1200)
+    const t = pick([80, 100, 120, 200, 250])
+    if (b.x1 - b.x0 < sw + 700 || b.y1 - b.y0 < sh + 700) continue
+    let x = g(b.x0 + 300, b.x1 - 300 - sw, 10)
+    let y = g(b.y0 + 300, b.y1 - 300 - sh, 10)
+    if (rnd() < 0.6) {
+      // against one side: the box's centreline `off` mm from the clear face (under t/2 it overlaps)
+      const off = pick([-100, -50, 0, 20, 50, 100, 170, 180, 200, 300])
+      const side = Math.floor(rnd() * 4)
+      if (side === 0) y = b.y0 + off
+      else if (side === 1) y = b.y1 - off - sh
+      else if (side === 2) x = b.x0 + off
+      else x = b.x1 - off - sw
+      if (rnd() < 0.3) {
+        // in a corner
+        if (side < 2) x = rnd() < 0.5 ? b.x0 + off : b.x1 - off - sw
+        else y = rnd() < 0.5 ? b.y0 + off : b.y1 - off - sh
+      }
+    }
+    const w: Rec = { id: `i${k}`, path: [[x, y], [x + sw, y], [x + sw, y + sh], [x, y + sh]], closed: true, thickness: t }
+    if (rnd() < 0.3) w.align = pick(['inner', 'outer', 'center'])
+    if (rnd() < 0.4) w.kind = pick(['partition', 'loadBearing', 'separator'])
+    if (rnd() < 0.2) w.height = pick([1200, 2100, 2700])
+    walls.push(w)
+  }
+  // open partitions from a wall into the room: dangling, across, or an L
+  const nPart = rnd() < 0.35 ? 1 + Math.floor(rnd() * 2) : 0
+  for (let k = 0; k < nPart; k++) {
+    const i = Math.floor(rnd() * boxes.length)
+    const b = boxes[i]
+    if (i === 0 && main.length !== 4) continue
+    if (b.x1 - b.x0 < 1600 || b.y1 - b.y0 < 1600) continue
+    const vertical = rnd() < 0.5
+    const across = rnd() < 0.4
+    let path: P[]
+    if (vertical) {
+      const X = g(b.x0 + 600, b.x1 - 600, 10)
+      path = [[X, b.y0], [X, across ? b.y1 : g(b.y0 + 600, b.y1 - 400, 10)]]
+    } else {
+      const Y = g(b.y0 + 600, b.y1 - 600, 10)
+      path = [[b.x0, Y], [across ? b.x1 : g(b.x0 + 600, b.x1 - 400, 10), Y]]
+    }
+    if (!across && rnd() < 0.3) {
+      const e = path[1]
+      path.push(vertical ? [Math.min(b.x1 - 200, e[0] + g(400, 1200)), e[1]] : [e[0], Math.min(b.y1 - 200, e[1] + g(400, 1200))])
+    }
+    walls.push({ id: `p${k + 1}`, path, thickness: pick([50, 80, 100, 120]), kind: pick(['partition', 'partition', 'glass', 'separator', 'railing']) })
+  }
+  // fixtures and furniture inside a room
+  const nFix = rnd() < 0.4 ? 1 + Math.floor(rnd() * 4) : 0
+  for (let k = 0; k < nFix; k++) {
+    const b = boxes[Math.floor(rnd() * boxes.length)]
+    const fw = g(300, 1800)
+    const fh = g(300, 900)
+    if (b.x1 - b.x0 < fw + 200 || b.y1 - b.y0 < fh + 200) continue
+    const types = ['toilet', 'bathtub', 'sink', 'stove', 'riser', 'shower', 'washer', 'fridge', 'wardrobe', 'bed', 'sofa', 'table']
+    const x: Rec = { type: pick(types), rect: [g(b.x0 + 100, b.x1 - 100 - fw, 10), g(b.y0 + 100, b.y1 - 100 - fh, 10), fw, fh] }
+    if (rnd() < 0.3) x.rotation = pick([90, 180, 270])
+    if (rnd() < 0.15) x.elevation = pick([400, 800])
+    fixtures.push(x)
+  }
+  // edge walls of balconies, dimension sources, snap settings
+  const sources = ['plan', 'derived', 'estimated', 'measured', 'drawn']
+  for (const r of out) {
+    if ((r.type === 'balcony' || r.type === 'loggia') && rnd() < 0.4) r.edgeWall = { kind: pick(['railing', 'glass', 'parapet']), thickness: pick([50, 100, 150]) }
+    if (rnd() < 0.1) r.source = pick(sources)
+    if (rnd() < 0.05) r.ceilingHeight = pick([2500, 3000])
+  }
+  const snap =
+    rnd() < 0.2
+      ? { gridMm: pick([10, 50]), orthogonal: rnd() < 0.7, ...(rnd() < 0.5 ? { mergeMm: pick([60, 150, 300]) } : {}), ...(rnd() < 0.3 ? { standardThickness: false } : {}) }
+      : undefined
+  const dimSource = rnd() < 0.15 ? pick(sources) : undefined
+  return { rooms: out, walls, fixtures, snap, dimSource }
 }
 
 export interface DigestApi {
@@ -151,8 +275,10 @@ function hash(s: string): string {
 export interface PlanDigest {
   seed: number
   /** hashes of the canonical walls (ends, thickness, height, kind, openings in them), the derived faces
-   *  (outline, holes, area, perimeter; wall outlines) and the issues (the check's and the compiler's) */
-  hash: { walls: string; faces: string; issues: string }
+   *  (outline, holes, area, perimeter; wall outlines), the issues (the check's and the compiler's), the
+   *  whole built doc but its meta (every collection and field: room records, items, materials…) and the
+   *  whole derived plan with the room ids the compiler reports */
+  hash: { walls: string; faces: string; issues: string; doc: string; plan: string }
   walls: number
   faces: number
   /** spec room id → floor area, m² */
@@ -195,7 +321,17 @@ export function digestPlan(seed: number, spec: unknown, api: DigestApi): PlanDig
   }
   const issues = [...v.issues, ...(res.issues as { severity: string; code: string }[])]
   const part = (x: unknown): string => hash(JSON.stringify(canon(x)))
-  const h = { walls: part({ walls, openings }), faces: part({ rooms, faces: plan.rooms.map((x) => pickOf(x as unknown as Record<string, unknown>, ['roomId', 'levelId', 'polygon', 'holes', 'centerline', 'edges', 'area', 'perimeter', 'labelPoint'])), wallGeoms: plan.wallGeoms, roomIds: res.roomIds }), issues: part(issues) }
+  // meta holds the doc's name, a random id and the time of the build: all else is compared
+  const whole = Object.fromEntries(Object.entries(doc).filter(([k]) => k !== 'meta'))
+  const h = {
+    walls: part({ walls, openings }),
+    faces: part({ rooms, faces: plan.rooms.map((x) => pickOf(x as unknown as Record<string, unknown>, ['roomId', 'levelId', 'polygon', 'holes', 'centerline', 'edges', 'area', 'perimeter', 'labelPoint'])), wallGeoms: plan.wallGeoms, roomIds: res.roomIds }),
+    issues: part(issues),
+    doc: part(whole),
+    // every field of the derived plan but the faces' \`nodes\` (the node ids of a face's loop, added for
+    // the voids that follow their walls: a56f5f4 has no such field)
+    plan: part({ plan: { ...plan, rooms: plan.rooms.map((x) => Object.fromEntries(Object.entries(x).filter(([k]) => k !== 'nodes'))) }, roomIds: res.roomIds, levelId: res.levelId }),
+  }
   const areas: Record<string, number> = {}
   for (const [sid, rid] of Object.entries(res.roomIds)) {
     const face = plan.rooms.find((x) => x.roomId === rid)

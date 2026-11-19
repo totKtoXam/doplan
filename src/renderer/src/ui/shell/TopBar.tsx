@@ -37,6 +37,7 @@ import { uiStore, useUi } from '@/store/ui'
 import { checkForUpdatesManually } from '@/store/updates'
 import { openGithubDialog } from '@/store/github'
 import { GithubButton } from '@/ui/github/GithubButton'
+import { welcomeMenuEntry } from '@/ui/welcome/menu'
 import type { ViewMode } from '@/contracts'
 import { AppLogo } from './AppLogo'
 import { DropdownMenu, IconBtn, type MenuEntry, Segmented, Sep, TextBtn, Tip } from './primitives'
@@ -90,6 +91,7 @@ export function TopBar() {
       disabled: recent.length === 0,
       items: recent.slice(0, 12).map((r) => ({ label: r.name || r.path, onSelect: () => void actions.openProject(r.path) })),
     },
+    welcomeMenuEntry(t),
     { type: 'separator' },
     { label: t('Сохранить'), icon: Save, kbd: 'Ctrl+S', onSelect: () => void actions.saveProject(false) },
     { label: t('Сохранить как…'), kbd: 'Ctrl+Shift+S', onSelect: () => void actions.saveProject(true) },

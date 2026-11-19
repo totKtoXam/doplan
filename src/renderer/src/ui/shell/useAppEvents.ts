@@ -13,6 +13,7 @@ import { notifyStore, alertDialog } from '@/store/notify'
 import { projectStore } from '@/store/project'
 import { checkForUpdatesManually, initUpdates, installUpdate } from '@/store/updates'
 import { uiStore } from '@/store/ui'
+import { runFileDrop, runFileOpen, showWelcome, welcomeBlocksKey, welcomeBlocksMenu } from '@/store/welcome'
 import type { ToolId } from '@/contracts'
 import { shortcutKey } from './keys'
 import { activateTool, TOOLS } from './tools'
@@ -45,6 +46,7 @@ function onKeyDown(e: KeyboardEvent): void {
   const selectFocused = (e.target as HTMLElement | null)?.tagName === 'SELECT'
   if (e.defaultPrevented || (isEditable(e.target) && !(ctrl && selectFocused)) || anyDialogOpen()) return
   const key = shortcutKey(e)
+  if (welcomeBlocksKey(ctrl && !e.altKey && !e.shiftKey, key)) return
   const ui = uiStore.getState()
 
   if (ctrl && !e.altKey) {
@@ -140,8 +142,11 @@ function onKeyDown(e: KeyboardEvent): void {
 function onMenu(cmd: MenuCommand): void {
   // native menu items and their accelerators reach here even while a dialog is open; keyboard
   // shortcuts are ignored then (onKeyDown), and so are menu commands — they would act behind the dialog
-  if (anyDialogOpen()) return
+  if (anyDialogOpen() || welcomeBlocksMenu(cmd)) return
   switch (cmd) {
+    case 'welcome':
+      showWelcome(true)
+      break
     case 'new':
       void actions.newProject()
       break
@@ -272,7 +277,7 @@ export function useAppEvents(enabled: boolean): { dragOver: boolean } {
 
     offs.push(api.window.onMenu(onMenu))
     offs.push(api.window.onCloseRequest(() => void actions.handleCloseRequest()))
-    offs.push(api.window.onOpenFile((p) => void onOpenFile(p)))
+    offs.push(api.window.onOpenFile((p) => void runFileOpen(() => onOpenFile(p))))
     offs.push(initUpdates())
 
     // title / dirty flag
@@ -340,7 +345,7 @@ export function useAppEvents(enabled: boolean): { dragOver: boolean } {
       depth = 0
       setDragOver(false)
       const files = Array.from(e.dataTransfer?.files ?? [])
-      void actions.handleDroppedFiles(files)
+      void runFileDrop(() => actions.handleDroppedFiles(files))
     }
     window.addEventListener('dragenter', onDragEnter)
     window.addEventListener('dragover', onDragOver)

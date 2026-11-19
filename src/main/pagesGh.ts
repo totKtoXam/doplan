@@ -50,8 +50,8 @@ export interface RepoState {
   isPrivate: boolean
   /** the signed-in user can push to it (write or admin access) */
   canPush?: boolean
-  /** the signed-in user administers it (may turn Pages on and off) */
-  admin?: boolean
+  /** the signed-in user may turn Pages on and off: admin or maintain access */
+  managesPages?: boolean
   /** its default branch (GitHub refuses to delete it) */
   defaultBranch?: string
 }
@@ -60,13 +60,14 @@ export async function repoState(ref: RepoRef): Promise<RepoState> {
   const r = await githubApi('GET', repoPath(ref))
   if (r.status === 404) return { exists: false, isPrivate: false }
   if (r.status !== 200) throw pagesError(r, msg('Не удалось узнать о репозитории', 'Could not read the repository'))
-  const j = (r.json ?? {}) as { private?: unknown; default_branch?: unknown; permissions?: { push?: unknown; admin?: unknown } }
+  const j = (r.json ?? {}) as { private?: unknown; default_branch?: unknown; permissions?: { push?: unknown; maintain?: unknown; admin?: unknown } }
   const admin = j.permissions?.admin === true
+  const managesPages = admin || j.permissions?.maintain === true
   return {
     exists: true,
     isPrivate: j.private === true,
-    canPush: j.permissions?.push === true || admin,
-    admin,
+    canPush: j.permissions?.push === true || managesPages,
+    managesPages,
     ...(typeof j.default_branch === 'string' && j.default_branch ? { defaultBranch: j.default_branch } : {}),
   }
 }

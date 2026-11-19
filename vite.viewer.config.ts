@@ -48,6 +48,8 @@ export default defineConfig({
             // view and its path tracing (dynamic imports); the plan and its 2D come first
             { name: 'pixi', test: /[\\/]node_modules[\\/](pixi\.js|@pixi)[\\/]/, priority: 10 },
             { name: 'react', test: /[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/, priority: 10 },
+            // the dynamic-import helper on its own: inside the pixi chunk it made every page load pixi first
+            { name: 'preload', test: /vite[\\/]preload-helper/, priority: 20 },
           ],
         },
       },

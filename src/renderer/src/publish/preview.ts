@@ -3,6 +3,7 @@
  * camera the viewer starts at (the default overview), taken in the editor when publishing.
  */
 import type { Engine3DHandle } from '@/contracts'
+import { docStore } from '@/store/document'
 import { handles, waitForEngine3D } from '@/store/handles'
 import { uiStore } from '@/store/ui'
 import { status3dStore } from '@/view3d/status'
@@ -32,8 +33,9 @@ async function settled(engine: Engine3DHandle, timeoutMs: number): Promise<void>
 }
 
 /**
- * The overview as WebP (≈1600 px wide), or null when there is no 3D here. Opens the 3D view for the
- * moment when only the plan is shown, and puts the camera, its mode and the view back afterwards.
+ * The overview as WebP (≈1600 px wide), or null when there is no 3D here: the first level from the
+ * default camera, as the viewer opens. Opens the 3D view for the moment when only the plan is shown,
+ * and puts the level, the camera, its mode and the view back afterwards.
  */
 export async function capturePreview(): Promise<Uint8Array | null> {
   const ui = uiStore.getState()
@@ -52,7 +54,14 @@ export async function capturePreview(): Promise<Uint8Array | null> {
   // no selection outline on the picture
   const prevSelection = uiStore.getState().selection
   if (prevSelection.length) uiStore.getState().clearSelection()
+  const prevLevel = uiStore.getState().activeLevelId
+  const firstLevel = docStore.getState().doc.levelOrder[0]
   try {
+    if (firstLevel && firstLevel !== prevLevel) {
+      uiStore.getState().set({ activeLevelId: firstLevel })
+      // the scene follows on its next frame; its models are counted from then
+      await sleep(250)
+    }
     // the models first: a picture of empty rooms would be worse than none
     await until(() => status3dStore.getState().modelsPending === 0, 30000)
     if (prevCamMode !== 'orbit') engine.setCameraMode('orbit')
@@ -65,6 +74,7 @@ export async function capturePreview(): Promise<Uint8Array | null> {
     console.warn('[doplan] publish: no preview', err)
     return null
   } finally {
+    if (uiStore.getState().activeLevelId !== prevLevel) uiStore.getState().set({ activeLevelId: prevLevel })
     if (prevCamMode !== 'orbit') engine.setCameraMode(prevCamMode)
     engine.setCamera(prevCam)
     if (prevSelection.length) uiStore.getState().select(prevSelection)

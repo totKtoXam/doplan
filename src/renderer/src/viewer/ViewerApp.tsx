@@ -22,7 +22,6 @@ import { builtinCatalog, mergeCatalog, parseDoc } from '@core'
 import { layerIndex } from '@core/layers'
 import type { Catalog, Doc, QualityPreset } from '@core/types'
 import type { Editor2DHandle, Engine3DHandle } from '@/contracts'
-import { createEditor2D } from '@/editor2d'
 import { addTranslations, useT } from '@/i18n'
 import { docStore, useDoc } from '@/store/document'
 import { setHandle } from '@/store/handles'
@@ -177,6 +176,8 @@ export function ViewerApp() {
 function Viewer({ params, setParams, booted }: { params: ViewerParams; setParams(p: ViewerParams): void; booted: Booted }) {
   const t = useT()
   const [used3d, setUsed3d] = useState(params.view === '3d')
+  // the plan's 2D (and its renderer) loads when it is shown, or once the 3D view has its models
+  const [used2d, setUsed2d] = useState(params.view === '2d')
   const [infoOpen, setInfoOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const name = useDoc((s) => s.doc.meta.name)
@@ -188,6 +189,7 @@ function Viewer({ params, setParams, booted }: { params: ViewerParams; setParams
 
   useEffect(() => {
     if (params.view === '3d') setUsed3d(true)
+    else setUsed2d(true)
   }, [params.view])
 
   const setView = (view: ViewerView) => setParams({ ...params, view })
@@ -233,8 +235,17 @@ function Viewer({ params, setParams, booted }: { params: ViewerParams; setParams
         </HeaderBtn>
       </header>
       <main className="relative min-h-0 flex-1">
-        <Plan2D hidden={params.view !== '2d'} />
-        {used3d && <Scene3D hidden={params.view !== '3d'} cam={params.cam} onCam={(cam) => setParams({ ...params, cam })} />}
+        {used2d && <Plan2D hidden={params.view !== '2d'} />}
+        {used3d && (
+          <Scene3D
+            hidden={params.view !== '3d'}
+            cam={params.cam}
+            onCam={(cam) => setParams({ ...params, cam })}
+            // the overview picture shows the first level from the default camera
+            preview={!params.level || params.level === levelOrder[0]}
+            onSettled={() => setUsed2d(true)}
+          />
+        )}
         <ToolRail />
         <HiddenPanel show3d={params.view === '3d'} />
         <ElementCard />
@@ -314,7 +325,8 @@ function Plan2D({ hidden }: { hidden: boolean }) {
     let ro: ResizeObserver | null = null
     let fitted = false
     setError(null)
-    createEditor2D(el)
+    import('@/editor2d')
+      .then((mod) => mod.createEditor2D(el))
       .then((h) => {
         if (disposed) {
           h.destroy()
@@ -372,7 +384,20 @@ function publishBackend(pref: 'webgpu' | 'webgl'): void {
   ;(globalThis as unknown as { __DOPLAN_BACKEND__?: string }).__DOPLAN_BACKEND__ = pref
 }
 
-function Scene3D({ hidden, cam, onCam }: { hidden: boolean; cam: ViewerCam; onCam(c: ViewerCam): void }) {
+function Scene3D({
+  hidden,
+  cam,
+  onCam,
+  preview,
+  onSettled,
+}: {
+  hidden: boolean
+  cam: ViewerCam
+  onCam(c: ViewerCam): void
+  preview: boolean
+  /** the 3D view is up with its models (or gave up): other work may start */
+  onSettled(): void
+}) {
   const t = useT()
   const host = useRef<HTMLDivElement>(null)
   const [engine, setEngine] = useState<Engine3DHandle | null>(null)
@@ -455,11 +480,23 @@ function Scene3D({ hidden, cam, onCam }: { hidden: boolean; cam: ViewerCam; onCa
     engine.setCameraMode(cam)
   }, [cam, engine])
   usePickClicks(host, '3d', cam === 'walk')
+  const pending = useStatus3d((s) => s.modelsPending)
+  const settledRef = useRef(onSettled)
+  settledRef.current = onSettled
+  useEffect(() => {
+    if (error || (engine && pending === 0)) {
+      settledRef.current()
+      return
+    }
+    // a slow model must not keep the plan away for ever
+    const id = setTimeout(() => settledRef.current(), 15000)
+    return () => clearTimeout(id)
+  }, [engine, pending, error])
 
   return (
     <div className={hidden ? 'hidden' : 'absolute inset-0 overflow-hidden bg-viewport'}>
       <div ref={host} className="absolute inset-0" />
-      {!error && cam !== 'walk' && <PreviewPicture ready={!!engine} host={host} />}
+      {!error && preview && cam === 'orbit' && <PreviewPicture ready={!!engine} host={host} />}
       {!engine && !error && (
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 text-xs text-muted">
           <LoaderCircle size={22} className="dp-spin text-accent" />

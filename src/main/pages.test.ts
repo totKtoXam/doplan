@@ -98,7 +98,7 @@ vi.mock('./pagesGh', () => ({
   repoState: async (ref: RepoRef) => {
     const r = gh.repos.get(k(ref))
     return r
-      ? { exists: true, isPrivate: r.private, canPush: r.push !== false, admin: (r.admin ?? r.push) !== false, defaultBranch: r.defaultBranch ?? 'main' }
+      ? { exists: true, isPrivate: r.private, canPush: r.push !== false, managesPages: (r.admin ?? r.push) !== false, defaultBranch: r.defaultBranch ?? 'main' }
       : { exists: false, isPrivate: false }
   },
   ownerPlan: async (owner: string, login: string | undefined) => (owner === login ? gh.userPlan : gh.orgPlans[owner]),
@@ -446,7 +446,7 @@ describe('the record follows its document', () => {
     expect((await status()).record).toBeNull()
   })
 
-  it('a collaborator (may push, not administer): updates the site of the project repository, and is told plainly that only an admin takes it down', async () => {
+  it('a collaborator (may push, not administer): updates the site of the project repository, and is told plainly that only an admin or maintainer takes it down', async () => {
     setOrigin('https://github.com/acme/plans.git')
     gh.repos.set('acme/plans', fresh())
     await publishPlan(req())
@@ -470,7 +470,7 @@ describe('the record follows its document', () => {
     expect(repo('acme/plans').pages).not.toBeNull()
     expect((await status()).record).toMatchObject({ owner: 'acme', repo: 'plans' })
 
-    // with admin rights given, it comes down
+    // with maintain or admin access given, it comes down
     repo('acme/plans').admin = true
     await unpublishPlan('doc1')
     expect(repo('acme/plans').pages).toBeNull()

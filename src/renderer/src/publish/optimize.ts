@@ -8,14 +8,14 @@
  * `env.read`, results ride along in `SiteFile.data`, and main writes those instead of copying.
  * Anything that fails to load or would not get smaller is published as it is.
  */
-import { type Document as GltfDocument, PropertyType, type Texture, WebIO } from '@gltf-transform/core'
+import { type Document as GltfDocument, type Material, type Node, PropertyType, type Texture, WebIO } from '@gltf-transform/core'
 import { ALL_EXTENSIONS, EXTTextureWebP } from '@gltf-transform/extensions'
 import { dedup, listTextureSlots, meshopt, prune, simplify, weld } from '@gltf-transform/functions'
 import { MeshoptDecoder, MeshoptEncoder, MeshoptSimplifier } from 'meshoptimizer'
 import { gltfDependencies, joinRel, mapStrings, type SiteContent, type SiteFile, siteUrlOf } from '@shared/pagesSite'
 
 /** bumps when the same input would give a different output (results are cached by it) */
-export const OPTIMIZE_VERSION = 2
+export const OPTIMIZE_VERSION = 3
 
 /** how a texture is sampled: colour (sRGB), a normal map, or other data (roughness / AO / …) */
 export type TextureUse = 'color' | 'normal' | 'data'
@@ -101,7 +101,9 @@ function pathOfUrl(s: string): string | null {
 
 /**
  * Budgets of the files the catalogue part of the site names: models by their size, material maps
- * 1024 px with their use. HDRIs are left out (lighting, not a texture to shrink).
+ * 1024 px with their use. HDRIs are left out (lighting, not a texture to shrink), and so are the
+ * plan's underlays: a scan's small dimension figures must stay readable, and its scale is given per
+ * pixel of the image.
  */
 export function budgets(content: SiteContent): { byPath: Map<string, Budget>; skip: Set<string> } {
   const byPath = new Map<string, Budget>()
@@ -125,6 +127,12 @@ export function budgets(content: SiteContent): { byPath: Map<string, Budget>; sk
     const p = typeof h?.src === 'string' ? pathOfUrl(h.src) : null
     if (p) skip.add(p)
   }
+  const underlays = (content.doc as { underlays?: unknown }).underlays
+  if (underlays && typeof underlays === 'object')
+    for (const u of Object.values(underlays as Record<string, { src?: unknown }>)) {
+      const p = typeof u?.src === 'string' ? pathOfUrl(u.src) : null
+      if (p) skip.add(p)
+    }
   return { byPath, skip }
 }
 
@@ -165,9 +173,44 @@ function triangles(doc: GltfDocument): number {
   return n
 }
 
+/**
+ * Gives every unnamed material the name the 3D view gives it when it loads the original file
+ * (`material_<n>` in the order its scene is walked: a node's own primitives, then its children), and
+ * a primitive without a material its default one under such a name. Those names are the item's
+ * override slots, and compression may move meshes into new nodes, which would change the order.
+ */
+export function nameMaterialSlots(doc: GltfDocument): void {
+  const root = doc.getRoot()
+  const scene = root.getDefaultScene() ?? root.listScenes()[0]
+  if (!scene) return
+  let unnamed = 0
+  const named = new Set<Material>()
+  let fallback: Material | null = null
+  const visit = (node: Node) => {
+    for (const p of node.getMesh()?.listPrimitives() ?? []) {
+      let m = p.getMaterial()
+      if (!m) {
+        // the loader's default: white, fully metallic and rough (one material for all of them)
+        if (!fallback) {
+          fallback = doc.createMaterial(`material_${unnamed++}`).setBaseColorFactor([1, 1, 1, 1]).setMetallicFactor(1).setRoughnessFactor(1)
+          named.add(fallback)
+        }
+        m = fallback
+        p.setMaterial(m)
+      }
+      if (named.has(m)) continue
+      named.add(m)
+      if (!m.getName()) m.setName(`material_${unnamed++}`)
+    }
+    for (const c of node.listChildren()) visit(c)
+  }
+  for (const n of scene.listChildren()) visit(n)
+}
+
 /** a model made lighter (see the module comment) */
 export async function optimizeModel(doc: GltfDocument, budget: Budget, codec: ImageCodec): Promise<Uint8Array> {
   const io = await gltfIO()
+  nameMaterialSlots(doc)
   // identical accessors / meshes / textures merge; materials stay apart: their names are override slots
   await doc.transform(dedup({ propertyTypes: [PropertyType.ACCESSOR, PropertyType.MESH, PropertyType.TEXTURE] }), prune({ keepAttributes: true, keepLeaves: true }))
   const tris = triangles(doc)
@@ -188,10 +231,8 @@ export async function optimizeModel(doc: GltfDocument, budget: Budget, codec: Im
   return io.writeBinary(doc)
 }
 
-/** a .glb, or a .gltf with the files it points to (read through env, never fetched) */
-async function readModel(f: SiteFile, bytes: Uint8Array, env: OptimizeEnv): Promise<GltfDocument> {
-  const io = await gltfIO()
-  if (extOf(f.rel) === 'glb') return io.readBinary(bytes)
+/** the files a .gltf points to (read through env, never fetched) */
+async function readResources(f: SiteFile, bytes: Uint8Array, env: OptimizeEnv): Promise<{ json: unknown; resources: Record<string, Uint8Array<ArrayBuffer>> }> {
   const json = JSON.parse(new TextDecoder().decode(bytes))
   const resources: Record<string, Uint8Array<ArrayBuffer>> = {}
   for (const list of [json.buffers ?? [], json.images ?? []] as { uri?: unknown }[][])
@@ -202,26 +243,49 @@ async function readModel(f: SiteFile, bytes: Uint8Array, env: OptimizeEnv): Prom
       if (!rel) throw new Error(`bad glTF reference ${x.uri}`)
       resources[x.uri] = (await env.read({ host: f.host, rel, path: f.path })) as Uint8Array<ArrayBuffer>
     }
-  return io.readJSON({ json, resources })
+  return { json, resources }
 }
 
 interface Done {
   file: SiteFile
-  /** the source bytes, and the new ones when the file was made lighter */
-  source: Uint8Array | null
+  /** the new bytes when the file was made lighter (main copies the source otherwise) */
   data?: Uint8Array
+  /** bytes before and after (0 when the source could not be read), hash of what is published */
+  before: number
+  after: number
+  hash: string | null
 }
 
-async function optimizeOne(f: SiteFile, budget: Budget, env: OptimizeEnv): Promise<Done> {
-  const source = await env.read(f)
+/** a file published as it is (its source read only to count and compare it) */
+async function asIs(f: SiteFile, source: Uint8Array | null): Promise<Done> {
+  return { file: f, before: source?.byteLength ?? 0, after: source?.byteLength ?? 0, hash: source && !/\.gltf$/i.test(f.path) ? await sha256(source) : null }
+}
+
+async function optimizeOne(f: SiteFile, budget: Budget, env: OptimizeEnv, used: Set<string>): Promise<Done> {
+  let source: Uint8Array
+  let gltf: Awaited<ReturnType<typeof readResources>> | null = null
   const ext = extOf(f.rel)
-  const key = `${OPTIMIZE_VERSION}|${f.host}|${f.rel}|${source.byteLength}|${budget.px}|${budget.tris}|${budget.use ?? ''}`
+  try {
+    source = await env.read(f)
+    if (ext === 'gltf') gltf = await readResources(f, source, env)
+  } catch (err) {
+    // a missing or unreadable file: this one goes out as it is, the others are still made lighter
+    console.warn('[doplan] publish: cannot read, keeping as is', f.path, err)
+    return asIs(f, null)
+  }
+  // by content: a file replaced on disk (or a .gltf's buffer or texture) is optimized again
+  const parts = [await sha256(source)]
+  if (gltf) for (const k of Object.keys(gltf.resources).sort()) parts.push(`${k}=${await sha256(gltf.resources[k])}`)
+  const key = `${OPTIMIZE_VERSION}|${budget.px}|${budget.tris}|${budget.use ?? ''}|${ext}|${parts.join(',')}`
+  used.add(key)
   const run = async (): Promise<Uint8Array | null> => {
     if (IMAGE.test(f.rel)) {
       const fitted = await env.codec.fit(source, MIME[ext] ?? 'image/png', budget.px, budget.use ?? mapUseOfName(f.rel))
       return fitted && fitted.mime === 'image/webp' && fitted.data.byteLength < source.byteLength * 0.9 ? fitted.data : null
     }
-    const out = await optimizeModel(await readModel(f, source, env), budget, env.codec)
+    const io = await gltfIO()
+    const doc = gltf ? await io.readJSON(gltf as Parameters<WebIO['readJSON']>[0]) : await io.readBinary(source)
+    const out = await optimizeModel(doc, budget, env.codec)
     // a .gltf becomes its .glb even when not smaller: one request instead of many
     return ext === 'gltf' || out.byteLength < source.byteLength * 0.95 ? out : null
   }
@@ -234,8 +298,8 @@ async function optimizeOne(f: SiteFile, budget: Budget, env: OptimizeEnv): Promi
     env.cache?.set(key, p)
   }
   const data = await p
-  if (!data) return { file: f, source }
-  return { file: { ...f, path: withExt(f.path, IMAGE.test(f.rel) ? 'webp' : 'glb') }, source, data }
+  if (!data) return asIs(f, source)
+  return { file: { ...f, path: withExt(f.path, IMAGE.test(f.rel) ? 'webp' : 'glb') }, data, before: source.byteLength, after: data.byteLength, hash: await sha256(data) }
 }
 
 /** the site content with lighter files (see the module comment) and what it saved */
@@ -243,19 +307,29 @@ export async function optimizeSite(content: SiteContent, env: OptimizeEnv): Prom
   const { byPath, skip } = budgets(content)
   const total = content.files.length
   const results: Done[] = new Array(total)
+  const used = new Set<string>()
   let next = 0
   let done = 0
-  // a few at a time: models are big, and images decode one by one anyway
+  let stopped = false
+  // a few at a time: models are big, and images decode one by one anyway. Only the hashes and sizes
+  // are kept of what goes out as it is; an unexpected failure stops the other workers too.
   const worker = async () => {
-    while (next < total) {
-      const i = next++
-      const f = content.files[i]
-      const light = !skip.has(f.path) && (IMAGE.test(f.rel) || MODEL.test(f.rel))
-      results[i] = light ? await optimizeOne(f, byPath.get(f.path) ?? DEFAULT_BUDGET, env) : { file: f, source: null }
-      env.onProgress?.(++done, total)
+    try {
+      while (next < total && !stopped) {
+        const i = next++
+        const f = content.files[i]
+        const light = !skip.has(f.path) && (IMAGE.test(f.rel) || MODEL.test(f.rel))
+        results[i] = light ? await optimizeOne(f, byPath.get(f.path) ?? DEFAULT_BUDGET, env, used) : { file: f, before: 0, after: 0, hash: null }
+        env.onProgress?.(++done, total)
+      }
+    } catch (err) {
+      stopped = true
+      throw err
     }
   }
   await Promise.all([worker(), worker(), worker()])
+  // the session keeps this plan's results only (a quick republish), not every plan's ever published
+  if (env.cache) for (const k of Array.from(env.cache.keys())) if (!used.has(k)) env.cache.delete(k)
 
   const report: OptimizeReport = { before: 0, after: 0, changed: 0, duplicates: 0, kept: 0 }
   const urls = new Map<string, string>()
@@ -264,15 +338,13 @@ export async function optimizeSite(content: SiteContent, env: OptimizeEnv): Prom
   const taken = new Set(content.files.map((f) => f.path))
   for (let i = 0; i < total; i++) {
     const from = content.files[i].path
-    const { source, data } = results[i]
+    const { data, before, after, hash } = results[i]
     let { file } = results[i]
     // `a.jpg` and `a.png` side by side both become WebP: the second keeps its old name in the new one
     if (file.path !== from && taken.has(file.path)) file = { ...file, path: `${from}.${extOf(file.path)}` }
     taken.add(file.path)
-    const bytes = data ?? source
-    if (source) report.before += source.byteLength
+    report.before += before
     // the same bytes under another name: one file, every reference pointed at it
-    const hash = bytes && !/\.gltf$/i.test(file.path) ? await sha256(bytes) : null
     const same = hash ? byHash.get(hash) : undefined
     if (same) {
       urls.set(siteUrlOf(from), siteUrlOf(same))
@@ -281,7 +353,7 @@ export async function optimizeSite(content: SiteContent, env: OptimizeEnv): Prom
     }
     if (hash) byHash.set(hash, file.path)
     if (file.path !== from) urls.set(siteUrlOf(from), siteUrlOf(file.path))
-    if (bytes) report.after += bytes.byteLength
+    report.after += after
     if (data) report.changed++
     else report.kept++
     files.push(data ? { ...file, data } : file)

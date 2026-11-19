@@ -297,7 +297,7 @@ async function findOwn(project: RepoRef | null, login: string | undefined, base:
   const tags = docTags(docId, aliases)
   // the tag travels with the file: a clone of someone else's project carries it too, so only a
   // repository the user may push to is taken as theirs. Updating needs no more (Pages are on already);
-  // taking the site down needs admin rights, and without them unpublish refuses before touching
+  // taking the site down needs admin or maintain access, and without it unpublish refuses before touching
   // anything and keeps the record, so it never comes back here after being dropped.
   // Only a live site: a branch left after unpublishing is not a publication.
   const inProject = async (): Promise<PagesRecord | null> => {
@@ -401,12 +401,12 @@ async function dropBranch(work: string, ref: RepoRef, head: string, marker: stri
   else await removeBranch(work, ref, head)
 }
 
-/** may push, may not change the Pages settings (a collaborator): the site stays, and so does the record */
+/** may push, may not change the Pages settings (write access only): the site stays, and so does the record */
 const notAdminError = (ref: RepoRef) =>
   new Error(
     msg(
-      `Снять сайт в репозитории ${ref.owner}/${ref.repo} может только его администратор: у этой учётной записи GitHub есть право записи, но не права выключить GitHub Pages. Ничего не изменено, план по-прежнему опубликован. Попросите владельца выключить Pages или дать вам права администратора.`,
-      `Only an administrator of repository ${ref.owner}/${ref.repo} can take the site down: this GitHub account may push there but not turn GitHub Pages off. Nothing was changed; the plan is still published. Ask the owner to turn Pages off or to give you admin rights.`,
+      `Снять сайт в репозитории ${ref.owner}/${ref.repo} может только его администратор или maintainer: у этой учётной записи GitHub есть право записи, но не права выключить GitHub Pages. Ничего не изменено, план по-прежнему опубликован. Попросите владельца выключить Pages или дать вам права maintain или admin.`,
+      `Only an administrator or maintainer of repository ${ref.owner}/${ref.repo} can take the site down: this GitHub account may push there but not turn GitHub Pages off. Nothing was changed; the plan is still published. Ask the owner to turn Pages off or to give you maintain or admin access.`,
     ),
   )
 
@@ -416,9 +416,9 @@ async function takeDown(work: string, ref: RepoRef, pubId: string | undefined): 
   if (!st.exists) return
   const insp = await inspectPages(ref)
   const own = pagesOwnership(insp, pubId, true)
-  // turning Pages off needs admin rights: without them nothing is touched (deleting the branch alone
-  // would leave Pages pointing at a branch that is gone)
-  if (own.site === 'ours' && st.admin === false) throw notAdminError(ref)
+  // turning Pages off needs admin or maintain access: without it nothing is touched (deleting the
+  // branch alone would leave Pages pointing at a branch that is gone)
+  if (own.site === 'ours' && st.managesPages === false) throw notAdminError(ref)
   // the branch first: a push that empties it may make GitHub turn Pages on again by itself, so they
   // are turned off after it
   if (own.branch === 'ours' && insp.branchSha) await dropBranch(work, ref, insp.branchSha, insp.marker ?? '', st.defaultBranch)

@@ -3,7 +3,7 @@ import { ALL_EXTENSIONS } from '@gltf-transform/extensions'
 import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer'
 import { describe, expect, it } from 'vitest'
 import type { AssetHost, SiteContent, SiteFile } from '@shared/pagesSite'
-import { budgetForSize, type ImageCodec, optimizeSite, type TextureUse, mapUseOfName } from './optimize'
+import { budgetForSize, type ImageCodec, optimizeModel, optimizeSite, type TextureUse, mapUseOfName } from './optimize'
 
 /** a stand-in codec: halves the bytes and calls them WebP, remembering what it was asked */
 function fakeCodec() {
@@ -166,5 +166,66 @@ describe('optimizeSite', () => {
     expect(second.content.files.map((f) => f.path)).toEqual(['assets/c/broken.glb', 'assets/c/a.webp'])
     expect(calls).toHaveLength(1)
     expect(progress.sort()).toEqual([1, 2])
+  })
+
+  it('a missing file goes out as it is and the others are still made lighter; underlays are never touched', async () => {
+    const { codec, calls } = fakeCodec()
+    const site = content(
+      [file('project', 'gone.png', 'assets/p/gone.png'), file('project', 'scan.png', 'assets/p/scan.png'), file('catalog', 'a.png', 'assets/c/a.png')],
+      {},
+      { underlays: { u1: { src: './assets/p/scan.png', scale: 2 } } },
+    )
+    const { content: out } = await optimizeSite(site, {
+      codec,
+      read: async (f) => {
+        if (f.rel === 'gone.png') throw new Error('404 gone.png')
+        return bytes(4_000, 5)
+      },
+    })
+    expect(out.files.map((f) => [f.path, !!f.data])).toEqual([
+      ['assets/p/gone.png', false],
+      ['assets/p/scan.png', false],
+      ['assets/c/a.webp', true],
+    ])
+    expect(calls).toHaveLength(1)
+    expect((out.doc as { underlays: { u1: { src: string } } }).underlays.u1.src).toBe('./assets/p/scan.png')
+  })
+
+  it("keeps a model's override slots: unnamed materials get the names the 3D view gave the original", async () => {
+    // Chair has its own mesh and a child Cushion: compression moves Chair's mesh into a new node after it
+    const doc = new Document()
+    const buffer = doc.createBuffer()
+    const prim = (m: ReturnType<Document['createMaterial']> | null) => {
+      const p = doc
+        .createPrimitive()
+        .setAttribute('POSITION', doc.createAccessor().setType('VEC3').setArray(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0])).setBuffer(buffer))
+      return m ? p.setMaterial(m) : p
+    }
+    const a = doc.createMaterial().setBaseColorFactor([1, 0, 0, 1])
+    const b = doc.createMaterial().setBaseColorFactor([0, 0, 1, 1])
+    const chair = doc.createNode('Chair').setMesh(doc.createMesh().addPrimitive(prim(a)))
+    chair.addChild(doc.createNode('Cushion').setMesh(doc.createMesh().addPrimitive(prim(b)).addPrimitive(prim(null))))
+    doc.createScene().addChild(chair)
+    const { codec } = fakeCodec()
+    const back = await (await io()).readBinary(await optimizeModel(doc, { px: 1024, tris: Infinity }, codec))
+    const byColour = new Map(back.getRoot().listMaterials().map((m) => [m.getBaseColorFactor().join(','), m.getName()]))
+    expect(byColour.get('1,0,0,1')).toBe('material_0')
+    expect(byColour.get('0,0,1,1')).toBe('material_1')
+    expect(byColour.get('1,1,1,1')).toBe('material_2')
+  })
+
+  it('a .gltf whose texture changed on disk is made lighter again; the session keeps only the last plan', async () => {
+    const files = await gridModel(20)
+    const { codec, calls } = fakeCodec()
+    const cache = new Map<string, Promise<Uint8Array | null>>()
+    const site = content([file('library', 'm/chair.gltf', 'assets/l/m/chair.gltf')], {})
+    const env = { codec, cache, read: async (f: SiteFile) => files[f.rel.slice(2)] }
+    await optimizeSite(site, env)
+    await optimizeSite(site, env)
+    expect(calls).toHaveLength(1)
+    files['tex.png'] = bytes(40_000, 8)
+    await optimizeSite(site, env)
+    expect(calls).toHaveLength(2)
+    expect(cache.size).toBe(1)
   })
 })

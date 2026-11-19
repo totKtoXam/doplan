@@ -67,9 +67,12 @@ describe('pagesGh errors', () => {
 
   it('repoState reads push and admin rights and the default branch', async () => {
     api.next = [{ status: 200, json: { private: false, default_branch: 'gh-pages', permissions: { push: true, admin: false } }, text: '' }]
-    await expect(repoState(ref)).resolves.toEqual({ exists: true, isPrivate: false, canPush: true, admin: false, defaultBranch: 'gh-pages' })
+    await expect(repoState(ref)).resolves.toEqual({ exists: true, isPrivate: false, canPush: true, managesPages: false, defaultBranch: 'gh-pages' })
     api.next = [{ status: 200, json: { private: true, permissions: { admin: true } }, text: '' }]
-    await expect(repoState(ref)).resolves.toEqual({ exists: true, isPrivate: true, canPush: true, admin: true })
+    await expect(repoState(ref)).resolves.toEqual({ exists: true, isPrivate: true, canPush: true, managesPages: true })
+    // maintain access may turn Pages off as well
+    api.next = [{ status: 200, json: { private: false, permissions: { push: true, maintain: true } }, text: '' }]
+    await expect(repoState(ref)).resolves.toMatchObject({ canPush: true, managesPages: true })
     api.next = [res(404)]
     await expect(repoState(ref)).resolves.toEqual({ exists: false, isPrivate: false })
   })

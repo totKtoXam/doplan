@@ -730,7 +730,8 @@ export function createElectricPlace(host: ElectricPlaceHost): ElectricPlace {
     const moved = locked() ? p.moved : Math.hypot(e.clientX - p.x, e.clientY - p.y)
     if (moved > CLICK_SLOP) return true // the view was turned
     // walk mode: the first mouse click captures the mouse (controls), it places nothing; touch / pen
-    // and a capture the browser keeps refusing place at the cursor (one refusal, e.g. right after Esc, does not)
+    // and a capture the browser keeps refusing place at the cursor (not its cooldown right after Esc)
+    if (!host.walkMode()) lockRefusals.reset()
     if (host.walkMode() && !locked() && walkPrefs.getState().captureMouse && e.pointerType === 'mouse' && !lockRefusals.persistent()) return true
     mods = { shift: p.shift, alt: p.alt }
     if (!locked()) lastPointer = { clientX: e.clientX, clientY: e.clientY }
@@ -877,6 +878,7 @@ export function createElectricPlace(host: ElectricPlaceHost): ElectricPlace {
   })
   const onLockChange = (): void => {
     if (locked()) lockRefusals.locked()
+    else lockRefusals.unlocked(performance.now())
     // the capture ends (Esc, M, another window) or starts during a move: the move is cancelled
     if (drag) {
       endDrag(false)
@@ -888,8 +890,12 @@ export function createElectricPlace(host: ElectricPlaceHost): ElectricPlace {
     }
   }
   const onLockError = (): void => {
-    lockRefusals.refused()
+    lockRefusals.refused(performance.now())
   }
+  // turning the capture off and on starts over
+  const unsubPrefs = walkPrefs.subscribe((s, prev) => {
+    if (s.captureMouse !== prev.captureMouse) lockRefusals.reset()
+  })
 
   window.addEventListener('keydown', onKeyDown, true)
   window.addEventListener('keyup', onKeyUp, true)
@@ -907,6 +913,7 @@ export function createElectricPlace(host: ElectricPlaceHost): ElectricPlace {
       if (drag) endDrag(false)
       offFrame()
       unsubUi()
+      unsubPrefs()
       window.removeEventListener('keydown', onKeyDown, true)
       window.removeEventListener('keyup', onKeyUp, true)
       document.removeEventListener('pointerlockchange', onLockChange)

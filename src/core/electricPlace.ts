@@ -94,12 +94,21 @@ const ALL_SURFACES: ReadonlySet<ElectricSurface> = new Set(['wall', 'floor', 'ce
 
 /**
  * The nearest surface a ray hits on a level: a face of a mountable, visible wall (from its front,
- * up to its shown height; a ray through a door or window hole passes on) or its top, else the floor
+ * up to its shown height; a ray through a door or window hole passes on), its top or a free end
+ * (a stub of a partition), else the floor
  * or a ceiling. Walls always block the ray: when the nearest hit is not one of `surfaces`, there is none.
  */
 export function rayElectricSurface(doc: RayDoc, levelId: Id, ray: PlanRay, opts: RaySurfaceOptions = {}): ElectricSurfaceHit | null {
   const surfaces = opts.surfaces ?? ALL_SURFACES
   let best: ElectricSurfaceHit | null = null
+  // walls at each node: an end no other wall meets is a free end, its face is seen
+  const atNode = new Map<Id, number>()
+  for (const id in doc.walls) {
+    const w = doc.walls[id]
+    if (w.levelId !== levelId) continue
+    atNode.set(w.a, (atNode.get(w.a) ?? 0) + 1)
+    atNode.set(w.b, (atNode.get(w.b) ?? 0) + 1)
+  }
   for (const id in doc.walls) {
     const w = doc.walls[id]
     if (w.levelId !== levelId || !isMountableWall(w) || wallHidden(doc, w)) continue
@@ -110,6 +119,11 @@ export function rayElectricSurface(doc: RayDoc, levelId: Id, ray: PlanRay, opts:
     }
     const cap = rayCap(doc, w, ray, top)
     if (cap && (!best || cap.s < best.s)) best = cap
+    for (const end of ['a', 'b'] as const) {
+      if ((atNode.get(w[end]) ?? 0) > 1) continue
+      const hit = rayEnd(doc, w, end, ray, top)
+      if (hit && (!best || hit.s < best.s)) best = hit
+    }
   }
   const consider = (surface: ElectricSurface, z: number, inside?: (x: number, y: number) => boolean): void => {
     if (Math.abs(ray.dz) < 1e-9) return
@@ -143,6 +157,49 @@ export function rayElectricSurface(doc: RayDoc, levelId: Id, ray: PlanRay, opts:
   return hit && surfaces.has(hit.surface) ? hit : null
 }
 
+/** the face of the wall nearer to the ray origin (a hit on the top or an end is given on it) */
+function nearerSide(doc: Pick<Doc, 'nodes' | 'walls'>, w: Wall, ray: PlanRay, t: number): 'left' | 'right' {
+  let side: 'left' | 'right' = 'left'
+  let bestD = Infinity
+  for (const sd of ['left', 'right'] as const) {
+    const f = wallFacePoint(doc, w.id, sd, t)
+    if (!f) continue
+    const d = Math.hypot(f.point.x - ray.ox, f.point.y - ray.oy)
+    if (d < bestD) {
+      bestD = d
+      side = sd
+    }
+  }
+  return side
+}
+
+/** the free end of a wall seen from beyond it: blocks the ray (a wall hit on the face towards the ray) */
+function rayEnd(doc: Pick<Doc, 'nodes' | 'walls'>, w: Wall, end: 'a' | 'b', ray: PlanRay, top: number): ElectricSurfaceHit | null {
+  const a = doc.nodes[w.a]
+  const b = doc.nodes[w.b]
+  if (!a || !b) return null
+  const len = Math.hypot(b.x - a.x, b.y - a.y)
+  if (len < 1e-6) return null
+  const ux = (b.x - a.x) / len
+  const uy = (b.y - a.y) / len
+  // the end face: across the wall at the node, facing away from the wall
+  const o = end === 'a' ? a : b
+  const nx = end === 'a' ? -ux : ux
+  const ny = end === 'a' ? -uy : uy
+  const denom = ray.dx * nx + ray.dy * ny
+  if (denom > -1e-9) return null
+  const s = ((o.x - ray.ox) * nx + (o.y - ray.oy) * ny) / denom
+  if (s <= 0) return null
+  const x = ray.ox + ray.dx * s
+  const y = ray.oy + ray.dy * s
+  const z = ray.oz + ray.dz * s
+  if (z < 0 || z > top) return null
+  const n = -(x - o.x) * uy + (y - o.y) * ux
+  if (Math.abs(n) > w.thickness / 2) return null
+  const t = end === 'a' ? 0 : len
+  return { surface: 'wall', x, y, z, s, wallId: w.id, side: nearerSide(doc, w, ray, t), t }
+}
+
 /** the top of a wall seen from above: blocks the ray (a wall hit on the face towards the ray) */
 function rayCap(doc: Pick<Doc, 'nodes' | 'walls'>, w: Wall, ray: PlanRay, top: number): ElectricSurfaceHit | null {
   if (ray.dz >= -1e-9 || ray.oz <= top) return null
@@ -160,19 +217,7 @@ function rayCap(doc: Pick<Doc, 'nodes' | 'walls'>, w: Wall, ray: PlanRay, top: n
   const t = (x - a.x) * ux + (y - a.y) * uy
   const n = -(x - a.x) * uy + (y - a.y) * ux
   if (t < 0 || t > len || Math.abs(n) > w.thickness / 2) return null
-  // the face on the side the ray comes from
-  let side: 'left' | 'right' = 'left'
-  let bestD = Infinity
-  for (const sd of ['left', 'right'] as const) {
-    const f = wallFacePoint(doc, w.id, sd, t)
-    if (!f) continue
-    const d = Math.hypot(f.point.x - ray.ox, f.point.y - ray.oy)
-    if (d < bestD) {
-      bestD = d
-      side = sd
-    }
-  }
-  return { surface: 'wall', x, y, z: top, s, wallId: w.id, side, t }
+  return { surface: 'wall', x, y, z: top, s, wallId: w.id, side: nearerSide(doc, w, ray, t), t }
 }
 
 function rayFace(

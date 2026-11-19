@@ -1,12 +1,14 @@
 /**
  * The height of the ceiling a room shows, mm above the level floor, as the 3D view builds it
  * (view3d/build/rooms): the room's own ceiling height, else the lowest wall around it, else the
- * level height; a multilevel ceiling is lower along its border ring, coffers and beams hang below
- * the slab. Ceiling electric points sit on this surface: `syncCeilingElectric` (run with syncRooms
+ * level height; a multilevel ceiling is lower along its border ring (the room outline minus its
+ * inset, the same inset the 3D build draws; a room too narrow for it gets a flat ceiling), coffers
+ * and beams hang below the slab. Ceiling electric points sit on this surface: `syncCeilingElectric` (run with syncRooms
  * after every edit) keeps their height on it when the ceiling, the walls or the level change.
  */
 import type { CeilingSpec, DerivedRoom, Doc, Id, Vec2 } from './types'
-import { pointInPolygon, projectOnSegment } from './geom'
+import { pointInPolygon } from './geom'
+import { insetPolygon } from './inset'
 
 type RoomShape = Pick<DerivedRoom, 'polygon' | 'holes' | 'edges'>
 
@@ -59,14 +61,28 @@ interface Lowered {
   under(x: number, y: number): boolean
 }
 
+/** the lowered parts of a room's ceiling, kept while the room and its ceiling stay the same objects */
+const partsCache = new WeakMap<RoomShape, { spec: CeilingSpec | undefined; parts: Lowered[] }>()
+
 function loweredParts(room: RoomShape, spec: CeilingSpec | undefined): Lowered[] {
+  const hit = partsCache.get(room)
+  if (hit && hit.spec === spec) return hit.parts
+  const parts = computeParts(room, spec)
+  partsCache.set(room, { spec, parts })
+  return parts
+}
+
+function computeParts(room: RoomShape, spec: CeilingSpec | undefined): Lowered[] {
   if (!spec) return []
   const poly = room.polygon
   if (spec.kind === 'multilevel') {
     const bw = Math.max(100, spec.borderWidth ?? MULTI_BORDER)
     const drop = Math.max(20, spec.borderDrop ?? MULTI_DROP)
-    // the ring: closer to the room outline than the border width
-    return [{ drop, under: (x, y) => distToOutline(poly, x, y) < bw }]
+    // as view3d/build/rooms: the ring is the room minus its inset (mitered corners, the largest
+    // loop); no inset (a room narrower than twice the border) — a flat ceiling at the main height
+    const inner = insetPolygon(poly, bw)
+    if (!inner || inner.length < 3) return []
+    return [{ drop, under: (x, y) => !pointInPolygon({ x, y }, inner) }]
   }
   if (spec.kind === 'coffered' || spec.kind === 'beams') {
     const coffered = spec.kind === 'coffered'
@@ -93,17 +109,6 @@ function loweredParts(room: RoomShape, spec: CeilingSpec | undefined): Lowered[]
     return [{ drop, under: (x, y) => xs.some((c) => Math.abs(x - c) <= half) || ys.some((c) => Math.abs(y - c) <= half) }]
   }
   return []
-}
-
-function distToOutline(poly: readonly Vec2[], x: number, y: number): number {
-  let d = Infinity
-  for (let i = 0; i < poly.length; i++) {
-    const a = poly[i]
-    const b = poly[(i + 1) % poly.length]
-    const pr = projectOnSegment({ x, y }, a, b)
-    d = Math.min(d, Math.hypot(pr.point.x - x, pr.point.y - y))
-  }
-  return d
 }
 
 /** the ceiling surface of a room right above (x, y), mm */

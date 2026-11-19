@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createEmptyDoc } from '../defaults'
-import { addOpening, addRectRoom, normalize, syncRooms } from '../ops'
+import { addOpening, addRectRoom, addWall, normalize, syncRooms } from '../ops'
 import { addElectric, alongWall } from '../electrical'
 import { ceilingHeightAt, levelCeiling } from '../ceiling'
 import { electricEditAllowed, rayElectricSurface } from '../electricPlace'
@@ -79,6 +79,45 @@ describe('ceiling points follow the ceiling (syncCeilingElectric)', () => {
     expect(down(300).z).toBe(2600)
   })
 
+  it('a multilevel ceiling in a room too narrow for its border is flat, as the 3D view draws it', () => {
+    const doc = createEmptyDoc()
+    const L = doc.levelOrder[0]
+    // inner faces 800 × 2800, border 600: no centre panel fits
+    addRectRoom(doc, L, 0, 0, 1000, 3000, { thickness: 200, height: 2700 })
+    edit(doc)
+    const rec = Object.values(doc.rooms)[0]
+    rec.ceiling = { ...rec.ceiling, kind: 'multilevel', borderWidth: 600, borderDrop: 100 }
+    const id = addElectric(doc, L, 'outLight', 500, 1500)
+    const edge = addElectric(doc, L, 'outLight', 150, 200)
+    edit(doc)
+    expect(doc.electrical![id].elevation).toBe(2700)
+    expect(doc.electrical![edge].elevation).toBe(2700)
+  })
+
+  it('a multilevel ring at a reflex corner is the mitered inset the 3D view draws', () => {
+    const doc = createEmptyDoc()
+    const L = doc.levelOrder[0]
+    const pts = [
+      { x: 0, y: 0 },
+      { x: 6000, y: 0 },
+      { x: 6000, y: 3000 },
+      { x: 3000, y: 3000 },
+      { x: 3000, y: 6000 },
+      { x: 0, y: 6000 },
+    ]
+    for (let i = 0; i < pts.length; i++) addWall(doc, L, pts[i], pts[(i + 1) % pts.length], { thickness: 200, height: 2700 })
+    edit(doc)
+    const rec = Object.values(doc.rooms)[0]
+    rec.ceiling = { ...rec.ceiling, kind: 'multilevel', borderWidth: 400, borderDrop: 100 }
+    // inner corner of the L at (2900, 2900); the inset's at (2500, 2500): (2550, 2550) is ~495 mm
+    // from the outline, yet on the lowered ring
+    const corner = addElectric(doc, L, 'outLight', 2550, 2550)
+    const centre = addElectric(doc, L, 'outLight', 1500, 1500)
+    edit(doc)
+    expect(doc.electrical![corner].elevation).toBe(2600)
+    expect(doc.electrical![centre].elevation).toBe(2700)
+  })
+
   it('beams: a point under a beam hangs on the beam', () => {
     const { doc, L, rec } = room()
     rec.ceiling = { ...rec.ceiling, kind: 'beams', height: 2700 }
@@ -102,6 +141,25 @@ describe('floor kinds', () => {
     expect(down(2000, 0)).toBeNull()
     // outside the building
     expect(down(2000, -1000)).toBeNull()
+  })
+
+  it('do not aim through the free end of a partition stub', () => {
+    const doc = createEmptyDoc()
+    const L = doc.levelOrder[0]
+    addRectRoom(doc, L, 0, 0, 6000, 6000, { thickness: 200, height: 2700 })
+    const [stub] = addWall(doc, L, { x: 3000, y: 0 }, { x: 3000, y: 3000 }, { thickness: 100, height: 2700 })
+    edit(doc)
+    const rooms = derivePlan(doc, L).rooms
+    // from (2500, 4500) at eye height at the end face of the stub, (3000, 3000, 1000)
+    const ray = { ox: 2500, oy: 4500, oz: 1600, dx: 500, dy: -1500, dz: -600 }
+    expect(rayElectricSurface(doc, L, ray, { surfaces: new Set(['floor'] as const), rooms })).toBeNull()
+    const hit = rayElectricSurface(doc, L, ray, { rooms })!
+    expect(hit.surface).toBe('wall')
+    expect(hit.wallId).toBe(stub)
+    expect(hit.y).toBeCloseTo(3000)
+    expect(hit.z).toBeCloseTo(1000)
+    // past the end the floor is seen
+    expect(rayElectricSurface(doc, L, { ...ray, dx: 1000 }, { surfaces: new Set(['floor'] as const), rooms })?.surface).toBe('floor')
   })
 })
 

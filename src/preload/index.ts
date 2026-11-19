@@ -7,7 +7,7 @@ import type { DoplanApi, MenuCommand } from '../shared/ipc'
 // ── ai-chat block ──
 import type { AiLoginEvent, AiProviderId, AiRunEvent, AiToolCall } from '../shared/aiChat'
 // ── end ai-chat block ──
-import type { GhLoginEvent } from '../shared/github'
+import type { GhLoginEvent, GithubCreateStep } from '../shared/github'
 import type { UpdateState } from '../shared/updater'
 import type { PagesProgress } from '../shared/pagesSite'
 import { CH, VERSION_ARG } from '../main/channels'
@@ -146,7 +146,7 @@ const api: DoplanApi = {
   // ── end ai-chat block ──
 
   github: {
-    ghStatus: () => invoke(CH.githubGhStatus),
+    ghStatus: (fresh) => invoke(CH.githubGhStatus, !!fresh),
     installGh: () => invoke(CH.githubInstallGh),
     login: () => invoke(CH.githubLogin),
     loginCancel: () => invoke(CH.githubLoginCancel),
@@ -154,6 +154,7 @@ const api: DoplanApi = {
     status: (fetch) => invoke(CH.githubStatus, !!fetch),
     connect: (url) => invoke(CH.githubConnect, url),
     create: (name, isPrivate) => invoke(CH.githubCreate, name, isPrivate),
+    onCreateStep: (cb) => subscribe<[GithubCreateStep]>(CH.evGithubCreateStep, (step) => cb(step)),
     push: () => invoke(CH.githubPush),
     pull: () => invoke(CH.githubPull),
     resolve: (choice) => invoke(CH.githubResolve, choice),

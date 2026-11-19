@@ -131,12 +131,19 @@ export interface GhStatus {
   /** GitHub login of the signed-in account */
   user?: string
   install: GhInstallHint
+  /** gh did not answer in time (a loaded computer): unknown whether signed in, not "signed out" */
+  slow?: boolean
+  /** GitHub did not answer the check (no connection, a timeout, an odd reply): unknown, not "signed out" */
+  offline?: boolean
 }
 
 export type GhLoginEvent =
   /** the one-time code to enter on `url` */
   | { type: 'code'; code: string; url: string }
   | { type: 'done'; ok: boolean; user?: string; error?: string }
+
+/** where creating a repository is (the dialog shows the step): sign-in check, creating it on GitHub, sending the project */
+export type GithubCreateStep = 'check' | 'create' | 'send'
 
 /** the one-time code `gh auth login --web` prints */
 export function parseDeviceCode(text: string): string | null {
@@ -241,7 +248,8 @@ export interface ConnectResult {
 
 /** renderer API (window.doplan.github) */
 export interface GithubApi {
-  ghStatus(): Promise<GhStatus>
+  /** `fresh`: the user asked to check again (gh is asked again too, seeing a sign-in made in a terminal) */
+  ghStatus(fresh?: boolean): Promise<GhStatus>
   /** opens a console window running the platform's install command; false where it cannot */
   installGh(): Promise<boolean>
   /** starts `gh auth login --web`; progress arrives through onLogin */
@@ -254,6 +262,8 @@ export interface GithubApi {
   connect(url: string): Promise<ConnectResult>
   /** creates a repository on the signed-in account (gh) and connects it */
   create(name: string, isPrivate: boolean): Promise<ConnectResult>
+  /** steps of create() as they start */
+  onCreateStep(cb: (step: GithubCreateStep) => void): () => void
   /** commits what is not committed yet and sends it to GitHub */
   push(): Promise<PushResult>
   /** gets versions from GitHub; on a real conflict nothing changes until resolve() */

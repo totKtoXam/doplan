@@ -55,6 +55,7 @@ vi.mock('./ipc', () => ({ handleIpc: () => undefined }))
 vi.mock('./window', () => ({ sendToRenderer: () => undefined }))
 vi.mock('./git', () => ({
   findGit: async () => 'git',
+  gitEffectiveUrls: async (_root: unknown, urls: string[]) => ({ effective: urls, ownAccount: false }),
   gitInit: async () => undefined,
   // only deletes here (the site itself goes up through pagesGit.pushSite)
   gitPushRef: async (_root: string, _net: unknown, src: string | null, _branch: string, opts: { remote: string; expected?: string }) => {
@@ -71,7 +72,9 @@ vi.mock('./github', () => ({
   ghStatus: async () => ({ installed: true, loggedIn: true, user: 'me' }),
   ghMissingText: () => 'gh missing',
   ghLoginText: () => 'gh login',
-  gitCredentialArgs: async () => [],
+  ghSlowText: () => 'gh slow',
+  ghOfflineText: () => 'gh offline',
+  gitCredentials: async () => ({ config: [], env: {} }),
 }))
 vi.mock('./projectFolder', () => ({ getProjectRoot: () => project }))
 vi.mock('./pagesBuild', () => ({

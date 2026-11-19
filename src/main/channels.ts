@@ -75,6 +75,7 @@ export const CH = {
   githubLogin: 'github:login',
   githubLoginCancel: 'github:loginCancel',
   evGithubLogin: 'ev:githubLogin',
+  evGithubCreateStep: 'ev:githubCreateStep',
   githubStatus: 'github:status',
   githubConnect: 'github:connect',
   githubCreate: 'github:create',

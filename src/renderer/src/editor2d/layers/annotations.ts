@@ -303,7 +303,7 @@ export class AnnotationsLayer {
     if (unreliable) {
       const box = bboxOf(itemCorners(it))
       const s = ctx.camera.toScreen({ x: (box.minX + box.maxX) / 2, y: box.minY })
-      p.sbadge(`icw:${it.id}`, `⚠ ${t(CLEARANCE_WARNING)}`, s.x, s.y - 34, { bg: pal.warn, color: 0x1b1300, size: 10.5 })
+      p.sbadge(`icw:${it.id}`, `⚠ ${t(CLEARANCE_WARNING)}`, s.x, s.y - 34, { bg: pal.warnBadge, color: pal.warnBadgeText, size: 10.5, bgAlpha: 1 })
     }
   }
 

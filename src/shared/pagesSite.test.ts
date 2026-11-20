@@ -109,6 +109,9 @@ describe('planSite', () => {
     expect(site.catalog.materials[0]).toMatchObject({ remote: true })
     expect(site.catalog.hdris[0]).toMatchObject({ remote: true })
     expect(site.notDownloaded.sort()).toEqual(['a2', 'h2', 'm2'])
+    // nothing to copy (the files are not on this computer): reported once, as not downloaded, never as missing
+    expect(site.files).toEqual([])
+    expect((site.catalog.assets[0] as { src: string }).src).toMatch(/^\.\/assets\//)
   })
 })
 

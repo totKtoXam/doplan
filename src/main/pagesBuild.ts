@@ -98,9 +98,22 @@ export async function buildSite(opts: BuildSiteOptions): Promise<BuildSiteResult
     const f = queue.shift() as SiteFile
     if (done.has(f.path)) continue
     done.add(f.path)
+    const dest = safeJoin(outDir, f.path)
+    // made lighter before publishing (renderer): written as given, a .glb with nothing to follow
+    if (f.data instanceof Uint8Array) {
+      if (!dest) {
+        missing.push(f.path)
+        continue
+      }
+      if (f.data.byteLength > PAGES_LIMITS.fileBytes) tooLarge.push(f.path)
+      await fsp.mkdir(dirname(dest), { recursive: true })
+      await fsp.writeFile(dest, f.data)
+      bytes += f.data.byteLength
+      count++
+      continue
+    }
     const root = Object.prototype.hasOwnProperty.call(roots, f.host) ? roots[f.host] : null
     const src = root ? safeJoin(root, f.rel) : null
-    const dest = safeJoin(outDir, f.path)
     if (!src || !dest) {
       missing.push(f.path)
       continue

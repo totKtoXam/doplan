@@ -5,7 +5,7 @@
  * document and the catalogue here: only what the viewer shows (shared/pagesSite.viewDoc), the
  * underlays only when the user ticks them in.
  */
-import { Check, Copy, ExternalLink, Globe, RefreshCw, TriangleExclamationPoint } from 'lucide-react'
+import { Check, Copy, Download, ExternalLink, Globe, RefreshCw, TriangleExclamationPoint } from 'lucide-react'
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import { builtinCatalog } from '@core'
 import {
@@ -18,16 +18,20 @@ import {
   type PagesProgress,
   type PagesPublishResult,
   type PagesStatus,
+  type SiteContent,
 } from '@shared/pagesSite'
+import type { Catalog } from '@core/types'
 import { addTranslations, useT } from '@/i18n'
+import { prepareSite } from '@/publish/prepare'
 import { api } from '@/store/api'
 import { useDoc } from '@/store/document'
 import { generation, isCurrentGeneration } from '@/store/github'
 import { movedKeys } from '@/store/pagesKeys'
 import { confirmDialog, toast } from '@/store/notify'
-import { uiStore } from '@/store/ui'
+import { uiStore, useUi } from '@/store/ui'
 import { Button, Dialog, Spinner } from '@/ui/kit'
 import type { DialogPropsBase } from './BomDialog'
+import { displayName, downloadEntry, useDownloads, useLang } from './common/catalog'
 
 addTranslations('en', {
   'Опубликовать для просмотра': 'Publish for viewing',
@@ -65,8 +69,19 @@ addTranslations('en', {
   'Сайт будет открыт всем, у кого есть ссылка, и может попасть в поисковики. Не публикуйте личные данные (адрес, имена, фото жильцов).':
     'The site is open to anyone with the link and may show up in search engines. Do not publish personal data (address, names, photos of residents).',
   'В плане {n} файлов моделей и текстур.': 'The plan has {n} model and texture files.',
-  'Не скачаны и не попадут на сайт: {list}. Скачайте их в каталоге, чтобы зрители их увидели.':
-    'Not downloaded, so not on the site: {list}. Download them in the catalogue for viewers to see them.',
+  'Не скачаны из каталога, поэтому на сайте вместо них будут пустые места: {list}.': 'Not downloaded from the catalogue, so the site shows empty spots instead: {list}.',
+  '{list} и ещё {n}': '{list} and {n} more',
+  'Скачать и обновить': 'Download and update',
+  'Скачать и опубликовать': 'Download and publish',
+  'Скачиваю недостающее…': 'Downloading what is missing…',
+  'Облегчаю модели и текстуры: {done} из {total}…': 'Making models and textures lighter: {done} of {total}…',
+  'Облегчаю модели и текстуры…': 'Making models and textures lighter…',
+  'Снимаю превью 3D…': 'Taking the 3D preview…',
+  'Запекаю свет: {p}%…': 'Baking the light: {p}%…',
+  'Запечь свет': 'Bake the light',
+  'Свет и тени на стенах, полу и потолке считаются заранее: 3D на сайте открывается быстрее и выглядит лучше на слабых устройствах. Посетитель может включить живой свет. Занимает от нескольких секунд до пары минут.':
+    'Light and shadows on the walls, floor and ceiling are worked out in advance: the 3D view on the site opens faster and looks better on weak devices. A visitor can switch to the live light. Takes from a few seconds to a couple of minutes.',
+  'Не удалось скачать: {list}.': 'Could not download: {list}.',
   'Собираю сайт…': 'Building the site…',
   'Готовлю репозиторий…': 'Preparing the repository…',
   'Отправляю на GitHub…': 'Uploading to GitHub…',
@@ -80,6 +95,7 @@ addTranslations('en', {
   'Сделать публичным': 'Make public',
   'Снять план с публикации?': 'Unpublish the plan?',
   'Сайт перестанет открываться по ссылке. Ветка gh-pages, созданная doplan, будет удалена.': 'The link stops working. The gh-pages branch doplan made is deleted.',
+  'Сайт перестанет открываться по ссылке, а файлы плана будут убраны из репозитория {r}.': 'The link stops working, and the plan files are removed from repository {r}.',
   'В ветке gh-pages репозитория {r} уже опубликован план doplan (другой документ или чужая публикация). Её не тронем: сайт пойдёт в отдельный публичный репозиторий {s}.':
     'The gh-pages branch of {r} already holds a doplan plan (another document, or someone else’s publication). It stays as it is: the site goes into a separate public repository {s}.',
   'В репозитории {r} уже есть ветка gh-pages, которую сделал не doplan. Её не тронем: сайт пойдёт в отдельный публичный репозиторий {s}.':
@@ -91,6 +107,10 @@ addTranslations('en', {
   'Репозиторий {r} не найден на GitHub. План можно опубликовать в отдельный публичный репозиторий {s}.':
     'Repository {r} was not found on GitHub. The plan can be published into a separate public repository {s}.',
   'Показать подложку': 'Include the underlay',
+  'Кнопка «Скачать план (.doplan)» на сайте': 'A “Download the plan (.doplan)” button on the site',
+  'Посетитель скачает план одной кнопкой и откроет его в doplan.': 'A visitor downloads the plan with one click and opens it in doplan.',
+  'Сам план (стены, размеры, мебель, материалы и скрытые объекты) в любом случае лежит на сайте открытым файлом, его можно сохранить и без кнопки. Цен и заметок в нём нет.':
+    'The plan itself (walls, sizes, furniture, materials and hidden objects) is on the site as an open file either way and can be saved without the button. It has no prices or notes.',
   'Подложка — это скан или фото исходного плана. На планах БТИ часто есть адрес, кадастровый номер и имена: всё это увидят все, у кого есть ссылка.':
     'The underlay is a scan or photo of the source plan. BTI plans often show the address, the cadastral number and names: everyone with the link sees all of it.',
   'Скрытые подложки, карандашные пометки, цены и заметки не публикуются.': 'Hidden underlays, pencil marks, prices and notes are not published.',
@@ -112,6 +132,19 @@ function builtinIds(): Set<string> {
   for (const e of b.materials) if (same(cat.materials, e)) ids.add(e.id)
   for (const e of b.assets) if (same(cat.assets, e)) ids.add(e.id)
   return ids
+}
+
+type CatalogKind = 'asset' | 'material' | 'hdri'
+
+/** not-downloaded entries by their catalogue kind and the name the user sees there */
+function remoteEntries(ids: string[], catalog: Catalog, lang: 'ru' | 'en'): { id: string; kind: CatalogKind; name: string }[] {
+  return ids.map((id) => {
+    const a = catalog.assets.find((e) => e.id === id)
+    if (a) return { id, kind: 'asset', name: displayName(a, lang) }
+    const m = catalog.materials.find((e) => e.id === id)
+    if (m) return { id, kind: 'material', name: displayName(m, lang) }
+    return { id, kind: 'hdri', name: displayName(catalog.hdris.find((e) => e.id === id), lang) }
+  })
 }
 
 const mb = (b: number) => (b >= 1024 ** 2 ? `${(b / 1024 ** 2).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`)
@@ -151,11 +184,15 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
   const loadId = useDoc((s) => s.loadId)
   const [status, setStatus] = useState<PagesStatus | null>(null)
   const [loading, setLoading] = useState(false)
-  const [busy, setBusy] = useState<PagesProgress['step'] | 'unpublish' | null>(null)
+  const [busy, setBusy] = useState<PagesProgress['step'] | 'unpublish' | 'download' | 'optimize' | 'preview' | 'bake' | null>(null)
+  const [bakeLight, setBakeLight] = useState(true)
+  const [bakePart, setBakePart] = useState(0)
+  const [optimized, setOptimized] = useState<{ done: number; total: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<PagesPublishResult | null>(null)
   const [choice, setChoice] = useState<PagesPrivateChoice>('separate')
   const [underlays, setUnderlays] = useState(false)
+  const [download, setDownload] = useState(false)
 
   const keys = publicationKeys(doc.meta, filePath)
   const key = keys.key
@@ -167,7 +204,13 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
   const withUnderlays = underlays && underlayCount > 0
   const shown = useMemo(() => viewDoc(doc, { underlays: withUnderlays }), [doc, withUnderlays])
   const hash = useMemo(() => docContentHash(shown), [shown])
-  const content = useMemo(() => (open ? planSite(shown, uiStore.getState().catalog, builtinIds()) : null), [open, shown])
+  // a model downloaded meanwhile (here or in the catalogue) goes on the site at once
+  const catalog = useUi((s) => s.catalog)
+  const lang = useLang()
+  const content = useMemo(() => (open ? planSite(shown, catalog, builtinIds()) : null), [open, shown, catalog])
+  const remote = useMemo(() => (content ? remoteEntries(content.notDownloaded, catalog, lang) : []), [content, catalog, lang])
+  const names = (list: { name: string }[]) =>
+    list.length > 8 ? t('{list} и ещё {n}', { list: list.slice(0, 8).map((e) => e.name).join(', '), n: list.length - 8 }) : list.map((e) => e.name).join(', ')
 
   const refresh = useCallback(
     async (fresh = false) => {
@@ -205,13 +248,17 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
   const recordStuck = !!record && !record.separate && !!recordTarget && (recordTarget.needsChoice || !recordTarget.exists)
   const choiceRef = recordStuck ? recordTarget?.ref : project?.ref
   const recordUnderlays = record?.underlays ?? false
+  const recordDownload = record?.download ?? false
 
   useEffect(() => {
     if (open) setUnderlays(recordUnderlays)
   }, [open, recordUnderlays])
+  useEffect(() => {
+    if (open) setDownload(recordDownload)
+  }, [open, recordDownload])
 
-  const publish = async () => {
-    if (!content || !status) return
+  const publish = async (built: SiteContent | null = content) => {
+    if (!built || !status) return
     // what main publishes is this project's plan: an answer after another one opened is not shown on it
     const gen = generation()
     const target = record ? (record.separate ? 'separate' : 'project') : projectUsable ? 'project' : 'separate'
@@ -231,14 +278,29 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
       )
       if (!ok || !isCurrentGeneration(gen)) return
     }
-    setBusy('build')
+    setBusy('optimize')
     setError(null)
     setResult(null)
     try {
+      // lighter models and textures, and the picture shown while the 3D loads
+      const prepared = await prepareSite(
+        built,
+        {
+          optimize: (done, total) => setOptimized({ done, total }),
+          preview: () => setBusy('preview'),
+          bake: (part) => {
+            setBusy('bake')
+            setBakePart(part)
+          },
+        },
+        { bake: bakeLight },
+      )
+      if (!isCurrentGeneration(gen)) return
+      setBusy('build')
       const res = await api.pages.publish({
         docId: key,
-        content,
-        info: { title: doc.meta.name, publishedAt: new Date().toISOString(), contentHash: hash, app: `doplan ${api.version}` },
+        content: prepared.content,
+        info: { title: doc.meta.name, publishedAt: new Date().toISOString(), contentHash: hash, app: `doplan ${api.version}`, ...(download ? { download: true } : {}) },
         target: privateChoice === 'separate' ? 'separate' : target,
         ...(privateChoice ? { privateChoice } : {}),
         aliases,
@@ -253,13 +315,38 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
       if (isCurrentGeneration(gen)) setError((e as Error).message)
     } finally {
       setBusy(null)
+      setOptimized(null)
     }
+  }
+
+  /** downloads what the plan uses from the catalogue and is not on this computer, then publishes again */
+  const downloadAndPublish = async () => {
+    if (!remote.length) return
+    const gen = generation()
+    setBusy('download')
+    setError(null)
+    try {
+      for (const e of remote) await downloadEntry(e.kind, e.id)
+    } finally {
+      setBusy(null)
+    }
+    if (!isCurrentGeneration(gen)) return
+    const built = planSite(shown, uiStore.getState().catalog, builtinIds())
+    if (built.notDownloaded.length) {
+      const failed = remoteEntries(built.notDownloaded, uiStore.getState().catalog, lang)
+      const why = failed.map((e) => useDownloads.getState().errors[e.id]).find(Boolean)
+      setError([t('Не удалось скачать: {list}.', { list: names(failed) }), why].filter(Boolean).join(' '))
+      return
+    }
+    await publish(built)
   }
 
   const unpublish = async () => {
     if (!record) return
-    const lines = [t('Сайт перестанет открываться по ссылке. Ветка gh-pages, созданная doplan, будет удалена.')]
-    if (record.separate) lines.push(t('Репозиторий {r} останется — удалить его можно на GitHub.', { r: `${record.owner}/${record.repo}` }))
+    const r = `${record.owner}/${record.repo}`
+    const lines = record.separate
+      ? [t('Сайт перестанет открываться по ссылке, а файлы плана будут убраны из репозитория {r}.', { r }), t('Репозиторий {r} останется — удалить его можно на GitHub.', { r })]
+      : [t('Сайт перестанет открываться по ссылке. Ветка gh-pages, созданная doplan, будет удалена.')]
     if (!(await confirmDialog(t('Снять план с публикации?'), lines.join('\n'), { ok: t('Снять'), cancel: t('Отмена'), danger: true }))) return
     setBusy('unpublish')
     setError(null)
@@ -293,6 +380,10 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
     pages: t('Включаю GitHub Pages…'),
     done: t('Готово'),
     unpublish: t('Снять с публикации'),
+    download: t('Скачиваю недостающее…'),
+    optimize: optimized && optimized.total > 0 ? t('Облегчаю модели и текстуры: {done} из {total}…', optimized) : t('Облегчаю модели и текстуры…'),
+    preview: t('Снимаю превью 3D…'),
+    bake: t('Запекаю свет: {p}%…', { p: Math.round(bakePart * 100) }),
   }
 
   const desktop = typeof window !== 'undefined' && !!(window as { doplan?: unknown }).doplan
@@ -443,9 +534,36 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
                 </span>
               </label>
             )}
+            <label className="flex cursor-pointer items-start gap-2">
+              <input type="checkbox" className="mt-0.5" checked={bakeLight} disabled={!!busy} onChange={(e) => setBakeLight(e.currentTarget.checked)} />
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="font-medium">{t('Запечь свет')}</span>
+                {bakeLight && (
+                  <span className="text-[var(--muted)]">
+                    {t('Свет и тени на стенах, полу и потолке считаются заранее: 3D на сайте открывается быстрее и выглядит лучше на слабых устройствах. Посетитель может включить живой свет. Занимает от нескольких секунд до пары минут.')}
+                  </span>
+                )}
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-2">
+              <input type="checkbox" className="mt-0.5" checked={download} disabled={!!busy} onChange={(e) => setDownload(e.currentTarget.checked)} />
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="font-medium">{t('Кнопка «Скачать план (.doplan)» на сайте')}</span>
+                {download && <span className="text-[var(--muted)]">{t('Посетитель скачает план одной кнопкой и откроет его в doplan.')}</span>}
+                {/* the viewer needs the document: unticked hides the button, not the plan */}
+                <span className="text-[var(--warning)]">{t('Сам план (стены, размеры, мебель, материалы и скрытые объекты) в любом случае лежит на сайте открытым файлом, его можно сохранить и без кнопки. Цен и заметок в нём нет.')}</span>
+              </span>
+            </label>
             <div className="text-[var(--muted)]">{t('Скрытые подложки, карандашные пометки, цены и заметки не публикуются.')}</div>
-            {content.notDownloaded.length > 0 && (
-              <Note kind="warn">{t('Не скачаны и не попадут на сайт: {list}. Скачайте их в каталоге, чтобы зрители их увидели.', { list: content.notDownloaded.slice(0, 8).join(', ') })}</Note>
+            {remote.length > 0 && (
+              <Note kind="warn">
+                <div className="flex flex-col items-start gap-2">
+                  <span>{t('Не скачаны из каталога, поэтому на сайте вместо них будут пустые места: {list}.', { list: names(remote) })}</span>
+                  <Button icon={<Download size={12} />} disabled={!!busy || loading} onClick={() => void downloadAndPublish()}>
+                    {record ? t('Скачать и обновить') : t('Скачать и опубликовать')}
+                  </Button>
+                </div>
+              </Note>
             )}
             <Note kind="warn">
               {t('Сайт будет открыт всем, у кого есть ссылка, и может попасть в поисковики. Не публикуйте личные данные (адрес, имена, фото жильцов).')}

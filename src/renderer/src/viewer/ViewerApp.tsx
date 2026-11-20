@@ -5,6 +5,7 @@ import {
   Footprints,
   Info,
   LampCeiling,
+  Lightbulb,
   Link2,
   LoaderCircle,
   Map as MapIcon,
@@ -17,23 +18,30 @@ import {
   TriangleExclamationPoint,
   X,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { type RefObject, useEffect, useMemo, useRef, useState } from 'react'
 import { builtinCatalog, mergeCatalog, parseDoc } from '@core'
-import type { Catalog, QualityPreset } from '@core/types'
-import type { Editor2DHandle, Engine3DHandle } from '@/contracts'
-import { createEditor2D } from '@/editor2d'
+import { layerIndex } from '@core/layers'
+import type { Catalog, Doc, QualityPreset } from '@core/types'
+import type { BakeManifest, Editor2DHandle, Engine3DHandle } from '@/contracts'
 import { addTranslations, useT } from '@/i18n'
 import { docStore, useDoc } from '@/store/document'
 import { setHandle } from '@/store/handles'
+import { setAuthorHiddenOpenings } from '@/store/viewOnly'
 import { uiStore, useUi } from '@/store/ui'
 import { AppLogo } from '@/ui/shell/AppLogo'
 import { MiniSelect, Segmented } from '@/ui/shell/primitives'
 import { WalkLockHint } from '@/ui/shell/WalkLockHint'
-import { useStatus3d } from '@/view3d/status'
+import { BAKE_MANIFEST, parseBakeManifest } from '@/view3d/bake/manifest'
+import { type BakedState, status3dStore, useStatus3d } from '@/view3d/status'
 import { parseViewerParams, viewerQuery, type SiteInfo, type ViewerCam, type ViewerParams, type ViewerView } from '@shared/pagesSite'
 import { installEditGuard, lockViewerTool, viewerEdit } from './guard'
+import { downloadableDoc } from './exporters'
 import { loadSite } from './load'
+import { capToBackend, currentDevice, lighter, rememberQuality, storedQuality, viewerQuality } from './quality'
+import { setDprPolicy } from '@/view3d/quality'
 import { WalkStick } from './WalkStick'
+import { unlockAll } from './hideState'
+import { ElementCard, ExportMenu, HiddenPanel, installViewerTools, MeasureOverlay, resetTools, setCeiling, setHost3d, ToolRail, usePickClicks, useToolKeys } from './ViewerTools'
 
 addTranslations('en', {
   'Загрузка плана…': 'Loading the plan…',
@@ -69,23 +77,21 @@ addTranslations('en', {
   'Загрузка моделей': 'Loading models',
   Этаж: 'Level',
   'Перетаскивайте, чтобы осмотреться': 'Drag to look around',
+  'Свет: запечённый. Нажмите, чтобы считать свет вживую': 'Light: baked. Click to light the scene live',
+  'Свет: живой. Нажмите, чтобы показать запечённый': 'Light: live. Click to show the baked light',
+  'Запечённый свет загружается…': 'Loading the baked light…',
+  'Запечённый свет сделан для плана целиком: пока скрыты объекты, выключен свет или открыт другой этаж, свет считается вживую': 'The baked light was made for the whole plan: while objects are hidden, a light is off or another level is shown, the light is live',
 })
 
 const QUALITY: QualityPreset[] = ['low', 'medium', 'high', 'ultra']
 const QUALITY_NAMES: Record<QualityPreset, string> = { low: 'Низкое', medium: 'Среднее', high: 'Высокое', ultra: 'Ультра' }
 const PT_TARGET = 256
 
-const coarsePointer = (): boolean => typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
-
-/** viewers get a lighter preset on phones; the author's own choice is the ceiling elsewhere */
-function autoQuality(author: QualityPreset | undefined): QualityPreset {
-  const small = typeof window !== 'undefined' && Math.min(window.innerWidth, window.innerHeight) < 600
-  if (coarsePointer() || small) return 'low'
-  return author === 'low' ? 'low' : 'medium'
-}
 
 interface Booted {
   info: SiteInfo | null
+  /** the plan as published (the .doplan download) */
+  pristine: Doc
   credits: { name: string; author?: string; licence?: string; source?: string }[]
 }
 
@@ -98,6 +104,15 @@ async function boot(params: ViewerParams): Promise<Booted> {
   installEditGuard()
   docStore.getState().load(doc, null)
   const d = docStore.getState().doc
+  const pristine = d
+  // what the author published hidden stays hidden; locks guard edits, and a viewer has none
+  const authorHidden = new Set<string>()
+  for (const [kind, table] of [['item', d.items], ['wall', d.walls], ['opening', d.openings], ['room', d.rooms], ['light', d.lights], ['electric', d.electrical]] as const)
+    for (const id in table ?? {}) if ((table?.[id] as { hidden?: boolean } | undefined)?.hidden) authorHidden.add(`${kind}:${id}`)
+  // an opening the plan hides (by itself, its layer or its group) leaves its wall solid in 3D
+  const layers = layerIndex(d)
+  setAuthorHiddenOpenings(new Set(Object.keys(d.openings).filter((id) => layers.hidden('opening', id))))
+  viewerEdit(() => docStore.getState().transact('view', unlockAll))
   uiStore.getState().setCatalog(mergeCatalog(builtinCatalog(), site.catalog as Partial<Catalog>))
   uiStore.getState().set({
     activeLevelId: params.level && d.levels[params.level] ? params.level : (d.levelOrder[0] ?? ''),
@@ -106,13 +121,16 @@ async function boot(params: ViewerParams): Promise<Booted> {
     cameraMode: params.cam,
   })
   lockViewerTool(uiStore)
-  viewerEdit(() => uiStore.getState().setQuality(autoQuality(d.render.quality)))
+  installViewerTools({ authorHidden, authorCeiling: d.render.ceilingVisible })
+  viewerEdit(() => uiStore.getState().setQuality(viewerQuality(d.render.quality, currentDevice(), storedQuality())))
+  // sharp at rest (the device's own pixel ratio), not soft while walking
+  setDprPolicy({ restMax: 2, movingMin: 1 })
   document.title = `${site.info?.title || d.meta.name || 'doplan'} — doplan`
   const cat = site.catalog
   const credits = [...(cat.assets ?? []), ...(cat.materials ?? []), ...(cat.hdris ?? [])]
     .filter((e) => e && (e.source || e.licence || ('author' in e && e.author)))
     .map((e) => ({ name: e.name, author: 'author' in e ? e.author : undefined, licence: e.licence, source: e.source }))
-  return { info: site.info, credits }
+  return { info: site.info, credits, pristine: downloadableDoc(pristine, site.catalog, location.href) }
 }
 
 export function ViewerApp() {
@@ -164,6 +182,8 @@ export function ViewerApp() {
 function Viewer({ params, setParams, booted }: { params: ViewerParams; setParams(p: ViewerParams): void; booted: Booted }) {
   const t = useT()
   const [used3d, setUsed3d] = useState(params.view === '3d')
+  // the plan's 2D (and its renderer) loads when it is shown, or once the 3D view has its models
+  const [used2d, setUsed2d] = useState(params.view === '2d')
   const [infoOpen, setInfoOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const name = useDoc((s) => s.doc.meta.name)
@@ -171,13 +191,16 @@ function Viewer({ params, setParams, booted }: { params: ViewerParams; setParams
   const levelMap = useDoc((s) => s.doc.levels)
   const levels = useMemo(() => levelOrder.map((id) => ({ id, name: levelMap[id]?.name ?? id })), [levelOrder, levelMap])
   const activeLevel = useUi((s) => s.activeLevelId)
+  useToolKeys()
 
   useEffect(() => {
     if (params.view === '3d') setUsed3d(true)
+    else setUsed2d(true)
   }, [params.view])
 
   const setView = (view: ViewerView) => setParams({ ...params, view })
   const setLevel = (level: string) => {
+    resetTools()
     uiStore.getState().set({ activeLevelId: level, selection: [] })
     setParams({ ...params, level: level === levels[0]?.id ? undefined : level })
   }
@@ -209,6 +232,7 @@ function Viewer({ params, setParams, booted }: { params: ViewerParams; setParams
             { value: '3d', label: <><Box size={13} />3D</> },
           ]}
         />
+        <ExportMenu title={booted.info?.title || name} pristine={booted.pristine} allowFile={booted.info?.download === true} />
         <HeaderBtn label={copied ? t('Ссылка скопирована') : t('Скопировать ссылку на этот вид')} onClick={() => void copyLink()}>
           {copied ? <Check size={16} className="text-success" /> : <Link2 size={16} />}
         </HeaderBtn>
@@ -217,8 +241,20 @@ function Viewer({ params, setParams, booted }: { params: ViewerParams; setParams
         </HeaderBtn>
       </header>
       <main className="relative min-h-0 flex-1">
-        <Plan2D hidden={params.view !== '2d'} />
-        {used3d && <Scene3D hidden={params.view !== '3d'} cam={params.cam} onCam={(cam) => setParams({ ...params, cam })} />}
+        {used2d && <Plan2D hidden={params.view !== '2d'} />}
+        {used3d && (
+          <Scene3D
+            hidden={params.view !== '3d'}
+            cam={params.cam}
+            onCam={(cam) => setParams({ ...params, cam })}
+            // the overview picture shows the first level from the default camera
+            preview={!params.level || params.level === levelOrder[0]}
+            onSettled={() => setUsed2d(true)}
+          />
+        )}
+        <ToolRail />
+        <HiddenPanel show3d={params.view === '3d'} />
+        <ElementCard />
         {infoOpen && <InfoPanel booted={booted} onClose={() => setInfoOpen(false)} />}
       </main>
     </div>
@@ -295,7 +331,8 @@ function Plan2D({ hidden }: { hidden: boolean }) {
     let ro: ResizeObserver | null = null
     let fitted = false
     setError(null)
-    createEditor2D(el)
+    import('@/editor2d')
+      .then((mod) => mod.createEditor2D(el))
       .then((h) => {
         if (disposed) {
           h.destroy()
@@ -327,10 +364,12 @@ function Plan2D({ hidden }: { hidden: boolean }) {
       }
     }
   }, [attempt])
+  usePickClicks(host, '2d', false)
 
   return (
     <div className={hidden ? 'hidden' : 'absolute inset-0 overflow-hidden bg-viewport'}>
       <div ref={host} className="absolute inset-0" />
+      {!hidden && <MeasureOverlay view="2d" />}
       {error && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center">
           <TriangleExclamationPoint size={28} className="text-warning" />
@@ -351,13 +390,44 @@ function publishBackend(pref: 'webgpu' | 'webgl'): void {
   ;(globalThis as unknown as { __DOPLAN_BACKEND__?: string }).__DOPLAN_BACKEND__ = pref
 }
 
-function Scene3D({ hidden, cam, onCam }: { hidden: boolean; cam: ViewerCam; onCam(c: ViewerCam): void }) {
+function Scene3D({
+  hidden,
+  cam,
+  onCam,
+  preview,
+  onSettled,
+}: {
+  hidden: boolean
+  cam: ViewerCam
+  onCam(c: ViewerCam): void
+  preview: boolean
+  /** the 3D view is up with its models (or gave up): other work may start */
+  onSettled(): void
+}) {
   const t = useT()
   const host = useRef<HTMLDivElement>(null)
   const [engine, setEngine] = useState<Engine3DHandle | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [backend, setBackend] = useState<'webgpu' | 'webgl'>('webgpu')
   const [attempt, setAttempt] = useState(0)
+  // the light baked when publishing (none on sites published without it)
+  const [bake, setBake] = useState<BakeManifest | null>(null)
+  const [liveLight, setLiveLight] = useState(false)
+  useEffect(() => {
+    let off = false
+    fetch(BAKE_MANIFEST)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json: unknown) => {
+        if (!off) setBake(parseBakeManifest(json))
+      })
+      .catch(() => undefined)
+    return () => {
+      off = true
+    }
+  }, [])
+  useEffect(() => {
+    engine?.setBakedLight?.(bake ? { manifest: bake, base: document.baseURI, live: liveLight } : null)
+  }, [engine, bake, liveLight])
 
   useEffect(() => {
     const el = host.current
@@ -365,6 +435,7 @@ function Scene3D({ hidden, cam, onCam }: { hidden: boolean; cam: ViewerCam; onCa
     let disposed = false
     let handle: Engine3DHandle | null = null
     let ro: ResizeObserver | null = null
+    let unsub: (() => void) | null = null
     setError(null)
     setEngine(null)
     publishBackend(backend)
@@ -377,7 +448,29 @@ function Scene3D({ hidden, cam, onCam }: { hidden: boolean; cam: ViewerCam; onCa
         }
         handle = h
         setHandle('engine3d', h)
-        uiStore.setState({ backend: h.backend })
+        setHost3d(el)
+        // the backend actually running decides the cap, not what the browser offered: at the start,
+        // and again when a lost GPU device made the renderer fall back to WebGL 2
+        const onBackend = () => {
+          uiStore.setState({ backend: h.backend })
+          const q = docStore.getState().doc.render.quality ?? 'high'
+          const capped = capToBackend(q, h.backend)
+          if (capped !== q) {
+            viewerEdit(() => uiStore.getState().setQuality(capped))
+            h.setQuality(capped)
+          }
+        }
+        onBackend()
+        // adaptive quality: slow frames at the lowest resolution take the preset a step down (for
+        // this visit only: a remembered choice stays the visitor's own)
+        unsub = status3dStore.subscribe((s, p) => {
+          if (s.rendererSwaps !== p.rendererSwaps) onBackend()
+          if (s.struggling === p.struggling) return
+          const next = lighter(docStore.getState().doc.render.quality ?? 'high')
+          if (!next) return
+          viewerEdit(() => uiStore.getState().setQuality(next))
+          h.setQuality(next)
+        })
         h.setCameraMode(uiStore.getState().cameraMode)
         ro = new ResizeObserver((entries) => {
           const r = entries[0]?.contentRect
@@ -394,8 +487,10 @@ function Scene3D({ hidden, cam, onCam }: { hidden: boolean; cam: ViewerCam; onCa
     return () => {
       disposed = true
       ro?.disconnect()
+      unsub?.()
       if (handle) {
         setHandle('engine3d', null)
+        setHost3d(null)
         uiStore.setState({ backend: null })
         handle.destroy()
       }
@@ -408,10 +503,24 @@ function Scene3D({ hidden, cam, onCam }: { hidden: boolean; cam: ViewerCam; onCa
     uiStore.getState().set({ cameraMode: cam })
     engine.setCameraMode(cam)
   }, [cam, engine])
+  usePickClicks(host, '3d', cam === 'walk')
+  const pending = useStatus3d((s) => s.modelsPending)
+  const settledRef = useRef(onSettled)
+  settledRef.current = onSettled
+  useEffect(() => {
+    if (error || (engine && pending === 0)) {
+      settledRef.current()
+      return
+    }
+    // a slow model must not keep the plan away for ever
+    const id = setTimeout(() => settledRef.current(), 15000)
+    return () => clearTimeout(id)
+  }, [engine, pending, error])
 
   return (
     <div className={hidden ? 'hidden' : 'absolute inset-0 overflow-hidden bg-viewport'}>
       <div ref={host} className="absolute inset-0" />
+      {!error && preview && cam === 'orbit' && <PreviewPicture ready={!!engine} host={host} />}
       {!engine && !error && (
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 text-xs text-muted">
           <LoaderCircle size={22} className="dp-spin text-accent" />
@@ -435,7 +544,8 @@ function Scene3D({ hidden, cam, onCam }: { hidden: boolean; cam: ViewerCam; onCa
           </div>
         </div>
       )}
-      {engine && <Toolbar3D engine={engine} cam={cam} onCam={onCam} />}
+      {engine && !hidden && <MeasureOverlay view="3d" />}
+      {engine && <Toolbar3D engine={engine} cam={cam} onCam={onCam} onToggleLight={() => setLiveLight((v) => !v)} />}
       {engine && !hidden && <Busy />}
       {engine && !hidden && <WalkLockHint host={host} active={cam === 'walk'} />}
       {engine && !hidden && cam === 'walk' && <WalkStick />}
@@ -443,15 +553,56 @@ function Scene3D({ hidden, cam, onCam }: { hidden: boolean; cam: ViewerCam; onCa
   )
 }
 
-function Toolbar3D({ engine, cam, onCam }: { engine: Engine3DHandle; cam: ViewerCam; onCam(c: ViewerCam): void }) {
+/**
+ * The overview picture taken when publishing (assets/preview.webp), shown at once while the 3D view
+ * loads its code, the scene and the models; it fades out when they are there or at the first touch.
+ * Only the first time, and never for an older site without one.
+ */
+function PreviewPicture({ ready, host }: { ready: boolean; host: RefObject<HTMLDivElement | null> }) {
+  const pending = useStatus3d((s) => s.modelsPending)
+  const [gone, setGone] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const [fading, setFading] = useState(false)
+  useEffect(() => {
+    const el = host.current
+    if (!el || gone) return
+    const off = () => setFading(true)
+    el.addEventListener('pointerdown', off, { once: true })
+    el.addEventListener('wheel', off, { once: true, passive: true })
+    return () => {
+      el.removeEventListener('pointerdown', off)
+      el.removeEventListener('wheel', off)
+    }
+  }, [host, gone])
+  // the first frame with the models in it: a short pause lets it reach the screen
+  useEffect(() => {
+    if (!ready || pending > 0 || gone) return
+    const id = setTimeout(() => setFading(true), 250)
+    return () => clearTimeout(id)
+  }, [ready, pending, gone])
+  if (gone || failed) return null
+  return (
+    <img
+      src="assets/preview.webp"
+      alt=""
+      draggable={false}
+      onError={() => setFailed(true)}
+      onTransitionEnd={() => fading && setGone(true)}
+      className={`pointer-events-none absolute inset-0 h-full w-full object-cover transition-opacity duration-500 ${fading ? 'opacity-0' : 'opacity-100'}`}
+    />
+  )
+}
+
+function Toolbar3D({ engine, cam, onCam, onToggleLight }: { engine: Engine3DHandle; cam: ViewerCam; onCam(c: ViewerCam): void; onToggleLight(): void }) {
   const t = useT()
+  const baked = useStatus3d((s) => s.baked)
   const quality = useDoc((s) => s.doc.render.quality)
   const cutaway = useDoc((s) => s.doc.render.wallCutaway)
   const ceiling = useDoc((s) => s.doc.render.ceilingVisible)
   const pt = useUi((s) => s.pathTracing)
   const canTrace = engine.backend === 'webgpu'
 
-  const toggle = (key: 'wallCutaway' | 'ceilingVisible') =>
+  const toggle = (key: 'wallCutaway') =>
     viewerEdit(() =>
       docStore.getState().transact(key, (d) => {
         d.render[key] = !d.render[key]
@@ -460,6 +611,7 @@ function Toolbar3D({ engine, cam, onCam }: { engine: Engine3DHandle; cam: Viewer
   const setQuality = (q: QualityPreset) => {
     viewerEdit(() => uiStore.getState().setQuality(q))
     engine.setQuality(q)
+    rememberQuality(q)
   }
   const startPt = () => {
     uiStore.getState().set({ pathTracing: { active: true, samples: 0, target: PT_TARGET } })
@@ -486,12 +638,13 @@ function Toolbar3D({ engine, cam, onCam }: { engine: Engine3DHandle; cam: Viewer
         <ToolBtn label={t('Срез стен')} active={cutaway} onClick={() => toggle('wallCutaway')}>
           <SquareDashed size={14} />
         </ToolBtn>
-        <ToolBtn label={t('Потолок')} active={ceiling} onClick={() => toggle('ceilingVisible')}>
+        <ToolBtn label={t('Потолок')} active={ceiling} onClick={() => setCeiling(!ceiling)}>
           <LampCeiling size={14} />
         </ToolBtn>
         <ToolBtn label={t('Сбросить камеру')} onClick={() => engine.resetCamera()}>
           <RotateCcw size={14} />
         </ToolBtn>
+        <BakedLightBtn state={baked} onClick={onToggleLight} />
       </div>
       <div className="pointer-events-auto ml-auto flex items-center gap-1 rounded-lg border border-border bg-panel/90 p-1 shadow-pop backdrop-blur">
         <MiniSelect title={t('Качество')} value={quality} options={QUALITY.map((q) => ({ value: q, label: t(QUALITY_NAMES[q]) }))} onChange={setQuality} />
@@ -521,6 +674,28 @@ function Toolbar3D({ engine, cam, onCam }: { engine: Engine3DHandle; cam: Viewer
           ))}
       </div>
     </div>
+  )
+}
+
+const BAKED_TITLES: Record<Exclude<BakedState, 'none'>, string> = {
+  on: 'Свет: запечённый. Нажмите, чтобы считать свет вживую',
+  live: 'Свет: живой. Нажмите, чтобы показать запечённый',
+  loading: 'Запечённый свет загружается…',
+  mismatch: 'Запечённый свет сделан для плана целиком: пока скрыты объекты, выключен свет или открыт другой этаж, свет считается вживую',
+}
+
+/** baked or live light; only on sites published with it */
+function BakedLightBtn({ state, onClick }: { state: BakedState; onClick(): void }) {
+  const t = useT()
+  if (state === 'none') return null
+  return (
+    <ToolBtn label={t(BAKED_TITLES[state])} active={state === 'on'} onClick={onClick}>
+      {state === 'loading' ? (
+        <LoaderCircle size={14} className="dp-spin" />
+      ) : (
+        <Lightbulb size={14} className={state === 'mismatch' ? 'opacity-50' : undefined} />
+      )}
+    </ToolBtn>
   )
 }
 

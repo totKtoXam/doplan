@@ -6,12 +6,39 @@ import { shell } from 'electron'
 import type { PagesConfig, PagesInspection, RepoRef } from '@shared/pagesSite'
 import { PAGES_BRANCH, PAGES_MARKER, pagesUrlOf } from '@shared/pagesSite'
 import { accountPlan, apiError, createRepo, githubApi, setRepoVisibility, type ApiResponse } from './github'
+import { PagesGhError } from './pagesError'
 import { msg } from './settings'
 
-/** an API refusal of a Pages call in plain words ("no admin rights" is the usual one) */
-export function pagesError(r: ApiResponse, what: string): Error {
-  if (r.status === 403) return new Error(msg(`${what}: у этой учётной записи GitHub нет прав администратора репозитория.`, `${what}: this GitHub account has no admin rights on the repository.`))
-  return new Error(`${what}: ${apiError(r).message}`)
+/**
+ * An API refusal of a Pages call in plain words, with its kind. A 403 is "no admin rights" only when
+ * GitHub says so: a rate limit or a token without the permission is not the user's access to the
+ * repository (the caller retries later, or signs in again, and keeps its record).
+ */
+export function pagesError(r: ApiResponse, what: string): PagesGhError {
+  const j = r.json as { message?: unknown } | null
+  const detail = typeof j?.message === 'string' ? j.message : r.text.slice(0, 300)
+  if (r.status === 429 || (r.status === 403 && /rate limit/i.test(detail)))
+    return new PagesGhError(
+      msg(`${what}: GitHub временно ограничил число запросов. Попробуйте через несколько минут.`, `${what}: GitHub is limiting requests for now. Try again in a few minutes.`),
+      'limited',
+      r.status,
+    )
+  if (r.status === 403 && /Resource not accessible by (integration|personal access token)/i.test(detail))
+    return new PagesGhError(
+      msg(
+        `${what}: у токена GitHub нет нужного разрешения. Войдите в GitHub заново (gh auth login) с доступом к репозиториям.`,
+        `${what}: the GitHub token lacks the permission. Sign in to GitHub again (gh auth login) with access to repositories.`,
+      ),
+      'token',
+      r.status,
+    )
+  if (r.status === 403)
+    return new PagesGhError(
+      msg(`${what}: у этой учётной записи GitHub нет прав администратора репозитория.`, `${what}: this GitHub account has no admin rights on the repository.`),
+      'forbidden',
+      r.status,
+    )
+  return new PagesGhError(`${what}: ${apiError(r).message}`, r.status === 404 ? 'notFound' : 'unknown', r.status)
 }
 
 const repoPath = (ref: RepoRef) => `repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}`
@@ -23,14 +50,29 @@ export interface RepoState {
   isPrivate: boolean
   /** the signed-in user can push to it (write or admin access) */
   canPush?: boolean
+  /**
+   * the signed-in user may turn Pages on and off: admin or maintain access. false may still be a
+   * custom role with "manage Pages", which the permissions do not show
+   */
+  managesPages?: boolean
+  /** its default branch (GitHub refuses to delete it) */
+  defaultBranch?: string
 }
 
 export async function repoState(ref: RepoRef): Promise<RepoState> {
   const r = await githubApi('GET', repoPath(ref))
   if (r.status === 404) return { exists: false, isPrivate: false }
   if (r.status !== 200) throw pagesError(r, msg('Не удалось узнать о репозитории', 'Could not read the repository'))
-  const j = (r.json ?? {}) as { private?: unknown; permissions?: { push?: unknown; admin?: unknown } }
-  return { exists: true, isPrivate: j.private === true, canPush: j.permissions?.push === true || j.permissions?.admin === true }
+  const j = (r.json ?? {}) as { private?: unknown; default_branch?: unknown; permissions?: { push?: unknown; maintain?: unknown; admin?: unknown } }
+  const admin = j.permissions?.admin === true
+  const managesPages = admin || j.permissions?.maintain === true
+  return {
+    exists: true,
+    isPrivate: j.private === true,
+    canPush: j.permissions?.push === true || managesPages,
+    managesPages,
+    ...(typeof j.default_branch === 'string' && j.default_branch ? { defaultBranch: j.default_branch } : {}),
+  }
 }
 
 /**

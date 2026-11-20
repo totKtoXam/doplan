@@ -487,6 +487,50 @@ describe.skipIf(!hasGit)('project sync', { timeout: 180_000 }, () => {
     expect(await gitRemoteUrl(other)).toBeNull()
   })
 
+  it("never connects the project to a published plan's site (the gh-pages branch Pages serve)", async () => {
+    const url = bare('flat-view')
+    const remote = join(remotes, 'me', 'flat-view.git')
+    // the way doplan makes it: an empty repository whose only (default) branch is gh-pages
+    const seed = join(base, `seed-${++n}`)
+    mkdirSync(seed, { recursive: true })
+    git(seed, 'init', '--quiet', '--initial-branch=gh-pages')
+    writeFileSync(join(seed, 'index.html'), '<!doctype html>')
+    writeFileSync(join(seed, '.doplan-pages.json'), '{"doplan":"pages","id":"pub1"}')
+    git(seed, 'add', '.')
+    git(seed, 'commit', '--quiet', '-m', 'site')
+    git(seed, 'push', '--quiet', remote, 'gh-pages')
+    git(remote, 'symbolic-ref', 'HEAD', 'refs/heads/gh-pages')
+    const a = await project('V')
+    useRoot(a)
+    await expect(sync.connect(url)).rejects.toThrow(/сайт|site/)
+    expect(await gitRemoteUrl(a)).toBeNull()
+    expect(git(remote, 'ls-tree', '--name-only', 'gh-pages').trim().split('\n').sort()).toEqual(['.doplan-pages.json', 'index.html'])
+  })
+
+  it('a project connected to a site before the check existed is neither sent there nor merged from there', async () => {
+    const url = bare('old-view')
+    const remote = join(remotes, 'me', 'old-view.git')
+    const a = await project('W')
+    useRoot(a)
+    await sync.connect(url)
+    // the site published next to it, and the project following gh-pages, as an older version allowed
+    const seed = join(base, `seed-${++n}`)
+    mkdirSync(seed, { recursive: true })
+    git(seed, 'init', '--quiet', '--initial-branch=gh-pages')
+    writeFileSync(join(seed, '.doplan-pages.json'), '{"doplan":"pages","id":"pub1"}')
+    git(seed, 'add', '.')
+    git(seed, 'commit', '--quiet', '-m', 'site')
+    git(seed, 'push', '--quiet', remote, 'gh-pages')
+    git(a, 'fetch', '--quiet', remote, 'gh-pages:refs/remotes/origin/gh-pages')
+    git(a, 'branch', '--quiet', '--set-upstream-to=origin/gh-pages')
+    const site = git(remote, 'rev-parse', 'gh-pages').trim()
+    writeFileSync(join(a, 'notes.txt'), 'private')
+    await expect(sync.push()).rejects.toThrow(/сайт|site/)
+    await expect(sync.pull()).rejects.toThrow(/сайт|site/)
+    expect(git(remote, 'rev-parse', 'gh-pages').trim()).toBe(site)
+    expect(existsSync(join(a, '.doplan-pages.json'))).toBe(false)
+  })
+
   it('explains bad links and missing repositories, and keeps nothing connected', async () => {
     const a = await project('E')
     useRoot(a)
@@ -554,6 +598,8 @@ describe.skipIf(!hasGit)('project sync', { timeout: 180_000 }, () => {
       await expect(gitPushRef(a, net, null, 'gh-pages', { remote: bad })).rejects.toThrow(/адрес|address/)
     await gitPushRef(a, net, null, 'gh-pages', { expected: second })
     expect(git(remote, 'branch', '--list', 'gh-pages').trim()).toBe('')
+    // gone already (deleted on GitHub meanwhile): that is what was asked for
+    await gitPushRef(a, net, null, 'gh-pages', { expected: second })
     await gitPushRef(a, net, second, 'gh-pages', { force: true })
 
     // unpublish: the branch goes away (twice is fine); the project's own branch cannot be deleted

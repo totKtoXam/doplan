@@ -1,0 +1,257 @@
+import { describe, expect, it } from 'vitest'
+import { addItem, addOpening, addRectRoom, createEmptyDoc, derivePlan, isHidden, syncRooms } from '@core'
+import type { Asset, Material } from '@core/types'
+import { gapBetween, planGap, pointGap, shapeOf } from './distance'
+import { elementInfo, type InfoEnv } from './elementInfo'
+import { downloadableDoc, inlineSiteFiles } from './exporters'
+import { applyHidden, EMPTY_HIDE, hiddenRefs, hideHash, parseHideHash, toggleCat, toggleRef } from './hideState'
+
+const velvet = { id: 'velvet', name: 'Velvet', nameRu: 'Бархат', category: 'fabric', color: '#888888', roughness: 1, metalness: 0, product: { price: 1000 } } as unknown as Material
+const sofa = {
+  id: 'sofa-a',
+  name: 'Sofa',
+  nameRu: 'Диван Олаф',
+  category: 'sofa',
+  kind: 'procedural',
+  size: { w: 2000, d: 900, h: 800 },
+  mount: 'floor',
+  slots: { fabric: 'velvet' },
+} as unknown as Asset
+const lamp = { ...sofa, id: 'lamp-a', name: 'Lamp', nameRu: 'Торшер', category: 'lighting', size: { w: 400, d: 400, h: 1600 } } as unknown as Asset
+
+function plan() {
+  const doc = createEmptyDoc('test')
+  const lid = doc.levelOrder[0]
+  const walls = addRectRoom(doc, lid, 0, 0, 4000, 3000)
+  syncRooms(doc)
+  const door = addOpening(doc, walls[0], 'door', 1000)
+  const win = addOpening(doc, walls[1], 'window', 1500)
+  const s = addItem(doc, lid, sofa, 1500, 1000)
+  const l = addItem(doc, lid, lamp, 3000, 2000)
+  const derived = derivePlan(doc, lid)
+  return { doc, lid, walls, door, win, sofa: s, lamp: l, derived }
+}
+
+const envOf = (p: ReturnType<typeof plan>): InfoEnv => ({
+  doc: p.doc,
+  plan: p.derived,
+  catalog: { assets: [sofa, lamp], materials: [velvet] },
+  lang: 'ru',
+  t: (s) => s,
+})
+
+describe('element card', () => {
+  it('an item: catalogue name, category, W×D×H and its material — no price', () => {
+    const p = plan()
+    const info = elementInfo({ kind: 'item', id: p.sofa }, envOf(p))
+    expect(info?.name).toBe('Диван Олаф')
+    expect(info?.type).toBe('Диван')
+    expect(info?.rows.find((r) => r.label === 'Размеры (Ш × Г × В)')?.value).toMatch(/^2\s000 × 900 × 800 мм$/)
+    expect(info?.rows).toContainEqual({ label: 'Материал', value: 'Бархат' })
+    expect(JSON.stringify(info)).not.toMatch(/1000|price/)
+  })
+
+  it('a wall: length, thickness, height; an opening: width, height, sill; a room: area, perimeter, ceiling', () => {
+    const p = plan()
+    const env = envOf(p)
+    const wall = elementInfo({ kind: 'wall', id: p.walls[0] }, env)
+    expect(wall?.rows.map((r) => r.label)).toEqual(expect.arrayContaining(['Длина', 'Толщина', 'Высота']))
+    const door = elementInfo({ kind: 'opening', id: p.door }, env)
+    expect(door?.type).toBe('Дверь')
+    expect(door?.rows.map((r) => r.label)).toEqual(['Ширина', 'Высота'])
+    const win = elementInfo({ kind: 'opening', id: p.win }, env)
+    expect(win?.type).toBe('Окно')
+    expect(win?.rows.map((r) => r.label)).toContain('Подоконник (от пола)')
+    const room = p.derived.rooms[0]
+    const card = elementInfo({ kind: 'room', id: room.roomId }, env)
+    expect(card?.rows.map((r) => r.label)).toEqual(expect.arrayContaining(['Площадь', 'Периметр', 'Высота потолка']))
+    expect(card?.rows.find((r) => r.label === 'Площадь')?.value).toMatch(/м²$/)
+  })
+
+  it('an electrical point never shows the author note', () => {
+    const p = plan()
+    p.doc.electrical = { e1: { id: 'e1', levelId: p.lid, kind: 'socket', mount: 'wall', x: 0, y: 500, elevation: 300, rotation: 0, comment: 'кофемашина, линия 3' } }
+    const info = elementInfo({ kind: 'electric', id: 'e1' }, envOf(p))
+    expect(info?.rows).toEqual([{ label: 'Высота установки', value: '300 мм' }])
+    expect(JSON.stringify(info)).not.toMatch(/кофемашина/)
+  })
+
+  it('unknown objects have no card', () => {
+    const p = plan()
+    expect(elementInfo({ kind: 'item', id: 'nope' }, envOf(p))).toBeNull()
+    expect(elementInfo({ kind: 'dimension', id: 'x' }, envOf(p))).toBeNull()
+  })
+})
+
+describe('distances', () => {
+  it('between footprints: shortest, with the closest points', () => {
+    const sq = (x: number, y: number, s = 100) => [
+      { x, y },
+      { x: x + s, y },
+      { x: x + s, y: y + s },
+      { x, y: y + s },
+    ]
+    const g = planGap(sq(0, 0), sq(300, 0))
+    expect(g.dist).toBeCloseTo(200)
+    expect(g.a.x).toBeCloseTo(100)
+    expect(g.b.x).toBeCloseTo(300)
+    expect(planGap(sq(0, 0), sq(50, 50)).dist).toBe(0)
+    // diagonal neighbours: corner to corner
+    expect(planGap(sq(0, 0), sq(400, 500)).dist).toBeCloseTo(500)
+    // a point (a light) to a box
+    expect(planGap([{ x: 50, y: 400 }], sq(0, 0)).dist).toBeCloseTo(300)
+  })
+
+  it('between two objects: X / Y gaps and the height gap', () => {
+    const p = plan()
+    const a = shapeOf({ kind: 'item', id: p.sofa }, p.doc, p.derived)
+    const b = shapeOf({ kind: 'item', id: p.lamp }, p.doc, p.derived)
+    if (!a || !b) throw new Error('no shape')
+    const g = gapBetween(a, b)
+    // sofa 500–2500 × 550–1450, lamp 2800–3200 × 1800–2200
+    expect(g.dx).toBeCloseTo(300)
+    expect(g.dy).toBeCloseTo(350)
+    expect(g.dz).toBe(0)
+    expect(g.shortest).toBeCloseTo(Math.hypot(300, 350))
+    const shelf = { poly: a.poly, z0: 2000, z1: 2300 }
+    expect(gapBetween(a, shelf).dz).toBe(1200)
+    expect(gapBetween(a, shelf).shortest).toBe(1200)
+  })
+
+  it('two measured points', () => {
+    expect(pointGap({ x: 0, y: 0, z: 0 }, { x: 300, y: 400, z: 1200 })).toEqual({ shortest: 1300, dx: 300, dy: 400, dz: 1200 })
+  })
+})
+
+describe('hiding in the URL hash', () => {
+  it('round-trips refs, categories and the ceiling, keeping other hash parameters', () => {
+    let s = toggleRef(EMPTY_HIDE, { kind: 'item', id: 'a1' }, true)
+    s = toggleRef(s, { kind: 'wall', id: 'w_2' }, true)
+    s = toggleCat(s, 'furniture', true)
+    s = { ...s, ceiling: false }
+    const hash = hideHash(s, '#foo=1')
+    expect(hash).toBe('#foo=1&hide=item:a1,wall:w_2&cats=furniture&ceil=0')
+    expect(parseHideHash(hash)).toEqual(s)
+    expect(hideHash(EMPTY_HIDE, '')).toBe('')
+    expect(hideHash(toggleRef(s, { kind: 'item', id: 'a1' }, false), '')).toBe('#hide=wall:w_2&cats=furniture&ceil=0')
+  })
+
+  it('a link naming what every object has (__proto__, constructor) hides nothing and breaks nothing', () => {
+    expect(parseHideHash('#hide=item:__proto__,wall:constructor,room:toString,item:a1').refs).toEqual([{ kind: 'item', id: 'a1' }])
+    const p = plan()
+    expect(elementInfo({ kind: 'item', id: '__proto__' }, envOf(p))).toBeNull()
+    expect(elementInfo({ kind: 'wall', id: 'constructor' }, envOf(p))).toBeNull()
+    expect(shapeOf({ kind: 'item', id: '__proto__' }, p.doc, p.derived)).toBeNull()
+  })
+
+  it('ignores junk in an edited link', () => {
+    expect(parseHideHash('#hide=bogus:1,item:,:x,item:a,item:a&cats=furniture,nope,furniture&ceil=maybe')).toEqual({
+      refs: [{ kind: 'item', id: 'a' }],
+      cats: ['furniture'],
+    })
+  })
+
+  it('categories: a lamp is lighting, a sofa furniture; doors and windows apart', () => {
+    const p = plan()
+    const asset = (id: string) => [sofa, lamp].find((a) => a.id === id)
+    const keys = (cats: Parameters<typeof toggleCat>[1][]) =>
+      hiddenRefs({ refs: [], cats }, p.doc, asset)
+        .map((r) => r.id)
+        .sort()
+    expect(keys(['furniture'])).toEqual([p.sofa])
+    expect(keys(['lighting'])).toEqual([p.lamp])
+    expect(keys(['doors'])).toEqual([p.door])
+    expect(keys(['windows'])).toEqual([p.win])
+  })
+
+  it('applies as hidden flags and restores what the author had hidden', () => {
+    const p = plan()
+    p.doc.items[p.lamp].hidden = true
+    const author = new Set([`item:${p.lamp}`])
+    // every edit is a new document in the app (Immer): the hidden index is cached per object
+    const a = structuredClone(p.doc)
+    applyHidden(a, [{ kind: 'item', id: p.sofa }], author)
+    expect(isHidden(a, { kind: 'item', id: p.sofa })).toBe(true)
+    expect(isHidden(a, { kind: 'item', id: p.lamp })).toBe(true)
+    const b = structuredClone(a)
+    applyHidden(b, [], author)
+    expect(isHidden(b, { kind: 'item', id: p.sofa })).toBe(false)
+    expect(isHidden(b, { kind: 'item', id: p.lamp })).toBe(true)
+  })
+})
+
+describe('the downloadable plan', () => {
+  it("carries the author's library entries in its own tables; catalogue ones stay the visitor's", () => {
+    const p = plan()
+    const libSofa = { ...sofa, id: 'lib-sofa', src: './assets/l/models/s%20a.glb', custom: true }
+    const packChair = { ...sofa, id: 'pack-chair', src: './assets/c/models/chair.glb' }
+    const libTex = { ...velvet, id: 'lib-tex', custom: true, maps: { albedo: './assets/l/tex/a.webp' } }
+    p.doc.items[p.sofa].assetId = 'lib-sofa'
+    const out = downloadableDoc(p.doc, { assets: [libSofa, packChair], materials: [velvet, libTex] }, 'https://me.github.io/flat/')
+    expect(out.assets['lib-sofa']).toMatchObject({ id: 'lib-sofa', src: 'https://me.github.io/flat/assets/l/models/s%20a.glb' })
+    expect(out.materials['lib-tex']).toMatchObject({ maps: { albedo: 'https://me.github.io/flat/assets/l/tex/a.webp' } })
+    // a copy of a catalogue entry would win over the visitor's working one
+    expect(out.assets['pack-chair']).toBeUndefined()
+    expect(out.materials.velvet).toBeUndefined()
+    // the document itself is not changed
+    expect(p.doc.assets['lib-sofa']).toBeUndefined()
+  })
+
+  it('carries the library files inside as data: URLs (the desktop app loads no https files)', async () => {
+    const p = plan()
+    const base = 'https://me.github.io/flat/'
+    const doc = downloadableDoc(
+      p.doc,
+      {
+        assets: [
+          { ...sofa, id: 'lib-sofa', src: './assets/l/s.glb', custom: true },
+          { ...sofa, id: 'lib-gltf', src: './assets/l/g/g.gltf', custom: true },
+          { ...sofa, id: 'lib-gone', src: './assets/l/gone.glb', custom: true },
+        ],
+      },
+      base,
+    )
+    const asked: string[] = []
+    const load = async (u: string) => {
+      asked.push(u)
+      return u.endsWith('gone.glb') ? new Response('', { status: 404 }) : new Response(new Uint8Array([103, 108, 84, 70]))
+    }
+    const out = await inlineSiteFiles(doc, base, load)
+    expect(out.assets['lib-sofa'].src).toBe('data:model/gltf-binary;base64,Z2xURg==')
+    // a .gltf has separate buffers: a link; a file that failed: a link
+    expect(out.assets['lib-gltf'].src).toBe(`${base}assets/l/g/g.gltf`)
+    expect(out.assets['lib-gone'].src).toBe(`${base}assets/l/gone.glb`)
+    expect(asked.sort()).toEqual([`${base}assets/l/gone.glb`, `${base}assets/l/s.glb`])
+  })
+
+  it('carries the published underlays inside too, first, and keeps links past the total budget', async () => {
+    const p = plan()
+    const base = 'https://me.github.io/flat/'
+    const withUnderlay = { ...p.doc, underlays: { u1: { id: 'u1', src: './assets/p/scan.png' } } } as unknown as typeof p.doc
+    const doc = downloadableDoc(
+      withUnderlay,
+      {
+        assets: [
+          { ...sofa, id: 'lib-a', src: './assets/l/a.glb', custom: true },
+          { ...sofa, id: 'lib-b', src: './assets/l/b.glb', custom: true },
+          { ...sofa, id: 'lib-big', src: './assets/l/big.glb', custom: true },
+        ],
+      },
+      base,
+    )
+    // the underlay became an https link of the site: the desktop app would not load it
+    expect((doc.underlays as Record<string, { src: string }>).u1.src).toBe(`${base}assets/p/scan.png`)
+    const sizes: Record<string, number> = { 'scan.png': 40, 'a.glb': 50, 'b.glb': 50, 'big.glb': 500 }
+    const load = async (u: string) => {
+      const n = sizes[u.slice(u.lastIndexOf('/') + 1)]
+      return new Response(new Uint8Array(n), { headers: { 'content-length': String(n) } })
+    }
+    const out = await inlineSiteFiles(doc, base, load, { file: 200, total: 100 })
+    const u1 = (out.underlays as Record<string, { src: string }>).u1.src
+    expect(u1.startsWith('data:image/png;base64,')).toBe(true)
+    const srcs = ['lib-a', 'lib-b', 'lib-big'].map((id) => out.assets[id].src)
+    // 40 bytes of underlay, then one 50-byte model fits; the other would pass 100, the large one passes 200
+    expect(srcs.filter((s) => s?.startsWith('data:'))).toHaveLength(1)
+    expect(srcs[2]).toBe(`${base}assets/l/big.glb`)
+  })
+})

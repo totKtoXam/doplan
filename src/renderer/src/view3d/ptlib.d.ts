@@ -20,3 +20,7 @@ declare module 'three-gpu-pathtracer/src/webgpu/nodes/aux.wgsl.js' {
   export const unpackAuxNormalFn: any
   export const AUX_LAYERS: number
 }
+
+declare module 'three/addons/libs/potpack.module.js' {
+  export function potpack(boxes: { w: number; h: number; x?: number; y?: number }[]): { w: number; h: number; fill: number }
+}

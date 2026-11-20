@@ -12,14 +12,14 @@ describe('view-only 2D plan', () => {
     expect(toolAfterEscape('select', false)).toBeNull()
   })
 
-  it('the viewer stays on Pan with nothing selected, whatever switches the tool', () => {
+  it('the viewer stays on Pan whatever switches the tool; its card keeps a selection', () => {
     const store = createStore<{ tool: string; selection: string[] }>(() => ({ tool: 'select', selection: ['room1'] }))
     const stop = lockViewerTool(store)
-    expect(store.getState()).toEqual({ tool: 'pan', selection: [] })
+    expect(store.getState()).toEqual({ tool: 'pan', selection: ['room1'] })
     store.setState({ tool: 'select' })
     expect(store.getState().tool).toBe('pan')
-    store.setState({ selection: ['room1'] })
-    expect(store.getState().selection).toEqual([])
+    store.setState({ selection: ['item1'] })
+    expect(store.getState().selection).toEqual(['item1'])
     stop()
     store.setState({ tool: 'select' })
     expect(store.getState().tool).toBe('select')

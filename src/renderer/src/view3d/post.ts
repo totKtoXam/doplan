@@ -94,9 +94,10 @@ export function createPost(ctx: EngineContext): PostPipeline {
     const gpu = isWebGPU(renderer)
     const temporal = q.antialias === 'traa' && gpu
     return {
-      ao: q.ao && r.ao !== false,
+      // a baked light map already holds the occlusion of the walls and floors
+      ao: q.ao && r.ao !== false && !shared.baked,
       // SSGI is tuned for temporal accumulation; without TRAA it is too noisy to show
-      ssgi: q.ssgi && r.ssgi === true && gpu && temporal,
+      ssgi: q.ssgi && r.ssgi === true && gpu && temporal && !shared.baked,
       ssr: q.ssr && r.ssr === true && gpu,
       bloom: q.bloom && r.bloom !== false,
       traa: temporal,
@@ -175,7 +176,8 @@ export function createPost(ctx: EngineContext): PostPipeline {
       aoNode.thickness.value = 1
       aoNode.useTemporalFiltering = f.traa
       let aoTexture: any = aoNode.getTextureNode()
-      if (!f.traa && q.aoDenoise) {
+      // a preset made for TRAA that runs without it (WebGL 2) gets the denoise pass instead of raw grain
+      if (!f.traa && (q.aoDenoise || q.antialias === 'traa')) {
         const smooth: any = track((denoise as any)(aoTexture, depth, normal, camera))
         smooth.radius.value = 4
         aoTexture = smooth

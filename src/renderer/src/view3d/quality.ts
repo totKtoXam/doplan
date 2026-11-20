@@ -9,6 +9,7 @@
 import type * as THREE from 'three'
 import type { QualityPreset } from '@core/types'
 import type { EngineContext } from '@/contracts'
+import type { BakeLights } from './bake/trace'
 
 export type ShadowKind = 'basic' | 'pcf' | 'vsm'
 export type AntiAliasing = 'fxaa' | 'traa'
@@ -217,6 +218,43 @@ export function effectiveDpr(preset: QualityPreset, deviceDpr: number, moving = 
   return Math.max(0.5, Math.min(deviceDpr || 1, cap))
 }
 
+/**
+ * How a page that only shows the scene (the published viewer) trades sharpness for speed: at rest
+ * the device's own pixel ratio up to `restMax`, while moving not below `movingMin` until the frame
+ * rate stays low. Applies to `high` and `ultra`; the app keeps the presets' iGPU budget (null).
+ */
+export interface DprPolicy {
+  restMax: number
+  movingMin: number
+}
+
+let dprPolicy: DprPolicy | null = null
+
+export function setDprPolicy(p: DprPolicy | null): void {
+  dprPolicy = p
+}
+
+/**
+ * Pixel ratio of one frame. `dynScale` (≤ 1) is the engine's adaptive factor: it drops only while
+ * frames take longer than ~25 ms; the policy's floor gives way after it dropped twice. `floor` lets
+ * the engine keep the floor off until the factor is back to 1 (hysteresis: no sharp/soft swings).
+ */
+export function frameDpr(
+  preset: QualityPreset,
+  deviceDpr: number,
+  moving: boolean,
+  dynScale = 1,
+  policy: DprPolicy | null = dprPolicy,
+  floor = dynScale > 0.8,
+): number {
+  const q = getQuality(preset)
+  const sharp = !!policy && (q.preset === 'high' || q.preset === 'ultra')
+  const rest = sharp ? Math.max(q.dprCap, policy.restMax) : q.dprCap
+  let cap = moving ? Math.min(rest, q.dprMoving * dynScale) : rest
+  if (moving && sharp && floor) cap = Math.max(cap, Math.min(rest, policy.movingMin))
+  return Math.max(0.5, Math.min(deviceDpr || 1, cap))
+}
+
 /** True when the renderer runs on the real WebGPU backend (not the WebGL2 fallback). */
 export function isWebGPU(renderer: any): boolean {
   return !!renderer && !!renderer.backend && renderer.backend.isWebGPUBackend === true
@@ -260,6 +298,19 @@ export interface RenderShared {
    * drawn during a path tracing session (camera moving, document edited) and returns the undo.
    */
   rasterLook: (() => () => void) | null
+  /**
+   * The walls, floors and ceilings show a baked light map (they ignore the live lights then); the
+   * screen-space occlusion and indirect light are off, they are in the map. The furniture keeps the
+   * live light with its shadows: the walls and ceilings still block the sun and the lamps for it.
+   */
+  baked: boolean
+  onBakedChanged(cb: (on: boolean) => void): () => void
+  setBaked(on: boolean): void
+  /**
+   * set by the lighting rig: every light of the shown level for a bake, as the live view has them,
+   * once the HDRI is loaded; null when the HDRI could not be had
+   */
+  bakeLights: (() => Promise<BakeLights | null>) | null
   onLightingChanged(cb: (c: LightingChange) => void): () => void
   emitLightingChanged(c: LightingChange): void
   onQualityChanged(cb: (q: QualityPreset) => void): () => void
@@ -298,6 +349,7 @@ export function getShared(ctx: EngineContext): RenderShared {
   const lighting = emitter<LightingChange>()
   const quality = emitter<QualityPreset>()
   const tracing = emitter<boolean>()
+  const baked = emitter<boolean>()
   const shared: RenderShared = {
     post: null,
     controls: null,
@@ -305,6 +357,14 @@ export function getShared(ctx: EngineContext): RenderShared {
     pathTracing: false,
     rasterLook: null,
     stillBusy: false,
+    baked: false,
+    onBakedChanged: baked.on,
+    setBaked(on) {
+      if (shared.baked === on) return
+      shared.baked = on
+      baked.emit(on)
+    },
+    bakeLights: null,
     onLightingChanged: lighting.on,
     emitLightingChanged: lighting.emit,
     onQualityChanged: quality.on,

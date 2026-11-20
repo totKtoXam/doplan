@@ -44,10 +44,12 @@ export default defineConfig({
       output: {
         codeSplitting: {
           groups: [
-            { name: 'pathtracer', test: /[\\/]node_modules[\\/](three-gpu-pathtracer|three-mesh-bvh|xatlas-web)[\\/]/, priority: 30 },
-            { name: 'engine3d', test: /[\\/]node_modules[\\/]three[\\/]|[\\/]src[\\/]renderer[\\/]src[\\/]view3d[\\/]/, priority: 20 },
+            // three, the 3D view and the path tracer have no group of their own: they load with the 3D
+            // view and its path tracing (dynamic imports); the plan and its 2D come first
             { name: 'pixi', test: /[\\/]node_modules[\\/](pixi\.js|@pixi)[\\/]/, priority: 10 },
             { name: 'react', test: /[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/, priority: 10 },
+            // the dynamic-import helper on its own: inside the pixi chunk it made every page load pixi first
+            { name: 'preload', test: /vite[\\/]preload-helper/, priority: 20 },
           ],
         },
       },

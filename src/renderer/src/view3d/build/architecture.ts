@@ -47,6 +47,8 @@ export interface ArchSyncInput {
   levelId: Id
   /** changes whenever cached materials became stale → forces a full rebuild */
   epoch: number
+  /** openings that cut the walls when they differ from the drawn ones (the viewer hides a door, not its hole) */
+  holes?: Doc['openings']
 }
 
 const r1 = (_k: string, v: unknown): unknown => (typeof v === 'number' ? Math.round(v * 10) / 10 : v)
@@ -77,16 +79,21 @@ export class Architecture {
 
     const walls: Wall[] = []
     for (const id in doc.walls) if (doc.walls[id].levelId === levelId) walls.push(doc.walls[id])
-    const openingsByWall = new Map<Id, Opening[]>()
-    for (const id in doc.openings) {
-      const o = doc.openings[id]
-      const w = doc.walls[o.wallId]
-      if (!w || w.levelId !== levelId) continue
-      let list = openingsByWall.get(o.wallId)
-      if (!list) openingsByWall.set(o.wallId, (list = []))
-      list.push(o)
+    const byWall = (table: Doc['openings']): Map<Id, Opening[]> => {
+      const out = new Map<Id, Opening[]>()
+      for (const id in table) {
+        const o = table[id]
+        const w = doc.walls[o.wallId]
+        if (!w || w.levelId !== levelId) continue
+        let list = out.get(o.wallId)
+        if (!list) out.set(o.wallId, (list = []))
+        list.push(o)
+      }
+      for (const list of out.values()) list.sort((p, q) => p.offset - q.offset)
+      return out
     }
-    for (const list of openingsByWall.values()) list.sort((p, q) => p.offset - q.offset)
+    const openingsByWall = byWall(doc.openings)
+    const holesByWall = input.holes ? byWall(input.holes) : openingsByWall
 
     // which room lies on which side of every wall
     const adjacent = new Map<Id, { left?: DerivedRoom; right?: DerivedRoom }>()
@@ -124,7 +131,7 @@ export class Architecture {
       const geom = plan.wallGeoms[wall.id]
       if (!geom) continue
       seenWalls.add(wall.id)
-      const ops = openingsByWall.get(wall.id) ?? []
+      const ops = holesByWall.get(wall.id) ?? []
       const adj = adjacent.get(wall.id) ?? {}
       const floorRoom = adj.left ?? adj.right
       const threshold = floorRoom ? recOf(floorRoom).floor : null
@@ -211,13 +218,13 @@ export class Architecture {
       const ceilingMm = ceilingOf(room)
       const edgeInfo = room.edges.map((e) => {
         const w = doc.walls[e.wallId]
-        return [e, w?.kind, w?.height, openingsByWall.get(e.wallId) ?? null]
+        return [e, w?.kind, w?.height, holesByWall.get(e.wallId) ?? null]
       })
       const sig = JSON.stringify([epoch, room.polygon, room.holes, rec, ceilingMm, edgeInfo], r1)
       const old = this.rooms.get(room.roomId)
       if (old && old.sig === sig) continue
       const build = buildRoom(
-        { room, rec, ceilingMm, walls: doc.walls, wallGeoms: plan.wallGeoms, openingsByWall },
+        { room, rec, ceilingMm, walls: doc.walls, wallGeoms: plan.wallGeoms, openingsByWall: holesByWall },
         this.lib,
       )
       if (old) {
@@ -328,6 +335,17 @@ export class Architecture {
       for (const rec of this.rooms.values()) rec.build.ceiling.visible = true
       this.applyOpeningVisibility()
     }
+  }
+
+  /** baking in export mode: the ceilings in place or left out */
+  setCeilingsShown(on: boolean): void {
+    for (const rec of this.rooms.values()) rec.build.ceiling.visible = on
+  }
+
+  /** any ceiling on screen (walk, or the ceiling shown from below it) */
+  ceilingsShown(): boolean {
+    for (const rec of this.rooms.values()) if (rec.build.ceiling.visible) return true
+    return false
   }
 
   objectsFor(ref: EntityRef): THREE.Object3D[] {

@@ -13,6 +13,22 @@ export function setViewOnly(value: boolean): void {
   viewOnly = value
 }
 
+/** openings the published plan itself hides (own flag, layer or group): their walls stay solid */
+let authorHiddenOpenings: ReadonlySet<string> = new Set()
+
+export function setAuthorHiddenOpenings(ids: ReadonlySet<string>): void {
+  authorHiddenOpenings = ids
+}
+
+/**
+ * Whether a hidden opening still cuts its wall: in the viewer an opening the visitor hid keeps its
+ * hole (a hidden door is still a doorway), one the author hid does not; in the app a hidden opening
+ * leaves the wall solid.
+ */
+export function keepsHole(openingId: string): boolean {
+  return viewOnly && !authorHiddenOpenings.has(openingId)
+}
+
 /**
  * The tool Esc switches the 2D editor to, or null to stay: the editor goes back to Select, a
  * view-only plan keeps its Pan tool (Select would show selection outlines and rename prompts).

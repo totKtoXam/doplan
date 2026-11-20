@@ -26,6 +26,7 @@ import { visibleDoc, visiblePlan } from '@core/layers'
 import { docStore } from '@/store/document'
 import { isLiveResizing, onLiveResizeEnd } from '@/store/liveResize'
 import { uiStore } from '@/store/ui'
+import { createBakedLight } from './bake/apply'
 import { Architecture } from './build/architecture'
 import { ElectricalBuilder } from './build/electrical'
 import { createControls } from './controls'
@@ -38,9 +39,11 @@ import { createPathTracer, type InteractivePathTracer } from './pathtracer'
 import { createPost } from './post'
 import { createProceduralFactory } from './procedural'
 import { mountPerfOverlay, perfBegin, perfBeginOnce, perfEnabled, perfEnd, perfPending, perfRecord, perfTime } from './perf'
-import { getQuality, getShared } from './quality'
+import { frameDpr, getQuality, getShared } from './quality'
 import { createMeasure3D } from './measure3d'
-import { isViewOnly } from '@/store/viewOnly'
+import { isViewOnly, keepsHole } from '@/store/viewOnly'
+import { createViewerPick, type ViewerPick } from './viewerPick'
+import { markRendererSwapped, markStruggling } from './status'
 
 type CameraMode = 'orbit' | 'walk' | 'top'
 
@@ -158,7 +161,19 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
   let lastTime = 0
   let lastMoveAt = -1e9
   let currentDpr = 0
+  let holesFor: Doc['openings'] | null = null
+  let holesOut: Doc['openings'] = {}
+  /** the openings that cut walls in the viewer, the same object while the openings stay the same */
+  function holesOf(openings: Doc['openings']): Doc['openings'] {
+    if (openings !== holesFor) {
+      holesFor = openings
+      holesOut = Object.fromEntries(Object.entries(openings).filter(([id]) => keepsHole(id)))
+    }
+    return holesOut
+  }
   let dynScale = 1
+  // the moving-DPR floor, off from the second drop until the factor is back to 1
+  let dprFloor = true
   let frameEma = 16
   let lastDynChange = 0
   let pendingSync = true
@@ -222,6 +237,35 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     scheduleCollect()
     invalidate()
   }
+  const baked = createBakedLight(ctx, shared, {
+    shown() {
+      const doc = visibleDoc(docStore.getState().doc)
+      return { doc, levelId: activeLevel(doc) }
+    },
+    flush: () => flushSync(),
+    ceilingsShown: () => arch.ceilingsShown(),
+    whenIdle: () => lib.whenIdle(8000),
+    withFullScene(ceilings, fn) {
+      arch.setExportMode(true)
+      arch.setCeilingsShown(ceilings)
+      try {
+        return fn()
+      } finally {
+        arch.setExportMode(false)
+        arch.updateVisibility(camera, uiStore.getState().cameraMode, docStore.getState().doc.render, bounds)
+        invalidate(3)
+      }
+    },
+  })
+  // the path tracer reads the live materials
+  let ptHold: (() => void) | null = null
+  const unsubPtHold = uiStore.subscribe((s) => {
+    if (s.pathTracing.active && !ptHold) ptHold = baked.hold()
+    else if (!s.pathTracing.active && ptHold) {
+      ptHold()
+      ptHold = null
+    }
+  })
   const items = new ItemsLayer(ctx, lib, factory, afterSceneChange)
   const electrical = new ElectricalBuilder(roots.electrical)
   const thumbs = new ThumbRenderer(ctx, lib, items)
@@ -329,6 +373,8 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     const levelId = activeLevel(doc)
     const fullPlan = ds.derived[levelId]
     const plan = fullPlan && visiblePlan(ds.doc, fullPlan)
+    // the viewer hides a door or a window but keeps its hole in the wall (not one the author hid)
+    const holes = isViewOnly() && doc.openings !== ds.doc.openings ? holesOf(ds.doc.openings) : undefined
 
     if (doc.render.quality && doc.render.quality !== lastDocQuality) {
       lastDocQuality = doc.render.quality
@@ -358,7 +404,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     if (archDirty) {
       try {
         const t0 = performance.now()
-        if (arch.sync({ doc, plan, levelId, epoch })) {
+        if (arch.sync({ doc, plan, levelId, epoch, holes })) {
           sceneChanged = true
           perfRecord('3d.sync.architecture', t0)
         }
@@ -401,6 +447,8 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     if (replaced || levelChanged || (hasContent && !hadContent)) wantsFit = true
     hadContent = hasContent
 
+    // the published light shows while the plan is what was baked
+    if (archDirty || sceneChanged || lightsDirty || levelChanged) baked.refresh()
     if (!mods) return
     if (sceneChanged || moved) {
       emitSceneChanged()
@@ -453,10 +501,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
 
   // ── sizing / adaptive DPR ──
   function targetDpr(moving: boolean): number {
-    const q = getQuality(ctx.quality)
-    const device = window.devicePixelRatio || 1
-    const cap = moving ? Math.min(q.dprCap, q.dprMoving * dynScale) : q.dprCap
-    return Math.max(0.5, Math.min(device, cap))
+    return frameDpr(ctx.quality, window.devicePixelRatio || 1, moving, dynScale, undefined, dprFloor)
   }
   function applySize(dpr: number): void {
     const w = container.clientWidth
@@ -476,11 +521,18 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       if (now - lastDynChange > 1500) {
         if (frameEma > 25 && dynScale > 0.6) {
           dynScale = Math.max(0.6, dynScale - 0.12)
+          if (dynScale <= 0.8) dprFloor = false
           lastDynChange = now
           frameEma = 18
         } else if (frameEma < 17.5 && dynScale < 1) {
           dynScale = Math.min(1, dynScale + 0.06)
+          if (dynScale >= 1) dprFloor = true
           lastDynChange = now
+        } else if (frameEma > 33 && dynScale <= 0.6 && now - lastDynChange > 3000) {
+          // the lowest resolution and still slow: the preset itself is too heavy here
+          lastDynChange = now
+          frameEma = 25
+          markStruggling()
         }
       }
     }
@@ -687,6 +739,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
         camera.lookAt(target)
       }
       suspended = false
+      markRendererSwapped()
       currentDpr = 0
       applySize(targetDpr(false))
       emitSceneChanged()
@@ -813,8 +866,16 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     }
   }
 
+  let viewerPick: ViewerPick | null = null
   // ── public handle ──
   const handle: Engine3DHandle = {
+    pickAt(clientX, clientY) {
+      flushSync()
+      return (viewerPick ??= createViewerPick(ctx)).pick(clientX, clientY)
+    },
+    projectPoint(p) {
+      return (viewerPick ??= createViewerPick(ctx)).project(p)
+    },
     destroy() {
       if (destroyed) return
       destroyed = true
@@ -828,6 +889,8 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       if (liveTimer) clearTimeout(liveTimer)
       offLiveResize()
       if (collectTimer) clearTimeout(collectTimer)
+      unsubPtHold()
+      baked.dispose()
       document.removeEventListener('visibilitychange', onVisibility)
       dprQuery?.removeEventListener('change', onDprChange)
       if (mods) disposeSubModules(mods)
@@ -943,6 +1006,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     async exportGlb() {
       flushSync()
       await lib.whenIdle(8000)
+      const release = baked.hold()
       // full-height walls, ceilings and everything a cut-away pass has hidden
       arch.setExportMode(true)
       const shown: THREE.Object3D[] = []
@@ -956,10 +1020,17 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
         return await exportSceneGlb([roots.architecture, roots.items, roots.electrical])
       } finally {
         for (const o of shown) o.visible = false
+        release()
         arch.setExportMode(false)
         arch.updateVisibility(camera, uiStore.getState().cameraMode, docStore.getState().doc.render, bounds)
         invalidate(3)
       }
+    },
+    bakeLighting(opts) {
+      return baked.bake(opts)
+    },
+    setBakedLight(bake) {
+      baked.set(bake)
     },
     renderAssetThumb(asset: Asset, size: number) {
       return thumbs.renderAsset(asset, size)

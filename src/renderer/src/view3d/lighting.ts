@@ -25,6 +25,7 @@ import type { EngineContext, LightingRig } from '@/contracts'
 import { docStore } from '@/store/document'
 import { uiStore } from '@/store/ui'
 import { t } from '@/i18n'
+import type { BakeLights, RGB } from './bake/trace'
 import { currentQuality, getShared, type QualitySettings } from './quality'
 
 // ───────────────────────────── calibration constants ─────────────────────────────
@@ -396,6 +397,76 @@ function collectPortals(doc: Doc, levelId: Id, plan: DerivedPlan | undefined, ma
   return out.slice(0, max)
 }
 
+/**
+ * The environment's light on a surface facing each axis (+x −x +y −y +z −z): the irradiance the
+ * equirectangular image gives, rotated as the scene rotates it, times `scale`. An even sky of the
+ * fallback colour when the image has no pixels on the CPU.
+ */
+function ambientCube(tex: THREE.Texture | null, rotY: number, scale: number, fallback: THREE.Color): [RGB, RGB, RGB, RGB, RGB, RGB] {
+  const out: [RGB, RGB, RGB, RGB, RGB, RGB] = [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]]
+  const img = tex?.image as { data?: ArrayLike<number>; width?: number; height?: number } | undefined
+  const data = img?.data
+  const w = img?.width ?? 0
+  const h = img?.height ?? 0
+  const channels = data && w && h ? Math.round(data.length / (w * h)) : 0
+  if (!data || channels < 3) {
+    // E = π L on every side
+    for (const c of out) {
+      c[0] = Math.PI * fallback.r * scale
+      c[1] = Math.PI * fallback.g * scale
+      c[2] = Math.PI * fallback.b * scale
+    }
+    return out
+  }
+  const half = tex?.type === THREE.HalfFloatType
+  const step = Math.max(1, Math.round(Math.sqrt((w * h) / 8192)))
+  const cr = Math.cos(rotY)
+  const sr = Math.sin(rotY)
+  let total = 0
+  for (let y = 0; y < h; y += step) {
+    const lat = ((y + 0.5) / h - 0.5) * Math.PI
+    const cl = Math.cos(lat)
+    const dy = Math.sin(lat)
+    for (let x = 0; x < w; x += step) {
+      const lon = ((x + 0.5) / w - 0.5) * 2 * Math.PI
+      const lx = cl * Math.cos(lon)
+      const lz = cl * Math.sin(lon)
+      const dx = lx * cr + lz * sr
+      const dz = -lx * sr + lz * cr
+      const o = (y * w + x) * channels
+      let r = data[o]
+      let g = data[o + 1]
+      let b = data[o + 2]
+      if (half) {
+        r = THREE.DataUtils.fromHalfFloat(r)
+        g = THREE.DataUtils.fromHalfFloat(g)
+        b = THREE.DataUtils.fromHalfFloat(b)
+      }
+      // the sun is its own light: its disc must not count twice
+      r = Math.min(r, 8)
+      g = Math.min(g, 8)
+      b = Math.min(b, 8)
+      total += cl
+      const axes = [dx, -dx, dy, -dy, dz, -dz]
+      for (let a = 0; a < 6; a++) {
+        const c = axes[a]
+        if (c <= 0) continue
+        out[a][0] += r * c * cl
+        out[a][1] += g * c * cl
+        out[a][2] += b * c * cl
+      }
+    }
+  }
+  // Σ L cosθ dΩ, dΩ = 4π cl / Σ cl
+  const norm = total > 0 ? (4 * Math.PI * scale) / total : 0
+  for (const c of out) {
+    c[0] *= norm
+    c[1] *= norm
+    c[2] *= norm
+  }
+  return out
+}
+
 // ───────────────────────────── fixtures ─────────────────────────────
 
 interface FixtureGeoms {
@@ -465,6 +536,8 @@ export function createLighting(ctx: EngineContext): LightingRig {
   let hdriTexture: THREE.DataTexture | null = null
   let hdriSrc = ''
   let hdriFailed = ''
+  /** the HDRI file on its way (settles either way) */
+  let hdriLoading: Promise<unknown> | null = null
   const hdriTint = new THREE.Color(1, 1, 1)
   let portalSig = ''
   let fixtureSig = ''
@@ -630,7 +703,12 @@ export function createLighting(ctx: EngineContext): LightingRig {
         const token = ++hdriToken
         // show the procedural sky until the file arrives
         changed = useProceduralSky(s, q) || changed
-        loadHdri(src).then(
+        const loading = loadHdri(src)
+        hdriLoading = loading.then(
+          () => undefined,
+          () => undefined,
+        )
+        loading.then(
           (tex) => {
             if (disposed || token !== hdriToken) return
             hdriTexture = tex
@@ -921,6 +999,87 @@ export function createLighting(ctx: EngineContext): LightingRig {
     return true
   }
 
+  /**
+   * The lights for a bake once the HDRI the document asks for is in place; null when it could not
+   * be had (the procedural sky would be baked under the HDRI's name).
+   */
+  async function lightsForBake(): Promise<BakeLights | null> {
+    sync()
+    const end = Date.now() + 120000
+    while (hdriLoading && hdriSrc && !hdriTexture && Date.now() < end) {
+      const pending = hdriLoading
+      await Promise.race([pending, new Promise((r) => setTimeout(r, 1000))])
+      if (disposed) return null
+      sync()
+    }
+    if (disposed) return null
+    const r = docStore.getState().doc.render
+    const wanted = r.hdriId ? (uiStore.getState().getHdri(r.hdriId)?.src ?? '') : ''
+    if (wanted && !(hdriTexture && scene.environment === hdriTexture)) return null
+    return bakeLights()
+  }
+
+  // ── for a bake: every light of the level, not only those the quality preset keeps live ──
+  function bakeLights(): BakeLights {
+    const doc = visibleDoc(docStore.getState().doc)
+    const r = doc.render
+    const active = uiStore.getState().activeLevelId
+    const levelId = doc.levels[active] ? active : doc.levelOrder[0]
+    const s = computeSun(r)
+    const k = clamp(r.hdriIntensity ?? 1, 0, 8)
+    const usingHdri = !!hdriTexture && scene.environment === hdriTexture
+    const day = usingHdri ? 1 : s.day
+    const tint = usingHdri ? hdriTint.clone() : skyTint(s, new THREE.Color())
+    const out: BakeLights = { sun: null, points: [], areas: [], hemi: null, ambient: null, sky: null }
+    if (s.intensity > 0)
+      out.sun = { dir: [s.direction.x, s.direction.y, s.direction.z], color: [s.color.r * s.intensity, s.color.g * s.intensity, s.color.b * s.intensity], spread: 0.025 }
+    out.hemi = { sky: [hemi.color.r, hemi.color.g, hemi.color.b], ground: [hemi.groundColor.r, hemi.groundColor.g, hemi.groundColor.b], intensity: hemi.intensity }
+    out.ambient = ambientCube(scene.environment as THREE.Texture | null, usingHdri ? (r.hdriRotation || 0) * DEG : 0, ENV_RASTER * k, tint)
+    const radiance = PORTAL_RADIANCE * day * k
+    if (radiance > 1e-4) out.sky = [tint.r * radiance, tint.g * radiance, tint.b * radiance]
+    if (r.lightsOn === false) return out
+    for (const id in doc.lights) {
+      const l = doc.lights[id]
+      const lumens = Math.max(0, l.lumens || 0)
+      if (l.levelId !== levelId || !l.on || lumens <= 0) continue
+      const p = toWorld(l.x, l.y, l.elevation)
+      const c = kelvinToColor(l.temperature)
+      if (l.kind === 'strip' || l.kind === 'area') {
+        const w = Math.max(0.03, (l.size?.w ?? (l.kind === 'strip' ? 1000 : 600)) / 1000)
+        const d = Math.max(0.01, (l.size?.d ?? (l.kind === 'strip' ? 40 : 600)) / 1000)
+        const a = -((l.rotation ?? 0) * DEG)
+        const nits = Math.min((lumens / (Math.PI * w * d)) * LUMEN_SCALE, 4000)
+        out.areas.push({
+          pos: [p[0], p[1] - 0.02, p[2]],
+          hu: [(Math.cos(a) * w) / 2, 0, (-Math.sin(a) * w) / 2],
+          hv: [(Math.sin(a) * d) / 2, 0, (Math.cos(a) * d) / 2],
+          n: [0, -1, 0],
+          color: [c.r * nits, c.g * nits, c.b * nits],
+        })
+      } else if (l.kind === 'spot') {
+        const half = 38 * DEG
+        const I = (lumens / (2 * Math.PI * (1 - Math.cos(half)))) * LUMEN_SCALE * SPOT_SCALE
+        let dir: [number, number, number] = [0, -1, 0]
+        if (l.rotation !== undefined && l.rotation !== null) {
+          const a = l.rotation * DEG
+          const tilt = 30 * DEG
+          dir = [Math.cos(a) * Math.sin(tilt), -Math.cos(tilt), Math.sin(a) * Math.sin(tilt)]
+        }
+        out.points.push({
+          pos: [p[0], p[1] - 0.07, p[2]],
+          color: [c.r * I, c.g * I, c.b * I],
+          distance: 14,
+          decay: 2,
+          spot: { dir, cosOuter: Math.cos(half), cosInner: Math.cos(half * (1 - 0.55)) },
+        })
+      } else {
+        const I = (l.kind === 'ceiling' ? lumens / (2 * Math.PI) : lumens / (4 * Math.PI)) * LUMEN_SCALE
+        out.points.push({ pos: [p[0], p[1] + (l.kind === 'ceiling' ? -0.1 : 0), p[2]], color: [c.r * I, c.g * I, c.b * I], distance: 16, decay: 2 })
+      }
+    }
+    return out
+  }
+
   // ── main entry ──
   function sync(): void {
     if (disposed) return
@@ -1025,6 +1184,7 @@ export function createLighting(ctx: EngineContext): LightingRig {
     envSig = ''
     sync()
   })
+  shared.bakeLights = lightsForBake
 
   return {
     sync,
@@ -1038,6 +1198,7 @@ export function createLighting(ctx: EngineContext): LightingRig {
       unsubQuality()
       unsubTracing()
       shared.rasterLook = null
+      if (shared.bakeLights === lightsForBake) shared.bakeLights = null
       hdriToken++
       for (const g of fixtureGroups.values()) disposeFixtureGroup(g)
       fixtureGroups.clear()

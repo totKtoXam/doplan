@@ -26,6 +26,7 @@ import {
   type SyncErrorCode,
   webUrlOf,
 } from '../shared/github'
+import { PAGES_BRANCH, PAGES_MARKER } from '../shared/pagesSite'
 import { CH } from './channels'
 import {
   findGit,
@@ -168,6 +169,23 @@ function noteCheck(root: string, err?: unknown): void {
   lastCheck = { root, at: prev?.at, error: e?.message ?? (err as Error).message, errorCode: e && e.kind !== 'ghMissing' && e.kind !== 'ghLogin' ? e.kind : 'unknown' }
 }
 
+/**
+ * A plan site published by doplan for viewing (the gh-pages branch, or a branch holding its marker):
+ * the project is never sent there or merged from there. Checked on connect and again on every send
+ * and get: a connection made before the check existed may point at one.
+ */
+async function refuseSiteBranch(root: string, branch: string): Promise<void> {
+  const ref = remoteRef(branch)
+  if (branch === PAGES_BRANCH || ((await gitRefExists(root, ref)) && (await gitTreeFiles(root, ref)).some((f) => f.path === PAGES_MARKER)))
+    throw new GithubError(
+      'unknown',
+      msg(
+        'Это репозиторий сайта плана, опубликованного doplan для просмотра (ветка gh-pages). Проект в него не отправляется: создайте для проекта отдельный репозиторий.',
+        'This is the repository of a plan site published by doplan for viewing (the gh-pages branch). The project is not sent there: create a separate repository for the project.',
+      ),
+    )
+}
+
 /** the upstream branch on GitHub; without one, what a fetch brought (main, master), else main */
 async function targetBranch(root: string): Promise<string> {
   const up = await gitUpstreamBranch(root)
@@ -255,6 +273,7 @@ async function pushLocked(root: string, n: GitNet): Promise<PushResult> {
   await gitFetch(root, n, REMOTE)
   noteCheck(root)
   const branch = await targetBranch(root)
+  await refuseSiteBranch(root, branch)
   if (await gitRefExists(root, remoteRef(branch))) {
     const { behind } = await gitAheadBehind(root, remoteRef(branch))
     if (behind) return { needPull: true, warnings: [], status: await computeStatus(root) }
@@ -306,6 +325,7 @@ async function pullLocked(root: string, n: GitNet): Promise<PullResult> {
   await gitFetch(root, n, REMOTE)
   noteCheck(root)
   const branch = await targetBranch(root)
+  await refuseSiteBranch(root, branch)
   const ref = remoteRef(branch)
   if (!(await gitRefExists(root, ref))) return { result: 'upToDate', status: await computeStatus(root) }
   await gitSetUpstream(root, branch, REMOTE)
@@ -384,6 +404,7 @@ export function resolveConflict(choice: ConflictChoice): Promise<ResolveResult> 
       await gitFetch(root, n, REMOTE)
       noteCheck(root)
       const branch = await targetBranch(root)
+      await refuseSiteBranch(root, branch)
       const ref = remoteRef(branch)
       if (!(await gitRefExists(root, ref))) return { status: await computeStatus(root) }
       let copyPath: string | undefined
@@ -452,6 +473,9 @@ async function connectLocked(url: unknown, opts: ConnectOpts = {}): Promise<Conn
     await gitFetch(root, n, REMOTE)
     const branch = heads.head
     const theirs = remoteRef(branch)
+    // a plan published for viewing: the project would go public with the site, and publishing again
+    // or unpublishing would replace or delete what the project syncs with
+    await refuseSiteBranch(root, branch)
     if (!(await gitRelated(root, theirs))) {
       if (opts.ownOnly)
         throw new GithubError(

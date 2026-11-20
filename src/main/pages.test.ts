@@ -27,6 +27,10 @@ interface FakeRepo {
   push?: boolean
   /** the signed-in user may change the Pages settings (default: push) */
   admin?: boolean
+  /** a custom role that may manage Pages: allowed, but the permissions show write access only */
+  customPages?: boolean
+  /** default 'main'; a repository doplan creates starts empty, so its first branch gh-pages is the default */
+  defaultBranch?: string
 }
 
 const gh = {
@@ -35,6 +39,9 @@ const gh = {
   orgPlans: {} as Record<string, string | undefined>,
   failEnable: false,
   failPush: 0,
+  /** the open project's sync: origin URLs and upstream branch */
+  syncUrls: [] as string[],
+  syncBranch: null as string | null,
   calls: [] as string[],
   seq: 0,
 }
@@ -57,13 +64,17 @@ vi.mock('./git', () => ({
   findGit: async () => 'git',
   gitEffectiveUrls: async (_root: unknown, urls: string[]) => ({ effective: urls, ownAccount: false }),
   gitInit: async () => undefined,
+  gitRemoteUrls: async () => gh.syncUrls,
+  gitUpstreamBranch: async () => gh.syncBranch,
   // only deletes here (the site itself goes up through pagesGit.pushSite)
-  gitPushRef: async (_root: string, _net: unknown, src: string | null, _branch: string, opts: { remote: string; expected?: string }) => {
+  gitPushRef: async (_root: string, net: { config?: string[] }, src: string | null, _branch: string, opts: { remote: string; expected?: string }) => {
     if (src !== null || !opts.expected) throw new Error('pages: a delete with the checked head only')
+    if (!net.config?.includes('credential.helper=gh')) throw new Error("fatal: could not read Username for 'https://github.com': terminal prompts disabled")
     const key = fromRemote(opts.remote)
     gh.calls.push(`delete ${key}`)
     const r = repo(key)
     if (r.branchSha !== opts.expected) throw new Error('stale info')
+    if ((r.defaultBranch ?? 'main') === 'gh-pages') throw Object.assign(new Error('git push: error: failed to push some refs'), { stderr: 'deletion of the current branch prohibited' })
     r.branchSha = null
     r.marker = null
   },
@@ -74,7 +85,8 @@ vi.mock('./github', () => ({
   ghLoginText: () => 'gh login',
   ghSlowText: () => 'gh slow',
   ghOfflineText: () => 'gh offline',
-  gitCredentials: async () => ({ config: [], env: {} }),
+  // gh's token for git: without it a push fails (signed in through gh only, no git credential)
+  gitCredentials: async () => ({ config: ['-c', 'credential.helper=gh'], env: {} }),
 }))
 vi.mock('./projectFolder', () => ({ getProjectRoot: () => project }))
 vi.mock('./pagesBuild', () => ({
@@ -87,7 +99,9 @@ vi.mock('./pagesGh', () => ({
   openPagesUrl: async () => undefined,
   repoState: async (ref: RepoRef) => {
     const r = gh.repos.get(k(ref))
-    return r ? { exists: true, isPrivate: r.private, canPush: r.push !== false } : { exists: false, isPrivate: false }
+    return r
+      ? { exists: true, isPrivate: r.private, canPush: r.push !== false, managesPages: (r.admin ?? r.push) !== false, defaultBranch: r.defaultBranch ?? 'main' }
+      : { exists: false, isPrivate: false }
   },
   ownerPlan: async (owner: string, login: string | undefined) => (owner === login ? gh.userPlan : gh.orgPlans[owner]),
   inspectPages: async (ref: RepoRef) => {
@@ -100,7 +114,7 @@ vi.mock('./pagesGh', () => ({
   },
   createPublicRepo: async (name: string) => {
     gh.calls.push(`create me/${name}`)
-    gh.repos.set(`me/${name}`, fresh())
+    gh.repos.set(`me/${name}`, fresh({ defaultBranch: 'gh-pages' }))
     return { owner: 'me', repo: name }
   },
   enablePages: async (ref: RepoRef, current: PagesConfig | null) => {
@@ -112,15 +126,28 @@ vi.mock('./pagesGh', () => ({
   },
   disablePages: async (ref: RepoRef) => {
     gh.calls.push(`nopages ${k(ref)}`)
-    if ((repo(k(ref)).admin ?? repo(k(ref)).push) === false) throw new Error('HTTP 403: Must have admin rights to Repository.')
+    // what pagesGh.pagesError makes of GitHub's 403 'Must have admin rights to Repository.': translated text, typed kind
+    const { PagesGhError } = await import('./pagesError')
+    if ((repo(k(ref)).admin ?? repo(k(ref)).push) === false && !repo(k(ref)).customPages)
+      throw new PagesGhError('Не удалось выключить GitHub Pages: у этой учётной записи GitHub нет прав администратора репозитория.', 'forbidden', 403)
     repo(k(ref)).pages = null
     return true
   },
 }))
 vi.mock('./pagesGit', () => ({
-  pushSite: async (_r: unknown, siteDir: string, remote: string, _b: string, _m: string, expected: string | null) => {
+  pushSite: async (
+    runner: { config?: string[]; credentials?: (dir: string) => Promise<{ config: string[] }> },
+    siteDir: string,
+    remote: string,
+    _b: string,
+    _m: string,
+    expected: string | null,
+  ) => {
     const key = fromRemote(remote)
     gh.calls.push(`push ${key}`)
+    // as pagesGit does: the credentials are read inside the site's repository
+    const net = runner.credentials ? await runner.credentials(siteDir) : runner
+    if (!net.config?.includes('credential.helper=gh')) throw new Error("fatal: could not read Username for 'https://github.com': terminal prompts disabled")
     if (gh.failPush > 0) {
       gh.failPush--
       throw new Error('could not resolve host: github.com')
@@ -158,6 +185,8 @@ const status = (docId = 'doc1', aliases?: string[]) => pagesStatus({ docId, cont
 beforeEach(() => {
   gh.repos.clear()
   gh.calls = []
+  gh.syncUrls = []
+  gh.syncBranch = null
   gh.userPlan = 'free'
   gh.orgPlans = {}
   gh.failEnable = false
@@ -208,7 +237,8 @@ describe('publishing never takes over what doplan did not make', () => {
     expect(gh.calls).toEqual(['push me/flat', 'pages me/flat new', 'push me/flat', 'pages me/flat keep'])
 
     await unpublishPlan('doc1')
-    expect(gh.calls.slice(4)).toEqual(['nopages me/flat', 'delete me/flat'])
+    // the branch goes first, Pages are turned off after it (an emptying push may turn them on again)
+    expect(gh.calls.slice(4)).toEqual(['delete me/flat', 'nopages me/flat'])
     expect((await status()).record).toBeNull()
 
     // published again, then someone replaced the branch with their own: unpublish leaves both alone
@@ -252,7 +282,7 @@ describe('updates go to the recorded repository', () => {
     const res = await publishPlan(req({ privateChoice: 'separate' }))
     expect(res.record).toMatchObject({ owner: 'me', repo: 'flat-view', separate: true })
     // the old site in the now private repository is taken down
-    expect(gh.calls).toEqual(['create me/flat-view', 'push me/flat-view', 'pages me/flat-view new', 'nopages me/flat', 'delete me/flat'])
+    expect(gh.calls).toEqual(['create me/flat-view', 'push me/flat-view', 'pages me/flat-view new', 'delete me/flat', 'nopages me/flat'])
     expect((await status()).record?.repo).toBe('flat-view')
   })
 
@@ -346,6 +376,39 @@ describe('the record follows its document', () => {
     expect(gh.calls.filter((c) => c.startsWith('push'))).toEqual([`push me/${name}`])
   })
 
+  it('unpublishing a separate repository (gh-pages is its default branch): Pages off, the site emptied, the record gone for good', async () => {
+    setOrigin(null)
+    const first = await publishPlan(req({ target: 'separate' }))
+    const ref = `me/${first.record.repo}`
+    gh.calls = []
+    await unpublishPlan('doc1')
+    // the default branch cannot be deleted: one commit with only the marker replaces the site
+    expect(gh.calls).toEqual([`push ${ref}`, `nopages ${ref}`])
+    expect(repo(ref).pages).toBeNull()
+    expect(markerId(repo(ref).marker)).toBe(first.record.pubId)
+    expect(readFileSync(join(userData, 'pages.json'), 'utf8')).not.toContain('doc1')
+    // not taken back as a live publication of this document, and publishing again reuses the repository
+    expect((await status()).record).toBeNull()
+    const again = await publishPlan(req({ target: 'separate' }))
+    expect(again.record.repo).toBe(first.record.repo)
+    expect(gh.calls.filter((c) => c.startsWith('create'))).toEqual([])
+  })
+
+  it('never publishes into, nor takes down, the gh-pages branch the open project syncs with', async () => {
+    setOrigin(null)
+    const first = await publishPlan(req({ target: 'separate' }))
+    const ref = `me/${first.record.repo}`
+    gh.syncUrls = [`https://github.com/${ref}.git`]
+    gh.syncBranch = 'gh-pages'
+    gh.calls = []
+    await expect(publishPlan(req({ target: 'separate', info: { ...req().info, contentHash: 'h2' } }))).rejects.toThrow(/синхронизируется/)
+    await expect(unpublishPlan('doc1')).rejects.toThrow(/синхронизируется/)
+    expect(gh.calls.filter((c) => c.startsWith('push') || c.startsWith('delete'))).toEqual([])
+    // another branch of the same repository, or another repository: no objection
+    gh.syncBranch = 'main'
+    await unpublishPlan('doc1')
+  })
+
   it('a request made for another project folder (opened meanwhile) is refused before anything happens', async () => {
     setOrigin('https://github.com/me/flat.git')
     gh.repos.set('me/flat', fresh())
@@ -383,13 +446,51 @@ describe('the record follows its document', () => {
     await expect(unpublishPlan('doc1')).rejects.toThrow(/Нет прав/)
     expect(gh.calls).toEqual([])
     expect((await status()).record).toBeNull()
+  })
 
-    // the refusal coming from GitHub itself: may push, may not change Pages (a collaborator)
-    repo('acme/plans').push = true
+  it('a collaborator (may push, not administer): updates the site of the project repository, and is told plainly that only an admin or maintainer takes it down', async () => {
+    setOrigin('https://github.com/acme/plans.git')
+    gh.repos.set('acme/plans', fresh())
     await publishPlan(req())
+    // the same project on a teammate's computer: no record there, write access only
+    rmSync(join(userData, 'pages.json'), { force: true })
     repo('acme/plans').admin = false
-    await expect(unpublishPlan('doc1')).rejects.toThrow(/Нет прав/)
-    expect(JSON.parse(readFileSync(join(userData, 'pages.json'), 'utf8')).doc1).toBeUndefined()
+    const st = await status()
+    expect(st.record).toMatchObject({ owner: 'acme', repo: 'plans' })
+    expect(st.project?.occupied).toBeUndefined()
+    gh.calls = []
+    const res = await publishPlan(req())
+    expect(res.record).toMatchObject({ owner: 'acme', repo: 'plans', separate: false })
+    expect(gh.calls).toEqual(['push acme/plans', 'pages acme/plans keep'])
+
+    // unpublishing: GitHub refuses to turn Pages off before anything else is touched, the record and the site stay
+    const sha = repo('acme/plans').branchSha
+    gh.calls = []
+    await expect(unpublishPlan('doc1')).rejects.toThrow(/только его администратор/)
+    expect(gh.calls).toEqual(['nopages acme/plans'])
+    expect(repo('acme/plans').branchSha).toBe(sha)
+    expect(repo('acme/plans').pages).not.toBeNull()
+    expect((await status()).record).toMatchObject({ owner: 'acme', repo: 'plans' })
+
+    // a custom role that may manage Pages looks like write access: GitHub lets it, and it comes down
+    repo('acme/plans').customPages = true
+    gh.calls = []
+    await unpublishPlan('doc1')
+    expect(gh.calls[0]).toBe('nopages acme/plans')
+    expect(repo('acme/plans').pages).toBeNull()
+    expect(repo('acme/plans').branchSha).toBeNull()
+    expect((await status()).record).toBeNull()
+
+    // published again by the collaborator, then taken down with admin access
+    repo('acme/plans').customPages = false
+    repo('acme/plans').admin = true
+    await publishPlan(req())
+
+    // with maintain or admin access given, it comes down
+    repo('acme/plans').admin = true
+    await unpublishPlan('doc1')
+    expect(repo('acme/plans').pages).toBeNull()
+    expect((await status()).record).toBeNull()
   })
 
   it('another plan published into the project repository is called that, not "not made by doplan"', async () => {

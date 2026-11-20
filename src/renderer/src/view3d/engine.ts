@@ -162,6 +162,8 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
   /** look for materials that were never compiled before the next frame */
   let compileCheck = true
   let firstCompileDone = false
+  /** a frame was drawn: until then what arrives during the first compile does not hold the picture */
+  let drawnOnce = false
   const compiled = new CompiledMaterials()
   let lastTime = 0
   let lastMoveAt = -1e9
@@ -621,10 +623,14 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
         stop()
         return
       }
+      // the first picture does not wait for what arrived while the first compile ran (models, their
+      // finishes): it is drawn without them, and they are compiled right after and show up then
+      let later: THREE.Material[] = []
       if (compileCheck) {
         compileCheck = false
         const fresh = compiled.pending(compileRoots())
-        if (fresh.length) {
+        if (fresh.length && firstCompileDone && !drawnOnce) later = fresh
+        else if (fresh.length) {
           startPrecompile(fresh)
           stop()
           return
@@ -641,10 +647,21 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       updateDpr(moving, dtMs, now)
       const firstFrame = perfPending('open')
       const frameStart = performance.now()
-      mods.post.render()
+      const withheld = later.length ? withhold(later) : []
+      try {
+        mods.post.render()
+      } finally {
+        for (const o of withheld) o.visible = true
+      }
+      drawnOnce = true
       measure.update()
       if (firstFrame) perfRecord('3d.firstFrame.cpu', frameStart)
       afterFrame()
+      if (later.length) {
+        startPrecompile(later)
+        stop()
+        return
+      }
       dirtyFrames = Math.max(0, dirtyFrames - 1)
       if (!moving && dirtyFrames === 0) stop()
     } catch (err) {
@@ -652,6 +669,20 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       dirtyFrames = 0
       stop()
     }
+  }
+
+  /** hides what is drawn with `materials` (not compiled yet) for one frame; returns it to show again */
+  function withhold(materials: THREE.Material[]): THREE.Object3D[] {
+    const set = new Set(materials)
+    const out: THREE.Object3D[] = []
+    for (const root of compileRoots()) {
+      root.traverseVisible((o) => {
+        const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined
+        if (m && (Array.isArray(m) ? m.some((x) => set.has(x)) : set.has(m))) out.push(o)
+      })
+    }
+    for (const o of out) o.visible = false
+    return out
   }
 
   function compileRoots(): THREE.Object3D[] {

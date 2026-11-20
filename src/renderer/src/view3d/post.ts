@@ -76,6 +76,8 @@ export function createPost(ctx: EngineContext): PostPipeline {
   const hoveredObjects: THREE.Object3D[] = []
 
   const sizeBefore = new THREE.Vector2()
+  /** the pass that draws the scene in the current graph */
+  let scenePassNode: any = null
 
   function wantedFeatures(): Features {
     const q = currentQuality(ctx)
@@ -104,6 +106,7 @@ export function createPost(ctx: EngineContext): PostPipeline {
       }
     }
     disposables = []
+    scenePassNode = null
     if (pipeline) {
       try {
         pipeline.dispose()
@@ -122,6 +125,7 @@ export function createPost(ctx: EngineContext): PostPipeline {
   function buildGraph(f: Features): any {
     const q = currentQuality(ctx)
     const scenePass = track(T.pass(scene, camera, { samples: 0 }))
+    scenePassNode = scenePass
     if (f.ao) scenePass.setMRT(T.mrt({ output: T.output, normal: T.directionToColor(T.normalView) }))
 
     let hdr: any = scenePass.getTextureNode('output')
@@ -180,6 +184,7 @@ export function createPost(ctx: EngineContext): PostPipeline {
 
   function buildMinimalGraph(): any {
     const scenePass = track(T.pass(scene, camera, { samples: 0 }))
+    scenePassNode = scenePass
     let display: any = T.renderOutput(scenePass.getTextureNode('output'))
     if (!isViewOnly()) display = addOutlines(display, false)
     return track((fxaa as any)(display))
@@ -304,6 +309,12 @@ export function createPost(ctx: EngineContext): PostPipeline {
     },
     kick() {
       /* nothing accumulates over frames */
+    },
+    sceneTarget() {
+      if (disposed) return null
+      if (dirty || signature(wantedFeatures()) !== featureSig) rebuild()
+      const pass = pipeline ? scenePassNode : null
+      return pass ? { target: pass.renderTarget as THREE.RenderTarget, mrt: pass.getMRT?.() ?? null } : null
     },
   }
   shared.post = internals

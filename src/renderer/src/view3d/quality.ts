@@ -194,6 +194,11 @@ export interface PostInternals {
   renderToTarget(target: THREE.RenderTarget, width: number, height: number): void
   /** the scene or the view changed (kept for the callers; nothing accumulates over frames) */
   kick(): void
+  /**
+   * The target and outputs the scene pass draws into: shaders precompiled for another target (the
+   * canvas) would be built again, on the GPU, in the first frame.
+   */
+  sceneTarget(): { target: THREE.RenderTarget; mrt: unknown } | null
 }
 
 /** Extra entry points of the camera controls used by interaction and stills. */

@@ -167,6 +167,15 @@ export function makeTexture(image: TexImage, flipped: boolean, p: TextureParams)
   return tex
 }
 
+/** a 1×1 texture of one colour (bytes; sRGB when `p.srgb`) sampled like a real map with the same params */
+export function placeholderTexture(rgb: [number, number, number], p: TextureParams): THREE.Texture {
+  const tex = new THREE.DataTexture(new Uint8Array([rgb[0], rgb[1], rgb[2], 255]), 1, 1)
+  applyTextureParams(tex, p)
+  tex.name = 'placeholder'
+  tex.needsUpdate = true
+  return tex
+}
+
 export function applyTextureParams(tex: THREE.Texture, p: TextureParams): void {
   tex.colorSpace = p.srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace
   tex.wrapS = THREE.RepeatWrapping

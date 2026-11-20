@@ -42,7 +42,8 @@ import { frameDpr, getQuality, getShared } from './quality'
 import { createMeasure3D } from './measure3d'
 import { isViewOnly, keepsHole } from '@/store/viewOnly'
 import { createViewerPick, type ViewerPick } from './viewerPick'
-import { markRendererSwapped, markStruggling } from './status'
+import { markRendererSwapped, markStruggling, setPreparing } from './status'
+import { CompiledMaterials, precompile } from './precompile'
 
 type CameraMode = 'orbit' | 'walk' | 'top'
 
@@ -156,6 +157,12 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
   let suspended = false
   let running = false
   let dirtyFrames = 0
+  /** new materials are being compiled: the canvas keeps the last frame meanwhile (precompile.ts) */
+  let compiling = false
+  /** look for materials that were never compiled before the next frame */
+  let compileCheck = true
+  let firstCompileDone = false
+  const compiled = new CompiledMaterials()
   let lastTime = 0
   let lastMoveAt = -1e9
   let currentDpr = 0
@@ -205,6 +212,16 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     getBounds: () => bounds.clone(),
   }
   const shared = getShared(ctx)
+  // a light added, a shadow switched or the baked light on or off: every lit shader is built again
+  const offLighting = shared.onLightingChanged((c) => {
+    if (!c.structure) return
+    compiled.reset()
+    compileCheck = true
+  })
+  const offBaked = shared.onBakedChanged(() => {
+    compiled.reset()
+    compileCheck = true
+  })
 
   const emitSceneChanged = (): void => {
     for (const cb of Array.from(sceneListeners)) {
@@ -229,6 +246,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     }, 2500)
   }
   const afterSceneChange = (): void => {
+    compileCheck = true
     emitSceneChanged()
     refreshOutline()
     scheduleCollect()
@@ -337,6 +355,9 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     else shared.setQuality(q)
     if (lib.syncQuality()) pendingSync = true
     currentDpr = 0
+    // other shadow maps and light counts: every shader again
+    compiled.reset()
+    compileCheck = true
     invalidate()
   }
 
@@ -421,6 +442,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       }
     }
     if (archDirty || sceneChanged || moved) updateBounds(plan, doc, levelId)
+    if (archDirty || sceneChanged) compileCheck = true
     lastSyncChanged = sceneChanged || moved
 
     const lightsDirty = !lastDoc || levelChanged || doc.lights !== lastDoc.lights || doc.render !== lastDoc.render
@@ -588,6 +610,19 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     const dt = dtMs / 1000
     try {
       flushSync()
+      if (compiling) {
+        stop()
+        return
+      }
+      if (compileCheck) {
+        compileCheck = false
+        const fresh = compiled.pending(compileRoots())
+        if (fresh.length) {
+          startPrecompile(fresh)
+          stop()
+          return
+        }
+      }
       for (const cb of Array.from(frameListeners)) cb(dt)
       const moving = mods.controls.update(dt) === true
       const ui = uiStore.getState()
@@ -610,6 +645,28 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       dirtyFrames = 0
       stop()
     }
+  }
+
+  function compileRoots(): THREE.Object3D[] {
+    return [roots.architecture, roots.items, roots.lights, roots.electrical]
+  }
+
+  /** compiles the new materials without blocking; the next frame is drawn once they are ready */
+  function startPrecompile(fresh: THREE.Material[]): void {
+    compiling = true
+    const first = !firstCompileDone
+    if (first) setPreparing(true)
+    const t0 = performance.now()
+    void precompile(renderer, scene, camera, compileRoots(), shared.post?.sceneTarget() ?? null).then(() => {
+      compiled.mark(fresh)
+      compiling = false
+      perfRecord(first ? '3d.precompile.first' : '3d.precompile', t0)
+      if (first) {
+        firstCompileDone = true
+        setPreparing(false)
+      }
+      if (!destroyed) invalidate()
+    })
   }
 
   /** closes the open / edit spans once the GPU finished the frame that shows them */
@@ -857,6 +914,8 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       offLiveResize()
       if (collectTimer) clearTimeout(collectTimer)
       baked.dispose()
+      offLighting()
+      offBaked()
       document.removeEventListener('visibilitychange', onVisibility)
       dprQuery?.removeEventListener('change', onDprChange)
       if (mods) disposeSubModules(mods)

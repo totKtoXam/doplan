@@ -1,4 +1,4 @@
-import { detachElectric, duplicateEntities, layerIndex, nearestWallFace, newId, pickableRefs, placeElectricOnWall, remapAccentFace, removeEntities, unlockedRefs } from '@core'
+import { detachElectric, duplicateEntities, layerIndex, nearestWallFace, newId, pickableRefs, placeElectricOnWall, remapAccentFace, remapVoidNodes, removeEntities, unlockedRefs } from '@core'
 import type { Doc, EntityRef, Id, Vec2 } from '@core/types'
 import { t } from '@/i18n'
 import { docStore } from '@/store/document'
@@ -300,6 +300,7 @@ function pasteInto(src: Doc, refs: EntityRef[], srcLevel: Id, d: Doc, level: Id,
     const id = newId('r')
     d.rooms[id] = structuredClone({ ...r, id, levelId: level, anchor: { x: r.anchor.x + dx, y: r.anchor.y + dy } })
     remapAccentFace(d.rooms[id], wallMap)
+    remapVoidNodes(d.rooms[id], nodeMap)
   }
   for (const r of refs) {
     switch (r.kind) {

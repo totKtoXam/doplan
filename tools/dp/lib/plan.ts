@@ -10,13 +10,16 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import sharp from 'sharp'
 import {
   buildDisplayList,
-  compilePlanSpec,
+  compilePlanSpecDetailed,
   type DerivedPlan,
   type Doc,
   derivePlan,
   drawToCanvas,
   parseDoc,
   parsePlanSpec,
+  explainedSeverity,
+  guessAreaCoef,
+  isTechnicalRoom,
   serializeDoc,
   type Underlay,
   validatePlanSpec,
@@ -71,6 +74,8 @@ export function firstLevel(doc: Doc): string {
 export interface Compiled {
   doc: Doc | null
   issues: Issue[]
+  /** spec room id → doc room id */
+  roomIds?: Record<string, string>
 }
 
 /** parse → validate → compile, collecting every problem instead of throwing */
@@ -88,22 +93,25 @@ export function compileSpecJson(spec: SpecJson): Compiled {
     issues.push({ level: 'error', code: 'VALIDATOR_CRASH', msg: errMsg(e) })
   }
   let doc: Doc | null = null
+  let roomIds: Record<string, string> | undefined
   try {
-    doc = compilePlanSpec(parsed)
+    const res = compilePlanSpecDetailed(parsed)
+    doc = res.doc
+    roomIds = res.roomIds
   } catch (e) {
     issues.push({ level: 'error', code: 'COMPILE', msg: errMsg(e) })
   }
-  return { doc, issues }
+  return { doc, issues, roomIds }
 }
 
 /** compile or throw a readable error (used by render / build) */
-export function compileOrThrow(spec: SpecJson): { doc: Doc; issues: Issue[] } {
+export function compileOrThrow(spec: SpecJson): { doc: Doc; issues: Issue[]; roomIds?: Record<string, string> } {
   const c = compileSpecJson(spec)
   if (!c.doc) {
     const first = c.issues.find((i) => i.level === 'error')
     throw new DpError(`cannot compile PlanSpec: ${first ? `${first.code}: ${first.msg}` : 'unknown error'}`, 1, 'run: pnpm dp spec validate <spec.json>')
   }
-  return { doc: c.doc, issues: c.issues }
+  return { doc: c.doc, issues: c.issues, roomIds: c.roomIds }
 }
 
 // ───────────────────────── area metrics ─────────────────────────
@@ -115,8 +123,13 @@ export interface RoomMetric {
   /** m², inner faces, null if the room was not found in the compiled plan */
   computed: number | null
   labelled?: number
+  /** the printed number is computed × coef (BTI loggia 0.5, balcony 0.3) */
+  coef?: number
+  /** computed × coef − labelled */
   delta?: number
   pct?: number
+  /** the author's explanation of a known mismatch (an explained error counts as a warning) */
+  note?: string
   status: 'ok' | 'warn' | 'error' | 'missing' | 'n/a'
 }
 
@@ -138,7 +151,13 @@ export function areaTol(labelled: number): { warn: number; error: number } {
   return { warn: Math.max(0.15, labelled * 0.02), error: Math.max(0.4, labelled * 0.05) }
 }
 
-export function areaMetrics(spec: SpecJson, doc: Doc, plan: DerivedPlan, scale: Scale | null): { metrics: AreaMetrics; issues: Issue[]; faceToSpec: Map<string, string> } {
+export function areaMetrics(
+  spec: SpecJson,
+  doc: Doc,
+  plan: DerivedPlan,
+  scale: Scale | null,
+  roomIds?: Record<string, string>,
+): { metrics: AreaMetrics; issues: Issue[]; faceToSpec: Map<string, string> } {
   const issues: Issue[] = []
   const rooms: RoomMetric[] = []
   const usedFaces = new Map<string, string>()
@@ -154,15 +173,23 @@ export function areaMetrics(spec: SpecJson, doc: Doc, plan: DerivedPlan, scale: 
       if (f === null) mm = scale ? pxToMm(scale, ref) : null
       else mm = [ref[0] * f, ref[1] * f]
     }
-    const face = mm
-      ? plan.rooms.find(
-          (f) => pointInPoly(mm[0], mm[1], f.polygon) && !f.holes.some((h) => pointInPoly(mm[0], mm[1], h)),
-        )
-      : undefined
+    // the compiler knows which face each spec room became; the ref point is only a fallback
+    // (a rect's centre can fall into a cutout)
+    const docId = roomIds?.[r.id]
+    const face =
+      (docId ? plan.rooms.find((f) => f.roomId === docId) : undefined) ??
+      (mm
+        ? plan.rooms.find(
+            (f) => pointInPoly(mm[0], mm[1], f.polygon) && !f.holes.some((h) => pointInPoly(mm[0], mm[1], h)),
+          )
+        : undefined)
     const rName = r.name ?? r.id
     const rType = r.type ?? 'other'
     const m: RoomMetric = { id: r.id, name: rName, type: rType, computed: face ? r2(face.area) : null, status: 'n/a' }
     if (typeof r.labelledArea === 'number') m.labelled = r.labelledArea
+    const k = typeof r.labelledAreaCoef === 'number' && r.labelledAreaCoef > 0 ? r.labelledAreaCoef : 1
+    if (k !== 1) m.coef = k
+    if (typeof r.areaNote === 'string' && r.areaNote.trim()) m.note = r.areaNote.trim()
     if (!face) {
       m.status = 'missing'
       issues.push({
@@ -183,20 +210,26 @@ export function areaMetrics(spec: SpecJson, doc: Doc, plan: DerivedPlan, scale: 
       } else {
         usedFaces.set(face.roomId, r.id)
         const coef = r.balcony === true ? 0.3 : SUMMER_COEF[rType]
-        grossArea += face.area
-        if (coef !== undefined) totalArea += face.area * coef
-        else {
-          totalArea += face.area
-          roomsArea += face.area
+        // a shaft / box void (marked technical, or a tiny non-specific area) is no floor
+        const rec = doc.rooms[face.roomId]
+        const tech = (r.technical === true || rec?.technical === true) && isTechnicalRoom(rec?.type, face.area, true)
+        if (!tech) {
+          grossArea += face.area
+          if (coef !== undefined) totalArea += face.area * coef
+          else {
+            totalArea += face.area
+            roomsArea += face.area
+          }
+          if (LIVING_TYPES.has(rType)) livingArea += face.area
         }
-        if (LIVING_TYPES.has(rType)) livingArea += face.area
       }
       if (m.labelled !== undefined) {
-        const d = face.area - m.labelled
+        const d = face.area * k - m.labelled
         m.delta = r2(d)
         m.pct = m.labelled > 0 ? Math.round((d / m.labelled) * 1000) / 10 : undefined
         const tol = areaTol(m.labelled)
-        m.status = Math.abs(d) > tol.error ? 'error' : Math.abs(d) > tol.warn ? 'warn' : 'ok'
+        const raw = Math.abs(d) > tol.error ? 'error' : Math.abs(d) > tol.warn ? 'warn' : 'ok'
+        m.status = raw === 'error' && m.note ? 'warn' : raw
       } else m.status = 'ok'
     }
     rooms.push(m)
@@ -217,10 +250,17 @@ export function areaMetrics(spec: SpecJson, doc: Doc, plan: DerivedPlan, scale: 
   }
   for (const m of rooms) {
     if (m.status === 'warn' || m.status === 'error') {
+      const r = spec.rooms.find((x) => x.id === m.id)
+      const outdoor = r?.balcony === true || SUMMER_COEF[m.type] !== undefined
+      const guess = !m.coef && outdoor && m.computed !== null && m.labelled !== undefined ? guessAreaCoef(m.computed, m.labelled) : null
+      const shown = m.coef ? `${m.computed?.toFixed(2)} m² × ${m.coef} = ${((m.computed ?? 0) * m.coef).toFixed(2)} m²` : `${m.computed?.toFixed(2)} m²`
       issues.push({
         level: m.status,
         code: 'AREA_MISMATCH',
-        msg: `${m.name} (${m.id}): computed ${m.computed?.toFixed(2)} m² vs labelled ${m.labelled?.toFixed(2)} m² (${m.delta && m.delta > 0 ? '+' : ''}${m.delta?.toFixed(2)} m², ${m.pct}%)`,
+        msg:
+          `${m.name} (${m.id}): computed ${shown} vs labelled ${m.labelled?.toFixed(2)} m² (${m.delta && m.delta > 0 ? '+' : ''}${m.delta?.toFixed(2)} m², ${m.pct}%)` +
+          (guess ? ` — the label looks like BTI area ×${guess}: set labelledAreaCoef: ${guess} (real depth = labelled / ${guess} / length)` : '') +
+          (m.note ? ` — explained: ${m.note}` : ''),
         ids: [m.id],
       })
     }
@@ -233,20 +273,35 @@ export function areaMetrics(spec: SpecJson, doc: Doc, plan: DerivedPlan, scale: 
     const dAlt = alt !== undefined ? alt - labelled : Number.POSITIVE_INFINITY
     const best = Math.abs(dAlt) < Math.abs(d) ? dAlt : d
     if (Math.abs(best) > tol.warn) {
+      const note = typeof src.areaNote === 'string' && src.areaNote.trim() ? src.areaNote.trim() : undefined
       issues.push({
-        level: Math.abs(best) > tol.error ? 'error' : 'warn',
+        level: explainedSeverity(Math.abs(best) > tol.error ? 'error' : 'warning', note) === 'error' ? 'error' : 'warn',
         code,
-        msg: `${label}: computed ${(labelled + best).toFixed(2)} m² vs labelled ${labelled.toFixed(2)} m² (${best > 0 ? '+' : ''}${best.toFixed(2)})`,
+        msg: `${label}: computed ${(labelled + best).toFixed(2)} m² vs labelled ${labelled.toFixed(2)} m² (${best > 0 ? '+' : ''}${best.toFixed(2)})${note ? ` — explained: ${note}` : ''}`,
       })
     }
   }
   totalCheck('TOTAL_AREA_MISMATCH', 'total area (balcony ×0.3, loggia ×0.5)', metrics.totalArea, metrics.labelledTotalArea, metrics.roomsArea)
   totalCheck('LIVING_AREA_MISMATCH', 'living area', metrics.livingArea, metrics.labelledLivingArea)
-  if (unmatchedFaces.length) {
+  // shaft / box voids and other < 1 m² technical niches are expected, not a forgotten room
+  const technical = (f: { roomId: string; area: number }) => {
+    const rec = doc.rooms[f.roomId]
+    return rec ? isTechnicalRoom(rec.type, f.area, rec.technical) : f.area < 1
+  }
+  const realUnmatched = unmatchedFaces.filter((f) => !technical(f))
+  const techUnmatched = unmatchedFaces.filter(technical)
+  if (realUnmatched.length) {
     issues.push({
       level: 'warn',
       code: 'UNLABELLED_FACE',
-      msg: `${unmatchedFaces.length} closed area(s) of the compiled plan have no room in the spec: ${unmatchedFaces.map((f) => `${f.area} m²`).join(', ')}`,
+      msg: `${realUnmatched.length} closed area(s) of the compiled plan have no room in the spec: ${realUnmatched.map((f) => `${f.area} m²`).join(', ')}`,
+    })
+  }
+  if (techUnmatched.length) {
+    issues.push({
+      level: 'info',
+      code: 'TECHNICAL_FACE',
+      msg: `${techUnmatched.length} technical void(s) (shaft / box / column void, or a niche < 1 m²): ${techUnmatched.map((f) => `${f.name ?? 'void'} ${f.area} m²`).join(', ')}`,
     })
   }
   return { metrics, issues, faceToSpec: usedFaces }

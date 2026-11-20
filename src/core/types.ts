@@ -294,6 +294,17 @@ export interface Room extends LayerFlags {
   skirtingMaterialId?: Id
   /** area printed on the source plan, m² (computed-vs-labelled report) */
   labelledArea?: number
+  /**
+   * a technical void, not floor (the inside of a shaft / riser box / column cut out of a room): left
+   * out of every area total whatever its size, as long as the type stays non-specific (other / storage)
+   */
+  technical?: boolean
+  /**
+   * technical voids only: the nodes of the void's face as last seen (kept by syncRooms). A void
+   * record follows its walls by these nodes, not by its anchor, so dragging the void's walls never
+   * hands its role to the room around it or loses it
+   */
+  voidNodes?: Id[]
   /** design layer: style the room was dressed in (core/styles) */
   design?: RoomDesign
 }
@@ -825,6 +836,12 @@ export const DOC_VERSION_VARIANTS = 2
  * doplan 0.12 accepts format 2 and would silently drop this data, so it must refuse the file.
  */
 export const DOC_VERSION_V3 = 3
+/**
+ * Format 4: technical voids (`Room.technical` — the shaft / box / column void of a PlanSpec cutout,
+ * left out of every area total whatever its size). doplan 0.13–0.14 accept format 3 and would drop
+ * the flag on save, counting a 2 m² shaft as floor, so they must refuse the file.
+ */
+export const DOC_VERSION_V4 = 4
 
 export interface Doc {
   version: number
@@ -984,6 +1001,8 @@ export interface DerivedRoom {
   holes: Vec2[][]
   /** centreline polygon (through nodes) */
   centerline: Vec2[]
+  /** the nodes of the centreline polygon */
+  nodes?: Id[]
   edges: RoomBoundaryEdge[]
   /** m² measured by inner faces */
   area: number

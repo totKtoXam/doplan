@@ -269,7 +269,7 @@ export function unmeasuredChecklist(doc: Pick<Doc, 'walls' | 'rooms'>, plan: Der
   for (const room of plan.rooms) {
     const rec = doc.rooms[room.roomId]
     const type: RoomType = rec?.type ?? 'other'
-    if (isTechnicalRoom(rec?.type, room.area)) continue
+    if (isTechnicalRoom(rec?.type, room.area, rec?.technical)) continue
     const name = rec?.name || ROOM_TYPE_NAMES[type].ru
     for (const run of roomEdgeRuns(room)) {
       const prov = runProvenance(doc, run)
@@ -566,7 +566,7 @@ export function sourceAreaChecks(doc: Pick<Doc, 'rooms' | 'source'>, plan: Deriv
   let missing = 0
   for (const room of plan.rooms) {
     const rec = doc.rooms[room.roomId]
-    if (!rec || isTechnicalRoom(rec.type, room.area)) continue
+    if (!rec || isTechnicalRoom(rec.type, room.area, rec.technical)) continue
     if (rec.labelledArea === undefined) {
       missing++
       continue

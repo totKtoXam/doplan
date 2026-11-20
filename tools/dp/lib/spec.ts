@@ -31,6 +31,8 @@ export interface SpecSource {
   labelledTotalArea?: number
   labelledLivingArea?: number
   toScale?: boolean
+  /** why the computed total / living area legitimately differs from the printed one */
+  areaNote?: string
   [k: string]: unknown
 }
 
@@ -55,6 +57,14 @@ export interface SpecRoom {
   polygon?: Pt[]
   at?: Pt
   labelledArea?: number
+  /** the printed area is clear area × this (BTI: loggia 0.5, balcony 0.3) */
+  labelledAreaCoef?: number
+  /** why the computed area legitimately differs from the printed one */
+  areaNote?: string
+  /** shafts / boxes / columns cut out of the room: rect in plan coordinates, inside the room */
+  cutouts?: { rect: number[]; kind?: string; wall?: number; name?: string }[]
+  /** not floor: a shaft / box void drawn as its own area (left out of the totals) */
+  technical?: boolean
   ceilingHeight?: number
   edgeWall?: { kind: string; thickness?: number; height?: number }
   confidence?: number

@@ -19,6 +19,8 @@ import { DOOR_LEAF_STYLES, DOOR_SLIDES } from './types'
 import { BUILTIN_ASSETS, createEmptyDoc, defaultRoom, OPENING_DEFAULTS, ROOM_TYPE_NAMES } from './defaults'
 import { addItem, addOpening, addWall, normalize, syncRooms } from './ops'
 import { derivePlan } from './derive'
+import { MIN_FACE_AREA } from './rooms'
+import * as legacy from './planspecBase'
 import { newId } from './ids'
 import { makeProvenance } from './provenance'
 
@@ -118,6 +120,8 @@ export interface PlanSource {
   /** m² as printed */
   labelledTotalArea?: number
   labelledLivingArea?: number
+  /** honest explanation of a remaining total / living area mismatch */
+  areaNote?: string
   toScale?: boolean
 }
 
@@ -166,12 +170,37 @@ export interface WallSpec {
   confidence?: number
   /** provenance of the faces along this wall: one value, or one per path segment */
   source?: SpecDimSource | SpecDimSource[]
+  /**
+   * a wall around a technical void (a shaft / box / column cutout), as `doc spec` writes it: it is
+   * never bridged with a collinear wall across a strip of floor, and it may be thicker than the
+   * exterior walls (a column filled by its walls)
+   */
+  cutout?: boolean
 }
 
 export interface EdgeWallSpec {
   kind: SpecWallKind
   thickness?: number
   height?: number
+}
+
+export const SPEC_CUTOUT_KINDS = ['shaft', 'column', 'box'] as const
+export type SpecCutoutKind = (typeof SPEC_CUTOUT_KINDS)[number]
+
+/**
+ * Something that takes floor area away from a rooms-mode room: a ventilation shaft / riser box in a
+ * corner, a column, a boxed pipe. `rect` is its OUTER footprint as seen from the room (spec units),
+ * i.e. what is not floor. The compiler subtracts it from the room and builds its walls: sides that
+ * face the room get a wall of `wall` mm inside the footprint; sides on the room's own outline keep the
+ * wall the room has there. What is left inside is a technical void (a solid column item for
+ * `column` / `box`).
+ */
+export interface CutoutSpec {
+  rect: number[]
+  kind?: SpecCutoutKind
+  /** mm, thickness of the shaft / box walls facing the room (default `defaults.partitionThickness`) */
+  wall?: number
+  name?: string
 }
 
 export interface RoomSpec {
@@ -188,6 +217,20 @@ export interface RoomSpec {
   at?: PlanPoint
   /** m² as printed */
   labelledArea?: number
+  /**
+   * the printed area already includes a reduction coefficient (БТИ: loggia 0.5, balcony / terrace 0.3):
+   * labelledArea = clear area × labelledAreaCoef. Only for the check; the geometry stays real.
+   */
+  labelledAreaCoef?: number
+  /** honest explanation of a remaining area mismatch (lets `dp spec build` proceed) */
+  areaNote?: string
+  /** shafts, columns, boxes cut out of the floor (rooms-mode) */
+  cutouts?: CutoutSpec[]
+  /**
+   * not floor: the inside of a shaft / riser box drawn as its own closed area (`dp doc spec` writes it
+   * for cutout voids). Left out of the totals, the reachability check and the area check.
+   */
+  technical?: boolean
   /** where the clear dimensions of the sides come from (see SpecRoomDimSources) */
   source?: SpecRoomDimSources
   /** mm */
@@ -289,10 +332,17 @@ export interface PlanIssue {
 
 export interface PlanRoomMetric {
   id: string
+  /** clear floor area, m² (cutouts subtracted) */
   computed: number
+  /** as printed */
   labelled?: number
+  /** the printed number is clear area × coef (BTI loggia 0.5, balcony 0.3) */
+  coef?: number
+  /** computed × coef − labelled */
   delta?: number
   pct?: number
+  /** the author's explanation of a known mismatch */
+  note?: string
 }
 
 export interface PlanValidation {
@@ -714,6 +764,7 @@ function coerceSpec(raw: unknown, c: Coercer): PlanSpec {
         originPx: c.numArr(s, 'originPx', '$.source', 2),
         labelledTotalArea: c.num(s, 'labelledTotalArea', '$.source'),
         labelledLivingArea: c.num(s, 'labelledLivingArea', '$.source'),
+        areaNote: c.str(s, 'areaNote', '$.source'),
         toScale: c.bool(s, 'toScale', '$.source'),
       })
       const cal = c.arr(s, 'calibration', '$.source')
@@ -795,6 +846,7 @@ function coerceSpec(raw: unknown, c: Coercer): PlanSpec {
         height: c.num(w, 'height', p),
         confidence: c.num(w, 'confidence', p),
         source: c.dimSources(w, 'source', p, false) as SpecDimSource | SpecDimSource[] | undefined,
+        cutout: c.bool(w, 'cutout', p),
       })
       if (path) spec.walls!.push(ws)
     })
@@ -817,6 +869,28 @@ function coerceSpec(raw: unknown, c: Coercer): PlanSpec {
           })
       }
     }
+    let cutouts: CutoutSpec[] | undefined
+    const cuts = c.arr(r, 'cutouts', p)
+    if (cuts) {
+      cutouts = []
+      cuts.forEach((cu, k) => {
+        const cp = `${p}.cutouts[${k}]`
+        if (!isObj(cu)) return c.err(cp, 'вырез должен быть объектом {rect, kind?, wall?}')
+        const rect = c.numArr(cu, 'rect', cp, 4, true)
+        if (!rect) return
+        if (rect[2] <= 0 || rect[3] <= 0) return c.err(`${cp}.rect`, 'у выреза ширина и высота должны быть > 0')
+        cutouts!.push(
+          strip({
+            rect,
+            kind: c.oneOf(cu, 'kind', cp, SPEC_CUTOUT_KINDS),
+            wall: c.num(cu, 'wall', cp),
+            name: c.str(cu, 'name', cp),
+          }),
+        )
+      })
+    }
+    const coef = c.num(r, 'labelledAreaCoef', p)
+    if (coef !== undefined && !(coef > 0 && coef <= 1)) c.err(`${p}.labelledAreaCoef`, '«labelledAreaCoef» должен быть в (0, 1]')
     spec.rooms.push(
       strip({
         id: c.str(r, 'id', p) ?? `room${i + 1}`,
@@ -827,6 +901,10 @@ function coerceSpec(raw: unknown, c: Coercer): PlanSpec {
         polygon: c.pts(r, 'polygon', p, 3),
         at: c.numArr(r, 'at', p, 2),
         labelledArea: c.num(r, 'labelledArea', p),
+        labelledAreaCoef: coef,
+        areaNote: c.str(r, 'areaNote', p),
+        cutouts,
+        technical: c.bool(r, 'technical', p),
         source: c.dimSources(r, 'source', p, true),
         ceilingHeight: c.num(r, 'ceilingHeight', p),
         edgeWall,
@@ -1022,6 +1100,8 @@ const DOOR_LIKE: OpeningKind[] = ['door', 'doubleDoor', 'slidingDoor', 'entrance
 const WINDOW_LIKE: OpeningKind[] = ['window', 'frenchWindow', 'balconyDoor', 'balconyBlock']
 const STANDARD_THICKNESS = [80, 100, 120, 150, 160, 180, 200, 250, 300, 380, 400, 510, 640]
 const MAX_GAP = 700
+/** mm: a cutout side this close to the room outline / another cutout is snapped onto it */
+const CUTOUT_SNAP = 30
 const AREA_COEF: Partial<Record<SpecRoomType, number>> = { balcony: 0.3, loggia: 0.5, terrace: 0.3 }
 
 const isOutdoor = (r: RoomSpec): boolean => r.balcony === true || OUTDOOR_TYPES.includes(r.type ?? 'other')
@@ -1144,8 +1224,600 @@ function roomPolygonMm(r: RoomSpec, U: UnitConv, snap: PlanSnap | undefined): Ve
 
 function roomRefPoint(r: RoomSpec, U: UnitConv, snap: PlanSnap | undefined): Vec2 | null {
   if (r.at && r.at.length === 2) return U.pt(r.at)
+  if (r.cutouts?.length) return roomShapeMm(r, U, snap)?.ref ?? null
   const poly = roomPolygonMm(r, U, snap)
   return poly ? interiorPoint(poly) : null
+}
+
+// ───────────────────────────── cutouts (shafts, columns) ─────────────────────────────
+
+interface Box {
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+}
+
+/** a technical void left inside the cutouts once their walls are built */
+interface CutVoid {
+  /** CCW polygon of the void */
+  poly: Vec2[]
+  kind: SpecCutoutKind
+  /** index in the room's `cutouts` of the cutout holding the void */
+  index: number
+  /** that cutout as snapped (void + its walls) */
+  cut: Box
+}
+
+interface RoomShape {
+  /** the room as written (rect / polygon), CCW */
+  base: Vec2[]
+  /** clear floor outline after the cutouts touching the outline, CCW */
+  outer: Vec2[]
+  /** cutouts inside the floor (free-standing columns) */
+  holes: Vec2[][]
+  voids: CutVoid[]
+  /** the walls of the cutouts: along every side between the floor and a cutout, inside the cutout */
+  walls: Seg[]
+  /** clear floor area, mm² */
+  area: number
+  /** a point on the floor (not in a cutout) */
+  ref: Vec2
+  problems: { code: string; message: string; severity: PlanIssueSeverity }[]
+  /** the holes the built floor has: cutouts of one hole touching over a piece no longer than the
+   *  shape tolerance (or at a corner) are holes of their own there, as the built walls make them */
+  holeParts?: number
+}
+
+/** between two touching cutouts of different kinds, the wall stands in the one ranked higher (a column is solid) */
+const CUT_RANK: Record<SpecCutoutKind, number> = { shaft: 1, box: 2, column: 3 }
+/** mm: the thickest wall a column is filled with (the thickest standard wall); the rest stays a technical void */
+const COLUMN_WALL_MAX = 640
+
+const isOrthoPoly = (poly: Vec2[]): boolean =>
+  poly.every((p, i) => {
+    const q = poly[(i + 1) % poly.length]
+    return Math.abs(p.x - q.x) < 0.5 || Math.abs(p.y - q.y) < 0.5
+  })
+
+/** boundary rings of the filled cells of a rectilinear grid; outer rings CCW (signed area > 0), holes CW */
+function cellRings(xs: number[], ys: number[], filled: (i: number, j: number) => boolean): Vec2[][] {
+  type GEdge = { a: string; b: string; cell: number }
+  const nj = ys.length - 1
+  const edges = new Map<string, GEdge>()
+  const add = (a: string, b: string, cell: number) => {
+    if (edges.has(`${b}>${a}`)) edges.delete(`${b}>${a}`)
+    else edges.set(`${a}>${b}`, { a, b, cell })
+  }
+  for (let i = 0; i + 1 < xs.length; i++)
+    for (let j = 0; j + 1 < ys.length; j++) {
+      if (!filled(i, j)) continue
+      const cell = i * nj + j
+      add(`${i},${j}`, `${i + 1},${j}`, cell)
+      add(`${i + 1},${j}`, `${i + 1},${j + 1}`, cell)
+      add(`${i + 1},${j + 1}`, `${i},${j + 1}`, cell)
+      add(`${i},${j + 1}`, `${i},${j}`, cell)
+    }
+  // connected parts of the filled cells (edge-adjacent)
+  const comp = new Map<number, number>()
+  for (let i = 0; i + 1 < xs.length; i++)
+    for (let j = 0; j + 1 < ys.length; j++) {
+      if (!filled(i, j) || comp.has(i * nj + j)) continue
+      const id = comp.size
+      const stack: [number, number][] = [[i, j]]
+      comp.set(i * nj + j, id)
+      while (stack.length) {
+        const [ci, cj] = stack.pop()!
+        for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const ni = ci + di
+          const nj2 = cj + dj
+          if (ni < 0 || nj2 < 0 || ni + 1 >= xs.length || nj2 + 1 >= ys.length) continue
+          if (!filled(ni, nj2) || comp.has(ni * nj + nj2)) continue
+          comp.set(ni * nj + nj2, id)
+          stack.push([ni, nj2])
+        }
+      }
+    }
+  const out = new Map<string, GEdge[]>()
+  for (const e of edges.values()) {
+    const l = out.get(e.a) ?? []
+    l.push(e)
+    out.set(e.a, l)
+  }
+  const pt = (k: string): Vec2 => {
+    const [i, j] = k.split(',').map(Number)
+    return V(xs[i], ys[j])
+  }
+  const rings: Vec2[][] = []
+  const used = new Set<GEdge>()
+  for (const start of edges.values()) {
+    if (used.has(start)) continue
+    const ring: Vec2[] = []
+    let e: GEdge | undefined = start
+    while (e && !used.has(e)) {
+      used.add(e)
+      ring.push(pt(e.a))
+      const cur: GEdge = e
+      const nexts = (out.get(cur.b) ?? []).filter((x) => x === start || !used.has(x))
+      // a pinch vertex: two filled cells touch diagonally. If they are connected elsewhere, the two
+      // empty regions are separate (a hole touching the outline): cross over to the other cell.
+      // Otherwise the filled parts are separate rings: stay with the same cell.
+      if (nexts.length > 1) {
+        const other = nexts.find((x) => x.cell !== cur.cell)
+        const same = nexts.find((x) => x.cell === cur.cell)
+        const connected = other !== undefined && comp.get(other.cell) === comp.get(cur.cell)
+        e = (connected ? other : same) ?? nexts[0]
+      } else e = nexts[0]
+      if (e === start) break
+    }
+    // drop collinear vertices
+    const clean = ring.filter((p, i) => {
+      const a = ring[(i - 1 + ring.length) % ring.length]
+      const b = ring[(i + 1) % ring.length]
+      return !((Math.abs(a.x - p.x) < 1e-6 && Math.abs(b.x - p.x) < 1e-6) || (Math.abs(a.y - p.y) < 1e-6 && Math.abs(b.y - p.y) < 1e-6))
+    })
+    if (clean.length >= 4) rings.push(clean)
+  }
+  return rings
+}
+
+/**
+ * The room's real floor: its rect / polygon minus `cutouts`, a boolean of rectilinear polygons on the
+ * grid of their coordinates (no logic depends on which way the plan is turned). Cutouts that touch
+ * the outline become notches of `outer`; cutouts inside the floor become `holes`.
+ *
+ * The walls of the cutouts come from that floor alone, by one rule: every side between the floor and
+ * a cutout gets the cutout's wall, inside the cutout (between two touching cutouts of different kinds,
+ * inside the higher ranked one: a column is solid). A cutout side on the room outline gets no wall of
+ * its own — the outline wall, built as if there were no cutouts, closes it. Walls meeting at a corner
+ * are joined there; a wall ending on the outline is joined to the outline wall later (joinEnds). What
+ * is left inside a cutout is its technical void.
+ */
+function roomShapeMm(r: RoomSpec, U: UnitConv, snap: PlanSnap | undefined, partition = 100, wallHeight = 2700): RoomShape | null {
+  const base = roomPolygonMm(r, U, snap)
+  if (!base) return null
+  const plain = (): RoomShape => ({ base, outer: base, holes: [], voids: [], walls: [], area: Math.abs(signedArea(base)), ref: interiorPoint(base), problems: [] })
+  if (!r.cutouts?.length) return plain()
+  const cutouts = r.cutouts
+  const problems: RoomShape['problems'] = []
+  if (!isOrthoPoly(base)) {
+    const s = plain()
+    s.problems.push({
+      severity: 'warning',
+      code: 'CUTOUT_UNSUPPORTED',
+      message: `Комната «${r.id}»: вырезы поддерживаются только у прямоугольных (ортогональных) комнат — вырезы пропущены`,
+    })
+    return s
+  }
+  // a side within CUTOUT_SNAP of the room outline (or of an earlier cutout) is snapped onto it: a
+  // cutout drawn a few mm past the wall, or a few mm short of it, is a misread, not a sliver of floor
+  const vEdges: { x: number; y0: number; y1: number }[] = []
+  const hEdges: { y: number; x0: number; x1: number }[] = []
+  base.forEach((p, i) => {
+    const q = base[(i + 1) % base.length]
+    if (Math.abs(p.x - q.x) < 0.5) vEdges.push({ x: p.x, y0: Math.min(p.y, q.y), y1: Math.max(p.y, q.y) })
+    else hEdges.push({ y: p.y, x0: Math.min(p.x, q.x), x1: Math.max(p.x, q.x) })
+  })
+  const snapTo = (v: number, cands: number[]): number => {
+    let best = v
+    let bestD = CUTOUT_SNAP + 1e-6
+    for (const c of cands)
+      if (Math.abs(c - v) < bestD - 1e-9 || (Math.abs(Math.abs(c - v) - bestD) <= 1e-9 && c < best)) {
+        best = c
+        bestD = Math.abs(c - v)
+      }
+    return best
+  }
+  const boxes: Box[] = []
+  cutouts.forEach((c, k) => {
+    const p0 = U.pt([c.rect[0], c.rect[1]])
+    const p1 = U.pt([c.rect[0] + c.rect[2], c.rect[1] + c.rect[3]])
+    const raw: Box = { x0: Math.min(p0.x, p1.x), y0: Math.min(p0.y, p1.y), x1: Math.max(p0.x, p1.x), y1: Math.max(p0.y, p1.y) }
+    const overlapsY = (a0: number, a1: number) => a0 < raw.y1 - 1 && a1 > raw.y0 + 1
+    const overlapsX = (a0: number, a1: number) => a0 < raw.x1 - 1 && a1 > raw.x0 + 1
+    // an outline edge that only reaches the cutout's span (an inner corner's edge ending a few mm
+    // off it) is a candidate too: a cutout misread past a reflex vertex snaps onto it
+    const nearY = (a0: number, a1: number) => a0 <= raw.y1 + CUTOUT_SNAP && a1 >= raw.y0 - CUTOUT_SNAP
+    const nearX = (a0: number, a1: number) => a0 <= raw.x1 + CUTOUT_SNAP && a1 >= raw.x0 - CUTOUT_SNAP
+    const xc = [
+      ...vEdges.filter((e) => nearY(e.y0, e.y1)).map((e) => e.x),
+      ...boxes.filter((o) => overlapsY(o.y0, o.y1)).flatMap((o) => [o.x0, o.x1]),
+    ]
+    const yc = [
+      ...hEdges.filter((e) => nearX(e.x0, e.x1)).map((e) => e.y),
+      ...boxes.filter((o) => overlapsX(o.x0, o.x1)).flatMap((o) => [o.y0, o.y1]),
+    ]
+    let b: Box = { x0: snapTo(raw.x0, xc), x1: snapTo(raw.x1, xc), y0: snapTo(raw.y0, yc), y1: snapTo(raw.y1, yc) }
+    if (b.x1 - b.x0 < 1 || b.y1 - b.y0 < 1) b = raw
+    const moved = Math.max(Math.abs(b.x0 - raw.x0), Math.abs(b.x1 - raw.x1), Math.abs(b.y0 - raw.y0), Math.abs(b.y1 - raw.y1))
+    if (moved > 0.5)
+      problems.push({
+        severity: 'info',
+        code: 'CUTOUT_SNAPPED',
+        message: `Комната «${r.id}»: вырез #${k + 1} подогнан к контуру комнаты / соседнему вырезу (сдвиг до ${Math.round(moved)} мм)`,
+      })
+    boxes.push(b)
+  })
+  const kindOf = (k: number): SpecCutoutKind => cutouts[k].kind ?? 'shaft'
+  const bx = base.map((p) => p.x)
+  const by = base.map((p) => p.y)
+  const minX = Math.min(...bx)
+  const maxX = Math.max(...bx)
+  const minY = Math.min(...by)
+  const maxY = Math.max(...by)
+  const clampX = (v: number) => Math.min(maxX, Math.max(minX, v))
+  const clampY = (v: number) => Math.min(maxY, Math.max(minY, v))
+  const uniq = (v: number[]) => [...new Set(v.map((x) => Math.round(x * 1000) / 1000))].sort((a, b) => a - b)
+  const xs = uniq([...bx, ...boxes.flatMap((b) => [clampX(b.x0), clampX(b.x1)])])
+  const ys = uniq([...by, ...boxes.flatMap((b) => [clampY(b.y0), clampY(b.y1)])])
+  const inBox = (p: Vec2, b: Box) => p.x > b.x0 && p.x < b.x1 && p.y > b.y0 && p.y < b.y1
+  const nI = xs.length - 1
+  const nJ = ys.length - 1
+  /** each cell: -1 outside the room, 0 floor, k + 1 cutout k */
+  const cls: number[][] = []
+  let area = 0
+  let best = { a: -1, c: V(0, 0) }
+  // each cutout's own area inside the room (overlaps counted for both: that is checked separately)
+  const cutInHost = boxes.map(() => 0)
+  for (let i = 0; i < nI; i++) {
+    cls.push([])
+    for (let j = 0; j < nJ; j++) {
+      const c = V((xs[i] + xs[i + 1]) / 2, (ys[j] + ys[j + 1]) / 2)
+      const a = (xs[i + 1] - xs[i]) * (ys[j + 1] - ys[j])
+      const h = pointInPoly(c, base)
+      let first = -1
+      boxes.forEach((b, k) => {
+        if (!inBox(c, b)) return
+        if (first < 0) first = k
+        if (h) cutInHost[k] += a
+      })
+      cls[i].push(!h ? -1 : first >= 0 ? first + 1 : 0)
+      if (h && first < 0) {
+        area += a
+        if (a > best.a) best = { a, c }
+      }
+    }
+  }
+  const at = (i: number, j: number): number => (i < 0 || j < 0 || i >= nI || j >= nJ ? -1 : cls[i][j])
+  boxes.forEach((b, k) => {
+    const full = (b.x1 - b.x0) * (b.y1 - b.y0)
+    // after snapping, any part outside the room is a real error (it would leave the room open)
+    if (full - cutInHost[k] > 1)
+      problems.push({
+        severity: 'error',
+        code: 'CUTOUT_OUTSIDE',
+        message: `Комната «${r.id}»: вырез #${k + 1} выходит за контур комнаты на ${((full - cutInHost[k]) / 1e6).toFixed(full - cutInHost[k] < 1e4 ? 4 : 2)} м² — rect выреза задаётся внутри комнаты`,
+      })
+    for (let m = 0; m < k; m++) {
+      const o = boxes[m]
+      const ov = Math.max(0, Math.min(b.x1, o.x1) - Math.max(b.x0, o.x0)) * Math.max(0, Math.min(b.y1, o.y1) - Math.max(b.y0, o.y0))
+      if (ov > 1)
+        problems.push({
+          severity: 'error',
+          code: 'CUTOUT_OVERLAP',
+          message: `Комната «${r.id}»: вырезы #${m + 1} и #${k + 1} перекрываются на ${(ov / 1e6).toFixed(2)} м² — Г-образную шахту задайте прямоугольниками вплотную, без перекрытия`,
+        })
+    }
+  })
+  const rings = cellRings(xs, ys, (i, j) => cls[i][j] === 0)
+  const outers = rings.filter((g) => signedArea(g) > 0).sort((a, b) => signedArea(b) - signedArea(a))
+  const holes = rings.filter((g) => signedArea(g) < 0)
+  if (!outers.length) {
+    const s = plain()
+    s.problems.push({ severity: 'error', code: 'CUTOUT_OUTSIDE', message: `Комната «${r.id}»: вырезы закрывают всю комнату` })
+    return s
+  }
+  if (outers.length > 1)
+    problems.push({
+      severity: 'error',
+      code: 'CUTOUT_SPLITS_ROOM',
+      message: `Комната «${r.id}»: вырезы делят комнату на ${outers.length} части — это разные комнаты или вырез задан неверно`,
+    })
+
+  // ── the walls of the cutouts
+  /** the wall between two touching cutouts of different kinds stands in the higher-ranked one */
+  const byRank = (c1: number, c2: number): number => {
+    const r1 = CUT_RANK[kindOf(c1 - 1)]
+    const r2 = CUT_RANK[kindOf(c2 - 1)]
+    // touching cutouts of one kind are one cutout (an L-shaped shaft as two rects)
+    if (r1 === r2) return -1
+    return r1 > r2 ? c1 - 1 : c2 - 1
+  }
+  // ... except at a reflex corner of the outline where one of the two touches the outside and the
+  // floor lies diagonally across from it: there the wall goes into that one, so that its end runs on
+  // into the outline wall and the other cutout's floor wall meets it. With the wall in the other
+  // cutout the floor and the void would touch at the corner point only, and the void leaked into
+  // the floor
+  const forced = new Map<string, number>()
+  const pairKey = (c1: number, c2: number) => (c1 < c2 ? `${c1},${c2}` : `${c2},${c1}`)
+  // two cutouts sharing only a part of a side each (staggered, neither side lies on the other in
+  // full) are two cutouts, each with its own walls, back to back on the shared part: a union of them
+  // has a step there shorter than the walls, which the walls cannot follow. A side lying in full on
+  // the other cutout (an L- or T-shaped shaft drawn as two rects) keeps the union / rank rule
+  const staggered = (k1: number, k2: number): boolean => {
+    const a = boxes[k1]
+    const b = boxes[k2]
+    const part = (p0: number, p1: number, q0: number, q1: number) => {
+      const s = Math.min(p1, q1) - Math.max(p0, q0)
+      return s > 0.5 && s < p1 - p0 - 0.5 && s < q1 - q0 - 0.5
+    }
+    if (Math.abs(a.x1 - b.x0) < 0.5 || Math.abs(b.x1 - a.x0) < 0.5) return part(a.y0, a.y1, b.y0, b.y1)
+    if (Math.abs(a.y1 - b.y0) < 0.5 || Math.abs(b.y1 - a.y0) < 0.5) return part(a.x0, a.x1, b.x0, b.x1)
+    return false
+  }
+  const apart = new Set<string>()
+  for (let k = 0; k < boxes.length; k++) for (let m = 0; m < k; m++) if (staggered(k, m)) apart.add(pairKey(k + 1, m + 1))
+  for (let i = 0; i <= nI; i++)
+    for (let j = 0; j <= nJ; j++) {
+      // the cells around grid point i,j in turn: -x-y, +x-y, +x+y, -x+y
+      const q = [at(i - 1, j - 1), at(i, j - 1), at(i, j), at(i - 1, j)]
+      for (let k = 0; k < 4; k++) {
+        const B = q[k]
+        if (B <= 0 || q[(k + 2) % 4] !== 0) continue
+        for (const [A, O] of [[q[(k + 1) % 4], q[(k + 3) % 4]], [q[(k + 3) % 4], q[(k + 1) % 4]]])
+          if (A > 0 && A !== B && O === -1 && byRank(A, B) >= 0 && !apart.has(pairKey(A, B))) forced.set(pairKey(A, B), B - 1)
+      }
+    }
+  /** the cutout whose wall stands on the side between cells of classes c1 and c2 (-1: no wall) */
+  const owner = (c1: number, c2: number): number => {
+    if (c1 === c2 || c1 < 0 || c2 < 0) return -1
+    if (c1 === 0) return c2 - 1
+    if (c2 === 0) return c1 - 1
+    const b = byRank(c1, c2)
+    return b < 0 ? b : (forced.get(pairKey(c1, c2)) ?? b)
+  }
+  /** every cutout with a wall on the side between cells of classes c1 and c2 (both, back to back, for a staggered pair) */
+  const owners = (c1: number, c2: number): number[] => {
+    if (c1 > 0 && c2 > 0 && c1 !== c2 && apart.has(pairKey(c1, c2))) return [c1 - 1, c2 - 1]
+    const o = owner(c1, c2)
+    return o < 0 ? [] : [o]
+  }
+  // which sides of each cutout carry a wall (its thickness: the walls must leave room for a void)
+  const walled = boxes.map(() => ({ x0: false, x1: false, y0: false, y1: false }))
+  for (let i = 0; i <= nI; i++)
+    for (let j = 0; j < nJ; j++) for (const o of owners(at(i - 1, j), at(i, j))) walled[o][at(i, j) === o + 1 ? 'x0' : 'x1'] = true
+  for (let j = 0; j <= nJ; j++)
+    for (let i = 0; i < nI; i++) for (const o of owners(at(i, j - 1), at(i, j))) walled[o][at(i, j) === o + 1 ? 'y0' : 'y1'] = true
+  const thick = boxes.map((b, k) => {
+    const c = cutouts[k]
+    const column = kindOf(k) === 'column'
+    // a column is solid: its walls fill it (up to the thickest standard wall)
+    const t0 = c.wall ?? (column ? COLUMN_WALL_MAX : partition)
+    const nX = Number(walled[k].x0) + Number(walled[k].x1)
+    const nY = Number(walled[k].y0) + Number(walled[k].y1)
+    const W = b.x1 - b.x0
+    const H = b.y1 - b.y0
+    const tX = r3(Math.min(t0, nX ? Math.max(10, (W - 40) / nX) : W))
+    const tY = r3(Math.min(t0, nY ? Math.max(10, (H - 40) / nY) : H))
+    if (!column && ((nX && tX < t0 - 0.5) || (nY && tY < t0 - 0.5)))
+      problems.push({
+        severity: 'info',
+        code: 'CUTOUT_THIN',
+        message: `Комната «${r.id}»: вырез #${k + 1} меньше двух стен по ${t0} мм — стенки утончены`,
+      })
+    return { tX, tY }
+  })
+  /** a straight run of cutout wall along a grid line: the wall stands on `side` (+1: towards +x / +y) */
+  interface Run {
+    vert: boolean
+    at: number
+    s0: number
+    s1: number
+    side: 1 | -1
+    t: number
+    owners: Set<number>
+    /** the axis ends (moved to the corners where runs are joined) */
+    e0: number
+    e1: number
+  }
+  const runs: Run[] = []
+  const lineRuns = (vert: boolean) => {
+    const nLines = vert ? nI : nJ
+    const nCells = vert ? nJ : nI
+    const along = vert ? ys : xs
+    for (let l = 0; l <= nLines; l++) {
+      // the open run on each side of the line (a staggered pair has walls on both)
+      const cur = new Map<1 | -1, Run>()
+      for (let c = 0; c < nCells; c++) {
+        const before = vert ? at(l - 1, c) : at(c, l - 1)
+        const after = vert ? at(l, c) : at(c, l)
+        const os = owners(before, after)
+        for (const s of [1, -1] as const) if (!os.some((o) => (after === o + 1 ? 1 : -1) === s)) cur.delete(s)
+        for (const o of os) {
+          const side: 1 | -1 = after === o + 1 ? 1 : -1
+          const t = vert ? thick[o].tX : thick[o].tY
+          const open = cur.get(side)
+          if (open && Math.abs(open.t - t) < 0.01 && open.s1 === along[c]) {
+            open.s1 = along[c + 1]
+            open.e1 = open.s1
+            open.owners.add(o)
+            continue
+          }
+          const run: Run = { vert, at: (vert ? xs : ys)[l], s0: along[c], s1: along[c + 1], side, t, owners: new Set([o]), e0: along[c], e1: along[c + 1] }
+          cur.set(side, run)
+          runs.push(run)
+        }
+      }
+    }
+  }
+  lineRuns(true)
+  lineRuns(false)
+  // run ends meeting at a grid point: two perpendicular runs bounding the same cutout corner (both
+  // walls on the corner's side) or the same floor corner (both walls away from it) are joined at
+  // the crossing of their axes, as walls meeting at a corner are
+  type End = { run: Run; start: boolean; d: Vec2; w: Vec2 }
+  const ends = new Map<string, End[]>()
+  for (const run of runs) {
+    for (const start of [true, false]) {
+      const s = start ? run.s0 : run.s1
+      const p = run.vert ? V(run.at, s) : V(s, run.at)
+      const key = `${p.x},${p.y}`
+      const d = run.vert ? V(0, start ? 1 : -1) : V(start ? 1 : -1, 0)
+      const w = run.vert ? V(run.side, 0) : V(0, run.side)
+      const list = ends.get(key) ?? []
+      list.push({ run, start, d, w })
+      ends.set(key, list)
+    }
+  }
+  const axisOf = (run: Run): number => run.at + (run.side * run.t) / 2
+  const joined = new Set<End>()
+  // the run each joined end met (a run joined to a run that then collapses is fixed up below)
+  const partner = new Map<End, Run>()
+  for (const list of ends.values()) {
+    const join = (e1: End, e2: End) => {
+      const [v, h] = e1.run.vert ? [e1, e2] : [e2, e1]
+      const px = axisOf(v.run)
+      const py = axisOf(h.run)
+      if (v.start) v.run.e0 = py
+      else v.run.e1 = py
+      if (h.start) h.run.e0 = px
+      else h.run.e1 = px
+      joined.add(e1)
+      joined.add(e2)
+      partner.set(e1, e2.run)
+      partner.set(e2, e1.run)
+    }
+    const quad = (u: Vec2) => `${Math.sign(u.x)},${Math.sign(u.y)}`
+    for (const mode of ['wall', 'floor'] as const)
+      for (let i = 0; i < list.length; i++)
+        for (let j = i + 1; j < list.length; j++) {
+          const e1 = list[i]
+          const e2 = list[j]
+          if (e1.run.vert === e2.run.vert || joined.has(e1) || joined.has(e2)) continue
+          const q1 = mode === 'wall' ? vAdd(e1.d, e1.w) : vSub(e1.d, e1.w)
+          const q2 = mode === 'wall' ? vAdd(e2.d, e2.w) : vSub(e2.d, e2.w)
+          if (quad(q1) === quad(q2)) join(e1, e2)
+        }
+  }
+  // a run ending against the wall side of another cutout (a shaft beside a column) meets that wall at
+  // its axis. A wall met that way near its corner runs on through the corner to the cutout's edge: its
+  // corner partner then meets it there too (with mitred thick column walls the axis of the side ended
+  // short of the corner and the shaft wall found nothing to meet)
+  for (const list of ends.values())
+    for (const e of list) {
+      if (joined.has(e)) continue
+      const S = e.run
+      const P = S.vert ? V(S.at, e.start ? S.s0 : S.s1) : V(e.start ? S.s0 : S.s1, S.at)
+      for (const R of runs) {
+        if (R === S || R.vert === S.vert) continue
+        const across = R.vert ? P.x : P.y
+        const along = R.vert ? P.y : P.x
+        if (across !== R.at || along < R.s0 || along > R.s1) continue
+        // S leaves R on R's floor side
+        if ((R.vert ? e.d.x : e.d.y) * R.side >= 0) continue
+        const tAt = axisOf(S)
+        if (e.start) S.e0 = axisOf(R)
+        else S.e1 = axisOf(R)
+        if (tAt < R.e0) R.e0 = Math.min(R.s0, tAt)
+        if (tAt > R.e1) R.e1 = Math.max(R.s1, tAt)
+        joined.add(e)
+        partner.set(e, R)
+        break
+      }
+    }
+  // a short run whose two ends were both joined to walls beyond it collapses to nothing (a column side
+  // shorter than the wall thickness of its neighbours). The runs that met it at its axis then stop on
+  // its line instead, where the cutout edge turns, or the floor leaks into the corner
+  const collapsed = (run: Run) => run.e1 - run.e0 < 1
+  for (const run of runs)
+    if (collapsed(run))
+      for (const [e, R] of partner)
+        if (R === run && !collapsed(e.run)) {
+          if (e.start) e.run.e0 = run.at
+          else e.run.e1 = run.at
+        }
+  // a cutout side partly on the outline and partly along the floor (it crosses the line of a reflex
+  // corner): its wall would end against the outline wall standing on the other side of the line.
+  // Checked on the union of touching cutouts: beyond the corner the same cutout, or one of the same
+  // kind with no wall between them (one shaft drawn as two rects), is the same refused side. A cutout
+  // of another kind beyond it has its own wall there, which this run meets
+  const index = (v: number[], x: number) => v.indexOf(x)
+  const atCorner = new Set<number>()
+  for (const run of runs)
+    for (const start of [true, false]) {
+      const s = start ? run.s0 : run.s1
+      const lineIdx = index(run.vert ? xs : ys, run.at)
+      const sIdx = index(run.vert ? ys : xs, s)
+      const c = start ? sIdx - 1 : sIdx
+      const cell = (l: number) => (run.vert ? at(l, c) : at(c, l))
+      const wallSide = cell(run.side > 0 ? lineIdx : lineIdx - 1)
+      const floorSide = cell(run.side > 0 ? lineIdx - 1 : lineIdx)
+      const cIn = start ? sIdx : sIdx - 1
+      const inner = run.vert ? at(run.side > 0 ? lineIdx : lineIdx - 1, cIn) : at(cIn, run.side > 0 ? lineIdx : lineIdx - 1)
+      if (wallSide > 0 && floorSide === -1 && !owners(inner, wallSide).length) for (const o of run.owners) atCorner.add(o)
+    }
+  for (const k of [...atCorner].sort((a, b) => a - b))
+    problems.push({
+      severity: 'error',
+      code: 'CUTOUT_AT_CORNER',
+      message: `Комната «${r.id}»: сторона выреза #${k + 1} проходит через внутренний угол комнаты — частью по контуру, частью вдоль пола; такой вырез компилятор не строит. Сдвиньте или подрежьте вырез так, чтобы каждая его сторона целиком лежала на контуре или целиком в комнате`,
+    })
+  const walls: Seg[] = []
+  // the wall bodies, for the voids: each run from its side to the far face, over its own span and
+  // the corners it was joined to
+  const bodies: Box[] = []
+  for (const run of runs) {
+    const ax = axisOf(run)
+    const a = run.vert ? V(ax, run.e0) : V(run.e0, ax)
+    const b = run.vert ? V(ax, run.e1) : V(run.e1, ax)
+    if (vDist(a, b) >= 1) walls.push({ a, b, t: run.t, kind: run.t >= 160 ? 'loadBearing' : 'partition', height: wallHeight, cut: true })
+    const lo = Math.min(run.s0, run.e0)
+    const hi = Math.max(run.s1, run.e1)
+    const f0 = Math.min(run.at, run.at + run.side * run.t)
+    const f1 = Math.max(run.at, run.at + run.side * run.t)
+    bodies.push(run.vert ? { x0: f0, x1: f1, y0: lo, y1: hi } : { x0: lo, x1: hi, y0: f0, y1: f1 })
+  }
+  // two walls meeting end to end at a right angle are mitred: the joint fills the whole square around
+  // the corner point, the outer quarter included (the void is what the built faces leave)
+  for (const w of walls)
+    for (const p of [w.a, w.b]) {
+      const at = walls.filter((o) => vDist(o.a, p) < 0.5 || vDist(o.b, p) < 0.5)
+      if (at.length !== 2) continue
+      const o = at[0] === w ? at[1] : at[0]
+      const vert = Math.abs(w.a.x - w.b.x) < 0.5
+      if (vert === Math.abs(o.a.x - o.b.x) < 0.5) continue
+      const [tx, ty] = vert ? [w.t, o.t] : [o.t, w.t]
+      bodies.push({ x0: p.x - tx / 2, x1: p.x + tx / 2, y0: p.y - ty / 2, y1: p.y + ty / 2 })
+    }
+  // ── the voids: the cutouts minus the wall bodies
+  const vxs = uniq([...xs, ...bodies.flatMap((b) => [b.x0, b.x1])])
+  const vys = uniq([...ys, ...bodies.flatMap((b) => [b.y0, b.y1])])
+  const cutAt = (p: Vec2): number => (pointInPoly(p, base) ? boxes.findIndex((b) => inBox(p, b)) : -1)
+  const voidRings = cellRings(vxs, vys, (i, j) => {
+    const c = V((vxs[i] + vxs[i + 1]) / 2, (vys[j] + vys[j + 1]) / 2)
+    return cutAt(c) >= 0 && !bodies.some((b) => inBox(c, b))
+  })
+  const voids: CutVoid[] = []
+  // a void belongs to the cutout it overlaps most (a point test fails for the void of a union, whose
+  // inner point can fall on the line two cutouts share)
+  const boxPoly = (b: Box): Vec2[] => [V(b.x0, b.y0), V(b.x1, b.y0), V(b.x1, b.y1), V(b.x0, b.y1)]
+  for (const ring of voidRings) {
+    if (signedArea(ring) <= 0) continue
+    let k = -1
+    let most = 0.5
+    boxes.forEach((b, i) => {
+      const ov = overlapArea(ring, boxPoly(b))
+      if (ov > most + 1e-6) [k, most] = [i, ov]
+    })
+    if (k < 0) continue
+    voids.push({ poly: ring, kind: kindOf(k), index: k, cut: boxes[k] })
+  }
+  // the hole count the built floor shows (see holeGroups): cutouts in one hole joined where they share
+  // more than the shape tolerance of a side
+  const contact = (a: Box, b: Box): number => {
+    const ox = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)
+    const oy = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0)
+    return Math.abs(ox) < 0.5 ? oy : Math.abs(oy) < 0.5 ? ox : 0
+  }
+  let holeParts = 0
+  for (const h of holes) {
+    const ks = boxes.map((_, k) => k).filter((k) => pointInPoly(V((boxes[k].x0 + boxes[k].x1) / 2, (boxes[k].y0 + boxes[k].y1) / 2), h))
+    const up = new Map(ks.map((k) => [k, k]))
+    const find = (k: number): number => (up.get(k) === k ? k : find(up.get(k)!))
+    for (const a of ks) for (const b of ks) if (a < b && contact(boxes[a], boxes[b]) > BUILT_SHAPE_TOL) up.set(find(a), find(b))
+    holeParts += Math.max(1, ks.filter((k) => find(k) === k).length)
+  }
+  return { base, outer: outers[0], holes, voids, walls, area, ref: best.c, problems, holeParts }
 }
 
 // ───────────────────────────── wall synthesis ─────────────────────────────
@@ -1156,6 +1828,8 @@ interface Seg {
   t: number
   kind: SpecWallKind
   height: number
+  /** the wall of a cutout (a void side facing the floor) */
+  cut?: boolean
 }
 
 interface REdge {
@@ -1185,15 +1859,37 @@ function subtractIntervals(base: [number, number], cut: [number, number][]): [nu
   return parts.filter(([a, b]) => b - a > 0.5)
 }
 
+/** the wall a room gets along an outline edge nobody shares */
+function roomEdgeWall(r: RoomSpec, D: ResolvedDefaults): { kind: SpecWallKind; t: number; h: number } {
+  if (r.edgeWall) {
+    const k = r.edgeWall.kind
+    return { kind: k, t: r.edgeWall.thickness ?? thicknessFor(k, D), h: r.edgeWall.height ?? heightFor(k, D) }
+  }
+  if (isOutdoor(r)) {
+    if (r.glazed) return { kind: 'glass', t: D.railingThickness, h: D.wallHeight }
+    return { kind: 'railing', t: D.railingThickness, h: D.railingHeight }
+  }
+  return { kind: 'exterior', t: D.exterior, h: D.wallHeight }
+}
+
+/** the kind of the wall two rooms share across a gap d (the wall synthesis pairs their edges so) */
+function sharedWallKind(a: RoomSpec, b: RoomSpec, d: number): SpecWallKind {
+  if (d < 40) return 'separator'
+  if (isOutdoor(a) || isOutdoor(b)) return 'exterior'
+  return d >= 160 ? 'loadBearing' : 'partition'
+}
+
 function roomsModeSegments(
   rooms: RoomSpec[],
-  polys: (Vec2[] | null)[],
+  roomPolys: (Vec2[] | null)[],
   D: ResolvedDefaults,
   stdT: boolean,
   issues: PlanIssue[],
+  /** out: wall ends stopped at another room's outline (joinEnds must not push them on) */
+  clipped: Vec2[] = [],
 ): Seg[] {
   const edges: REdge[] = []
-  polys.forEach((poly, ri) => {
+  roomPolys.forEach((poly, ri) => {
     if (!poly) return
     for (let i = 0; i < poly.length; i++) {
       const p0 = poly[i]
@@ -1206,6 +1902,33 @@ function roomsModeSegments(
     }
   })
 
+  /**
+   * How far (≤ want) a wall end may grow along `dir` from the axis point `from` before its body
+   * (half thickness `h` across `n`) enters the floor of another room (`skip`: the wall's own room).
+   * At a convex corner next to a neighbour the full t/2 went through the neighbour's floor: with
+   * 380…640 mm brick walls that cut 0.1…0.4 m² out of the room beside.
+   */
+  const roomFree = (from: Vec2, dir: Vec2, n: Vec2, h: number, want: number, skip: number): number => {
+    let best = want
+    for (const u of [-h + 1, -h / 2, 0, h / 2, h - 1]) {
+      const o = vAdd(from, vMul(n, u))
+      roomPolys.forEach((poly, ri) => {
+        if (!poly || ri === skip) return
+        if (pointInPoly(o, poly) && distToPolyBoundary(o, poly) > 0.5) {
+          best = 0
+          return
+        }
+        for (let i = 0; i < poly.length; i++) {
+          const p = poly[i]
+          const hit = lineHit(o, dir, p, vSub(poly[(i + 1) % poly.length], p))
+          if (!hit || hit.mu < -1e-6 || hit.mu > 1 + 1e-6 || hit.lambda < -0.5 || hit.lambda >= best) continue
+          // an entry, not a ray leaving the outline it starts on or grazing a corner
+          if (pointInPoly(vAdd(o, vMul(dir, Math.max(0, hit.lambda) + 1)), poly)) best = Math.max(0, hit.lambda)
+        }
+      })
+    }
+    return best
+  }
   const segs: Seg[] = []
   // 1. anti-parallel pairs → shared walls (nearest first)
   const cands: { A: REdge; B: REdge; d: number; lo: number; hi: number }[] = []
@@ -1243,11 +1966,7 @@ function roomsModeSegments(
         B.covered.push([s0, s1])
         const ra = rooms[A.room]
         const rb = rooms[B.room]
-        let kind: SpecWallKind
-        if (isOutdoor(ra) || isOutdoor(rb)) kind = d < 40 ? 'separator' : 'exterior'
-        else if (d < 40) kind = 'separator'
-        else if (d >= 160) kind = 'loadBearing'
-        else kind = 'partition'
+        const kind = sharedWallKind(ra, rb, d)
         if (d > 1 && d < 40)
           issues.push({
             severity: 'warning',
@@ -1274,27 +1993,38 @@ function roomsModeSegments(
       if (s1 - s0 <= MAX_GAP) {
         const probe = vAdd(vAdd(E.p0, vMul(E.e, (s0 + s1) / 2)), vMul(E.n, 30))
         let near = 0
-        polys.forEach((poly, ri) => {
+        // near rooms reaching past the edge's line on its outer side (a neighbour in the room's notch)
+        let nearBeyond = 0
+        roomPolys.forEach((poly, ri) => {
           if (!poly || ri === E.room) return
-          if (pointInPoly(probe, poly) || distToPolyBoundary(probe, poly) <= MAX_GAP) near++
+          if (pointInPoly(probe, poly) || distToPolyBoundary(probe, poly) <= MAX_GAP) {
+            near++
+            if (poly.some((v) => vDot(vSub(v, E.p0), E.n) > 1)) nearBeyond++
+          }
         })
         const touchesVertex = s0 < 0.5 || s1 > E.L - 0.5
         if (near >= 2 || (!touchesVertex && near >= 1)) continue
+        // the side of a step in a wall (the wall gets thicker along its length): beyond the edge lies
+        // wall body between two rooms, not the outside → no wall (the step join below closes it)
+        const inRoom = (p: Vec2): number => roomPolys.findIndex((poly) => !!poly && pointInPoly(p, poly))
+        const hitAlong = (dir: Vec2): number => {
+          for (let t = 10; t <= MAX_GAP; t += 10) {
+            const ri = inRoom(vAdd(probe, vMul(dir, t)))
+            if (ri >= 0) return ri
+          }
+          return -1
+        }
+        const h0 = hitAlong(E.e)
+        const h1 = hitAlong(vMul(E.e, -1))
+        if (h0 >= 0 && h1 >= 0 && h0 !== h1) continue
+        // the corner square at a reflex vertex between the room and a neighbour in its notch: the
+        // junction of the two walls around the neighbour, not the outside (an outer wall here went
+        // a wall thickness into the neighbour's floor). Only a neighbour past the edge's line is in
+        // the notch: one beside the room's lower arm leaves the edge outside, and its wall stays
+        if (nearBeyond >= 1 && (h0 === E.room || h1 === E.room)) continue
       }
       E.kept.push([s0, s1])
     }
-  }
-
-  const edgeWallOf = (r: RoomSpec): { kind: SpecWallKind; t: number; h: number } => {
-    if (r.edgeWall) {
-      const k = r.edgeWall.kind
-      return { kind: k, t: r.edgeWall.thickness ?? thicknessFor(k, D), h: r.edgeWall.height ?? heightFor(k, D) }
-    }
-    if (isOutdoor(r)) {
-      if (r.glazed) return { kind: 'glass', t: D.railingThickness, h: D.wallHeight }
-      return { kind: 'railing', t: D.railingThickness, h: D.railingHeight }
-    }
-    return { kind: 'exterior', t: D.exterior, h: D.wallHeight }
   }
 
   // per-room edge lists in order, to find neighbours at vertices
@@ -1304,12 +2034,11 @@ function roomsModeSegments(
     list.push(E)
     byRoom.set(E.room, list)
   }
-  for (const [ri, list] of byRoom) {
-    const room = rooms[ri]
-    const ew = edgeWallOf(room)
+  for (const list of byRoom.values()) {
     const n = list.length
     for (let k = 0; k < n; k++) {
       const E = list[k]
+      const ew = roomEdgeWall(rooms[E.room], D)
       const prev = list[(k - 1 + n) % n]
       const next = list[(k + 1) % n]
       for (const [s0, s1] of E.kept) {
@@ -1325,12 +2054,19 @@ function roomsModeSegments(
           const convex = atStart ? vCross(nb.e, E.e) > 0 : vCross(E.e, nb.e) > 0
           const base = atStart ? a : b
           if (nbKeptAtVertex) {
-            const nbOff = vMul(nb.n, ew.t / 2)
+            const nbT = roomEdgeWall(rooms[nb.room], D).t
+            const nbOff = vMul(nb.n, nbT / 2)
             const hit = lineHit(vAdd(E.p0, off), E.e, vAdd(nb.p0, nbOff), nb.e)
-            if (hit && vDist(hit.point, vertex) < 2 * ew.t + 10) return hit.point
+            if (hit && vDist(hit.point, vertex) < 2 * Math.max(ew.t, nbT) + 10) return hit.point
             return base
           }
-          if (convex) return vAdd(base, vMul(E.e, atStart ? -ew.t / 2 : ew.t / 2))
+          if (convex) {
+            const dir = vMul(E.e, atStart ? -1 : 1)
+            const ext = roomFree(base, dir, E.n, ew.t / 2, ew.t / 2, E.room)
+            const end = vAdd(base, vMul(dir, ext))
+            if (ext < ew.t / 2 - 0.5) clipped.push(end)
+            return end
+          }
           return base
         }
         if (s0 < 0.5) a = endAt(true)
@@ -1339,7 +2075,57 @@ function roomsModeSegments(
       }
     }
   }
+
   return segs
+}
+
+/**
+ * Steps in a wall: two parallel walls of different thickness, flush on one side, ending at the same
+ * point from opposite directions (a wall that gets thicker along its length). Their axes are offset, so
+ * a zero-thickness joint between the two ends closes the plan graph. Run after joinEnds.
+ */
+function stepJoints(segs: Seg[], height: number): Seg[] {
+  const joints: Seg[] = []
+  for (let i = 0; i < segs.length; i++) {
+    for (let j = i + 1; j < segs.length; j++) {
+      const s = segs[i]
+      const o = segs[j]
+      if (s.kind === 'separator' || o.kind === 'separator' || Math.abs(s.t - o.t) < 1) continue
+      const ds = vNorm(vSub(s.b, s.a))
+      if (Math.abs(vCross(ds, vNorm(vSub(o.b, o.a)))) > 0.002) continue
+      for (const [p, pIn] of [[s.a, s.b], [s.b, s.a]] as const) {
+        for (const [q, qIn] of [[o.a, o.b], [o.b, o.a]] as const) {
+          const w = vSub(q, p)
+          const off = Math.abs(vCross(ds, w))
+          if (Math.abs(vDot(w, ds)) > 1 || off < 1) continue
+          if (Math.abs(off - Math.abs(s.t - o.t) / 2) > 1) continue
+          if (vDot(vSub(pIn, p), ds) * vDot(vSub(qIn, q), ds) >= 0) continue
+          // a wall across the step already ends at one of the two ends, on the joint's line (a
+          // partition meeting the step): extend it to the other end instead. A zero-thickness joint
+          // collinear with that wall gives the room faces a wedge (parallel face lines at a corner)
+          const jd = vNorm(vSub(q, p))
+          let extended = false
+          for (const w of segs) {
+            if (extended || w === s || w === o || w.kind === 'separator') continue
+            if (Math.abs(vCross(vNorm(vSub(w.b, w.a)), jd)) > 0.002) continue
+            for (const end of ['a', 'b'] as const) {
+              const e = w[end]
+              const far = end === 'a' ? w.b : w.a
+              const to = vDist(e, p) < 0.5 ? q : vDist(e, q) < 0.5 ? p : null
+              // only outward: the other step end lies beyond this end, not back along the wall
+              if (!to || vDot(vSub(to, e), vSub(e, far)) <= 0) continue
+              w[end] = to
+              extended = true
+              break
+            }
+          }
+          if (extended) continue
+          joints.push({ a: p, b: q, t: 0, kind: 'separator', height })
+        }
+      }
+    }
+  }
+  return joints
 }
 
 function wallsModeSegments(walls: WallSpec[], U: UnitConv, D: ResolvedDefaults, snap: PlanSnap | undefined): Seg[] {
@@ -1371,7 +2157,7 @@ function wallsModeSegments(walls: WallSpec[], U: UnitConv, D: ResolvedDefaults, 
     for (let i = 0; i < count; i++) {
       const a = pts[i]
       const b = pts[(i + 1) % pts.length]
-      if (vDist(a, b) >= 1) segs.push({ a, b, t, kind, height })
+      if (vDist(a, b) >= 1) segs.push({ a, b, t, kind, height, ...(w.cutout ? { cut: true } : {}) })
     }
   }
   return segs
@@ -1380,7 +2166,9 @@ function wallsModeSegments(walls: WallSpec[], U: UnitConv, D: ResolvedDefaults, 
 function mergeCollinear(segs: Seg[], mergeMm: number): Seg[] {
   const groups = new Map<string, Seg[]>()
   for (const s of segs) {
-    const key = `${s.kind}|${Math.round(s.t)}|${Math.round(s.height)}`
+    // cutout walls merge only with cutout walls, and only end to end (a strip of floor between two
+    // cutouts on one line is floor, not a junction to bridge)
+    const key = `${s.kind}|${Math.round(s.t)}|${Math.round(s.height)}|${s.cut ? 1 : 0}`
     const g = groups.get(key) ?? []
     g.push(s)
     groups.set(key, g)
@@ -1421,17 +2209,20 @@ function mergeCollinear(segs: Seg[], mergeMm: number): Seg[] {
         .map((s) => {
           const u0 = vDot(vSub(s.a, origin), dir)
           const u1 = vDot(vSub(s.b, origin), dir)
-          return [Math.min(u0, u1), Math.max(u0, u1)] as [number, number]
+          return [Math.min(u0, u1), Math.max(u0, u1), s.cut === true] as [number, number, boolean]
         })
         .sort((x, y) => x[0] - y[0])
       let cur = iv[0]
-      const flush = (c: [number, number]) =>
-        out.push({ ...base, a: vAdd(origin, vMul(dir, c[0])), b: vAdd(origin, vMul(dir, c[1])) })
+      const flush = (c: [number, number, boolean]) =>
+        out.push({ ...base, a: vAdd(origin, vMul(dir, c[0])), b: vAdd(origin, vMul(dir, c[1])), ...(c[2] ? { cut: true } : {}) })
       for (let k = 1; k < iv.length; k++) {
         const nx = iv[k]
         const gap = nx[0] - cur[1]
-        if (gap <= 0.5 || gap <= mergeMm || (gap <= MAX_GAP && endpointInGap(origin, dir, nrm, cur[1], nx[0], base.t))) {
-          cur = [cur[0], Math.max(cur[1], nx[1])]
+        // two cutout walls in line (two shafts side by side) have floor between them: the corner
+        // walls ending at the gap are theirs, not a junction to bridge
+        const bridge = !base.cut && gap <= MAX_GAP && endpointInGap(origin, dir, nrm, cur[1], nx[0], base.t)
+        if (gap <= 0.5 || (!base.cut && gap <= mergeMm) || bridge) {
+          cur = [cur[0], Math.max(cur[1], nx[1]), cur[2] && nx[2]]
         } else {
           flush(cur)
           cur = nx
@@ -1443,23 +2234,68 @@ function mergeCollinear(segs: Seg[], mergeMm: number): Seg[] {
   return out
 }
 
+function cornerRank(o: Seg, lambda: number): number {
+  return -o.t * 1e5 + Math.min(lambda, 1e5 - 1)
+}
+
+/** a corner on an end's way: `o`'s line beyond its end `oEnd` */
+type Via = { lambda: number; point: Vec2; o: Seg; oEnd: 'a' | 'b' }
+
+/**
+ * Joins the free wall ends. Every pass decides all ends from the same positions and then moves them
+ * together, so the result does not depend on the order of the walls (the order follows the
+ * coordinates, and with ends moved one by one a turned or mirrored plan was joined differently)
+ */
 function joinEnds(segs: Seg[], mergeMm: number): void {
   const onAnother = (p: Vec2, self: Seg): boolean =>
     segs.some((o) => o !== self && projectOnSeg(p, o.a, o.b).dist <= 0.5)
-  // extension (two passes so chained corners settle)
-  for (let pass = 0; pass < 2; pass++) {
+  type Move = { s: Seg; end: 'a' | 'b'; p: Vec2; lambda: number; corner?: boolean }
+  const same = (p: Vec2, q: Vec2) => Math.abs(p.x - q.x) < 1e-6 && Math.abs(p.y - q.y) < 1e-6
+  // an end past a crossing wall's axis but still inside its body (an edge wall reaching the face of
+  // the wall it meets) is joined already: the trim below takes it back to the axis. Extended on out
+  // of that body, it ran through the wall to a corner beyond (a thick wall end pulled 300 mm into the
+  // next room); a target still inside the body (a thin glazing end reaching a partition within a
+  // thick corner) is met as before. Returns how far along the end the body reaches, or null
+  const overshot = (s: Seg, p: Vec2, dir: Vec2): number | null => {
+    let face: number | null = null
+    for (const o of segs) {
+      if (o === s || (o.cut && !s.cut)) continue
+      const od = vSub(o.b, o.a)
+      const oL = vLen(od)
+      if (oL < 1 || o.t < 1) continue
+      const odn = vMul(od, 1 / oL)
+      const sin = Math.abs(vCross(dir, odn))
+      if (sin < 0.3) continue
+      const h = lineHit(p, dir, o.a, odn)
+      if (!h || h.lambda >= -0.5 || h.lambda < -(o.t / 2 + 0.5) || h.mu <= 0.5 || h.mu >= oL - 0.5) continue
+      const f = h.lambda + o.t / 2 / sin
+      if (face === null || f > face) face = f
+    }
+    return face
+  }
+  // extension, repeated until chained corners settle
+  for (let pass = 0; pass < 6; pass++) {
+    const moves: Move[] = []
+    const pulls: Move[] = []
+    // ends heading for a wall body with a nearer corner on the way, beyond another wall's end
+    const detours: { s: Seg; end: 'a' | 'b'; body: number; via: Via[] }[] = []
     for (const s of segs) {
       for (const end of ['a', 'b'] as const) {
         const p = s[end]
         if (onAnother(p, s)) continue
         const other = end === 'a' ? s.b : s.a
         const dir = vNorm(vSub(p, other))
+        const inBody = overshot(s, p, dir)
         // a hit through the body of another wall stops the extension (nearest wins);
         // otherwise (ends meeting near a corner) the thickest target wins, then the nearest
         let body: { lambda: number; point: Vec2 } | null = null
-        let corner: { lambda: number; point: Vec2; t: number } | null = null
+        let corner: { lambda: number; point: Vec2; o: Seg; oEnd: 'a' | 'b'; beyond: boolean } | null = null
+        const via: Via[] = []
         for (const o of segs) {
           if (o === s) continue
+          // the outline walls are joined as if there were no cutouts: a cutout wall never draws an
+          // outline wall end (that took a short outline stub through the next room's floor)
+          if (o.cut && !s.cut) continue
           const od = vSub(o.b, o.a)
           const oL = vLen(od)
           if (oL < 1) continue
@@ -1469,20 +2305,133 @@ function joinEnds(segs: Seg[], mergeMm: number): void {
           if (!h) continue
           const reach = Math.max(o.t / 2 + 10, mergeMm)
           const tolMu = Math.max(s.t / 2 + 10, mergeMm)
-          if (h.lambda > 0.5 && h.lambda <= reach && h.mu >= -tolMu && h.mu <= oL + tolMu) {
-            if (h.mu > 0.5 && h.mu < oL - 0.5) {
-              if (!body || h.lambda < body.lambda) body = { lambda: h.lambda, point: h.point }
-            } else if (!corner || o.t > corner.t + 0.5 || (Math.abs(o.t - corner.t) <= 0.5 && h.lambda < corner.lambda)) {
-              corner = { lambda: h.lambda, point: h.point, t: o.t }
-            }
+          if (h.lambda > reach || h.mu < -tolMu || h.mu > oL + tolMu) continue
+          const beyond = h.mu < -0.5 || h.mu > oL + 0.5
+          if (h.mu > 0.5 && h.mu < oL - 0.5) {
+            if (h.lambda > 0.5 && (!body || h.lambda < body.lambda)) body = { lambda: h.lambda, point: h.point }
+          } else {
+            const oEnd = h.mu < oL / 2 ? 'a' : 'b'
+            if (beyond && h.lambda > 0.5) via.push({ lambda: h.lambda, point: h.point, o, oEnd })
+            // an end already on the other wall's line beyond its end (it got there while that wall
+            // moved) still meets it there. Two cutout walls in line met at the same point (a misread
+            // splits a column side in two): the one ending short of it is brought along, whatever
+            // the order of the walls (the first one found won, so a turn of the plan kept or dropped
+            // the piece that closes the column)
+            const rk = cornerRank(o, h.lambda)
+            const ck = corner ? cornerRank(corner.o, corner.lambda) : Infinity
+            const better = !corner
+              ? true
+              : o.cut && corner.o.cut
+                ? rk < ck - 1e-6 || (Math.abs(rk - ck) <= 1e-6 && beyond && !corner.beyond)
+                : rk < ck
+            if ((h.lambda > 0.5 || (beyond && h.lambda >= -0.5)) && better)
+              corner = { lambda: Math.max(0, h.lambda), point: h.point, o, oEnd, beyond }
           }
         }
         const best = body ?? corner
-        if (best) s[end] = V(r3(best.point.x), r3(best.point.y))
+        if (!best) continue
+        // an end inside a crossing wall's body does not drag a settled wall end (one standing on a third
+        // wall) out to a corner past that body: both stay, the trim joins this end on the axis
+        const settled = !body && !!corner?.beyond && onAnother(corner.o[corner.oEnd], corner.o)
+        if (settled && inBody !== null && best.lambda > inBody + 0.5) continue
+        const q = V(r3(best.point.x), r3(best.point.y))
+        moves.push({ s, end, p: q, lambda: best.lambda, corner: !body })
+        if (body && via.some((v) => v.lambda < body!.lambda - 0.5)) detours.push({ s, end, body: body.lambda, via })
+        // a corner beyond the other wall's end, which sits on a third wall (a separator) and so never
+        // moves itself: bring that end to the corner too, or the two walls never meet
+        if (!body && corner?.beyond && onAnother(corner.o[corner.oEnd], corner.o))
+          pulls.push({ s: corner.o, end: corner.oEnd, p: q, lambda: corner.lambda })
       }
     }
+    // a detour end stops on the nearer wall's line when that wall's end crosses its path in the same
+    // pass (it will stand there: a T), as when the walls were joined one after another. Two walls
+    // crossing each other's path that way: the longer one (then the thicker) runs on, the
+    // other stops on it; with neither stronger both run on as they were
+    const moveOf = (s: Seg, end: 'a' | 'b') => moves.find((x) => x.s === s && x.end === end)
+    const rank = (s: Seg) => vDist(s.a, s.b) * 1e4 + s.t
+    const crossing = (d: { s: Seg; end: 'a' | 'b' }, v: Via): boolean => {
+      const om = moveOf(v.o, v.oEnd)
+      if (!om) return false
+      const dir = vNorm(vSub(d.s[d.end], d.end === 'a' ? d.s.b : d.s.a))
+      const side = (p: Vec2) => vCross(dir, vSub(p, d.s[d.end]))
+      return Math.sign(side(om.s[om.end])) !== Math.sign(side(om.p)) && Math.abs(side(om.p)) > 0.5
+    }
+    const stops = new Map<Move, Via>()
+    // a thicker wall end crossing a thin detour's way on the way to a corner stops on the thin wall's
+    // line instead, and the thin wall runs on to its body (as when the thin wall was joined first: a
+    // thick separator end run on past a partition went into the corner of the room below)
+    const yields = new Map<Move, Seg>()
+    for (const d of detours) {
+      let stop: Via | null = null
+      for (const v of d.via) {
+        if (v.lambda >= d.body - 0.5 || (stop && v.lambda >= stop.lambda) || !crossing(d, v)) continue
+        const om = moveOf(v.o, v.oEnd)
+        if (om?.corner && !om.s.cut && !d.s.cut && v.o.t > d.s.t + 1e-6) {
+          yields.set(om, d.s)
+          continue
+        }
+        const back = detours.find((x) => x.s === v.o && x.end === v.oEnd)
+        const mutual = back?.via.some((w) => w.o === d.s && w.oEnd === d.end && w.lambda < back.body - 0.5 && crossing(back, w))
+        if (mutual && Math.abs(rank(v.o) - rank(d.s)) < 1e-6) continue
+        if (mutual && rank(v.o) < rank(d.s)) continue
+        stop = v
+      }
+      if (stop) stops.set(moveOf(d.s, d.end)!, stop)
+    }
+    for (const [m, v] of stops) {
+      m.p = V(r3(v.point.x), r3(v.point.y))
+      m.lambda = v.lambda
+    }
+    for (const [m, thin] of yields) {
+      const from = m.s[m.end]
+      const dir = vNorm(vSub(m.p, from))
+      const td = vSub(thin.b, thin.a)
+      const h = lineHit(from, dir, thin.a, vMul(td, 1 / vLen(td)))
+      if (!h || h.lambda < 0.5 || h.lambda > m.lambda - 0.5) continue
+      m.p = V(r3(h.point.x), r3(h.point.y))
+      m.lambda = h.lambda
+    }
+    // an end another wall runs over in the same pass (that wall's end moves along its line past this
+    // point) stays where it is: it will stand on that wall, as when that wall was joined first. Two
+    // ends running over each other: the longer wall (then the thicker) runs on. A wall end stopping
+    // on this end (a corner) does not hold it
+    const runsOver = (m: Move, q: Vec2): boolean => {
+      const fixed = m.end === 'a' ? m.s.b : m.s.a
+      return projectOnSeg(q, fixed, m.p).dist <= 0.5 && projectOnSeg(q, m.s.a, m.s.b).dist > 0.5 && vDist(q, m.p) > 0.5
+    }
+    const stays = new Set<Move>()
+    for (const m of moves) {
+      if (same(m.s[m.end], m.p)) continue
+      for (const o of moves) {
+        if (o.s === m.s || same(o.s[o.end], o.p) || !runsOver(o, m.s[m.end])) continue
+        if (runsOver(m, o.s[o.end]) && rank(o.s) <= rank(m.s) + 1e-6) continue
+        stays.add(m)
+        break
+      }
+    }
+    for (const m of stays) m.p = m.s[m.end]
+    // an end pulled by several walls goes to the nearest corner (then the lowest point, for a tie)
+    const pulled = new Map<string, Move>()
+    for (const m of pulls) {
+      const key = `${segs.indexOf(m.s)}${m.end}`
+      const cur = pulled.get(key)
+      const d = vDist(m.p, m.s[m.end])
+      if (!cur) pulled.set(key, m)
+      else {
+        const dc = vDist(cur.p, cur.s[cur.end])
+        if (d < dc - 1e-6 || (Math.abs(d - dc) <= 1e-6 && (m.p.x < cur.p.x || (m.p.x === cur.p.x && m.p.y < cur.p.y)))) pulled.set(key, m)
+      }
+    }
+    let changed = false
+    for (const m of [...moves, ...pulled.values()]) {
+      if (same(m.s[m.end], m.p)) continue
+      m.s[m.end] = m.p
+      changed = true
+    }
+    if (!changed) break
   }
-  // trimming of short overshoots past a crossing wall (free ends only)
+  // trimming of short overshoots past a crossing wall (free ends only), decided together as well
+  const trims: Move[] = []
   for (const s of segs) {
     for (const end of ['a', 'b'] as const) {
       const p = s[end]
@@ -1499,18 +2448,25 @@ function joinEnds(segs: Seg[], mergeMm: number): void {
         if (Math.abs(vCross(dir, odn)) < 0.3) continue
         const h = lineHit(p, dir, o.a, odn)
         if (!h) continue
-        if (h.lambda < -0.5 && h.lambda >= -(o.t / 2 + 10) && h.mu > 0.5 && h.mu < oL - 0.5 && sl + h.lambda > 1) {
+        if (h.lambda < -0.5 && h.lambda >= -(o.t / 2 + 10) && h.mu >= -0.5 && h.mu <= oL + 0.5 && sl + h.lambda > 1) {
           if (!best || h.lambda > best.lambda) best = { lambda: h.lambda, point: h.point }
         }
       }
       if (best) {
         // only a free end (nothing else touches it) is trimmed
         const touching = segs.some((o) => o !== s && projectOnSeg(p, o.a, o.b).dist <= 0.5)
-        if (!touching) s[end] = V(r3(best.point.x), r3(best.point.y))
+        // … and no other wall ends on the overshoot (a partition meeting it there would dangle)
+        const cut = best.point
+        const carries = segs.some(
+          (o) => o !== s && [o.a, o.b].some((q) => vDist(q, cut) > 0.5 && projectOnSeg(q, cut, p).dist <= 0.5),
+        )
+        if (!touching && !carries) trims.push({ s, end, p: V(r3(best.point.x), r3(best.point.y)), lambda: best.lambda })
       }
     }
   }
+  for (const m of trims) m.s[m.end] = m.p
 }
+
 
 // ───────────────────────────── compiler ─────────────────────────────
 
@@ -1736,7 +2692,30 @@ function applySpecProvenance(doc: Doc, levelId: Id, spec: PlanSpec, U: UnitConv,
   for (const w of Object.values(doc.walls)) if (w.dims && !w.dims.left && !w.dims.right) delete w.dims
 }
 
+/**
+ * the spec needs the cutout geometry: a room with cutouts, a technical room or a cutout wall (what
+ * `dp doc spec` writes for voids). Any other spec is built and checked by the a56f5f4 code
+ * (planspecBase.ts), exactly as before the cutout work. Reads raw input too (validation coerces later)
+ */
+export function usesCutoutLogic(spec: unknown): boolean {
+  const s = spec as { rooms?: unknown; walls?: unknown } | null
+  const rooms = s && Array.isArray(s.rooms) ? (s.rooms as { cutouts?: unknown; technical?: unknown }[]) : []
+  const walls = s && Array.isArray(s.walls) ? (s.walls as { cutout?: unknown }[]) : []
+  return (
+    rooms.some((r) => !!r && ((Array.isArray(r.cutouts) && r.cutouts.length > 0) || !!r.technical)) ||
+    walls.some((w) => !!w && !!w.cutout)
+  )
+}
+
+/** a plan with cutouts, shafts or voids is always built and checked by the cutout compiler: when its
+ *  check refuses, the plan is refused (the base would lose the shafts, the floor and the technical mark) */
 export function compilePlanSpecDetailed(spec: PlanSpec, opts: CompileOptions = {}): CompileResult {
+  if (!usesCutoutLogic(spec)) return legacy.compilePlanSpecDetailed(spec as legacy.PlanSpec, opts)
+  return compileCutoutSpec(spec, opts)
+}
+
+/** the compiler with cutouts, shafts and columns inside rooms (usesCutoutLogic) */
+export function compileCutoutSpec(spec: PlanSpec, opts: CompileOptions = {}): CompileResult {
   const issues: PlanIssue[] = []
   const U = makeUnits(spec)
   const D = resolveDefaults(spec)
@@ -1751,6 +2730,10 @@ export function compilePlanSpecDetailed(spec: PlanSpec, opts: CompileOptions = {
 
   const polys = spec.rooms.map((r) => roomPolygonMm(r, U, snap))
   const refPoints = spec.rooms.map((r) => roomRefPoint(r, U, snap))
+  const shapes = spec.rooms.map((r) => (r.cutouts?.length ? roomShapeMm(r, U, snap, D.partition, D.wallHeight) : null))
+  // the outline walls are built as if there were no cutouts (a cutout changes nothing for the rooms
+  // beside); the cutouts add their own walls inside, along the floor
+  const voids = shapes.flatMap((sh, host) => (sh ? sh.voids.map((v) => ({ host, v })) : []))
 
   // ── walls
   const wallsMode = (spec.walls?.length ?? 0) > 0
@@ -1758,14 +2741,18 @@ export function compilePlanSpecDetailed(spec: PlanSpec, opts: CompileOptions = {
   // rect/polygon — e.g. shaft outlines drawn inside rect rooms. Pure walls-mode (rooms as `at` labels
   // only) infers nothing from rooms.
   const roomsWithGeometry = polys.some(Boolean)
+  const clipped: Vec2[] = []
   let segs = [
     ...(wallsMode ? wallsModeSegments(spec.walls!, U, D, snap) : []),
-    ...(roomsWithGeometry || !wallsMode ? roomsModeSegments(spec.rooms, polys, D, stdT, issues) : []),
+    ...(roomsWithGeometry || !wallsMode ? roomsModeSegments(spec.rooms, polys, D, stdT, issues, clipped) : []),
+    ...shapes.flatMap((sh) => sh?.walls ?? []),
   ]
-  const maxT = segs.reduce((m, s) => Math.max(m, s.t), 0)
+  // the snap tolerances follow the outline walls: a thick column wall must not let them reach further
+  const maxT = segs.reduce((m, s) => (s.cut ? m : Math.max(m, s.t)), 0)
   const mergeMm = snap?.mergeMm ?? maxT / 2 + 50
   segs = mergeCollinear(segs, mergeMm)
   joinEnds(segs, mergeMm)
+  segs = [...segs, ...stepJoints(segs, D.wallHeight)]
   segs = segs.filter((s) => vDist(s.a, s.b) >= 1).sort((x, y) => vDist(y.a, y.b) - vDist(x.a, x.b))
   for (const s of segs) {
     addWall(doc, levelId, s.a, s.b, { thickness: s.t, height: s.height, kind: WALL_KIND_MAP[s.kind] })
@@ -1956,11 +2943,38 @@ export function compilePlanSpecDetailed(spec: PlanSpec, opts: CompileOptions = {
     rec.type = type
     if (r.ceilingHeight !== undefined) rec.ceiling = { ...rec.ceiling, height: r.ceilingHeight }
     else if (D.ceilingHeight !== D.wallHeight) rec.ceiling = { ...rec.ceiling, height: D.ceilingHeight }
-    if (r.labelledArea !== undefined && r.labelledArea > 0) rec.labelledArea = r.labelledArea
+    // the doc keeps the clear-area equivalent: a loggia printed as 1,3 (×0.5) is 2.6 m² of floor
+    if (r.labelledArea !== undefined && r.labelledArea > 0)
+      rec.labelledArea = Math.round((r.labelledArea / (r.labelledAreaCoef ?? 1)) * 100) / 100
+    if (r.technical) rec.technical = true
     doc.rooms[rec.id] = rec
     roomIds[r.id] = rec.id
   })
   syncRooms(doc)
+  // the faces left inside cutouts are technical rooms (shaft / box / column), not «Комната N»
+  if (voids.length) {
+    const CUT_NAMES: Record<SpecCutoutKind, string> = { shaft: 'Шахта', box: 'Короб', column: 'Колонна' }
+    const inCut = (p: Vec2, b: Box) => p.x > b.x0 && p.x < b.x1 && p.y > b.y0 && p.y < b.y1
+    for (const face of derivePlan(doc, levelId).rooms) {
+      if (doc.rooms[face.roomId] && Object.values(roomIds).includes(face.roomId)) continue
+      const p = interiorPoint(face.polygon)
+      // the planned void, or any leftover inside the cutout (a thick continued outline wall can
+      // leave the void a sliver beside it)
+      const hit = voids.find(({ v }) => pointInPoly(p, v.poly)) ?? voids.find(({ v }) => inCut(p, v.cut))
+      if (!hit) continue
+      // a void under 0.1 m² gets no record from syncRooms: it still is the cutout, not a nameless face
+      let rec = doc.rooms[face.roomId]
+      if (!rec) {
+        rec = defaultRoom(levelId, p)
+        doc.rooms[rec.id] = rec
+      }
+      const cut = spec.rooms[hit.host].cutouts?.[hit.v.index]
+      rec.name = cut?.name ?? CUT_NAMES[hit.v.kind]
+      rec.type = 'other'
+      // not floor, whatever its size: a 1.4 × 1.4 m shaft must not add 2 m² to the flat
+      rec.technical = true
+    }
+  }
   for (const [sid, rid] of Object.entries(roomIds)) {
     if (!doc.rooms[rid]) {
       delete roomIds[sid]
@@ -2101,15 +3115,112 @@ function projectToWall(
 
 // ───────────────────────────── validator ─────────────────────────────
 
-function areaThreshold(computed: number, labelled: number): PlanIssueSeverity | null {
+export function areaThreshold(computed: number, labelled: number): PlanIssueSeverity | null {
   const delta = Math.abs(computed - labelled)
   if (delta > Math.max(0.4, 0.05 * labelled)) return 'error'
   if (delta > Math.max(0.15, 0.02 * labelled)) return 'warning'
   return null
 }
 
+/**
+ * mm: how far a built room face may stray from its spec shape. Thickness snapping moves a face by up
+ * to 7.5 mm, a zero-thickness separator in a < 40 mm gap by up to 20 mm.
+ */
+const BUILT_SHAPE_TOL = 25
+/** a built-shape difference this small (a corner notch of a wall junction) only warns: the areas
+ *  stay within rounding and no wall pokes far into the floor */
+function builtShapeSeverity(dev: number, dA: number, holes: boolean): 'error' | 'warning' {
+  return holes || dev >= 300 || Math.abs(dA) >= 0.05 ? 'error' : 'warning'
+}
+
+/** the largest distance from the boundary of rings `a` to the boundary of rings `b` (sampled ≤ 50 mm) */
+function boundaryDeviation(a: Vec2[][], b: Vec2[][], skip?: (s: Vec2, side: Vec2) => boolean): number {
+  let worst = 0
+  for (const ring of a)
+    for (let i = 0; i < ring.length; i++) {
+      const p = ring[i]
+      const q = ring[(i + 1) % ring.length]
+      const n = Math.max(1, Math.ceil(vDist(p, q) / 50))
+      const side = vDist(p, q) > 1e-9 ? vMul(V(-(q.y - p.y), q.x - p.x), 1 / vDist(p, q)) : V(0, 0)
+      for (let k = 0; k < n; k++) {
+        const s = vAdd(p, vMul(vSub(q, p), k / n))
+        if (skip?.(s, side)) continue
+        let d = Infinity
+        for (const r of b) d = Math.min(d, distToPolyBoundary(s, r))
+        if (d > worst) worst = d
+      }
+    }
+  return worst
+}
+
+/**
+ * The number of holes of a built face as the checked shape sees them: holes sharing a piece of a side
+ * are one hole (partly adjacent cutouts, each with its own void), and a hole sharing a side with the
+ * outer ring is a notch of the outline (a shaft against a column at the outline). Holes meeting at a
+ * single point stay apart, as the checked shape keeps them. `least`: the shortest shared piece that
+ * joins two rings (by default the shape tolerance)
+ */
+function holeGroups(outer: Vec2[], holes: Vec2[][], least = BUILT_SHAPE_TOL): number {
+  const rings = [outer, ...holes]
+  const up = rings.map((_, i) => i)
+  const find = (i: number): number => (up[i] === i ? i : (up[i] = find(up[i])))
+  for (let i = 0; i < rings.length; i++)
+    for (let j = i + 1; j < rings.length; j++) if (sharesSide(rings[i], rings[j], least)) up[find(i)] = find(j)
+  return rings.filter((_, i) => find(i) === i && find(i) !== find(0)).length
+}
+
+/**
+ * two rings share a piece of a side (not just a point: holes meeting at a corner stay two holes). The
+ * piece must be longer than the shape tolerance: a snapped wall (a 95 mm gap built 100) moves a reflex
+ * corner a few mm along the hole beside it, which is no shared side
+ */
+function sharesSide(a: Vec2[], b: Vec2[], least = BUILT_SHAPE_TOL): boolean {
+  for (let i = 0; i < a.length; i++) {
+    const p = a[i]
+    const q = a[(i + 1) % a.length]
+    const len = vLen(vSub(q, p))
+    if (len < 1) continue
+    const u = vMul(vSub(q, p), 1 / len)
+    for (let j = 0; j < b.length; j++) {
+      const r = b[j]
+      const s = b[(j + 1) % b.length]
+      // both ends of b's side on a's line, then the overlap of the two along it
+      const off = (x: Vec2) => Math.abs(vCross(u, vSub(x, p)))
+      if (off(r) > 1 || off(s) > 1) continue
+      const t0 = vDot(vSub(r, p), u)
+      const t1 = vDot(vSub(s, p), u)
+      if (Math.min(len, Math.max(t0, t1)) - Math.max(0, Math.min(t0, t1)) > least) return true
+    }
+  }
+  return false
+}
+
+/** BTI coefficients a printed outdoor-room area may carry (loggia 0.5, balcony / terrace 0.3) */
+export const SUMMER_AREA_COEFS = [0.5, 0.3] as const
+
+/**
+ * An outdoor room whose clear area is far from the printed one, but matches it after a BTI
+ * coefficient — the printed number most likely already includes it.
+ */
+export function guessAreaCoef(computed: number, labelled: number): number | null {
+  if (!(labelled > 0) || !areaThreshold(computed, labelled)) return null
+  for (const k of SUMMER_AREA_COEFS) if (!areaThreshold(computed * k, labelled)) return k
+  return null
+}
+
+/** severity of an area mismatch after the author's explanation: an explained error is only a warning */
+export function explainedSeverity(sev: PlanIssueSeverity, note: string | undefined): PlanIssueSeverity {
+  return note && note.trim() && sev === 'error' ? 'warning' : sev
+}
+
 /** Full validation with metrics (same code as the in-app check and `dp spec validate`). */
 export function validatePlanSpecDetailed(input: PlanSpec): PlanValidation {
+  if (!usesCutoutLogic(input)) return legacy.validatePlanSpecDetailed(input as legacy.PlanSpec)
+  return validateCutoutSpec(input)
+}
+
+/** the check of the cutout compiler (compileCutoutSpec) */
+export function validateCutoutSpec(input: PlanSpec): PlanValidation {
   const c = new Coercer()
   const spec = coerceSpec(input, c)
   const issues: PlanIssue[] = [...c.issues]
@@ -2168,8 +3279,12 @@ export function validatePlanSpecDetailed(input: PlanSpec): PlanValidation {
 
   // ── rooms static
   const polys = spec.rooms.map((r) => roomPolygonMm(r, U, spec.snap))
+  const shapes = spec.rooms.map((r) => (r.cutouts?.length ? roomShapeMm(r, U, spec.snap, D.partition, D.wallHeight) : null))
   spec.rooms.forEach((r, i) => {
     const path = `rooms[${i}]`
+    for (const p of shapes[i]?.problems ?? []) issues.push({ ...p, path: `${path}.cutouts`, ids: [r.id] })
+    if (r.cutouts?.length && !r.rect && !r.polygon)
+      issues.push({ severity: 'error', code: 'CUTOUT_UNSUPPORTED', message: `Комната «${r.id}»: вырезы нужны внутри rect или polygon`, path, ids: [r.id] })
     if (r.rect && (r.rect[2] <= 0 || r.rect[3] <= 0))
       issues.push({ severity: 'error', code: 'SCHEMA', message: `Комната «${r.id}»: отрицательный или нулевой размер rect`, path: `${path}.rect`, ids: [r.id] })
     if (!r.rect && !r.polygon && !r.at)
@@ -2220,7 +3335,7 @@ export function validatePlanSpecDetailed(input: PlanSpec): PlanValidation {
     const t = w.thickness ?? thicknessFor(kind, D)
     if (kind !== 'separator' && (t < 60 || t > 700))
       issues.push({ severity: 'warning', code: 'WALL_THICKNESS_ODD', message: `Стена «${w.id}»: толщина ${t} мм вне 60–700`, path: `walls[${i}]`, ids: [w.id] })
-    if ((kind === 'partition' || kind === 'loadBearing') && t > D.exterior)
+    if ((kind === 'partition' || kind === 'loadBearing') && t > D.exterior && !w.cutout)
       issues.push({
         severity: 'warning',
         code: 'WALL_THICKNESS_ODD',
@@ -2270,7 +3385,7 @@ export function validatePlanSpecDetailed(input: PlanSpec): PlanValidation {
   // ── compile-based checks
   let res: CompileResult
   try {
-    res = compilePlanSpecDetailed(spec)
+    res = compileCutoutSpec(spec)
   } catch (e) {
     issues.push({ severity: 'error', code: 'COMPILE_FAILED', message: `Не удалось построить план: ${(e as Error).message}` })
     return done()
@@ -2313,7 +3428,9 @@ export function validatePlanSpecDetailed(input: PlanSpec): PlanValidation {
         ids,
       })
   }
+  const voidPolys = shapes.flatMap((sh) => sh?.voids.map((v) => v.poly) ?? [])
   plan.rooms.forEach((r, fi) => {
+    if (voidPolys.some((vp) => pointInPoly(interiorPoint(r.polygon), vp))) return
     if (!faceToSpec.has(fi) && r.area > 0.5)
       issues.push({
         severity: wallsMode ? 'warning' : 'info',
@@ -2322,46 +3439,127 @@ export function validatePlanSpecDetailed(input: PlanSpec): PlanValidation {
       })
   })
 
+  // the built plan vs the checked shapes: the area check below works on the spec shapes, so a room
+  // whose built floor differs (a wall end poking into the floor or the next room, a cutout that did
+  // not become a hole) must not pass as «ok» — whatever the reason in the wall synthesis
+  if (!wallsMode) {
+    spec.rooms.forEach((r, i) => {
+      const fi = specFace.get(r.id)
+      const sh = shapes[i]
+      const want = sh ? [sh.outer, ...sh.holes] : polys[i] ? [polys[i]!] : null
+      if (fi === undefined || !want) return
+      const f = plan.rooms[fi]
+      const got = [f.polygon, ...f.holes]
+      // two holes of the built face that touch (partly adjacent cutouts, each with its own void) are
+      // one hole of the checked shape: their shared side borders no floor and is not compared
+      // (a probe on a boundary is no floor: pointInPoly there follows the rounding, so the orientation).
+      // A hairline sliver of floor (a snapped wall leaves 2.5 mm along a wall body) borders no floor
+      // either: a probe 2 mm in counts only with 0.8 mm clear, so any sliver under 2.8 mm is skipped
+      // the same way in every orientation (0.5 mm clear made a 2.5 mm sliver a tie of the rounding)
+      const floorAt = (p: Vec2) =>
+        got.every((g) => distToPolyBoundary(p, g) > 0.8) && pointInPoly(p, f.polygon) && !f.holes.some((h) => pointInPoly(p, h))
+      const inner = (s: Vec2, side: Vec2) => !floorAt(vAdd(s, vMul(side, 2))) && !floorAt(vAdd(s, vMul(side, -2)))
+      const dev = Math.max(boundaryDeviation(got, want, inner), boundaryDeviation(want, got))
+      // (a hole sharing even a few mm of side with another hole or the outline is one with it in the
+      // checked shape, which is the union of the cutouts: a column touching a shaft flush to the outline
+      // over 1–25 mm is part of that notch there, and the hole it builds is no hole missing or extra)
+      const nHoles = holeGroups(f.polygon, f.holes)
+      const holesOk =
+        nHoles === want.length - 1 ||
+        (sh?.holeParts !== undefined && nHoles === sh.holeParts) ||
+        holeGroups(f.polygon, f.holes, 0.25) === want.length - 1
+      if (dev <= BUILT_SHAPE_TOL && holesOk) return
+      const area = (sh ? sh.area : Math.abs(signedArea(polys[i]!))) / 1e6
+      const holes = !holesOk ? `, вырезов-отверстий ${nHoles} вместо ${want.length - 1}` : ''
+      issues.push({
+        severity: builtShapeSeverity(dev, f.area - area, holes !== ''),
+        code: 'BUILT_SHAPE_MISMATCH',
+        message: `Комната «${r.id}»: построенный пол отличается от проверенного (до ${Math.round(dev)} мм; ${f.area.toFixed(2)} м² вместо ${area.toFixed(2)} м²${holes}) — площади и стены в .doplan будут другими. Упростите или сдвиньте вырез / угол; если не помогает — это ограничение компилятора, сообщите`,
+        path: `rooms[${i}]`,
+        ids: [r.id],
+      })
+    })
+    // every shaft / box void is one closed area of its own (a solid column has no space inside)
+    shapes.forEach((sh, i) =>
+      sh?.voids.forEach((v) => {
+        if (v.kind === 'column') return
+        const fi = faceOf(interiorPoint(v.poly))
+        const f = fi >= 0 ? plan.rooms[fi] : null
+        // a void too small to be a closed area of the editor (a vent duct: under 0.01 m² inside its
+        // walls) has none, and needs none: its walls are built, its floor is not counted anyway
+        if (!f && Math.abs(signedArea(v.poly)) < MIN_FACE_AREA) return
+        const dev = f ? Math.max(boundaryDeviation([f.polygon, ...f.holes], [v.poly]), boundaryDeviation([v.poly], [f.polygon, ...f.holes])) : Infinity
+        if (dev <= BUILT_SHAPE_TOL) return
+        const r = spec.rooms[i]
+        issues.push({
+          severity: f ? builtShapeSeverity(dev, f.area - Math.abs(signedArea(v.poly)) / 1e6, f.holes.length > 0) : 'error',
+          code: 'BUILT_SHAPE_MISMATCH',
+          message: `Комната «${r.id}»: вырез #${v.index + 1} построен не тем контуром, что задан (${f ? `до ${Math.round(dev)} мм` : 'нет замкнутого контура'}) — проверьте, не пересекается ли он с соседними вырезами и стенами`,
+          path: `rooms[${i}].cutouts[${v.index}]`,
+          ids: [r.id],
+        })
+      }),
+    )
+  }
+
   // areas
   const roomType = (id: string): SpecRoomType => spec.rooms.find((r) => r.id === id)?.type ?? 'other'
   spec.rooms.forEach((r, i) => {
     const fi = specFace.get(r.id)
     let computed: number | undefined
-    if (!wallsMode && polys[i]) computed = Math.abs(signedArea(polys[i]!)) / 1e6
+    if (!wallsMode && shapes[i]) computed = shapes[i]!.area / 1e6
+    else if (!wallsMode && polys[i]) computed = Math.abs(signedArea(polys[i]!)) / 1e6
     else if (fi !== undefined) computed = plan.rooms[fi].area
     if (computed === undefined) return
     const m: PlanRoomMetric = { id: r.id, computed: Math.round(computed * 100) / 100 }
+    // a blank note explains nothing (it neither downgrades the error nor shows up in the message)
+    const note = r.areaNote?.trim() || undefined
     if (r.labelledArea !== undefined) {
+      const k = r.labelledAreaCoef ?? 1
+      const shown = computed * k
       m.labelled = r.labelledArea
-      m.delta = Math.round((computed - r.labelledArea) * 100) / 100
-      m.pct = r.labelledArea > 0 ? Math.round(((computed - r.labelledArea) / r.labelledArea) * 1000) / 10 : undefined
-      const sev = areaThreshold(computed, r.labelledArea)
-      if (sev)
+      if (k !== 1) m.coef = k
+      if (note) m.note = note
+      m.delta = Math.round((shown - r.labelledArea) * 100) / 100
+      m.pct = r.labelledArea > 0 ? Math.round(((shown - r.labelledArea) / r.labelledArea) * 1000) / 10 : undefined
+      const sev = areaThreshold(shown, r.labelledArea)
+      if (sev) {
+        const guess = k === 1 && isOutdoor(r) ? guessAreaCoef(computed, r.labelledArea) : null
+        const what = k !== 1 ? `${computed.toFixed(2)} м² × ${k} = ${shown.toFixed(2)} м²` : `${computed.toFixed(2)} м²`
+        let message = `Комната «${r.id}»: площадь ${what}, на плане ${r.labelledArea} м²`
+        if (guess)
+          message += `. Похоже, на плане площадь с коэффициентом БТИ ${guess}: укажите labelledAreaCoef: ${guess} (реальная глубина = ${r.labelledArea} / ${guess} / длина)`
+        if (note) message += ` — объяснено: ${note}`
         issues.push({
-          severity: sev,
+          severity: explainedSeverity(sev, note),
           code: 'AREA_MISMATCH',
-          message: `Комната «${r.id}»: площадь ${computed.toFixed(2)} м², на плане ${r.labelledArea} м²`,
+          message,
           path: `rooms[${i}]`,
           ids: [r.id],
         })
+      }
     }
     metrics.perRoom.push(m)
     const coef = r.balcony && !AREA_COEF[r.type ?? 'other'] ? 0.3 : (AREA_COEF[r.type ?? 'other'] ?? 1)
-    // shafts / boxed niches (< 1 m², type other) are not floor area in BTI totals
-    const technical = computed < 1 && (r.type === undefined || r.type === 'other')
+    // shafts / boxed niches (< 1 m² or marked technical, type other) are not floor in BTI totals
+    // (a marked one follows the app's rule, isTechnicalRoom: other / storage)
+    const technical =
+      (computed < 1 && (r.type === undefined || r.type === 'other')) ||
+      (r.technical === true && (r.type === undefined || r.type === 'other' || r.type === 'storage'))
     if (!technical) metrics.totalArea += computed * coef
     if (LIVING_TYPES.includes(r.type ?? 'other')) metrics.livingArea += computed
   })
   metrics.totalArea = Math.round(metrics.totalArea * 100) / 100
   metrics.livingArea = Math.round(metrics.livingArea * 100) / 100
+  const srcNote = spec.source?.areaNote?.trim() || undefined
   const lt = spec.source?.labelledTotalArea
   if (lt !== undefined) {
     const sev = areaThreshold(metrics.totalArea, lt)
     if (sev)
       issues.push({
-        severity: sev,
+        severity: explainedSeverity(sev, srcNote),
         code: 'TOTAL_AREA_MISMATCH',
-        message: `Общая площадь ${metrics.totalArea.toFixed(2)} м² (балкон ×0,3, лоджия ×0,5), на плане ${lt} м²`,
+        message: `Общая площадь ${metrics.totalArea.toFixed(2)} м² (балкон ×0,3, лоджия ×0,5), на плане ${lt} м²${srcNote ? ` — объяснено: ${srcNote}` : ''}`,
         path: 'source.labelledTotalArea',
       })
   }
@@ -2370,9 +3568,9 @@ export function validatePlanSpecDetailed(input: PlanSpec): PlanValidation {
     const sev = areaThreshold(metrics.livingArea, ll)
     if (sev)
       issues.push({
-        severity: sev,
+        severity: explainedSeverity(sev, srcNote),
         code: 'TOTAL_AREA_MISMATCH',
-        message: `Жилая площадь ${metrics.livingArea.toFixed(2)} м², на плане ${ll} м²`,
+        message: `Жилая площадь ${metrics.livingArea.toFixed(2)} м², на плане ${ll} м²${srcNote ? ` — объяснено: ${srcNote}` : ''}`,
         path: 'source.labelledLivingArea',
       })
   }
@@ -2458,7 +3656,9 @@ export function validatePlanSpecDetailed(input: PlanSpec): PlanValidation {
       // shafts, risers, boxed niches: tiny closed areas with no doors are technical, not rooms
       const face = specFace.get(r.id)
       const technical =
-        face !== undefined && plan.rooms[face].area < 1 && !(adj.get(r.id)?.size ?? 0) && (r.type === undefined || r.type === 'other' || r.type === 'storage')
+        face !== undefined &&
+        (r.technical === true || (plan.rooms[face].area < 1 && !(adj.get(r.id)?.size ?? 0))) &&
+        (r.type === undefined || r.type === 'other' || r.type === 'storage')
       if (face !== undefined && !seen.has(r.id) && !technical)
         issues.push({
           severity: 'error',
@@ -2482,10 +3682,26 @@ export function validatePlanSpecDetailed(input: PlanSpec): PlanValidation {
     degree.set(w.a, (degree.get(w.a) ?? 0) + 1)
     degree.set(w.b, (degree.get(w.b) ?? 0) + 1)
   }
+  // an end inside the body of another wall is covered, not free (the stub that closes a column's
+  // corner runs on into the body of the column's other wall)
+  const inBody = (id: Id, self: Id): boolean => {
+    const p = doc.nodes[id]
+    return lw.some((o) => {
+      if (o.id === self || o.kind === 'virtual') return false
+      const a = doc.nodes[o.a]
+      const b = doc.nodes[o.b]
+      const ab = vSub(b, a)
+      const L = vLen(ab)
+      if (L < 1) return false
+      const along = vDot(vSub(p, a), ab) / L
+      const across = Math.abs(vCross(ab, vSub(p, a))) / L
+      return along >= -0.5 && along <= L + 0.5 && across <= o.thickness / 2 + 0.5
+    })
+  }
   let dangling = 0
   for (const w of lw) {
     if (w.kind === 'parapet' || w.kind === 'glazing' || w.kind === 'virtual') continue
-    if ((degree.get(w.a) ?? 0) === 1 || (degree.get(w.b) ?? 0) === 1) dangling++
+    if ([w.a, w.b].some((n) => (degree.get(n) ?? 0) === 1 && !inBody(n, w.id))) dangling++
   }
   if (dangling)
     issues.push({ severity: 'warning', code: 'DANGLING_WALL', message: `${dangling} стен(ы) со свободным концом — проверьте примыкания` })
@@ -2516,11 +3732,14 @@ export function docToPlanSpec(doc: Doc, levelId?: Id): PlanSpec {
   const level = doc.levels[lid]
   const plan = derivePlan(doc, lid)
   const sidesWithRoom = new Map<Id, Set<string>>()
+  // the walls around a technical void: written with `cutout`, so the rebuild keeps them as cutout walls
+  const aroundVoid = new Set<Id>()
   for (const r of plan.rooms) {
     for (const e of r.edges) {
       const s = sidesWithRoom.get(e.wallId) ?? new Set<string>()
       s.add(e.side)
       sidesWithRoom.set(e.wallId, s)
+      if (doc.rooms[r.roomId]?.technical) aroundVoid.add(e.wallId)
     }
   }
   const walls: WallSpec[] = []
@@ -2556,6 +3775,7 @@ export function docToPlanSpec(doc: Doc, levelId?: Id): PlanSpec {
       thickness: w.thickness,
       kind,
       height: w.height,
+      ...(aroundVoid.has(w.id) ? { cutout: true } : {}),
     })
     // provenance: a wall segment carries one source for both faces; emit it when the faces agree
     const pl = w.dims?.left
@@ -2589,8 +3809,10 @@ export function docToPlanSpec(doc: Doc, levelId?: Id): PlanSpec {
     const dr = plan.rooms.find((x) => x.roomId === r.id)
     const at = dr ? dr.labelPoint : r.anchor
     const rs: RoomSpec = { id: r.id, name: r.name, type: REVERSE_TYPE[r.type] ?? 'other', at: [r1(at.x), r1(at.y)] }
+    // a shaft / box void is no floor: it keeps its mark and gets no area to check
+    if (r.technical) rs.technical = true
     if (r.labelledArea) rs.labelledArea = r.labelledArea
-    else if (dr) rs.labelledArea = Math.round(dr.area * 100) / 100
+    else if (dr && !r.technical) rs.labelledArea = Math.round(dr.area * 100) / 100
     if (r.ceiling.height !== undefined) rs.ceilingHeight = r.ceiling.height
     rooms.push(rs)
   }
@@ -2630,11 +3852,40 @@ export function docToPlanSpec(doc: Doc, levelId?: Id): PlanSpec {
     if (it.elevation) f.elevation = it.elevation
     fixtures.push(f)
   }
+  // a cutout wall split by a junction stays one cutout wall: its collinear pieces of the same
+  // thickness carry the mark too (the piece past a shaft that closes a column's corner); an outline
+  // wall never does
+  for (let changed = true; changed; ) {
+    changed = false
+    for (const w of walls) {
+      if (w.cutout || (w.kind !== 'loadBearing' && w.kind !== 'partition')) continue
+      const [p, q] = w.path
+      const dir = [q[0] - p[0], q[1] - p[1]]
+      const run = walls.some((o) => {
+        if (!o.cutout || o.thickness !== w.thickness) return false
+        const [a, b] = o.path
+        const od = [b[0] - a[0], b[1] - a[1]]
+        if (Math.abs(dir[0] * od[1] - dir[1] * od[0]) > 1e-6 * Math.hypot(...dir) * Math.hypot(...od)) return false
+        return [p, q].some((u) => [a, b].some((v) => u[0] === v[0] && u[1] === v[1]))
+      })
+      if (run) {
+        w.cutout = true
+        changed = true
+      }
+    }
+  }
+  // the exterior thickness the walls are checked against: the one most of the outline is built with
+  // (by length; the walls around voids left out), so a 510 mm project is not read as a 300 mm one
+  const byT = new Map<number, number>()
+  for (const w of walls)
+    if (w.kind === 'exterior' && !w.cutout && w.thickness)
+      byT.set(w.thickness, (byT.get(w.thickness) ?? 0) + Math.hypot(w.path[1][0] - w.path[0][0], w.path[1][1] - w.path[0][1]))
+  const exteriorThickness = [...byT].sort((p, q) => q[1] - p[1] || q[0] - p[0])[0]?.[0]
   const spec: PlanSpec = {
     version: 1,
     units: 'mm',
     name: doc.meta.name,
-    defaults: { ceilingHeight: level?.height ?? doc.settings.wallHeight, wallHeight: level?.height ?? doc.settings.wallHeight },
+    defaults: strip({ ceilingHeight: level?.height ?? doc.settings.wallHeight, wallHeight: level?.height ?? doc.settings.wallHeight, exteriorThickness }),
     snap: { orthogonal: false, standardThickness: false, mergeMm: 1 },
     walls,
     rooms,

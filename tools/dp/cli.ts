@@ -69,7 +69,7 @@ const COMMANDS: Record<string, Record<string, Cmd>> = {
     },
     validate: {
       usage: 'spec validate <spec.json> [--strict]',
-      summary: 'core validator + computed vs labelled room areas; exit 1 on errors',
+      summary: 'core validator + computed vs labelled room areas + build gate; exit 1 on errors',
       load: async () => (await import('./commands/spec')).specValidate,
     },
     normalize: {
@@ -93,8 +93,8 @@ const COMMANDS: Record<string, Record<string, Cmd>> = {
       load: async () => (await import('./commands/spec')).specCheck,
     },
     build: {
-      usage: 'spec build <spec.json> --out <project.doplan> [--open] [--no-underlay] [--name "…"] [--strict]',
-      summary: 'compile → .doplan (zip: manifest.json, doc.json, assets/) and optionally open the app',
+      usage: 'spec build <spec.json> --out <project.doplan> [--open] [--no-underlay] [--name "…"] [--strict] [--force]',
+      summary: 'compile → .doplan; refuses on errors (incl. unexplained area mismatches — see areaNote), --strict also on warnings, --force overrides',
       load: async () => (await import('./commands/spec')).specBuild,
     },
   },

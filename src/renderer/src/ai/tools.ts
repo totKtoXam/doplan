@@ -43,6 +43,7 @@ import {
   electricHalfWidth,
   isMountableWall,
   wallHidden,
+  remapVoidNodes,
 } from '@core'
 import type { Catalog, DerivedPlan, Doc, ElectricKind, ElectricPoint, EntityRef, Id, Vec2 } from '@core/types'
 import type { AiToolResult } from '@shared/aiChat'
@@ -158,6 +159,7 @@ function copyLevel(src: Doc, srcLevel: Id, d: Doc, dst: Id): void {
     const id = newId('r')
     d.rooms[id] = structuredClone({ ...r, id, levelId: dst })
     remapAccentFace(d.rooms[id], wallMap)
+    remapVoidNodes(d.rooms[id], nodeMap)
   }
   for (const it of Object.values(src.items)) {
     if (it.levelId !== srcLevel) continue

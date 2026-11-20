@@ -111,11 +111,11 @@ export function rayElectricSurface(doc: RayDoc, levelId: Id, ray: PlanRay, opts:
     const w = doc.walls[id]
     if (w.levelId !== levelId || !isMountableWall(w) || wallHidden(doc, w)) continue
     const top = opts.wallHeight ? opts.wallHeight(w) : w.height
+    const g = geoms[id] as WallGeom | undefined
     for (const side of ['left', 'right'] as const) {
-      const hit = rayFace(doc, w, side, ray, top)
+      const hit = rayFace(doc, w, side, ray, top, g)
       if (hit && (!best || hit.s < best.s)) best = hit
     }
-    const g = geoms[id]
     if (!g || g.polygon.length < 3) continue
     const cap = rayCap(doc, w, g, ray, top)
     if (cap && (!best || cap.s < best.s)) best = cap
@@ -241,6 +241,7 @@ function rayFace(
   side: 'left' | 'right',
   ray: PlanRay,
   top: number,
+  g?: WallGeom,
 ): ElectricSurfaceHit | null {
   const f0 = wallFacePoint(doc, w.id, side, 0)
   const a = doc.nodes[w.a]
@@ -260,8 +261,20 @@ function rayFace(
   const z = ray.oz + ray.dz * s
   if (z < 0 || z > top) return null
   const t = (x - f0.point.x) * ux + (y - f0.point.y) * uy
-  const range = wallFaceRange(doc, w.id, side, 0)
-  if (!range || t < range.lo - 1 || t > range.hi + 1) return null
+  // the face as the 3D view draws it: the outline's face segment (at an outer corner it runs on to
+  // the mitre point, past the node); without the outline, the face range along the wall
+  const seg = g && faceSegment(g, f0.point, ux, uy)
+  if (seg) {
+    const sx = seg[1].x - seg[0].x
+    const sy = seg[1].y - seg[0].y
+    const sl = Math.hypot(sx, sy)
+    if (sl < 1e-6) return null
+    const u = ((x - seg[0].x) * sx + (y - seg[0].y) * sy) / sl
+    if (u < -1 || u > sl + 1) return null
+  } else {
+    const range = wallFaceRange(doc, w.id, side, 0)
+    if (!range || t < range.lo - 1 || t > range.hi + 1) return null
+  }
   // through a door or window hole the ray passes on
   const openings = doc.openings ?? {}
   for (const id in openings) {
@@ -269,7 +282,15 @@ function rayFace(
     if (o.wallId !== w.id) continue
     for (const r of openingRects(o)) if (t > o.offset + r.x0 && t < o.offset + r.x1 && z > r.v0 && z < r.v1) return null
   }
-  return { surface: 'wall', x, y, z, s, wallId: w.id, side, t }
+  // a point is placed along the wall itself
+  return { surface: 'wall', x, y, z, s, wallId: w.id, side, t: Math.max(0, Math.min(len, t)) }
+}
+
+/** the face segment of a wall outline on the face line through `at` along (ux, uy) */
+function faceSegment(g: WallGeom, at: Vec2, ux: number, uy: number): readonly [Vec2, Vec2] | null {
+  const off = (p: Vec2) => Math.abs(-(p.x - at.x) * uy + (p.y - at.y) * ux)
+  for (const seg of [g.left, g.right]) if (off(seg[0]) < 1 && off(seg[1]) < 1) return seg
+  return null
 }
 
 /** how much a wall point at (t, h) overlaps the openings of its wall, mm² (0: free of them) */

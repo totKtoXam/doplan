@@ -259,6 +259,53 @@ describe('wall ends block the ray as the 3D view draws them (the wall outlines)'
     expect(end.x).toBeCloseTo(5000)
   })
 
+  it.each([
+    ['as tall (A)', 2700],
+    ['lower (B)', 900],
+  ])('an outer corner, the neighbour %s: the face strip past the node is the face, not the neighbour', (_n, h2) => {
+    const { doc, ids, shoot } = walls([
+      { from: [1000, 3000], to: [3000, 3000], thickness: 100 },
+      { from: [3000, 3000], to: [3000, 5000], thickness: 100, height: h2, kind: h2 < 2700 ? 'parapet' : 'wall' },
+    ])
+    const w1 = ids[0][0]
+    for (const x of [2990, 3010, 3025, 3045]) {
+      const hit = rayElectricSurface(doc, doc.levelOrder[0], { ox: x, oy: 1000, oz: 1500, dx: 0, dy: 1, dz: 0 })!
+      expect(hit?.wallId, `x=${x}`).toBe(w1)
+      expect(hit.y).toBeCloseTo(2950)
+      expect(hit.t!).toBeLessThanOrEqual(2000)
+    }
+    expect(shoot(2990, 1000, 0, 1)?.wallId).toBe(w1)
+  })
+
+  it('an outer corner of 200 mm walls from outside: the face, not the end of the other wall', () => {
+    const { ids, shoot } = walls([
+      { from: [1000, 3000], to: [3000, 3000], thickness: 200 },
+      { from: [3000, 3000], to: [3000, 1000], thickness: 200 },
+    ])
+    for (const x of [2990, 3010, 3050, 3090]) {
+      const hit = shoot(x, 5000, 0, -1)!
+      expect(hit.wallId, `x=${x}`).toBe(ids[0][0])
+      expect(hit.y).toBeCloseTo(3100)
+      expect(hit.t).toBeCloseTo(Math.min(x - 1000, 2000))
+    }
+    // beyond the mitre point: past the walls
+    expect(shoot(3150, 5000, 0, -1)?.surface).toBe('floor')
+  })
+
+  it('the outer corner of a rectangular room from outside is the face aimed at', () => {
+    const doc = createEmptyDoc()
+    const L = doc.levelOrder[0]
+    addRectRoom(doc, L, 0, 0, 4000, 3000, { thickness: 200, height: 2700 })
+    edit(doc)
+    const top = Object.values(doc.walls).find((w) => Math.abs(doc.nodes[w.a].y) < 1 && Math.abs(doc.nodes[w.b].y) < 1)!
+    for (const x of [-10, -50, -90]) {
+      const hit = rayElectricSurface(doc, L, { ox: x, oy: -2000, oz: 1000, dx: 0, dy: 1, dz: 0 })!
+      expect(hit.wallId, `x=${x}`).toBe(top.id)
+      expect(hit.y).toBeCloseTo(-100)
+      expect(hit.t).toBeCloseTo(doc.nodes[top.a].x < 1 ? 0 : 4000)
+    }
+  })
+
   it('an acute junction: the bevel is a face', () => {
     const { shoot } = walls([
       { from: [1000, 3000], to: [3000, 3000], thickness: 200 },

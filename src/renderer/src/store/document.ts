@@ -1,13 +1,14 @@
 /**
  * Document store: the undoable project document + derived geometry per level.
  * Every change goes through `transact()` (Immer `produceWithPatches`), which synchronously runs
- * core `normalize` + `syncRooms` and recomputes `derivePlan` for the levels the patches touched.
+ * core `normalize` + `syncRooms` (when the change could break the plan invariants: `touchesPlan`)
+ * and recomputes `derivePlan` for the levels the patches touched.
  * Untouched levels keep their previous `DerivedPlan` object (structural sharing → cheap 3D/2D diffing).
  */
 import { applyPatches, enablePatches, type Patch, produce, produceWithPatches } from 'immer'
 import { createStore } from 'zustand/vanilla'
 import { useStore } from 'zustand'
-import { createEmptyDoc, derivePlan, normalize, syncFormatVersion, syncRooms } from '@core'
+import { createEmptyDoc, derivePlan, docFormatVersion, normalize, syncFormatVersion, syncRooms } from '@core'
 import type { DerivedPlan, Doc, EntityRef, Id } from '@core/types'
 import type { DocState } from '@/contracts'
 
@@ -149,6 +150,25 @@ function normalizeDraft(d: Doc): void {
   }
 }
 
+/** collections that normalize and syncRooms neither read nor change */
+const INERT_ROOTS = new Set(['meta', 'render', 'items', 'lights', 'dimensions', 'labels', 'annotations', 'underlays', 'cameras', 'materials', 'assets', 'source', 'design'])
+/** room fields the room detection and the record sync do not read: the finishes and the description */
+const INERT_ROOM_FIELDS = new Set(['name', 'type', 'floor', 'skirting', 'skirtingMaterialId', 'labelledArea', 'design', 'styleId', 'accentFace'])
+
+/**
+ * Whether a change can break the plan invariants (a wall, a node, a room's place, an electric point,
+ * a layer…). The document in the store is always normalised, so a change that touches none of that
+ * (a room renamed letter by letter, furniture moved, a finish picked) leaves it normalised, and the
+ * normalisation, which detects the rooms of every level again, is skipped.
+ */
+export function touchesPlan(patches: readonly Patch[]): boolean {
+  return patches.some((p) => {
+    const [root, id, field] = p.path
+    if (INERT_ROOTS.has(root as string)) return false
+    return !(root === 'rooms' && id !== undefined && field !== undefined && INERT_ROOM_FIELDS.has(field as string))
+  })
+}
+
 function touchModified(d: Doc): void {
   d.meta.modifiedAt = new Date().toISOString()
 }
@@ -285,9 +305,19 @@ export const docStore = createStore<DocStoreState>()((set, get) => {
       try {
         ;[next, patches, inverse] = produceWithPatches(before, (d: Doc) => {
           fn(d)
-          normalizeDraft(d)
           touchModified(d)
         })
+        // then the invariants, when the change could break them (applied after it: one history entry)
+        const plan = touchesPlan(patches)
+        if (plan || docFormatVersion(next) !== next.version) {
+          const [n2, p2, i2] = produceWithPatches(next, (d: Doc) => {
+            if (plan) normalizeDraft(d)
+            else syncFormatVersion(d)
+          })
+          next = n2
+          patches = [...patches, ...p2]
+          inverse = [...i2, ...inverse]
+        }
       } catch (err) {
         console.error(`[doplan] transaction "${label}" failed`, err)
         throw err
@@ -317,11 +347,19 @@ export const docStore = createStore<DocStoreState>()((set, get) => {
       let patches: Patch[]
       let inverse: Patch[]
       try {
+        // furniture dragged: nothing the normalisation looks at moved (see touchesPlan)
+        const plan = touchesPlan(forward)
         ;[next, patches, inverse] = produceWithPatches(base, (d: Doc) => {
           applyPatches(d, forward)
-          normalizeDraft(d)
+          if (plan) normalizeDraft(d)
           touchModified(d)
         })
+        if (!plan && docFormatVersion(next) !== next.version) {
+          const [n2, p2, i2] = produceWithPatches(next, (d: Doc) => syncFormatVersion(d))
+          next = n2
+          patches = [...patches, ...p2]
+          inverse = [...i2, ...inverse]
+        }
       } catch (err) {
         console.error(`[doplan] commitTransient "${label}" failed`, err)
         // fall back to the base document

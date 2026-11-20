@@ -337,6 +337,30 @@ class CellQueue {
  * preferred whenever it is as good as the best cell, so convex rooms get a centred label.
  */
 export function polylabel(polygon: readonly Vec2[], holes?: readonly (readonly Vec2[])[], precision?: number): Vec2 {
+  // every edit derives the rooms of the level again, while a drag or a rename changes one or two of
+  // them: the answer for an unchanged outline is remembered (keyed by the exact coordinates)
+  let key = precision === undefined ? '' : `${precision}:`
+  for (const p of polygon) key += `${p.x},${p.y};`
+  if (holes) for (const h of holes) {
+    key += '|'
+    for (const p of h) key += `${p.x},${p.y};`
+  }
+  const hit = labelCache.get(key)
+  if (hit) {
+    labelCache.delete(key)
+    labelCache.set(key, hit)
+    return { x: hit.x, y: hit.y }
+  }
+  const p = polylabelUncached(polygon, holes, precision)
+  labelCache.set(key, p)
+  if (labelCache.size > LABEL_CACHE_SIZE) labelCache.delete(labelCache.keys().next().value!)
+  return { x: p.x, y: p.y }
+}
+const LABEL_CACHE_SIZE = 4000
+/** least recently used first */
+const labelCache = new Map<string, Vec2>()
+
+function polylabelUncached(polygon: readonly Vec2[], holes?: readonly (readonly Vec2[])[], precision?: number): Vec2 {
   if (polygon.length === 0) return { x: 0, y: 0 }
   if (polygon.length < 3) return polygonCentroid(polygon)
   const rings: (readonly Vec2[])[] = [polygon]

@@ -50,7 +50,10 @@ export interface RepoState {
   isPrivate: boolean
   /** the signed-in user can push to it (write or admin access) */
   canPush?: boolean
-  /** the signed-in user may turn Pages on and off: admin or maintain access */
+  /**
+   * the signed-in user may turn Pages on and off: admin or maintain access. false may still be a
+   * custom role with "manage Pages", which the permissions do not show
+   */
   managesPages?: boolean
   /** its default branch (GitHub refuses to delete it) */
   defaultBranch?: string

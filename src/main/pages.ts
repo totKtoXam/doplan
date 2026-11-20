@@ -416,11 +416,20 @@ async function takeDown(work: string, ref: RepoRef, pubId: string | undefined): 
   if (!st.exists) return
   const insp = await inspectPages(ref)
   const own = pagesOwnership(insp, pubId, true)
-  // turning Pages off needs admin or maintain access: without it nothing is touched (deleting the
-  // branch alone would leave Pages pointing at a branch that is gone)
-  if (own.site === 'ours' && st.managesPages === false) throw notAdminError(ref)
-  // the branch first: a push that empties it may make GitHub turn Pages on again by itself, so they
-  // are turned off after it
+  // turning Pages off needs admin or maintain access, or a custom role that may manage Pages, which
+  // the permissions GitHub shows do not tell: then Pages are turned off first, and when GitHub refuses
+  // nothing else is touched (deleting the branch alone would leave Pages pointing at a branch that
+  // is gone)
+  if (own.site === 'ours' && st.managesPages !== true) {
+    try {
+      await disablePages(ref)
+    } catch (e) {
+      if (isNoAccess(e)) throw notAdminError(ref)
+      throw e
+    }
+  }
+  // the branch before Pages are (finally) off: a push that empties it may make GitHub turn Pages on
+  // again by itself
   if (own.branch === 'ours' && insp.branchSha) await dropBranch(work, ref, insp.branchSha, insp.marker ?? '', st.defaultBranch)
   if (own.site === 'ours') await disablePages(ref)
 }

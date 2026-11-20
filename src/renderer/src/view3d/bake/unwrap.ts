@@ -118,7 +118,10 @@ function chartsOf(p: Float32Array, mesh: number): Omit<Chart, 'minU' | 'minV' | 
       const b = k[(e + 1) % 3]
       const ek = a < b ? `${a}|${b}` : `${b}|${a}`
       let list = byEdge.get(ek)
-      if (!list) byEdge.set(ek, (list = []))
+      if (!list) {
+        list = []
+        byEdge.set(ek, list)
+      }
       list.push(t)
     }
   }

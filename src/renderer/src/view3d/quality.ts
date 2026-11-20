@@ -299,14 +299,18 @@ export interface RenderShared {
    */
   rasterLook: (() => () => void) | null
   /**
-   * The walls, floors and ceilings show a baked light map: the sun and the lamps stop casting
-   * shadow maps, the window lights and the screen-space occlusion are off (they are in the map).
+   * The walls, floors and ceilings show a baked light map (they ignore the live lights then); the
+   * screen-space occlusion and indirect light are off, they are in the map. The furniture keeps the
+   * live light with its shadows: the walls and ceilings still block the sun and the lamps for it.
    */
   baked: boolean
   onBakedChanged(cb: (on: boolean) => void): () => void
   setBaked(on: boolean): void
-  /** set by the lighting rig: every light of the shown level for a bake, as the live view has them */
-  bakeLights: (() => BakeLights) | null
+  /**
+   * set by the lighting rig: every light of the shown level for a bake, as the live view has them,
+   * once the HDRI is loaded; null when the HDRI could not be had
+   */
+  bakeLights: (() => Promise<BakeLights | null>) | null
   onLightingChanged(cb: (c: LightingChange) => void): () => void
   emitLightingChanged(c: LightingChange): void
   onQualityChanged(cb: (q: QualityPreset) => void): () => void

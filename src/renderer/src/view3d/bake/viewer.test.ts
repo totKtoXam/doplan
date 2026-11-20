@@ -1,7 +1,9 @@
 import * as THREE from 'three'
 import { describe, expect, it, vi } from 'vitest'
 import { createEmptyDoc } from '@core/defaults'
-import type { Doc } from '@core/types'
+import type { Doc, ElectricPoint, Item, Opening, Wall } from '@core/types'
+import { viewDoc } from '@shared/pagesSite'
+import { unlockAll } from '@/viewer/hideState'
 import type { BakedLevel, EngineContext } from '@/contracts'
 import type { RenderShared } from '../quality'
 import { status3dStore } from '../status'
@@ -74,7 +76,9 @@ function setup() {
     shared,
     loadTexture,
     manifest,
-    frame: () => frames.forEach((f) => f(0)),
+    frame: () => {
+      for (const f of frames) f(0)
+    },
     setCeilings: (on: boolean) => {
       ceilings = on
     },
@@ -141,6 +145,25 @@ describe('baked light in the viewer', () => {
     expect(status3dStore.getState().baked).toBe('mismatch')
   })
 
+  it('leaves the cut of a lowered wall to the live light: it lies inside the full wall the bake sees', () => {
+    const set = new THREE.Group()
+    set.name = 'wall-set:w1'
+    const mesh = (part: string) => {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshStandardMaterial())
+      m.userData.part = part
+      return m
+    }
+    const full = new THREE.Group()
+    full.add(mesh('face'), mesh('cap'))
+    const low = new THREE.Group()
+    low.userData.lowered = true
+    low.add(mesh('face'), mesh('cap'))
+    set.add(full, low)
+    const root = new THREE.Group()
+    root.add(set)
+    expect(receiversOf(root).map((r) => r.key)).toEqual(['wall-set:w1/0/0', 'wall-set:w1/0/1', 'wall-set:w1/1/0'])
+  })
+
   it('stays live when the page does not load', async () => {
     const t = setup()
     t.loadTexture.mockRejectedValue(new Error('404'))
@@ -150,6 +173,53 @@ describe('baked light in the viewer', () => {
     warn.mockRestore()
     expect(t.floor.material).toBe(t.live)
     expect(status3dStore.getState().baked).toBe('mismatch')
+  })
+})
+
+describe('bake signature', () => {
+  /** a level with a wall, a door in it, a chair and a socket, all locked and annotated */
+  function annotated(): { doc: Doc; levelId: string; other: string } {
+    const doc = createEmptyDoc()
+    const levelId = doc.levelOrder[0]
+    const other = 'lv_other'
+    doc.levels[other] = { ...doc.levels[levelId], id: other }
+    doc.levelOrder.push(other)
+    const wall = (id: string, lv: string) => ({ id, levelId: lv, a: 'n1', b: 'n2', thickness: 120, height: 2700, kind: 'solid', locked: true }) as unknown as Wall
+    doc.walls.w1 = wall('w1', levelId)
+    doc.walls.w2 = wall('w2', other)
+    const door = (id: string, wallId: string) =>
+      ({ id, wallId, kind: 'door', offset: 900, width: 800, height: 2000, sill: 0, hinge: 'a', swing: 'left', locked: true, name: 'Дверь' }) as Opening
+    doc.openings.o1 = door('o1', 'w1')
+    doc.openings.o2 = door('o2', 'w2')
+    doc.items.i1 = { id: 'i1', levelId, assetId: 'chair', x: 1000, y: 1000, elevation: 0, rotation: 0, size: { w: 500, d: 500, h: 900 }, locked: true } as unknown as Item
+    doc.electrical = {
+      e1: { id: 'e1', levelId, kind: 'socket', mount: 'wall', x: 0, y: 500, elevation: 300, rotation: 90, wallId: 'w1', side: 'left', locked: true, comment: 'холодильник' } as ElectricPoint,
+    }
+    return { doc, levelId, other }
+  }
+
+  it('is the same in the editor and in the published viewer (no comments, everything unlocked)', () => {
+    const { doc, levelId } = annotated()
+    const published = viewDoc(structuredClone(doc), { underlays: false }) as Doc
+    unlockAll(published)
+    expect(published.electrical?.e1.comment).toBeUndefined()
+    expect(published.openings.o1.locked).toBeUndefined()
+    expect(bakeSignature(published, levelId)).toEqual(bakeSignature(doc, levelId))
+  })
+
+  it('follows what throws shadows on its own level only', () => {
+    const { doc, levelId, other } = annotated()
+    const before = bakeSignature(doc, levelId)
+    // a door moved on another floor
+    doc.openings.o2 = { ...doc.openings.o2, offset: 1500 }
+    expect(bakeSignature(doc, levelId)).toEqual(before)
+    expect(bakeSignature(doc, other)).not.toEqual(bakeSignature(annotated().doc, other))
+    // a door of this level made wider, a socket moved
+    doc.openings.o1 = { ...doc.openings.o1, width: 900 }
+    expect(bakeSignature(doc, levelId).casters).not.toBe(before.casters)
+    const wider = bakeSignature(doc, levelId).casters
+    if (doc.electrical) doc.electrical.e1 = { ...doc.electrical.e1, elevation: 1100 }
+    expect(bakeSignature(doc, levelId).casters).not.toBe(wider)
   })
 })
 

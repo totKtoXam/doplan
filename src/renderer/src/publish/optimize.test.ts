@@ -1,6 +1,7 @@
 import { Document, WebIO } from '@gltf-transform/core'
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions'
 import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer'
+import type * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
 import type { AssetHost, SiteContent, SiteFile } from '@shared/pagesSite'
 import { budgetForSize, type ImageCodec, optimizeModel, optimizeSite, type TextureUse, mapUseOfName } from './optimize'
@@ -212,6 +213,51 @@ describe('optimizeSite', () => {
     expect(byColour.get('1,0,0,1')).toBe('material_0')
     expect(byColour.get('0,0,1,1')).toBe('material_1')
     expect(byColour.get('1,1,1,1')).toBe('material_2')
+  })
+
+  it('names a material shared by primitives with and without vertex colours twice, as the 3D view does', async () => {
+    const doc = new Document()
+    const buffer = doc.createBuffer()
+    const vec3 = (a: number[]) => doc.createAccessor().setType('VEC3').setArray(new Float32Array(a)).setBuffer(buffer)
+    const mat = doc.createMaterial()
+    const prim = (colour: boolean) => {
+      const p = doc
+        .createPrimitive()
+        .setAttribute('POSITION', vec3([0, 0, 0, 1, 0, 0, 0, 1, 0]))
+        .setAttribute('NORMAL', vec3([0, 0, 1, 0, 0, 1, 0, 0, 1]))
+        .setMaterial(mat)
+      return colour ? p.setAttribute('COLOR_0', vec3([1, 1, 1, 1, 0, 0, 0, 1, 0])) : p
+    }
+    doc
+      .createScene()
+      .addChild(doc.createNode('Plain').setMesh(doc.createMesh().addPrimitive(prim(false))))
+      .addChild(doc.createNode('Painted').setMesh(doc.createMesh().addPrimitive(prim(true))))
+    const original = await (await io()).writeBinary(doc)
+    const { codec } = fakeCodec()
+    const optimized = await optimizeModel(doc, { px: 1024, tris: Infinity }, codec)
+    /** what the 3D view calls each mesh's material (view3d/items prepareTemplate), by vertex colours */
+    const slots = async (glb: Uint8Array) => {
+      const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js')
+      const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder)
+      const gltf = await loader.parseAsync(glb.slice().buffer, '')
+      let unnamed = 0
+      const named = new Map<THREE.Material, string>()
+      const out = new Map<boolean, string>()
+      gltf.scene.traverse((o) => {
+        const mesh = o as THREE.Mesh
+        if (!mesh.isMesh) return
+        const m = mesh.material as THREE.Material
+        if (!m.name) {
+          if (!named.has(m)) named.set(m, `material_${unnamed++}`)
+          m.name = named.get(m) as string
+        }
+        out.set(!!mesh.geometry.getAttribute('color'), m.name)
+      })
+      return out
+    }
+    const before = await slots(original)
+    expect(new Set(before.values()).size).toBe(2)
+    expect(await slots(optimized)).toEqual(before)
   })
 
   it('a .gltf whose texture changed on disk is made lighter again; the session keeps only the last plan', async () => {

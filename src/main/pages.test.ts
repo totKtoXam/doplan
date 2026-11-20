@@ -27,6 +27,8 @@ interface FakeRepo {
   push?: boolean
   /** the signed-in user may change the Pages settings (default: push) */
   admin?: boolean
+  /** a custom role that may manage Pages: allowed, but the permissions show write access only */
+  customPages?: boolean
   /** default 'main'; a repository doplan creates starts empty, so its first branch gh-pages is the default */
   defaultBranch?: string
 }
@@ -126,7 +128,7 @@ vi.mock('./pagesGh', () => ({
     gh.calls.push(`nopages ${k(ref)}`)
     // what pagesGh.pagesError makes of GitHub's 403 'Must have admin rights to Repository.': translated text, typed kind
     const { PagesGhError } = await import('./pagesError')
-    if ((repo(k(ref)).admin ?? repo(k(ref)).push) === false)
+    if ((repo(k(ref)).admin ?? repo(k(ref)).push) === false && !repo(k(ref)).customPages)
       throw new PagesGhError('Не удалось выключить GitHub Pages: у этой учётной записи GitHub нет прав администратора репозитория.', 'forbidden', 403)
     repo(k(ref)).pages = null
     return true
@@ -461,14 +463,28 @@ describe('the record follows its document', () => {
     expect(res.record).toMatchObject({ owner: 'acme', repo: 'plans', separate: false })
     expect(gh.calls).toEqual(['push acme/plans', 'pages acme/plans keep'])
 
-    // unpublishing: refused before anything is touched, the record and the site stay
+    // unpublishing: GitHub refuses to turn Pages off before anything else is touched, the record and the site stay
     const sha = repo('acme/plans').branchSha
     gh.calls = []
     await expect(unpublishPlan('doc1')).rejects.toThrow(/только его администратор/)
-    expect(gh.calls).toEqual([])
+    expect(gh.calls).toEqual(['nopages acme/plans'])
     expect(repo('acme/plans').branchSha).toBe(sha)
     expect(repo('acme/plans').pages).not.toBeNull()
     expect((await status()).record).toMatchObject({ owner: 'acme', repo: 'plans' })
+
+    // a custom role that may manage Pages looks like write access: GitHub lets it, and it comes down
+    repo('acme/plans').customPages = true
+    gh.calls = []
+    await unpublishPlan('doc1')
+    expect(gh.calls[0]).toBe('nopages acme/plans')
+    expect(repo('acme/plans').pages).toBeNull()
+    expect(repo('acme/plans').branchSha).toBeNull()
+    expect((await status()).record).toBeNull()
+
+    // published again by the collaborator, then taken down with admin access
+    repo('acme/plans').customPages = false
+    repo('acme/plans').admin = true
+    await publishPlan(req())
 
     // with maintain or admin access given, it comes down
     repo('acme/plans').admin = true

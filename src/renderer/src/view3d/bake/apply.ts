@@ -4,8 +4,8 @@
  * Viewer: the published pages are shown on the walls, floors and ceilings while the shown plan
  * still is what was baked: the same lights and sky, the same furniture, the same geometry laid out
  * the same way. The receivers then get a cheap material (their colour and picture times the light
- * map, no live lights), the sun and the lamps stop casting shadow maps and the screen-space
- * occlusion is off. Anything else (a hidden chair, a lamp switched off, the visitor's "live light")
+ * map, no live lights) and the screen-space occlusion is off. The furniture keeps the live light
+ * and its shadows. Anything else (a hidden chair, a lamp switched off, the visitor's "live light")
  * shows the live light.
  *
  * Each level has two pages with one layout: with the ceilings in place (the walk, or the ceiling
@@ -24,7 +24,7 @@ import type { BakedLevel, BakeOutput, BakeVariant, EngineContext } from '@/contr
 import type { RenderShared } from '../quality'
 import { setBakedState } from '../status'
 import { bakeSignature, castersOf, geometryHash, type Receiver, receiversOf } from './collect'
-import { DEFAULT_LAYOUT, type Layout, layoutHash, layoutOf } from './unwrap'
+import { DEFAULT_LAYOUT, fingerprint, type Layout, layoutHash, layoutOf } from './unwrap'
 
 export interface BakedLightDeps {
   /** the document as the scene shows it, and its level */
@@ -219,16 +219,25 @@ export function createBakedLight(ctx: EngineContext, shared: RenderShared, deps:
     const { doc, levelId } = deps.shown()
     const level = Object.hasOwn(src.manifest.levels, levelId) ? src.manifest.levels[levelId] : undefined
     const sig = level ? bakeSignature(doc, levelId) : null
-    if (!level || !sig || sig.lights !== level.lights || sig.casters !== level.casters) return mismatch()
+    if (!level || !sig || sig.lights !== level.lights || sig.casters !== level.casters) {
+      mismatch()
+      return
+    }
     const receivers = receiversOf(ctx.roots.architecture)
     const geometry = geometryHash(receivers)
-    if (geometry !== level.geometry) return mismatch()
+    if (geometry !== level.geometry) {
+      mismatch()
+      return
+    }
     const key = `${levelId}|${geometry}|${level.layoutHash}`
     // the same meshes laid out for the same page: only new meshes of a rebuilt group need it
     const fresh = receivers.some((r) => r.mesh.userData.bakedKey !== key || !applied.has(r.mesh))
     if (key === shownKey && !fresh) return
     const layout = layoutOf(receivers, level.layout)
-    if (layoutHash(layout) !== level.layoutHash) return mismatch()
+    if (layoutHash(layout) !== level.layoutHash) {
+      mismatch()
+      return
+    }
     if (shownKey && shownKey !== key) unapply()
     const variant = variantNow()
     setBakedState('loading')
@@ -298,7 +307,7 @@ export function createBakedLight(ctx: EngineContext, shared: RenderShared, deps:
     async bake(opts = {}) {
       deps.flush()
       await deps.whenIdle()
-      const lights = shared.bakeLights?.()
+      const lights = await shared.bakeLights?.()
       if (!lights) return null
       const { doc, levelId } = deps.shown()
       const release = this.hold()
@@ -312,7 +321,8 @@ export function createBakedLight(ctx: EngineContext, shared: RenderShared, deps:
         if (!receivers.length) return null
         const sig = bakeSignature(doc, levelId)
         const geometry = geometryHash(receivers)
-        const key = JSON.stringify([BAKE_VERSION, DEFAULT_LAYOUT, geometry, sig, lights])
+        // the casters' triangles too: a model that arrived or changed under the same asset id
+        const key = JSON.stringify([BAKE_VERSION, DEFAULT_LAYOUT, geometry, sig, lights, fingerprint(closed), fingerprint(open)])
         const cached = lastBake.get(levelId)
         if (cached?.key === key) {
           opts.onProgress?.(1, 1)

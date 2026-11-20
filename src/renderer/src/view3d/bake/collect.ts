@@ -66,11 +66,14 @@ export function receiversOf(root: THREE.Object3D): Receiver[] {
   const seen = new Map<string, number>()
   for (const anchor of root.children) {
     if (!RECEIVER_GROUP.test(anchor.name)) continue
-    const walk = (o: THREE.Object3D, path: string): void => {
+    const walk = (o: THREE.Object3D, path: string, lowered: boolean): void => {
       o.children.forEach((child, i) => {
         const p = `${path}/${i}`
         const mesh = child as THREE.Mesh
-        if (mesh.isMesh && !(mesh as THREE.InstancedMesh).isInstancedMesh) {
+        const low = lowered || child.userData.lowered === true
+        // the cut of a lowered wall lies inside the full wall the bake sees: it keeps the live light
+        const cut = low && child.userData.part === 'cap'
+        if (mesh.isMesh && !(mesh as THREE.InstancedMesh).isInstancedMesh && !cut) {
           const m = mesh.material
           if (!Array.isArray(m) && opaque(m) && !glowing(m) && mesh.matrixWorld.determinant() > 0) {
             let key = `${anchor.name}${p}`
@@ -81,10 +84,10 @@ export function receiversOf(root: THREE.Object3D): Receiver[] {
             if (positions.length) out.push({ key, mesh, positions })
           }
         }
-        walk(child, p)
+        walk(child, p, low)
       })
     }
-    walk(anchor, '')
+    walk(anchor, '', false)
   }
   // the scene adds groups in the order they were last rebuilt: the layout must not depend on it
   return out.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
@@ -158,13 +161,33 @@ export function bakeSignature(doc: Doc, levelId: Id): { lights: string; casters:
     .filter((i) => i.levelId === levelId)
     .map((i) => [i.id, i.assetId, i.x, i.y, i.elevation, i.rotation, i.size.w, i.size.d, i.size.h, !!i.mirrored, i.params ?? null])
     .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+  // only what shapes the shadows: names, comments, locks and layers change between the editor and the
+  // published viewer (comments are not published, the viewer unlocks everything)
   const openings = Object.values(doc.openings)
-    .map((o) => JSON.stringify(o, r2))
-    .sort()
+    .filter((o) => doc.walls[o.wallId]?.levelId === levelId)
+    .map((o) => [
+      o.id,
+      o.wallId,
+      o.kind,
+      o.offset,
+      o.width,
+      o.height,
+      o.sill,
+      o.hinge,
+      o.swing,
+      o.frameMaterialId ?? null,
+      o.leafMaterialId ?? null,
+      o.style ?? null,
+      o.slide ?? null,
+      o.sashes ?? null,
+      o.sillBoard ?? null,
+      o.curtain ?? null,
+    ])
+    .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
   const electrical = Object.values(doc.electrical ?? {})
-    .filter((e) => (e as { levelId?: Id }).levelId === levelId)
-    .map((e) => JSON.stringify(e, r2))
-    .sort()
+    .filter((e) => e.levelId === levelId)
+    .map((e) => [e.id, e.kind, e.mount, e.x, e.y, e.elevation, e.rotation, e.wallId ?? null, e.side ?? null, e.gangs ?? 1, !!e.vertical])
+    .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
   return {
     lights: fnv(JSON.stringify([levelId, sky, lights, ceiling], r2)),
     casters: fnv(JSON.stringify([levelId, items, openings, electrical], r2)),

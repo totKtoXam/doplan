@@ -536,6 +536,8 @@ export function createLighting(ctx: EngineContext): LightingRig {
   let hdriTexture: THREE.DataTexture | null = null
   let hdriSrc = ''
   let hdriFailed = ''
+  /** the HDRI file on its way (settles either way) */
+  let hdriLoading: Promise<unknown> | null = null
   const hdriTint = new THREE.Color(1, 1, 1)
   let portalSig = ''
   let fixtureSig = ''
@@ -600,7 +602,7 @@ export function createLighting(ctx: EngineContext): LightingRig {
       tmpBox.min.x.toFixed(2), tmpBox.min.y.toFixed(2), tmpBox.min.z.toFixed(2),
       tmpBox.max.x.toFixed(2), tmpBox.max.y.toFixed(2), tmpBox.max.z.toFixed(2),
       s.direction.x.toFixed(4), s.direction.y.toFixed(4), s.direction.z.toFixed(4),
-      q.shadowMapSize, q.shadowRadius, q.sunShadows ? 1 : 0, s.intensity > 0 ? 1 : 0, shared.baked ? 1 : 0,
+      q.shadowMapSize, q.shadowRadius, q.sunShadows ? 1 : 0, s.intensity > 0 ? 1 : 0,
     ].join(',')
     if (sig === shadowSig) return false
     shadowSig = sig
@@ -617,7 +619,7 @@ export function createLighting(ctx: EngineContext): LightingRig {
     sun.updateMatrixWorld(true)
     sun.target.updateMatrixWorld(true)
 
-    const casts = q.sunShadows && s.intensity > 0 && !shared.baked
+    const casts = q.sunShadows && s.intensity > 0
     sun.castShadow = casts
     if (casts) {
       setShadowMapSize(sun, q.shadowMapSize)
@@ -701,7 +703,12 @@ export function createLighting(ctx: EngineContext): LightingRig {
         const token = ++hdriToken
         // show the procedural sky until the file arrives
         changed = useProceduralSky(s, q) || changed
-        loadHdri(src).then(
+        const loading = loadHdri(src)
+        hdriLoading = loading.then(
+          () => undefined,
+          () => undefined,
+        )
+        loading.then(
           (tex) => {
             if (disposed || token !== hdriToken) return
             hdriTexture = tex
@@ -960,7 +967,7 @@ export function createLighting(ctx: EngineContext): LightingRig {
     const lit = new Set(byPower.slice(0, q.maxLights).map((l) => l.id))
     const shadowed = new Set(
       byPower
-        .filter((l) => l.kind !== 'strip' && l.kind !== 'area' && !shared.baked)
+        .filter((l) => l.kind !== 'strip' && l.kind !== 'area')
         .slice(0, q.maxShadowLights)
         .map((l) => l.id),
     )
@@ -977,7 +984,7 @@ export function createLighting(ctx: EngineContext): LightingRig {
       list
         .map((l) => `${lightSignature(l)}|${lit.has(l.id) ? 1 : 0}${shadowed.has(l.id) ? 1 : 0}`)
         .sort()
-        .join(';') + `#${globalOn ? 1 : 0}#${ceilingMm}#${q.fixtureShadowMapSize}#${shared.baked ? 1 : 0}`
+        .join(';') + `#${globalOn ? 1 : 0}#${ceilingMm}#${q.fixtureShadowMapSize}`
     if (sig === fixtureSig && !detached) return false
     fixtureSig = sig
     for (const g of fixtureGroups.values()) disposeFixtureGroup(g)
@@ -990,6 +997,26 @@ export function createLighting(ctx: EngineContext): LightingRig {
     }
     root.updateMatrixWorld(true)
     return true
+  }
+
+  /**
+   * The lights for a bake once the HDRI the document asks for is in place; null when it could not
+   * be had (the procedural sky would be baked under the HDRI's name).
+   */
+  async function lightsForBake(): Promise<BakeLights | null> {
+    sync()
+    const end = Date.now() + 120000
+    while (hdriLoading && hdriSrc && !hdriTexture && Date.now() < end) {
+      const pending = hdriLoading
+      await Promise.race([pending, new Promise((r) => setTimeout(r, 1000))])
+      if (disposed) return null
+      sync()
+    }
+    if (disposed) return null
+    const r = docStore.getState().doc.render
+    const wanted = r.hdriId ? (uiStore.getState().getHdri(r.hdriId)?.src ?? '') : ''
+    if (wanted && !(hdriTexture && scene.environment === hdriTexture)) return null
+    return bakeLights()
   }
 
   // ── for a bake: every light of the level, not only those the quality preset keeps live ──
@@ -1083,12 +1110,6 @@ export function createLighting(ctx: EngineContext): LightingRig {
       structure = true
       changed = true
     }
-    // the window light is in the baked map
-    if (portalGroup.visible === shared.baked) {
-      portalGroup.visible = !shared.baked
-      structure = true
-      changed = true
-    }
     const usingHdri = !!hdriTexture && scene.environment === hdriTexture
     const fillSig = `${hemi.intensity}|${hemi.color.getHex()}|${(portalGroup.children[0] as THREE.RectAreaLight | undefined)?.intensity ?? 0}`
     syncFill(r, s, usingHdri)
@@ -1163,11 +1184,7 @@ export function createLighting(ctx: EngineContext): LightingRig {
     envSig = ''
     sync()
   })
-  const unsubBaked = shared.onBakedChanged(() => {
-    shadowSig = ''
-    sync()
-  })
-  shared.bakeLights = bakeLights
+  shared.bakeLights = lightsForBake
 
   return {
     sync,
@@ -1180,9 +1197,8 @@ export function createLighting(ctx: EngineContext): LightingRig {
       unsubScene()
       unsubQuality()
       unsubTracing()
-      unsubBaked()
       shared.rasterLook = null
-      if (shared.bakeLights === bakeLights) shared.bakeLights = null
+      if (shared.bakeLights === lightsForBake) shared.bakeLights = null
       hdriToken++
       for (const g of fixtureGroups.values()) disposeFixtureGroup(g)
       fixtureGroups.clear()

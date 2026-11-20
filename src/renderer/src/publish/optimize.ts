@@ -173,34 +173,54 @@ function triangles(doc: GltfDocument): number {
   return n
 }
 
+/** glTF primitive modes below this draw points and lines, which the 3D view does not name */
+const TRIANGLES = 4
+
 /**
  * Gives every unnamed material the name the 3D view gives it when it loads the original file
  * (`material_<n>` in the order its scene is walked: a node's own primitives, then its children), and
  * a primitive without a material its default one under such a name. Those names are the item's
  * override slots, and compression may move meshes into new nodes, which would change the order.
+ *
+ * three's loader makes one material per glTF material and set of attributes that changes it (no
+ * tangents, vertex colours, no normals; GLTFLoader.assignFinalMaterial), and the 3D view names each
+ * of them: a material shared by primitives with different sets is split here the same way.
  */
 export function nameMaterialSlots(doc: GltfDocument): void {
   const root = doc.getRoot()
   const scene = root.getDefaultScene() ?? root.listScenes()[0]
   if (!scene) return
   let unnamed = 0
-  const named = new Set<Material>()
-  let fallback: Material | null = null
+  /** per glTF material (null: the loader's default) and attribute set, the material that stands for it */
+  const slots = new Map<Material | null, Map<string, Material>>()
+  /** materials named here (they had no name) */
+  const ours = new Set<Material>()
   const visit = (node: Node) => {
     for (const p of node.getMesh()?.listPrimitives() ?? []) {
-      let m = p.getMaterial()
-      if (!m) {
-        // the loader's default: white, fully metallic and rough (one material for all of them)
-        if (!fallback) {
-          fallback = doc.createMaterial(`material_${unnamed++}`).setBaseColorFactor([1, 1, 1, 1]).setMetallicFactor(1).setRoughnessFactor(1)
-          named.add(fallback)
-        }
-        m = fallback
-        p.setMaterial(m)
+      if (p.getMode() < TRIANGLES) continue
+      const own = p.getMaterial()
+      const set = `${p.getAttribute('TANGENT') ? 0 : 1}${p.getAttribute('COLOR_0') ? 1 : 0}${p.getAttribute('NORMAL') ? 0 : 1}`
+      let bySet = slots.get(own)
+      if (!bySet) {
+        bySet = new Map()
+        slots.set(own, bySet)
       }
-      if (named.has(m)) continue
-      named.add(m)
-      if (!m.getName()) m.setName(`material_${unnamed++}`)
+      let m = bySet.get(set)
+      if (!m) {
+        if (!own) {
+          // the loader's default: white, fully metallic and rough
+          m = doc.createMaterial(`material_${unnamed++}`).setBaseColorFactor([1, 1, 1, 1]).setMetallicFactor(1).setRoughnessFactor(1)
+        } else if (own.getName() && !ours.has(own)) {
+          // a named material keeps its name in every copy the loader makes
+          m = own
+        } else {
+          m = bySet.size ? own.clone() : own
+          m.setName(`material_${unnamed++}`)
+          ours.add(m)
+        }
+        bySet.set(set, m)
+      }
+      if (m !== own) p.setMaterial(m)
     }
     for (const c of node.listChildren()) visit(c)
   }

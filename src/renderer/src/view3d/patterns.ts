@@ -1,7 +1,7 @@
 /**
  * Procedural laying patterns (tiles + grout, parquet, planks) baked into a periodic canvas
  * texture set: albedo, tangent-space normal (bevelled tile edges) and roughness (rougher grout).
- * The result is plain texture data, so raster, path tracer and GLB export share one code path.
+ * The result is plain texture data, so raster, light bake and GLB export share one code path.
  *
  * Everything is laid out in millimetres inside one rectangular period; the canvases tile
  * seamlessly with RepeatWrapping and `repeat = 1000 / periodMm` (UVs are in metres).

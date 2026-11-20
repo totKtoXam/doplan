@@ -163,8 +163,8 @@ export class Architecture {
         hasLeft: !!adj.left,
         hasRight: !!adj.right,
       }
-      // the cut-away variant is built up front (hidden): toggling it then only flips visibility,
-      // which the path tracer applies in place instead of rebuilding its scene
+      // the cut-away variant is built up front (hidden): toggling it then only flips visibility
+      // (its shaders are precompiled with the rest)
       if (!this.exportMode) this.setLowered(rec, !!old?.lowered)
       if (old) this.dropGroup(old.group)
       this.walls.set(wall.id, rec)

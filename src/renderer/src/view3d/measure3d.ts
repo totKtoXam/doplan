@@ -1,6 +1,6 @@
 /**
  * 3D measurements of the selected item, drawn as an HTML/SVG overlay over the canvas (always on top,
- * crisp, no effect on the scene, the outline or the path tracer):
+ * crisp, no effect on the scene or the outline):
  *  - clear distances from the footprint to the nearest walls (core `itemClearances`, as in 2D:
  *    green = measured wall, amber «≈» = the wall is not measured);
  *  - gaps to neighbouring items closer than 1.5 m (core `itemGaps`);
@@ -120,7 +120,7 @@ export function createMeasure3D(container: HTMLElement, camera: THREE.Camera): M
     }
   }
 
-  // selection / document changes also redraw when no frame is rendered (e.g. while path tracing)
+  // selection / document changes also redraw when no frame is rendered (on-demand rendering)
   let raf = 0
   const schedule = () => {
     if (!raf) raf = requestAnimationFrame(() => {

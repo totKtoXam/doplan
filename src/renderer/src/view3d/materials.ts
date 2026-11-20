@@ -8,7 +8,7 @@
  *  - cache keyed by material content + finish; unused entries are swept and their textures released
  *
  * Only standard physical-material properties and plain textures are used, so the same materials
- * feed the rasteriser, the path tracer and the GLB exporter.
+ * feed the rasteriser, the light bake and the GLB exporter.
  */
 import * as THREE from 'three'
 import type { Id, Material, SurfaceFinish, TilePattern } from '@core/types'

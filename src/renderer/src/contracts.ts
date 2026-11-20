@@ -274,11 +274,11 @@ export interface EngineContext {
     items: THREE.Group // one child per Item, userData.ref = {kind:'item', id}
     lights: THREE.Group // fixtures + THREE lights from doc.lights
     electrical: THREE.Group // sockets, switches, outlets from doc.electrical, userData.ref = {kind:'electric', id}
-    helpers: THREE.Group // gizmos, outlines — excluded from stills/path tracing/export
+    helpers: THREE.Group // gizmos, outlines — excluded from stills/export
   }
   /** request a frame (on-demand rendering). Pass true while something animates. */
   invalidate(): void
-  /** fired after the scene graph was rebuilt from the document (path tracer must reset) */
+  /** fired after the scene graph was rebuilt from the document (shadows, outlines and precompilation follow) */
   onSceneChanged(cb: () => void): () => void
   /** fired every rendered frame before render; dt seconds */
   onBeforeRender(cb: (dt: number) => void): () => void

@@ -51,7 +51,7 @@ export interface BakedLight {
   set(src: BakedLightSource | null): void
   /** after the scene or the shown document changed */
   refresh(): void
-  /** live materials until the returned function is called (path tracing, export) */
+  /** live materials until the returned function is called (export) */
   hold(): () => void
   bake(opts?: { onProgress?(done: number, total: number): void; signal?: AbortSignal }): Promise<BakeOutput | null>
   dispose(): void

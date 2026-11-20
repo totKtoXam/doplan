@@ -208,7 +208,7 @@ export interface ControlsInternals {
 }
 
 export interface LightingChange {
-  /** objects were added/removed (the path tracer must rebuild its scene) */
+  /** lights were added (every lit shader is built again) */
   structure: boolean
 }
 

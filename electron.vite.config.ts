@@ -115,11 +115,6 @@ export default defineConfig({
           codeSplitting: {
             groups: [
               {
-                name: 'pathtracer',
-                test: /[\\/]node_modules[\\/](three-gpu-pathtracer|three-mesh-bvh|xatlas-web)[\\/]/,
-                priority: 30,
-              },
-              {
                 name: 'engine3d',
                 test: /[\\/]node_modules[\\/]three[\\/]|[\\/]src[\\/]renderer[\\/]src[\\/]view3d[\\/]/,
                 priority: 20,

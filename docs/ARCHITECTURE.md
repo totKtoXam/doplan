@@ -4,7 +4,7 @@ Decisions come from `docs/research/_critic.md` (overrides individual reports). D
 `docs/research/editor-2d.md`, `render-3d.md`, `electron-optimization.md`, `photo-to-plan.md`, `open-assets.md`.
 
 Stack: Electron 45 · electron-vite 6 · Vite 8 · TypeScript 7 · React 19 · zustand 5 + immer 11 · PixiJS 8 (2D editor)
-· three 0.187 `WebGPURenderer` (`three/webgpu`, TSL; WebGL2 fallback via `forceWebGL`) · three-gpu-pathtracer 0.0.28 (`/webgpu`)
+· three 0.187 `WebGPURenderer` (`three/webgpu`, TSL; WebGL2 fallback via `forceWebGL`)
 · Tailwind 4 · single package, pnpm (hoisted). ALL dependencies are already installed — do NOT run `pnpm add/install`.
 If you truly need another package, list it in your final report instead.
 
@@ -27,7 +27,7 @@ If a contract is insufficient, do NOT edit it: add your own extension type in yo
 | editor2d | `src/renderer/src/editor2d/**` |
 | 3d-architecture | `src/renderer/src/view3d/{index,engine,materials,textures,patterns,items,export}.ts`, `src/renderer/src/view3d/build/**` |
 | 3d-procedural | `src/renderer/src/view3d/procedural/**` |
-| 3d-rendering | `src/renderer/src/view3d/{lighting,post,controls,interaction,pathtracer,quality}.ts` |
+| 3d-rendering | `src/renderer/src/view3d/{lighting,post,controls,interaction,quality}.ts` |
 | assets | `tools/assets/**`, `resources/assets/**` |
 | photo-to-plan | `tools/dp/**`, `.claude/skills/photo-to-plan/**`, `docs/PHOTO_TO_PLAN.md` |
 

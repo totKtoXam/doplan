@@ -44,7 +44,7 @@ async function view3d(width: number): Promise<Snapshot> {
   try {
     if (!engine) throw new Error('3D-вид недоступен')
     const height = Math.round(width * 0.625)
-    const blob = await engine.renderStill({ width, height, mode: 'realtime', format: 'jpeg' })
+    const blob = await engine.renderStill({ width, height, format: 'jpeg' })
     return { mime: 'image/jpeg', data: await blobToBase64(blob), note: `${width}×${height} px, текущая камера 3D` }
   } finally {
     if (prevMode !== uiStore.getState().mode && prevMode === '2d') uiStore.getState().setMode(prevMode)

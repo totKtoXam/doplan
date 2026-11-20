@@ -40,8 +40,6 @@ const SUN_BASE = 3.2
 const PORTAL_RADIANCE = 3
 /** share of the environment used as (unoccluded) image-based light in the raster path */
 const ENV_RASTER = 0.3
-/** window portal lights while path tracing (the traced sky already comes through the openings) */
-const PORTAL_TRACED = 0.35
 const HEMI_DAY = 0.35
 const HEMI_NIGHT = 0.035
 /** latitude / declination used by the time-of-day model (mid latitudes, late spring) */
@@ -173,7 +171,7 @@ function skyTint(sun: SunState, target: THREE.Color): THREE.Color {
 
 /**
  * Analytic gradient sky with a sun glow, written as an equirectangular half-float texture so
- * the very same image feeds the background, the PMREM environment and the path tracer.
+ * the very same image feeds the background and the PMREM environment.
  */
 function buildSkyTexture(width: number, sun: SunState): THREE.DataTexture {
   const w = Math.max(64, Math.floor(width))
@@ -664,7 +662,7 @@ export function createLighting(ctx: EngineContext): LightingRig {
   function applyEnvironmentLevels(r: RenderSettings, usingHdri: boolean): void {
     const k = clamp(r.hdriIntensity ?? 1, 0, 8)
     scene.backgroundIntensity = k
-    scene.environmentIntensity = (shared.pathTracing ? 1 : ENV_RASTER) * k
+    scene.environmentIntensity = ENV_RASTER * k
     const rot = usingHdri ? (r.hdriRotation || 0) * DEG : 0
     scene.backgroundRotation.set(0, rot, 0)
     scene.environmentRotation.set(0, rot, 0)
@@ -743,7 +741,7 @@ export function createLighting(ctx: EngineContext): LightingRig {
       skyTexture = null
       skySig = ''
     }
-    const sig = [usingHdri ? hdriSrc : 'sky', r.hdriIntensity, r.hdriRotation, shared.pathTracing ? 1 : 0].join('|')
+    const sig = [usingHdri ? hdriSrc : 'sky', r.hdriIntensity, r.hdriRotation].join('|')
     if (sig !== envSig) {
       envSig = sig
       applyEnvironmentLevels(r, usingHdri)
@@ -761,7 +759,7 @@ export function createLighting(ctx: EngineContext): LightingRig {
     hemi.color.copy(tmpColor)
     hemi.groundColor.setRGB(0.42, 0.4, 0.37).multiplyScalar(0.6 + 0.4 * day)
     hemi.intensity = (HEMI_NIGHT + (HEMI_DAY - HEMI_NIGHT) * day) * Math.max(0.15, k)
-    const radiance = PORTAL_RADIANCE * day * k * (shared.pathTracing ? PORTAL_TRACED : 1)
+    const radiance = PORTAL_RADIANCE * day * k
     for (const child of portalGroup.children) {
       const light = child as THREE.RectAreaLight
       light.color.copy(tmpColor)
@@ -787,8 +785,6 @@ export function createLighting(ctx: EngineContext): LightingRig {
       if (!light) {
         light = new THREE.RectAreaLight(0xffffff, 0, 1, 1)
         light.name = 'doplan-window-portal'
-        // the path tracer samples it but the camera must not see a glowing rectangle
-        ;(light as any).visibleToCameraRays = false
         portalGroup.add(light)
       }
       light.width = p.width
@@ -825,8 +821,6 @@ export function createLighting(ctx: EngineContext): LightingRig {
     const mesh = new THREE.Mesh(geometry, material)
     mesh.castShadow = false
     mesh.receiveShadow = false
-    // a shade around a bulb must not swallow the path tracer's shadow rays
-    ;(mesh as any).visibleToShadowRays = false
     return mesh
   }
 
@@ -870,7 +864,6 @@ export function createLighting(ctx: EngineContext): LightingRig {
         const area = new THREE.RectAreaLight(color, Math.min(nits * LUMEN_SCALE, 4000), w, d)
         area.position.y = -0.02
         area.rotation.x = -Math.PI / 2
-        ;(area as any).visibleToCameraRays = false
         light = area
       }
     } else if (l.kind === 'spot') {
@@ -1169,21 +1162,6 @@ export function createLighting(ctx: EngineContext): LightingRig {
     shadowSig = ''
     sync()
   })
-  shared.rasterLook = () => {
-    const env = scene.environmentIntensity
-    scene.environmentIntensity = env * ENV_RASTER
-    const lights = portalGroup.children as THREE.RectAreaLight[]
-    const saved = lights.map((l) => l.intensity)
-    for (const l of lights) l.intensity /= PORTAL_TRACED
-    return () => {
-      scene.environmentIntensity = env
-      lights.forEach((l, i) => (l.intensity = saved[i]))
-    }
-  }
-  const unsubTracing = shared.onPathTracingChanged(() => {
-    envSig = ''
-    sync()
-  })
   shared.bakeLights = lightsForBake
 
   return {
@@ -1196,8 +1174,6 @@ export function createLighting(ctx: EngineContext): LightingRig {
       unsubUi()
       unsubScene()
       unsubQuality()
-      unsubTracing()
-      shared.rasterLook = null
       if (shared.bakeLights === lightsForBake) shared.bakeLights = null
       hdriToken++
       for (const g of fixtureGroups.values()) disposeFixtureGroup(g)

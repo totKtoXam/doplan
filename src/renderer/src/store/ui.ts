@@ -31,14 +31,6 @@ export interface UiStoreState extends UiState {
   setQuality(q: QualityPreset): void
 }
 
-/**
- * Viewport path tracing reached its target: the tracer idles but the session stays `active`
- * (a camera or scene change re-accumulates and reports fewer samples again).
- */
-export function pathTracingDone(pt: UiState['pathTracing']): boolean {
-  return pt.active && pt.target > 0 && pt.samples >= pt.target
-}
-
 interface CatalogIndex {
   materials: Map<Id, Material>
   assets: Map<Id, Asset>
@@ -90,7 +82,6 @@ export const uiStore = createStore<UiStoreState>()((set, get) => ({
   cursor: null,
   hint: '',
   cameraMode: 'orbit',
-  pathTracing: { active: false, samples: 0, target: 256 },
 
   backend: null,
   backendPref: 'webgpu',

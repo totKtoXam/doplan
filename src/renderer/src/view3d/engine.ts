@@ -35,7 +35,6 @@ import { createInteraction } from './interaction'
 import { ItemsLayer } from './items'
 import { createLighting } from './lighting'
 import { type MaterialLibraryEx, createMaterialLibrary } from './materials'
-import { createPathTracer, type InteractivePathTracer } from './pathtracer'
 import { createPost } from './post'
 import { createProceduralFactory } from './procedural'
 import { mountPerfOverlay, perfBegin, perfBeginOnce, perfEnabled, perfEnd, perfPending, perfRecord, perfTime } from './perf'
@@ -56,7 +55,6 @@ interface SubModules {
   post: PostPipeline
   controls: ControlsWithView
   interaction: { dispose(): void }
-  pathTracer: InteractivePathTracer
 }
 
 const DEFAULT_BOUNDS = new THREE.Box3(new THREE.Vector3(-3, 0, -3), new THREE.Vector3(3, 2.7, 3))
@@ -177,7 +175,6 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
   let frameEma = 16
   let lastDynChange = 0
   let pendingSync = true
-  let ptTarget = 0
 
   const invalidate = (frames = 2): void => {
     dirtyFrames = Math.max(dirtyFrames, frames)
@@ -256,15 +253,6 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
         invalidate(3)
       }
     },
-  })
-  // the path tracer reads the live materials
-  let ptHold: (() => void) | null = null
-  const unsubPtHold = uiStore.subscribe((s) => {
-    if (s.pathTracing.active && !ptHold) ptHold = baked.hold()
-    else if (!s.pathTracing.active && ptHold) {
-      ptHold()
-      ptHold = null
-    }
   })
   const items = new ItemsLayer(ctx, lib, factory, afterSceneChange)
   const electrical = new ElectricalBuilder(roots.electrical)
@@ -480,8 +468,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     const controls = createControls(ctx) as ControlsWithView
     // the published viewer never edits: no picking, dragging or gizmos
     const interaction = isViewOnly() ? { dispose() {} } : createInteraction(ctx, { controls, post })
-    const pathTracer = createPathTracer(ctx)
-    return { lighting, post, controls, interaction, pathTracer }
+    return { lighting, post, controls, interaction }
   }
   function disposeSubModules(m: SubModules): void {
     const safely = (fn: () => void): void => {
@@ -491,9 +478,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
         console.warn('[doplan] dispose failed', err)
       }
     }
-    safely(() => m.pathTracer.stop())
     safely(() => m.interaction.dispose())
-    safely(() => m.pathTracer.dispose())
     safely(() => m.controls.dispose())
     safely(() => m.post.dispose())
     safely(() => m.lighting.dispose())
@@ -607,29 +592,11 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       const moving = mods.controls.update(dt) === true
       const ui = uiStore.getState()
       const render = docStore.getState().doc.render
-      // the cut-away follows the camera while tracing too; the path tracer notices the changed
-      // visibility itself and recaptures its scene once the camera rests
       if (!shared.stillBusy && arch.updateVisibility(camera, ui.cameraMode as CameraMode, render, bounds)) refreshOutline()
-      if (mods.pathTracer.active) {
-        const samples = mods.pathTracer.step()
-        // while the camera moves or the document changes the tracer pauses and the realtime frame
-        // shows (below); tracing resumes by itself once things rest
-        if (!mods.pathTracer.rasterFrame) {
-          dirtyFrames = Math.max(0, dirtyFrames - 1)
-          if (samples >= ptTarget && ptTarget > 0 && !moving && dirtyFrames === 0) stop()
-          return
-        }
-      }
       updateDpr(moving, dtMs, now)
       const firstFrame = perfPending('open')
       const frameStart = performance.now()
-      // the lights are set up for the tracer during a session: draw with the realtime levels
-      const restoreLook = shared.pathTracing ? shared.rasterLook?.() : undefined
-      try {
-        mods.post.render()
-      } finally {
-        restoreLook?.()
-      }
+      mods.post.render()
       measure.update()
       if (firstFrame) perfRecord('3d.firstFrame.cpu', frameStart)
       afterFrame()
@@ -745,7 +712,6 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       emitSceneChanged()
       mods.lighting.sync()
       refreshOutline()
-      uiStore.getState().set({ pathTracing: { active: false, samples: 0, target: 0 } })
       invalidate(3)
     } catch (err) {
       console.error('[doplan] could not restore the 3D view', err)
@@ -793,10 +759,8 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
   observer.observe(container)
   const offLiveResize = onLiveResizeEnd(() => resize())
   const onVisibility = (): void => {
-    if (document.hidden) {
-      // keep long path-trace jobs running in the background
-      if (!mods?.pathTracer.active) stop()
-    } else invalidate()
+    if (document.hidden) stop()
+    else invalidate()
   }
   document.addEventListener('visibilitychange', onVisibility)
   let dprQuery: MediaQueryList | null = null
@@ -889,7 +853,6 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       if (liveTimer) clearTimeout(liveTimer)
       offLiveResize()
       if (collectTimer) clearTimeout(collectTimer)
-      unsubPtHold()
       baked.dispose()
       document.removeEventListener('visibilitychange', onVisibility)
       dprQuery?.removeEventListener('change', onDprChange)
@@ -960,47 +923,8 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     setQuality(q) {
       applyQuality(q)
     },
-    startPathTracing(targetSamples) {
-      if (!mods) return
-      flushSync()
-      const target = Math.max(1, Math.round(targetSamples))
-      ptTarget = target
-      const ui = uiStore.getState()
-      try {
-        // before start(): a session that is already running reports its current count synchronously
-        ui.set({ pathTracing: { active: true, samples: 0, target } })
-        mods.pathTracer.start(target, (samples) => {
-          uiStore.getState().set({ pathTracing: { active: true, samples, target } })
-          if (samples < target) invalidate()
-        })
-      } catch (err) {
-        console.error('[doplan] path tracing unavailable', err)
-        ui.set({ pathTracing: { active: false, samples: 0, target } })
-      }
-      invalidate(3)
-    },
-    stopPathTracing() {
-      try {
-        mods?.pathTracer.stop()
-      } catch (err) {
-        console.warn('[doplan] path tracer stop failed', err)
-      }
-      ptTarget = 0
-      const ui = uiStore.getState()
-      ui.set({ pathTracing: { ...ui.pathTracing, active: false } })
-      invalidate(3)
-    },
-    async renderStill(opts) {
-      if (!mods) throw new Error('3D view is not ready')
-      if (opts.mode === 'pathtraced') {
-        flushSync()
-        await lib.whenIdle(8000)
-        try {
-          return await mods.pathTracer.renderStill(opts)
-        } finally {
-          invalidate(3)
-        }
-      }
+    renderStill(opts) {
+      if (!mods) return Promise.reject(new Error('3D view is not ready'))
       return renderRealtimeStill(opts)
     },
     async exportGlb() {
@@ -1043,6 +967,6 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     },
   }
   // measurement hook (debug flag only): scripted edits and camera moves for the timing runs
-  if (perfEnabled()) (globalThis as unknown as { __doplan3d?: unknown }).__doplan3d = { docStore, uiStore, engine: handle, scene, camera, renderer, loop: () => ({ running, dirtyFrames, ptTarget, suspended }) }
+  if (perfEnabled()) (globalThis as unknown as { __doplan3d?: unknown }).__doplan3d = { docStore, uiStore, engine: handle, scene, camera, renderer, loop: () => ({ running, dirtyFrames, suspended }) }
   return handle
 }

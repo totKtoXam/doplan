@@ -1,6 +1,6 @@
 /**
  * Quality presets of the 3D viewport (area: 3d-rendering) + the small per-engine registry
- * the rendering sub-modules (lighting / post / controls / interaction / path tracer) use to
+ * the rendering sub-modules (lighting / post / controls / interaction) use to
  * talk to each other without widening the public contracts.
  *
  * Target hardware is an Intel Arc class integrated GPU: `low` and `medium` must stay
@@ -59,11 +59,6 @@ export interface QualitySettings {
   maxTextureSize: number
   /** equirect width of the procedural sky, px */
   skyWidth: number
-  /** path tracer tuning */
-  ptBounces: number
-  ptRenderScale: number
-  ptFrameBudget: number
-  ptTargetFrameTime: number
 }
 
 export const QUALITY_PRESETS: Record<QualityPreset, QualitySettings> = {
@@ -96,10 +91,6 @@ export const QUALITY_PRESETS: Record<QualityPreset, QualitySettings> = {
     anisotropy: 2,
     maxTextureSize: 1024,
     skyWidth: 512,
-    ptBounces: 4,
-    ptRenderScale: 0.5,
-    ptFrameBudget: 100_000,
-    ptTargetFrameTime: 30,
   },
   medium: {
     preset: 'medium',
@@ -130,10 +121,6 @@ export const QUALITY_PRESETS: Record<QualityPreset, QualitySettings> = {
     anisotropy: 4,
     maxTextureSize: 2048,
     skyWidth: 768,
-    ptBounces: 6,
-    ptRenderScale: 0.75,
-    ptFrameBudget: 160_000,
-    ptTargetFrameTime: 24,
   },
   high: {
     preset: 'high',
@@ -164,10 +151,6 @@ export const QUALITY_PRESETS: Record<QualityPreset, QualitySettings> = {
     anisotropy: 8,
     maxTextureSize: 2048,
     skyWidth: 1024,
-    ptBounces: 8,
-    ptRenderScale: 1,
-    ptFrameBudget: 250_000,
-    ptTargetFrameTime: 20,
   },
   ultra: {
     preset: 'ultra',
@@ -198,10 +181,6 @@ export const QUALITY_PRESETS: Record<QualityPreset, QualitySettings> = {
     anisotropy: 16,
     maxTextureSize: 4096,
     skyWidth: 1024,
-    ptBounces: 12,
-    ptRenderScale: 1,
-    ptFrameBudget: 400_000,
-    ptTargetFrameTime: 16,
   },
 }
 
@@ -289,15 +268,8 @@ export interface RenderShared {
   controls: ControlsInternals | null
   /** preset pushed through `PostPipeline.setQuality()`; falls back to `ctx.quality` */
   quality: QualityPreset | null
-  /** true while the path tracer owns the image: lighting switches to unoccluded-safe values */
-  pathTracing: boolean
   /** true while a still is being rendered: interaction and controls stay passive */
   stillBusy: boolean
-  /**
-   * Set by the lighting rig: switches the lights to their realtime levels for one raster frame
-   * drawn during a path tracing session (camera moving, document edited) and returns the undo.
-   */
-  rasterLook: (() => () => void) | null
   /**
    * The walls, floors and ceilings show a baked light map (they ignore the live lights then); the
    * screen-space occlusion and indirect light are off, they are in the map. The furniture keeps the
@@ -315,8 +287,6 @@ export interface RenderShared {
   emitLightingChanged(c: LightingChange): void
   onQualityChanged(cb: (q: QualityPreset) => void): () => void
   setQuality(q: QualityPreset): void
-  onPathTracingChanged(cb: (active: boolean) => void): () => void
-  setPathTracing(active: boolean): void
 }
 
 const registry = new WeakMap<object, RenderShared>()
@@ -348,14 +318,11 @@ export function getShared(ctx: EngineContext): RenderShared {
   if (s) return s
   const lighting = emitter<LightingChange>()
   const quality = emitter<QualityPreset>()
-  const tracing = emitter<boolean>()
   const baked = emitter<boolean>()
   const shared: RenderShared = {
     post: null,
     controls: null,
     quality: null,
-    pathTracing: false,
-    rasterLook: null,
     stillBusy: false,
     baked: false,
     onBakedChanged: baked.on,
@@ -372,12 +339,6 @@ export function getShared(ctx: EngineContext): RenderShared {
       if (shared.quality === q) return
       shared.quality = q
       quality.emit(q)
-    },
-    onPathTracingChanged: tracing.on,
-    setPathTracing(active) {
-      if (shared.pathTracing === active) return
-      shared.pathTracing = active
-      tracing.emit(active)
     },
   }
   s = shared

@@ -120,9 +120,6 @@ importers:
       three:
         specifier: 0.187.0
         version: 0.187.0
-      three-gpu-pathtracer:
-        specifier: 0.0.28
-        version: 0.0.28(three-mesh-bvh@0.9.18(three@0.187.0))(three@0.187.0)(xatlas-web@0.1.0)
       three-mesh-bvh:
         specifier: ^0.9.18
         version: 0.9.18(three@0.187.0)
@@ -2767,13 +2764,6 @@ packages:
 
   text-segmentation@1.0.3:
     resolution: {integrity: sha512-iOiPUo/BGnZ6+54OsWxZidGCsdU8YbE4PSpdPinp7DeMtUJNJBoJ/ouUSTJjHkh1KntHaltHl/gDs2FC4i5+Nw==}
-
-  three-gpu-pathtracer@0.0.28:
-    resolution: {integrity: sha512-Ybfa6qpRIU2QP4EXQJaawYZzVN4raSFqsr9qhXXVSiCi59fjef0pyyXztYYWqAnX7bweKmD70p2xMEWehl019A==}
-    peerDependencies:
-      three: '>=0.187.0'
-      three-mesh-bvh: '>=0.9.17'
-      xatlas-web: ^0.1.0
 
   three-mesh-bvh@0.9.18:
     resolution: {integrity: sha512-S76hOBnsSG4jsuEyCu98K63klONG4NwJANabPY1LUD5l7oUgu2xtKC0IwnX/XyPzo4YZ1D7ZU+gHVA479UdQmA==}
@@ -5641,12 +5631,6 @@ snapshots:
     dependencies:
       utrie: 1.0.2
     optional: true
-
-  three-gpu-pathtracer@0.0.28(three-mesh-bvh@0.9.18(three@0.187.0))(three@0.187.0)(xatlas-web@0.1.0):
-    dependencies:
-      three: 0.187.0
-      three-mesh-bvh: 0.9.18(three@0.187.0)
-      xatlas-web: 0.1.0
 
   three-mesh-bvh@0.9.18(three@0.187.0):
     dependencies:

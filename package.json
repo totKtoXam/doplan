@@ -71,7 +71,6 @@
     "svg2pdf.js": "^2.9.0",
     "tailwindcss": "^4.3.5",
     "three": "0.187.0",
-    "three-gpu-pathtracer": "0.0.28",
     "three-mesh-bvh": "^0.9.18",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",

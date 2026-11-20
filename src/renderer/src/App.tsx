@@ -5,7 +5,8 @@ import { actions } from '@/actions'
 import { t, useT } from '@/i18n'
 import { api } from '@/store/api'
 import { dialogStore, type DialogKey, useDialogs } from '@/store/dialogs'
-import { buildSampleApartment } from '@/store/sample'
+import { prepareStartup } from '@/ui/welcome/startup'
+import { WelcomeScreen } from '@/ui/welcome/WelcomeScreen'
 import { usePanelSize } from '@/store/layout'
 import { uiStore, useUi } from '@/store/ui'
 import { ResizablePanel } from '@/ui/kit/Sash'
@@ -72,12 +73,8 @@ async function boot(): Promise<void> {
   } catch (err) {
     console.warn('[doplan] settings unavailable', err)
   }
-  // starter document: a furnished sample apartment
-  try {
-    actions.loadDocument(buildSampleApartment(t('Пример квартиры')), null)
-  } catch (err) {
-    console.error('[doplan] sample apartment failed, starting empty', err)
-  }
+  // starter: an empty plan behind the welcome screen (skipped when launched to open a file)
+  await prepareStartup()
   // catalog: builtin colour materials + procedural assets merged with the bundled pack and user library
   try {
     const loaded = await api.catalog.load()
@@ -206,6 +203,7 @@ export function App() {
         </ResizablePanel>
       </div>
       <StatusBar />
+      <WelcomeScreen />
       <Dialogs />
       <ProjectFolderDialogs />
       <Overlays />

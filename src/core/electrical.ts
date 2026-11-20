@@ -804,7 +804,8 @@ export interface AddElectricOptions extends Partial<Omit<ElectricPoint, 'id' | '
 
 /**
  * Adds a point. A wall kind near a wall is put on the nearest face (facing the room); the height
- * defaults to the catalog height (ceiling points: the level height). Returns the new id.
+ * defaults to the catalog height (ceiling points: the level height, then syncRooms puts them on the
+ * ceiling of their room, core/ceiling). Returns the new id.
  */
 export function addElectric(doc: Doc, levelId: Id, kind: ElectricKind, x: number, y: number, opts: AddElectricOptions = {}): Id {
   const level = doc.levels[levelId]

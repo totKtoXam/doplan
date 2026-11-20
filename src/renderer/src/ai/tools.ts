@@ -652,7 +652,8 @@ async function run(host: ToolHost, name: AiToolName, a: Record<string, unknown>)
         } else {
           id = addElectric(d, lv, kind, args.at!.x, args.at!.y, {
             ...common,
-            ...(args.elevation !== undefined ? { elevation: args.elevation } : {}),
+            // a ceiling point is on the ceiling of its room (syncRooms): no height of its own
+            ...(args.elevation !== undefined && ty.mount !== 'ceiling' ? { elevation: args.elevation } : {}),
             ...(args.rotation !== undefined ? { rotation: args.rotation } : {}),
           })
         }
@@ -660,7 +661,8 @@ async function run(host: ToolHost, name: AiToolName, a: Record<string, unknown>)
       const p = host.doc().electrical?.[id]
       if (!p) throw new ToolError('Точка не создана')
       const where = p.wallId ? ` — ${p.wallId}, h ${r0(p.elevation)}` : ` — ${pt(p)}`
-      return ok(`Поставлена ${electricInfo(host.doc(), host.derived(lv), p)}.`, [t('Электроточка «{name}»{where}', { name: electricName(p, en() ? 'en' : 'ru'), where })])
+      const ceilNote = p.mount === 'ceiling' && args.elevation !== undefined ? ` elevation не применена: потолочная точка стоит на потолке комнаты (h ${r0(p.elevation)}).` : ''
+      return ok(`Поставлена ${electricInfo(host.doc(), host.derived(lv), p)}.${ceilNote}`, [t('Электроточка «{name}»{where}', { name: electricName(p, en() ? 'en' : 'ru'), where })])
     }
     case 'set_electric': {
       const args = a as AiToolArgs<'set_electric'>
@@ -679,16 +681,21 @@ async function run(host: ToolHost, name: AiToolName, a: Record<string, unknown>)
         if (w.levelId !== p.levelId) throw new ToolError(`Стена ${wid} на другом уровне`)
         spot = wallSpot(doc, host.derived(p.levelId), wid, { side: args.side ?? (wid === p.wallId ? p.side : undefined), offset: args.offset, at: args.at, from: p, half: electricHalfWidth({ kind: nextKind, gangs: args.gangs ?? p.gangs, vertical: args.vertical ?? p.vertical }) })
       }
+      // a ceiling point stays on the ceiling of its room (syncRooms): a height given for it is not applied
+      const ceilElev = args.elevation !== undefined && !spot && p.mount === 'ceiling'
       const ch: string[] = []
       if (args.kind && args.kind !== p.kind) ch.push(t('тип {kind}', { kind: en() ? nextTy.en : nextTy.ru }))
-      if (args.elevation !== undefined) ch.push(t('высота {h}', { h: r0(args.elevation) }))
+      if (args.elevation !== undefined && !ceilElev) ch.push(t('высота {h}', { h: r0(args.elevation) }))
       if (args.gangs !== undefined) ch.push(t('постов {n}', { n: args.gangs }))
       if (args.vertical !== undefined) ch.push(args.vertical ? t('вертикально') : t('горизонтально'))
       if (args.comment !== undefined) ch.push(t('комментарий'))
       if (spot) ch.push(t('на {wall}, offset {t}', { wall: `${spot.wallId}:${spot.side}`, t: r0(spot.t) }))
       else if (args.at) ch.push(`→ ${pt(args.at)}`)
       if (args.rotation !== undefined && !spot && !p.wallId) ch.push(t('поворот {from}° → {to}°', { from: r0(p.rotation), to: normDeg(args.rotation) }))
-      if (!ch.length) throw new ToolError('Нечего менять')
+      if (!ch.length) {
+        if (ceilElev) throw new ToolError(`Потолочная точка стоит на потолке комнаты (h ${r0(p.elevation)}): высота задаётся потолком (высота потолка комнаты — set_room), elevation не применяется`)
+        throw new ToolError('Нечего менять')
+      }
       host.mutate(label, (d) => {
         const x = d.electrical![args.electricId]
         if (args.kind && args.kind !== x.kind) {
@@ -701,7 +708,7 @@ async function run(host: ToolHost, name: AiToolName, a: Record<string, unknown>)
             delete x.vertical
           }
         }
-        if (args.elevation !== undefined) x.elevation = args.elevation
+        if (args.elevation !== undefined && !ceilElev) x.elevation = args.elevation
         if (args.gangs !== undefined) {
           if (args.gangs > 1) x.gangs = args.gangs
           else {
@@ -736,7 +743,8 @@ async function run(host: ToolHost, name: AiToolName, a: Record<string, unknown>)
         if (args.rotation !== undefined && !x.wallId) x.rotation = normDeg(args.rotation)
       })
       const np = host.doc().electrical?.[args.electricId] ?? p
-      return ok(`${electricInfo(host.doc(), host.derived(p.levelId), np)}.`, [`${electricName(np, en() ? 'en' : 'ru')}: ${ch.join(', ')}`])
+      const ceilNote = ceilElev ? ` elevation не применена: потолочная точка стоит на потолке комнаты (h ${r0(np.elevation)}).` : ''
+      return ok(`${electricInfo(host.doc(), host.derived(p.levelId), np)}.${ceilNote}`, [`${electricName(np, en() ? 'en' : 'ru')}: ${ch.join(', ')}`])
     }
     case 'set_material': {
       const args = a as AiToolArgs<'set_material'>

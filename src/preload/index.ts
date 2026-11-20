@@ -12,6 +12,7 @@ import type { UpdateState } from '../shared/updater'
 import type { PagesProgress } from '../shared/pagesSite'
 import { CH, VERSION_ARG } from '../main/channels'
 import { cleanIpcError } from '../shared/ipcError'
+import { RECENT_CH } from '../shared/recent'
 
 /** errors from main come back with their message only, without Electron's "Error invoking remote method…" */
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> =>
@@ -176,6 +177,13 @@ const api: DoplanApi = {
     unpublish: (docId) => invoke(CH.pagesUnpublish, docId),
     onProgress: (cb) => subscribe<[PagesProgress]>(CH.evPagesProgress, (p) => cb(p)),
     openUrl: (url) => invoke(CH.pagesOpenUrl, url),
+  },
+
+  recent: {
+    list: () => invoke(RECENT_CH.list),
+    remove: (path) => invoke(RECENT_CH.remove, path),
+    setThumb: (path, svg) => invoke(RECENT_CH.setThumb, path, svg),
+    launch: () => invoke(RECENT_CH.launch),
   },
 
   window: {

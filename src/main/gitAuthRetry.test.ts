@@ -5,7 +5,7 @@
  * A local HTTP server stands in for GitHub and accepts only the newer header.
  */
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -153,6 +153,136 @@ describe.skipIf(systemHasRules)('addresses as git will use them (the global url.
     expect((await gitEffectiveUrls(null, [plain])).ownAccount).toBe(true)
   })
 
+  it('a user name for one owner\'s path (credential.https://github.com/work-org) counts only under that path', async () => {
+    globalConfig('[credential "https://github.com/work-org"]\n\tusername = work-acct\n')
+    const a = await gitRemoteAddresses(root)
+    expect(a.ownAccount).toBe(false)
+    expect((await gitEffectiveUrls(null, [plain])).ownAccount).toBe(false)
+    expect((await gitEffectiveUrls(null, ['https://github.com/work-org/site.git'])).ownAccount).toBe(true)
+    expect((await gitEffectiveUrls(null, ['https://github.com/work-org2/site.git'])).ownAccount).toBe(false)
+  })
+
+  // forward slashes: git reads the include paths and patterns
+  const slashed = (p: string) => realpathSync.native(p).replace(/\\/g, '/')
+
+  it('an include that depends on the remote (includeIf "hasconfig:remote.*.url:…"): counts once the remote is set', async () => {
+    writeFileSync(join(home, 'work.gitconfig'), '[credential "https://github.com"]\n\tusername = work-acct\n')
+    globalConfig(`[includeIf "hasconfig:remote.*.url:https://github.com/work-org/**"]\n\tpath = ${slashed(home)}/work.gitconfig\n`)
+    const fresh = join(base, 'rules-include')
+    mkdirSync(fresh, { recursive: true })
+    execFileSync('git', ['init', '-q', fresh], { windowsHide: true })
+    expect((await gitRemoteAddresses(fresh)).ownAccount).toBe(false)
+    execFileSync('git', ['-C', fresh, 'remote', 'add', 'origin', 'https://github.com/work-org/site.git'], { windowsHide: true })
+    expect((await gitRemoteAddresses(fresh)).ownAccount).toBe(true)
+    // moved to another owner: the include is off again
+    execFileSync('git', ['-C', fresh, 'remote', 'set-url', 'origin', 'https://github.com/anna/site.git'], { windowsHide: true })
+    expect((await gitRemoteAddresses(fresh)).ownAccount).toBe(false)
+  })
+
+  it('an include for the folder the push runs in (includeIf "gitdir:…"): read in that repository, not outside', async () => {
+    writeFileSync(join(home, 'personal.gitconfig'), '[credential "https://github.com"]\n\tusername = personal\n')
+    const sites = join(base, 'sites')
+    const site = join(sites, 'one')
+    mkdirSync(site, { recursive: true })
+    execFileSync('git', ['init', '-q', site], { windowsHide: true })
+    globalConfig(`[includeIf "gitdir/i:${slashed(sites)}/"]\n\tpath = ${slashed(home)}/personal.gitconfig\n`)
+    expect((await gitEffectiveUrls(null, [plain])).ownAccount).toBe(false)
+    expect((await gitEffectiveUrls(site, [plain])).ownAccount).toBe(true)
+  })
+
+  it('a context git cannot normalise (no host, %XX in the host, "://host"): never "not the user\'s" where git applies it', async () => {
+    const odd = ['https:///anna/flat.git', 'https:////anna/flat.git', 'https:///anna', 'https://github%2Ecom/anna%2Fflat.git', 'https://github%2Ecom//anna/flat.git', 'https://github.com:x', '://github.com', '://github.com/anna/flat.git']
+    const targets = [plain, 'https://github.com/anna/flat.git/', 'https://github.com/work-org/site.git']
+    for (const ctx of odd) {
+      for (const target of targets) {
+        globalConfig(`[credential "${ctx}"]\n\tusername = acct\n`)
+        const git = gitUserFor(target) === 'acct'
+        const own = (await gitEffectiveUrls(null, [target])).ownAccount
+        // an extra "yes" only keeps gh out; a "no" where git uses the user's account would send gh's token
+        expect({ ctx, target, missed: git && !own }).toEqual({ ctx, target, missed: false })
+      }
+    }
+  })
+
+  // git's own answer: the user name `git credential fill` ends up with (a helper that names none: "none")
+  const HELPER = '!f() { u=; while read l; do case "$l" in username=*) u=1;; esac; done; [ -z "$u" ] && echo username=none; echo password=p; }; f'
+  function gitUserFor(target: string): string {
+    const out = execFileSync('git', ['-c', 'credential.helper=', '-c', `credential.helper=${HELPER}`, 'credential', 'fill'], {
+      input: `url=${target}\n\n`,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      windowsHide: true,
+    })
+    return /^username=(.*)$/m.exec(out.toString())?.[1] ?? ''
+  }
+
+  it('a user name counts exactly where git itself applies it (git credential fill)', async () => {
+    const cases: [string, string][] = [
+      ['https://github.com/work-org', 'https://github.com/work-org/repo.git'],
+      ['https://github.com/work-org', 'https://github.com/anna/flat.git'],
+      ['https://github.com/work-org', 'https://github.com/work-org2/repo.git'],
+      ['https://github.com/work-org/', 'https://github.com/work-org/repo.git'],
+      ['https://github.com/Work-Org', 'https://github.com/work-org/repo.git'],
+      ['https://github.com/an%6Ea', 'https://github.com/anna/flat.git'],
+      ['https://github.com/anna/flat', 'https://github.com/anna/flat.git'],
+      ['https://github.com/anna/flat.git/', 'https://github.com/anna/flat.git'],
+      ['https://github.com/', 'https://github.com/anna/flat.git'],
+      ['https://GitHub.com', 'https://github.com/anna/flat.git'],
+      ['https://github.com:443', 'https://github.com/anna/flat.git'],
+      ['http://github.com', 'https://github.com/anna/flat.git'],
+      ['https://me@github.com', 'https://github.com/anna/flat.git'],
+      ['https://*.github.com', 'https://github.com/anna/flat.git'],
+      ['https://*.github.com', 'https://gist.github.com/anna/flat.git'],
+      ['github.com', 'https://github.com/anna/flat.git'],
+      ['github.com/anna', 'https://github.com/anna/flat.git'],
+      ['github.com/anna/flat.git', 'https://github.com/anna/flat.git'],
+      // a context without a scheme: git decodes it all (%2F too) and drops leading and trailing "/"
+      ['github.com/anna/flat.git/', 'https://github.com/anna/flat.git'],
+      ['github.com/anna/flat.git//', 'https://github.com/anna/flat.git'],
+      ['github.com/anna/flat', 'https://github.com/anna/flat/'],
+      ['github.com/anna/flat.git', 'https://github.com/anna/flat.git/'],
+      ['github.com/anna/flat.git', 'https://github.com//anna/flat.git'],
+      ['github.com//anna/flat.git', 'https://github.com/anna/flat.git'],
+      ['github.com/anna%2Fflat.git', 'https://github.com/anna/flat.git'],
+      ['github.com/anna/flat.git', 'https://github.com/anna%2Fflat.git'],
+      ['github.com/anna/fl%61t.git', 'https://github.com/anna/flat.git'],
+      ['github.com/anna/flat.git?x', 'https://github.com/anna/flat.git'],
+      ['github.com/anna/flat.git#x', 'https://github.com/anna/flat.git'],
+      ['github.com/an na/flat.git', 'https://github.com/an%20na/flat.git'],
+      // …and its host with the port as written, case-sensitive
+      ['github.com:443', 'https://github.com:443/anna/flat.git'],
+      ['github.com:443', 'https://github.com/anna/flat.git'],
+      ['github.com', 'https://github.com:443/anna/flat.git'],
+      ['GitHub.com', 'https://github.com/anna/flat.git'],
+      ['github.com', 'https://GitHub.com/anna/flat.git'],
+      // a context with a scheme: the url's path as git reads it (decoded, no leading or trailing "/")
+      ['https://github.com/anna', 'https://github.com/anna%2Fflat.git'],
+      ['https://github.com/anna', 'https://github.com//anna/flat.git'],
+      ['https://github.com/anna/flat.git', 'https://github.com/anna/flat.git/'],
+      ['https://github.com/anna/flat.git/', 'https://github.com/anna/flat.git//'],
+      ['https://github.com/anna%2Fflat.git', 'https://github.com/anna/flat.git'],
+      ['https://github.com/anna/flat.git', 'https://github.com/anna/flat.git?x=1'],
+      ['https://github.com/anna?x', 'https://github.com/anna/flat.git'],
+      ['https://github.com/an na', 'https://github.com/an%20na/flat.git'],
+      ['https://github.com.', 'https://github.com/anna/flat.git'],
+      ['https://github.com', 'https://github.com./anna/flat.git'],
+    ]
+    for (const useHttpPath of [false, true]) {
+      for (const [ctx, target] of cases) {
+        globalConfig(`[credential]\n\tuseHttpPath = ${useHttpPath}\n[credential "${ctx}"]\n\tusername = acct\n`)
+        const git = gitUserFor(target) === 'acct'
+        expect({ ctx, target, useHttpPath, own: (await gitEffectiveUrls(null, [target])).ownAccount }).toEqual({ ctx, target, useHttpPath, own: git })
+      }
+    }
+  })
+
+  it('an address git cannot be asked about safely (a stray % in its user name) never breaks the read', async () => {
+    globalConfig('[credential "me@github.com"]\n\tusername = acct\n')
+    const odd = 'https://a%ZZ@github.com/anna/flat.git'
+    expect((await gitEffectiveUrls(null, [odd])).ownAccount).toBe(false)
+    globalConfig('[credential "https://me@github.com"]\n\tusername = acct\n')
+    expect((await gitEffectiveUrls(null, [odd])).ownAccount).toBe(false)
+  })
+
   it('a user name for another host does not count', async () => {
     globalConfig('[credential "https://gitlab.com"]\n\tusername = work-acct\n[credential "https://github.com.evil.example"]\n\tusername = x\n')
     expect((await gitRemoteAddresses(root)).ownAccount).toBe(false)
@@ -206,5 +336,26 @@ describe('a refused token header is read again once', { timeout: 60_000 }, () =>
     expect(refresh).toHaveBeenCalledTimes(1)
     expect(seen).toContain('old')
     expect(seen[seen.length - 1]).toBe('new')
+  })
+
+  it('Pages: the credentials are read inside the site\'s repository once it exists, and used for the push', async () => {
+    const git = (await findGit())!
+    const site = join(base, 'site2')
+    mkdirSync(site, { recursive: true })
+    writeFileSync(join(site, 'index.html'), '<p>plan</p>')
+    const hooks = join(base, 'hooks')
+    mkdirSync(hooks, { recursive: true })
+    const where: boolean[] = []
+    const credentials = vi.fn(async (dir: string) => {
+      where.push(existsSync(join(dir, '.git')))
+      return { config: [...creds(NEW), '-c', 'protocol.http.allow=always'], env: {} }
+    })
+    const runner = { git, hooksDir: hooks, config: [...creds(OLD), '-c', 'protocol.http.allow=always'], env: {}, credentials }
+    await expect(pushSite(runner, site, url, 'gh-pages', 'test', null)).rejects.toThrow(/403/)
+    expect(credentials).toHaveBeenCalledTimes(1)
+    expect(credentials).toHaveBeenCalledWith(site)
+    expect(where).toEqual([true])
+    expect(seen.length).toBeGreaterThan(0)
+    expect(seen.every((s) => s === 'new')).toBe(true)
   })
 })

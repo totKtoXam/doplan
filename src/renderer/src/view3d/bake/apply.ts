@@ -329,14 +329,21 @@ export function createBakedLight(ctx: EngineContext, shared: RenderShared, deps:
           return cached.out
         }
         const cores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 4 : 4
-        const { bakeLightMap } = await import('./run')
+        const { bakeLightMap, bakeSurface } = await import('./run')
+        const surface = bakeSurface(receivers, DEFAULT_LAYOUT)
         const pass = async (casters: Float32Array, part: number) =>
-          bakeLightMap(receivers, casters, lights, {
-            layout: DEFAULT_LAYOUT,
-            workers: Math.max(1, Math.min(8, cores - 1)),
-            onProgress: opts.onProgress && ((done, total) => opts.onProgress?.(part * total + done, 2 * total)),
-            signal: opts.signal,
-          })
+          bakeLightMap(
+            receivers,
+            casters,
+            lights,
+            {
+              layout: DEFAULT_LAYOUT,
+              workers: Math.max(1, Math.min(8, cores - 1)),
+              onProgress: opts.onProgress && ((done, total) => opts.onProgress?.(part * total + done, 2 * total)),
+              signal: opts.signal,
+            },
+            surface,
+          )
         const c = await pass(closed, 0)
         const o = await pass(open, 1)
         const out: BakeOutput = {

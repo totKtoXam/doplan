@@ -15,7 +15,14 @@
  * Pure: no renderer, so it runs in workers and in tests.
  */
 import * as THREE from 'three'
-import type { MeshBVH } from 'three-mesh-bvh'
+import { MeshBVH } from 'three-mesh-bvh'
+
+/** the tree of the casters (world-space triangles, 9 numbers each) the texels are traced against */
+export function sceneBvh(casters: Float32Array): MeshBVH {
+  const g = new THREE.BufferGeometry()
+  g.setAttribute('position', new THREE.BufferAttribute(casters, 3))
+  return new MeshBVH(g)
+}
 
 export type RGB = [number, number, number]
 

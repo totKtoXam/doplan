@@ -3,11 +3,9 @@
  * casters (in workers when there are any, here otherwise) and the page is smoothed, filled around
  * the charts and stored as 8-bit sRGB with its brightness scale.
  */
-import * as THREE from 'three'
-import { MeshBVH } from 'three-mesh-bvh'
 import { dilate, encode, pageOf, smooth } from './page'
-import { type BakeLights, DEFAULT_TRACE, type TraceOptions, traceTexels } from './trace'
-import { type BakeLayoutOptions, DEFAULT_LAYOUT, type Layout, layoutHash, layoutOf, type UnwrapMesh, texelsOf } from './unwrap'
+import { type BakeLights, DEFAULT_TRACE, sceneBvh, type TraceOptions, traceTexels } from './trace'
+import { type BakeLayoutOptions, DEFAULT_LAYOUT, type Layout, layoutHash, layoutOf, type Texels, type UnwrapMesh, texelsOf } from './unwrap'
 
 export { type BakeLayoutOptions, DEFAULT_LAYOUT, layoutHash, layoutOf }
 
@@ -31,7 +29,7 @@ export interface BakeRunOptions {
 const aborted = () => new DOMException('The bake was cancelled', 'AbortError')
 
 async function traceInWorkers(
-  bvh: MeshBVH,
+  casters: Float32Array,
   points: Float32Array,
   lights: BakeLights,
   opts: TraceOptions,
@@ -45,8 +43,6 @@ async function traceInWorkers(
   const chunk = Math.max(256, Math.ceil(n / (count * 8)))
   const starts: number[] = []
   for (let s = 0; s < n; s += chunk) starts.push(s)
-  const data = MeshBVH.serialize(bvh)
-  const positions = (bvh.geometry.getAttribute('position') as THREE.BufferAttribute).array as Float32Array
   const workers: Worker[] = []
   let next = 0
   try {
@@ -87,7 +83,7 @@ async function traceInWorkers(
           }
         }
         w.onerror = (ev) => fail(new Error(ev.message || 'bake worker failed'))
-        w.postMessage({ bvh: first ? data : undefined, positions: first ? positions : undefined, points: points.slice(s * 6, e * 6), lights, opts, seed: s })
+        w.postMessage({ casters: first ? casters : undefined, points: points.slice(s * 6, e * 6), lights, opts, seed: s })
       }
       for (let i = 0; i < Math.min(count, starts.length); i++) {
         const w = new Worker(new URL('./bake.worker.ts', import.meta.url), { type: 'module' })
@@ -102,15 +98,31 @@ async function traceInWorkers(
   return { rgb, valid }
 }
 
-/** bakes the receivers' light map; `casters` are world-space triangles (9 numbers each) */
-export async function bakeLightMap(receivers: UnwrapMesh[], casters: Float32Array, lights: BakeLights, o: BakeRunOptions = {}): Promise<BakeResult> {
-  const lo = o.layout ?? DEFAULT_LAYOUT
+/** where the receivers go on the page and the texels they cover: the same for every pass over them */
+export interface BakeSurface {
+  layout: Layout
+  texels: Texels
+}
+
+export function bakeSurface(receivers: UnwrapMesh[], lo: BakeLayoutOptions = DEFAULT_LAYOUT): BakeSurface {
   const layout = layoutOf(receivers, lo)
-  const texels = texelsOf(receivers, layout)
+  return { layout, texels: texelsOf(receivers, layout) }
+}
+
+/**
+ * bakes the receivers' light map; `casters` are world-space triangles (9 numbers each). `surface`:
+ * the receivers' layout made once for several passes (other casters, same receivers)
+ */
+export async function bakeLightMap(
+  receivers: UnwrapMesh[],
+  casters: Float32Array,
+  lights: BakeLights,
+  o: BakeRunOptions = {},
+  surface: BakeSurface = bakeSurface(receivers, o.layout ?? DEFAULT_LAYOUT),
+): Promise<BakeResult> {
+  const lo = o.layout ?? DEFAULT_LAYOUT
+  const { layout, texels } = surface
   const opts: TraceOptions = { ...DEFAULT_TRACE, texel: 1 / layout.density, ...o.trace }
-  const g = new THREE.BufferGeometry()
-  g.setAttribute('position', new THREE.BufferAttribute(casters, 3))
-  const bvh = new MeshBVH(g)
   const total = texels.index.length
   let done = 0
   const step = (k: number) => {
@@ -122,8 +134,8 @@ export async function bakeLightMap(receivers: UnwrapMesh[], casters: Float32Arra
   const workers = o.workers ?? 0
   const traced =
     workers > 0 && typeof Worker !== 'undefined'
-      ? await traceInWorkers(bvh, texels.points, lights, opts, workers, step, o.signal)
-      : traceTexels(bvh, texels.points, lights, opts, 0, (k) => step(Math.floor(k * total) - done))
+      ? await traceInWorkers(casters, texels.points, lights, opts, workers, step, o.signal)
+      : traceTexels(sceneBvh(casters), texels.points, lights, opts, 0, (k) => step(Math.floor(k * total) - done))
   if (o.signal?.aborted) throw aborted()
   const page = dilate(smooth(pageOf(layout.size, texels.index, texels.chart, traced.rgb, traced.valid)), lo.pad + 2)
   const { rgba, scale } = encode(page)

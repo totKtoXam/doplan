@@ -421,12 +421,15 @@ async function takeDown(work: string, ref: RepoRef, pubId: string | undefined): 
   // nothing else is touched (deleting the branch alone would leave Pages pointing at a branch that
   // is gone)
   if (own.site === 'ours' && st.managesPages !== true) {
+    let off: boolean
     try {
-      await disablePages(ref)
+      off = await disablePages(ref)
     } catch (e) {
       if (isNoAccess(e)) throw notAdminError(ref)
       throw e
     }
+    // the site was just seen there: "no site" now is GitHub hiding the settings from this account
+    if (!off) throw notAdminError(ref)
   }
   // the branch before Pages are (finally) off: a push that empties it may make GitHub turn Pages on
   // again by itself

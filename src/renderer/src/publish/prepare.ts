@@ -6,12 +6,11 @@
 import type { SiteContent, SiteFile } from '@shared/pagesSite'
 import { BAKE_DIR } from '@/view3d/bake/manifest'
 import { captureBake } from './bake'
-import { browserCodec } from './browserCodec'
-import { type OptimizeReport, optimizeSite } from './optimize'
+import type { OptimizeReport } from './optimize'
 import { capturePreview, PREVIEW_PATH } from './preview'
 
-/** results by source, kept for the session: publishing again after a small edit is quick */
-const cache = new Map<string, Promise<Uint8Array | null>>()
+/** the optimizer's worker, kept for the session: it caches its results (a quick republish) */
+let worker: Worker | null = null
 
 export function assetUrlOf(f: Pick<SiteFile, 'host' | 'rel'>): string {
   return `doplan-asset://${f.host}/${f.rel.split('/').map(encodeURIComponent).join('/')}`
@@ -21,6 +20,40 @@ async function readSource(f: SiteFile): Promise<Uint8Array> {
   const res = await fetch(assetUrlOf(f))
   if (!res.ok) throw new Error(`${res.status} ${f.rel}`)
   return new Uint8Array(await res.arrayBuffer())
+}
+
+/** lighter models and textures, worked out in ./optimize.worker so the editor stays responsive */
+function optimizeInWorker(content: SiteContent, onProgress: (done: number, total: number) => void): Promise<{ content: SiteContent; report: OptimizeReport }> {
+  if (!worker) worker = new Worker(new URL('./optimize.worker.ts', import.meta.url), { type: 'module' })
+  const w = worker
+  return new Promise((resolve, reject) => {
+    const fail = (err: Error): void => {
+      w.removeEventListener('message', onMessage)
+      w.removeEventListener('error', onError)
+      // a worker that failed may hold a half-done state: the next publish starts a new one
+      w.terminate()
+      if (worker === w) worker = null
+      reject(err)
+    }
+    const onError = (ev: ErrorEvent): void => fail(new Error(ev.message || 'optimizer worker failed'))
+    const onMessage = (ev: MessageEvent): void => {
+      const msg = ev.data
+      if (msg?.type === 'read') {
+        readSource(msg.file as SiteFile).then(
+          (data) => w.postMessage({ type: 'read', id: msg.id, data }, [data.buffer]),
+          (err: unknown) => w.postMessage({ type: 'read', id: msg.id, error: err instanceof Error ? err.message : String(err) }),
+        )
+      } else if (msg?.type === 'progress') onProgress(msg.done, msg.total)
+      else if (msg?.type === 'done') {
+        w.removeEventListener('message', onMessage)
+        w.removeEventListener('error', onError)
+        resolve({ content: msg.content as SiteContent, report: msg.report as OptimizeReport })
+      } else if (msg?.type === 'error') fail(new Error(String(msg.message)))
+    }
+    w.addEventListener('message', onMessage)
+    w.addEventListener('error', onError)
+    w.postMessage({ type: 'run', content })
+  })
 }
 
 export interface PrepareSteps {
@@ -39,7 +72,7 @@ export async function prepareSite(content: SiteContent, steps: PrepareSteps, opt
   let out = content
   let report: OptimizeReport | null = null
   try {
-    const r = await optimizeSite(content, { read: readSource, codec: browserCodec, cache, onProgress: steps.optimize })
+    const r = await optimizeInWorker(content, steps.optimize)
     out = r.content
     report = r.report
   } catch (err) {

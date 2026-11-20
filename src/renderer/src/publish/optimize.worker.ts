@@ -1,8 +1,8 @@
 /**
  * The publish optimizer in a worker: simplifying and compressing the models (meshopt) and fitting
  * and re-encoding the textures (WebP) take seconds of CPU that would otherwise freeze the editor.
- * The worker also runs outside the page's content security policy, which forbids the `new Function`
- * a dependency of the model tools uses.
+ * Like the page, it holds no code compiled from strings: gltf-transform's pixel helpers (ndarray-ops)
+ * are replaced by a stub in the build (see electron.vite.config.ts, `pnpm check:built`).
  *
  * Messages in:  { type: 'run', content } — one at a time; { type: 'read', id, data | error } — a
  *               source file the page read for it (doplan-asset:// URLs are the page's to fetch).

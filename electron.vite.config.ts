@@ -94,6 +94,9 @@ export default defineConfig({
         { find: /^@\/(.*)$/, replacement: resolve(root, 'src/renderer/src') + '/$1' },
         // bare `three` → WebGPU build; `three/webgpu`, `three/tsl`, `three/addons/*` stay untouched
         { find: /^three$/, replacement: 'three/webgpu' },
+        // gltf-transform's pixel helpers load ndarray-ops, which runs `new Function` on load: the CSP
+        // (no 'unsafe-eval') makes that throw. The publish optimizer never uses them.
+        { find: /^ndarray-(pixels|lanczos)$/, replacement: resolve(root, 'src/renderer/src/publish/noPixels.ts') },
       ],
       dedupe: ['three', 'react', 'react-dom'],
     },

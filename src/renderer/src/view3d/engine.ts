@@ -604,6 +604,13 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       stop()
       return
     }
+    // a hidden view (the 2D mode keeps the engine behind display:none) draws nothing and leaves the
+    // scene to catch up once it shows again (the resize observer restarts the loop): a plan edit in
+    // 2D then costs no 3D work at all
+    if (container.clientWidth < 2 || container.clientHeight < 2) {
+      stop()
+      return
+    }
     const now = performance.now()
     const dtMs = Math.min(100, Math.max(0, now - lastTime))
     lastTime = now

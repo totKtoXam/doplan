@@ -30,8 +30,10 @@
 | Тамб. | тамбур | `hallway` |
 
 Marks drawn in the plan, which are not rooms:
-- **в/ш, вент., ВК** — вентшахта. Use fixture `ventShaft`.
-- **ст., стояк, Ст1** — riser. Use `riser`.
+- **в/ш, вент., ВК** — вентшахта. Cut it out of the room it stands in (`cutouts`, `kind: "shaft"`);
+  a `ventShaft` fixture alone does not reduce the room area.
+- **ст., стояк, Ст1** — riser. A thin riser in a box: `cutouts` with `kind: "box"`; a pipe with no
+  box: fixture `riser`.
 - **h=2,70 / Н=2,70** — ceiling height in m. Put it in `defaults.ceilingHeight` (mm).
 - **М 1:100 / 1:50** — paper scale. It is useless for a photo; calibrate with a dimension instead.
 
@@ -52,6 +54,56 @@ Take each room's area from the table, matching by the number written in the room
 
 Put the total *without* summer rooms in `labelledTotalArea` if the table gives it; otherwise the
 printed total with a note. Numbers use a decimal comma: `15,2` means 15.2.
+
+## Loggia and balcony areas: the coefficient
+BTI often prints the area of a loggia/balcony **already multiplied** by the summer coefficient:
+
+| room | coefficient | a 1.2 × 2.2 m (2.64 m²) room is printed as |
+|---|---|---|
+| лоджия | 0.5 | `1,3` |
+| балкон, терраса | 0.3 | `0,8` |
+
+How to tell: the printed area is much smaller than the room's drawn size (about ½ or ⅓ of it); the
+экспликация puts it in a "лоджий/балконов" column, sometimes with "(к=0,5)" / "с коэф."; the total
+"с учётом летних помещений" adds exactly these reduced numbers.
+
+What to write:
+- `labelledArea`: the number **as printed** (1.3);
+- `labelledAreaCoef`: 0.5 for a loggia, 0.3 for a balcony / terrace. The check then compares
+  clear area × k with the label; the project keeps the clear area (2.6 m²).
+
+**Recovering the real depth.** The drawn depth of a loggia is the least reliable size on a plan (thin
+lines, the parapet drawn over the slab edge). When one side is printed or clearly bounded by the
+neighbouring rooms (the length along the facade), take the other from the label:
+`depth = labelled ÷ k ÷ length`, e.g. 1.3 ÷ 0.5 ÷ 2.2 = 1.18 m → 1180 mm. Note it in `notes`
+("глубина лоджии из площади 1,3 с к=0,5"). Mind the rounding: a label of 1.3 means 1.25–1.35, so the
+depth is only known to ±4 %.
+
+If the printed area matches the clear area (no coefficient), leave `labelledAreaCoef` out. The
+validator suggests the coefficient when an outdoor room is ≈ 2× or ≈ 3.3× its label.
+
+## BTI marks that are not dimensions
+- A number at the entrance door or in the stairwell (`171`, `кв. 45`) is the **flat number**.
+- A number in a door gap is the door width; a number in a window opening is the window width.
+- Short ticks across a wall line mark where a dimension starts/ends; read which faces they touch.
+- Room sizes are written along the inner side of the walls they measure; a size written next to a
+  short wall segment (`1,65`) belongs to that segment (e.g. the side of an L-shaped room), not to
+  the whole room.
+
+## Shafts, boxes, columns and steps
+A room's printed area is its **clear floor**: shafts, ventilation boxes and columns inside it are
+excluded. They are drawn as small hatched or filled rectangles in a corner or at a wall, often with
+"в/ш". Model each one as a cutout of the room (`cutouts` in `planspec-reference.md`): its `rect` is
+the outer footprint seen from the room, including its walls. A shaft against a wall gets the wall's
+coordinate exactly (a few mm off is snapped); an L-shaped shaft is two touching rectangles. A large
+shaft (over 1 m²) is still a void, not a room: it never counts in the areas.
+
+A wall that changes thickness along its length (a step: a pilaster, a thicker part next to a shaft)
+makes the room an L-shape: use a `polygon` with the step. Signs: the wall line jumps; the clear sizes
+printed on opposite sides of the room differ; the area is smaller than width × depth.
+
+When the area of a room does not match: subtract what the plan shows first (cutouts, steps), then
+check the coefficient (outdoor rooms), and only then doubt a printed number.
 
 ## Wall thickness conventions (mm)
 | wall | typical |
@@ -89,7 +141,8 @@ How to read thickness on the drawing:
     loggia.
 - **Plumbing:** bathtub rectangle with rounded inner, toilet oval, sink, square shower tray with a
   cross. Kitchen: stove with 4 circles, sink.
-- **Columns / shafts:** small filled squares or rectangles (often hatched) inside or at walls.
+- **Columns / shafts:** small filled squares or rectangles (often hatched) inside or at walls. Cut them
+  out of the room (`cutouts`), see "Shafts, boxes, columns and steps".
 - **Dimension lines:** a line with ticks or arrows and the number above it. Check which faces the
   ticks touch: inner faces, outer faces, or axes.
 

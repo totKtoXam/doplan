@@ -20,7 +20,7 @@ export async function docInfo(a: Args): Promise<CommandResult> {
           const rec = doc.rooms[f.roomId]
           const room = { id: f.roomId, name: rec?.name ?? '(без названия)', type: rec?.type ?? 'other', area: r2(f.area), perimeter: r2(f.perimeter) }
           // shafts / risers: listed, but not counted in the totals (same rule as the app status bar)
-          return isTechnicalRoom(rec?.type, f.area) ? { ...room, technical: true } : room
+          return isTechnicalRoom(rec?.type, f.area, rec?.technical) ? { ...room, technical: true } : room
         })
         .sort((x, y) => y.area - x.area)
       // BTI totals: balcony ×0.3, loggia ×0.5, technical areas excluded
@@ -66,7 +66,7 @@ export async function docInfo(a: Args): Promise<CommandResult> {
     )
     text.push(
       `  total ${l.area.total} m² (balcony ×0.3, loggia ×0.5), living ${l.area.living} m², balconies/loggias ${l.area.outdoor} m² actual` +
-        (l.area.technicalCount ? `, ${l.area.technicalCount} technical area(s) < 1 m² excluded` : ''),
+        (l.area.technicalCount ? `, ${l.area.technicalCount} technical area(s) (shafts, voids) excluded` : ''),
     )
     for (const r of l.rooms)
       text.push(`  ${r.name.padEnd(18)} ${r.type.padEnd(13)} ${r.area.toFixed(2).padStart(7)} m²${'technical' in r ? '  (technical, excluded)' : ''}`)

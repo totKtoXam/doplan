@@ -161,6 +161,162 @@ describe('floor kinds', () => {
     // past the end the floor is seen
     expect(rayElectricSurface(doc, L, { ...ray, dx: 1000 }, { surfaces: new Set(['floor'] as const), rooms })?.surface).toBe('floor')
   })
+
+  it.each<[string, { kind?: Wall['kind']; height?: number; hidden?: boolean }]>([
+    ['a virtual border', { kind: 'virtual' }],
+    ['a hidden wall', { hidden: true }],
+    ['a parapet lower than the hit', { kind: 'parapet', height: 900 }],
+  ])('the end of a stub continued by %s still blocks the ray', (_name, cont) => {
+    const doc = createEmptyDoc()
+    const L = doc.levelOrder[0]
+    addRectRoom(doc, L, 0, 0, 6000, 6000, { thickness: 200, height: 2700 })
+    const [stub] = addWall(doc, L, { x: 3000, y: 0 }, { x: 3000, y: 3000 }, { thickness: 100, height: 2700 })
+    const [next] = addWall(doc, L, { x: 3000, y: 3000 }, { x: 3000, y: 4000 }, {
+      thickness: cont.kind === 'virtual' ? 0 : 100,
+      height: cont.height ?? 2700,
+      kind: cont.kind ?? 'wall',
+    })
+    if (cont.hidden) doc.walls[next].hidden = true
+    edit(doc)
+    expect(doc.walls[next].a === doc.walls[stub].b || doc.walls[next].b === doc.walls[stub].b).toBe(true)
+    const rooms = derivePlan(doc, L).rooms
+    const ray = { ox: 2500, oy: 4500, oz: 1600, dx: 500, dy: -1500, dz: -600 }
+    expect(rayElectricSurface(doc, L, ray, { surfaces: new Set(['floor'] as const), rooms })).toBeNull()
+    const hit = rayElectricSurface(doc, L, ray, { rooms })!
+    expect(hit.wallId).toBe(stub)
+    expect(hit.z).toBeCloseTo(1000)
+  })
+
+  it('a full-height wall continuing the stub covers its end', () => {
+    const doc = createEmptyDoc()
+    const L = doc.levelOrder[0]
+    addRectRoom(doc, L, 0, 0, 6000, 6000, { thickness: 200, height: 2700 })
+    const [stub] = addWall(doc, L, { x: 3000, y: 0 }, { x: 3000, y: 3000 }, { thickness: 100, height: 2700 })
+    addWall(doc, L, { x: 3000, y: 3000 }, { x: 5000, y: 3000 }, { thickness: 100, height: 2700 })
+    edit(doc)
+    // straight at the joined end from below-right of the corner: the other wall's face, not the stub's end
+    const ray = { ox: 3000, oy: 4500, oz: 1000, dx: 0, dy: -1, dz: 0 }
+    const hit = rayElectricSurface(doc, L, ray, { rooms: derivePlan(doc, L).rooms })!
+    expect(hit.surface).toBe('wall')
+    expect(hit.wallId).not.toBe(stub)
+  })
+})
+
+describe('wall ends block the ray as the 3D view draws them (the wall outlines)', () => {
+  type Seg = { from: [number, number]; to: [number, number]; thickness: number; height?: number; kind?: Wall['kind'] }
+  /** walls on an empty level; the ray sees the floor everywhere (no rooms) */
+  function walls(segs: Seg[]) {
+    const doc = createEmptyDoc()
+    const L = doc.levelOrder[0]
+    const ids = segs.map((w) =>
+      addWall(doc, L, { x: w.from[0], y: w.from[1] }, { x: w.to[0], y: w.to[1] }, { thickness: w.thickness, height: w.height ?? 2700, kind: w.kind ?? 'wall' }),
+    )
+    edit(doc)
+    const shoot = (ox: number, oy: number, dx: number, dy: number) => rayElectricSurface(doc, L, { ox, oy, oz: 1500, dx, dy, dz: -0.05 })
+    return { doc, ids, shoot }
+  }
+
+  it('a T junction with a lower stem: the notch of the tall wall above the stem is a face', () => {
+    const { shoot } = walls([
+      { from: [1000, 3000], to: [3000, 3000], thickness: 100 },
+      { from: [3000, 3000], to: [5000, 3000], thickness: 100 },
+      { from: [3000, 3000], to: [3000, 5000], thickness: 100, height: 900, kind: 'parapet' },
+    ])
+    for (const x of [2900, 2980, 3000, 3020, 3100]) {
+      const hit = shoot(x, 4500, 0, -1)!
+      expect(hit.surface, `x=${x}`).toBe('wall')
+      expect(hit.y, `x=${x}`).toBeGreaterThan(2940)
+    }
+  })
+
+  it('a T junction with one lower arm: above it, the tall arm and the stem are faces', () => {
+    const { shoot } = walls([
+      { from: [1000, 3000], to: [3000, 3000], thickness: 100, height: 900, kind: 'parapet' },
+      { from: [3000, 3000], to: [5000, 3000], thickness: 100 },
+      { from: [3000, 3000], to: [3000, 5000], thickness: 100 },
+    ])
+    for (const y of [2970, 2990, 3010, 3030]) {
+      const hit = shoot(1500, y, 1, 0)!
+      expect(hit.surface, `y=${y}`).toBe('wall')
+      expect(hit.x, `y=${y}`).toBeLessThan(3060)
+    }
+  })
+
+  it('a thinner wall continuing a thicker one: the shoulders of the thick end are faces', () => {
+    const { ids, shoot } = walls([
+      { from: [1000, 3000], to: [3000, 3000], thickness: 200 },
+      { from: [3000, 3000], to: [5000, 3000], thickness: 100 },
+    ])
+    for (const y of [3075, 2925]) {
+      const hit = shoot(6000, y, -1, 0)!
+      expect(hit.surface, `y=${y}`).toBe('wall')
+      expect(hit.wallId).toBe(ids[0][0])
+      expect(hit.x).toBeCloseTo(3000)
+    }
+    // inside the thin wall's width: its free end
+    const end = shoot(6000, 3020, -1, 0)!
+    expect(end.wallId).toBe(ids[1][0])
+    expect(end.x).toBeCloseTo(5000)
+  })
+
+  it.each([
+    ['as tall (A)', 2700],
+    ['lower (B)', 900],
+  ])('an outer corner, the neighbour %s: the face strip past the node is the face, not the neighbour', (_n, h2) => {
+    const { doc, ids, shoot } = walls([
+      { from: [1000, 3000], to: [3000, 3000], thickness: 100 },
+      { from: [3000, 3000], to: [3000, 5000], thickness: 100, height: h2, kind: h2 < 2700 ? 'parapet' : 'wall' },
+    ])
+    const w1 = ids[0][0]
+    for (const x of [2990, 3010, 3025, 3045]) {
+      const hit = rayElectricSurface(doc, doc.levelOrder[0], { ox: x, oy: 1000, oz: 1500, dx: 0, dy: 1, dz: 0 })!
+      expect(hit?.wallId, `x=${x}`).toBe(w1)
+      expect(hit.y).toBeCloseTo(2950)
+      expect(hit.t!).toBeLessThanOrEqual(2000)
+    }
+    expect(shoot(2990, 1000, 0, 1)?.wallId).toBe(w1)
+  })
+
+  it('an outer corner of 200 mm walls from outside: the face, not the end of the other wall', () => {
+    const { ids, shoot } = walls([
+      { from: [1000, 3000], to: [3000, 3000], thickness: 200 },
+      { from: [3000, 3000], to: [3000, 1000], thickness: 200 },
+    ])
+    for (const x of [2990, 3010, 3050, 3090]) {
+      const hit = shoot(x, 5000, 0, -1)!
+      expect(hit.wallId, `x=${x}`).toBe(ids[0][0])
+      expect(hit.y).toBeCloseTo(3100)
+      expect(hit.t).toBeCloseTo(Math.min(x - 1000, 2000))
+    }
+    // beyond the mitre point: past the walls
+    expect(shoot(3150, 5000, 0, -1)?.surface).toBe('floor')
+  })
+
+  it('the outer corner of a rectangular room from outside is the face aimed at', () => {
+    const doc = createEmptyDoc()
+    const L = doc.levelOrder[0]
+    addRectRoom(doc, L, 0, 0, 4000, 3000, { thickness: 200, height: 2700 })
+    edit(doc)
+    const top = Object.values(doc.walls).find((w) => Math.abs(doc.nodes[w.a].y) < 1 && Math.abs(doc.nodes[w.b].y) < 1)!
+    for (const x of [-10, -50, -90]) {
+      const hit = rayElectricSurface(doc, L, { ox: x, oy: -2000, oz: 1000, dx: 0, dy: 1, dz: 0 })!
+      expect(hit.wallId, `x=${x}`).toBe(top.id)
+      expect(hit.y).toBeCloseTo(-100)
+      expect(hit.t).toBeCloseTo(doc.nodes[top.a].x < 1 ? 0 : 4000)
+    }
+  })
+
+  it('an acute junction: the bevel is a face', () => {
+    const { shoot } = walls([
+      { from: [1000, 3000], to: [3000, 3000], thickness: 200 },
+      { from: [3000, 3000], to: [1000, 3536], thickness: 200 },
+    ])
+    for (const y of [2920, 2960, 3000, 3040, 3080]) {
+      const hit = shoot(4000, y, -1, 0)!
+      expect(hit.surface, `y=${y}`).toBe('wall')
+      expect(hit.x, `y=${y}`).toBeGreaterThan(2890)
+    }
+  })
 })
 
 describe('electricEditAllowed (keys on the selected point)', () => {

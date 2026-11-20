@@ -4,7 +4,7 @@
  * recovered by reading it again and repeating the command — once (git.runNet, pagesGit.run).
  * A local HTTP server stands in for GitHub and accepts only the newer header.
  */
-import { execFileSync } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -190,33 +190,76 @@ describe.skipIf(systemHasRules)('addresses as git will use them (the global url.
     expect((await gitEffectiveUrls(site, [plain])).ownAccount).toBe(true)
   })
 
-  it('a context git cannot normalise (no host, %XX in the host, "://host"): never "not the user\'s" where git applies it', async () => {
-    const odd = ['https:///anna/flat.git', 'https:////anna/flat.git', 'https:///anna', 'https://github%2Ecom/anna%2Fflat.git', 'https://github%2Ecom//anna/flat.git', 'https://github.com:x', '://github.com', '://github.com/anna/flat.git']
-    const targets = [plain, 'https://github.com/anna/flat.git/', 'https://github.com/work-org/site.git']
-    for (const ctx of odd) {
-      for (const target of targets) {
-        globalConfig(`[credential "${ctx}"]\n\tusername = acct\n`)
-        const git = gitUserFor(target) === 'acct'
-        const own = (await gitEffectiveUrls(null, [target])).ownAccount
-        // an extra "yes" only keeps gh out; a "no" where git uses the user's account would send gh's token
-        expect({ ctx, target, missed: git && !own }).toEqual({ ctx, target, missed: false })
-      }
-    }
-  })
+  /**
+   * Comparisons with git itself, each case in a config file of its own included by `-c include.path`
+   * (the same file syntax as the global config): the cases run side by side, a few git processes at a
+   * time, so a loaded computer makes them slower but never wrong.
+   */
+  const cases = join(base, 'credential-cases')
+  mkdirSync(cases, { recursive: true })
+  let caseNo = 0
+  function caseConfig(text: string): string {
+    const file = join(cases, `${++caseNo}.gitconfig`)
+    writeFileSync(file, text)
+    return `include.path=${slashed(file)}`
+  }
 
   // git's own answer: the user name `git credential fill` ends up with (a helper that names none: "none")
   const HELPER = '!f() { u=; while read l; do case "$l" in username=*) u=1;; esac; done; [ -z "$u" ] && echo username=none; echo password=p; }; f'
-  function gitUserFor(target: string): string {
-    const out = execFileSync('git', ['-c', 'credential.helper=', '-c', `credential.helper=${HELPER}`, 'credential', 'fill'], {
-      input: `url=${target}\n\n`,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-      windowsHide: true,
+  function gitUserFor(include: string, target: string): Promise<string> {
+    return new Promise((ok, fail) => {
+      const child = execFile(
+        'git',
+        ['-c', include, '-c', 'credential.helper=', '-c', `credential.helper=${HELPER}`, 'credential', 'fill'],
+        { env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, windowsHide: true },
+        (err, out) => (err ? fail(err) : ok(/^username=(.*)$/m.exec(String(out))?.[1] ?? '')),
+      )
+      child.stdin?.end(`url=${target}\n\n`)
     })
-    return /^username=(.*)$/m.exec(out.toString())?.[1] ?? ''
   }
 
-  it('a user name counts exactly where git itself applies it (git credential fill)', async () => {
-    const cases: [string, string][] = [
+  /** ours: configMatching copies netTestConfig before its first await, so the include reaches this call only */
+  function ownAccountWith(include: string, target: string): Promise<boolean> {
+    netTestConfig.push('-c', include)
+    const read = gitEffectiveUrls(null, [target])
+    netTestConfig.splice(netTestConfig.length - 2, 2)
+    return read.then((a) => a.ownAccount)
+  }
+
+  /** `fn` over `items`, at most `limit` at a time, results in order */
+  async function pooled<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+    const out: R[] = new Array(items.length)
+    let next = 0
+    const worker = async () => {
+      while (next < items.length) {
+        const i = next++
+        out[i] = await fn(items[i])
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+    return out
+  }
+
+  /** each [config text, target] compared with git: what git applies and what ownAccount says */
+  function compare(list: { label: Record<string, unknown>; text: string; target: string }[]) {
+    return pooled(list, 8, async ({ label, text, target }) => {
+      const include = caseConfig(text)
+      const [git, own] = await Promise.all([gitUserFor(include, target), ownAccountWith(include, target)])
+      return { ...label, target, git: git === 'acct', own }
+    })
+  }
+
+  it('a context git cannot normalise (no host, %XX in the host, "://host"): never "not the user\'s" where git applies it', { timeout: 300_000 }, async () => {
+    const odd = ['https:///anna/flat.git', 'https:////anna/flat.git', 'https:///anna', 'https://github%2Ecom/anna%2Fflat.git', 'https://github%2Ecom//anna/flat.git', 'https://github.com:x', '://github.com', '://github.com/anna/flat.git']
+    const targets = [plain, 'https://github.com/anna/flat.git/', 'https://github.com/work-org/site.git']
+    const list = odd.flatMap((ctx) => targets.map((target) => ({ label: { ctx }, text: `[credential "${ctx}"]\n\tusername = acct\n`, target })))
+    const results = await compare(list)
+    // an extra "yes" only keeps gh out; a "no" where git uses the user's account would send gh's token
+    expect(results.filter((r) => r.git && !r.own)).toEqual([])
+  })
+
+  it('a user name counts exactly where git itself applies it (git credential fill)', { timeout: 300_000 }, async () => {
+    const table: [string, string][] = [
       ['https://github.com/work-org', 'https://github.com/work-org/repo.git'],
       ['https://github.com/work-org', 'https://github.com/anna/flat.git'],
       ['https://github.com/work-org', 'https://github.com/work-org2/repo.git'],
@@ -266,13 +309,14 @@ describe.skipIf(systemHasRules)('addresses as git will use them (the global url.
       ['https://github.com.', 'https://github.com/anna/flat.git'],
       ['https://github.com', 'https://github.com./anna/flat.git'],
     ]
-    for (const useHttpPath of [false, true]) {
-      for (const [ctx, target] of cases) {
-        globalConfig(`[credential]\n\tuseHttpPath = ${useHttpPath}\n[credential "${ctx}"]\n\tusername = acct\n`)
-        const git = gitUserFor(target) === 'acct'
-        expect({ ctx, target, useHttpPath, own: (await gitEffectiveUrls(null, [target])).ownAccount }).toEqual({ ctx, target, useHttpPath, own: git })
-      }
-    }
+    const list = [false, true].flatMap((useHttpPath) =>
+      table.map(([ctx, target]) => ({ label: { ctx, useHttpPath }, text: `[credential]\n\tuseHttpPath = ${useHttpPath}\n[credential "${ctx}"]\n\tusername = acct\n`, target })),
+    )
+    const results = await compare(list)
+    expect(results.filter((r) => r.git !== r.own)).toEqual([])
+    // the comparison saw both answers
+    expect(results.some((r) => r.git)).toBe(true)
+    expect(results.some((r) => !r.git)).toBe(true)
   })
 
   it('an address git cannot be asked about safely (a stray % in its user name) never breaks the read', async () => {

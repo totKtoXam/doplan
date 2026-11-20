@@ -1599,6 +1599,7 @@ export function createInteraction(ctx: EngineContext, deps: { controls: CameraCo
     wallShown: (id) => wallCut(id).shown,
     wallHeight: (w) => (wallCut(w.id).lowered ? Math.min(CUT_HEIGHT, w.height) : w.height),
     rooms: () => planOf()?.rooms ?? [],
+    wallGeoms: () => planOf()?.wallGeoms,
     toggleSelect,
     editable: (ref) => editable(docStore.getState().doc, ref),
     pickElectric() {

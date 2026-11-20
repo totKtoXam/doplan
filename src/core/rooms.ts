@@ -18,7 +18,7 @@ import type { DerivedRoom, Doc, Id, Room, RoomBoundaryEdge, Vec2, Wall, WallGeom
 /** centreline cycles below this area (mm²) are not faces (tree components, slits) */
 const AREA_EPS = 1e3
 /** faces whose inner area is below this (mm²) are dropped: 0.01 m² */
-const MIN_FACE_AREA = 1e4
+export const MIN_FACE_AREA = 1e4
 /** faces smaller than this (m²) never get an automatic Room record (shafts, ducts) */
 export const MIN_ROOM_AREA_M2 = 0.1
 const PT_EPS = 0.01
@@ -157,6 +157,67 @@ function sideRing(cycle: HalfEdge[], geoms: Record<Id, WallGeom>, edges: RoomBou
   return cleanRing(pts)
 }
 
+/** the first proper crossing of two non-adjacent edges of a closed ring: edges i and j (i < j) */
+function firstCrossing(r: readonly Vec2[]): { i: number; j: number; p: Vec2 } | null {
+  const n = r.length
+  for (let i = 0; i < n; i++) {
+    const a = r[i]
+    const b = r[(i + 1) % n]
+    const ex = b.x - a.x
+    const ey = b.y - a.y
+    const le = Math.hypot(ex, ey)
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue
+      const c = r[j]
+      const d = r[(j + 1) % n]
+      const fx = d.x - c.x
+      const fy = d.y - c.y
+      const den = ex * fy - ey * fx
+      if (Math.abs(den) < 1e-9) continue
+      const t = ((c.x - a.x) * fy - (c.y - a.y) * fx) / den
+      const u = ((c.x - a.x) * ey - (c.y - a.y) * ex) / den
+      const lf = Math.hypot(fx, fy)
+      if (t * le <= PT_EPS || (1 - t) * le <= PT_EPS || u * lf <= PT_EPS || (1 - u) * lf <= PT_EPS) continue
+      return { i, j, p: { x: a.x + t * ex, y: a.y + t * ey } }
+    }
+  }
+  return null
+}
+
+/**
+ * A face ring that crosses itself. Four walls whose axes miss each other at a pinwheel junction (offset
+ * by less than their thickness) leave a tiny square of centrelines; one room's cycle runs round three
+ * sides of it, and the mitred faces of those short pieces fold back over the room's corner. The ring is
+ * split at its crossings into simple loops: the loops wound against the face are the fold, wall and not
+ * floor. When exactly one loop runs with the face, it is the room; any other ring is left as it was, and
+ * so is a ring wound against the face on the whole (it was no face before and makes none now).
+ */
+export function untwistRing(ring: Vec2[]): Vec2[] {
+  if (ring.length < 4 || polygonArea(ring) <= 0) return ring
+  const loops: Vec2[][] = []
+  const stack = [ring]
+  let guard = 0
+  while (stack.length) {
+    if (++guard > 64) return ring
+    const r = stack.pop() as Vec2[]
+    const x = r.length >= 4 ? firstCrossing(r) : null
+    if (!x) {
+      loops.push(r)
+      continue
+    }
+    stack.push([x.p, ...r.slice(x.i + 1, x.j + 1)], [x.p, ...r.slice(x.j + 1), ...r.slice(0, x.i + 1)])
+  }
+  if (loops.length === 1) return ring
+  let keep: Vec2[] | null = null
+  for (const l of loops) {
+    const c = cleanRing(l)
+    if (c.length < 3 || polygonArea(c) <= 1) continue
+    if (keep) return ring
+    keep = c
+  }
+  return keep ?? ring
+}
+
 function findRoot(parent: Map<Id, Id>, x: Id): Id {
   let r = x
   for (;;) {
@@ -181,6 +242,7 @@ interface Face {
   holeArea: number
   edges: RoomBoundaryEdge[]
   centerline: Vec2[]
+  nodeIds: Id[]
   nodeKey: string
 }
 
@@ -189,6 +251,11 @@ interface Face {
  * A face without a record gets the deterministic id `auto_<hash of its node ids>`.
  */
 export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeom>): DerivedRoom[] {
+  // the cutout geometry (folded rings untwisted, islands placed by their centrelines, records matched
+  // around voids) works only on a level with a technical void: a level without one (a plan without
+  // cutouts, a plan drawn by hand) is detected exactly as before the cutout work (a56f5f4)
+  let voidLevel = false
+  for (const id in doc.rooms) if (doc.rooms[id].levelId === levelId && doc.rooms[id].technical) voidLevel = true
   // ── half-edges ──
   const hes: HalfEdge[] = []
   const out = new Map<Id, HalfEdge[]>()
@@ -265,7 +332,8 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
   for (const c of cycles) {
     if (c.area > AREA_EPS) {
       const edges: RoomBoundaryEdge[] = []
-      const polygon = sideRing(c.hes, wallGeoms, edges)
+      const side = sideRing(c.hes, wallGeoms, edges)
+      const polygon = voidLevel ? untwistRing(side) : side
       const ringArea = polygon.length >= 3 ? polygonArea(polygon) : 0
       if (ringArea <= 0) continue
       const ids = pruneSpurs(c.hes.map((h) => h.from))
@@ -277,6 +345,7 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
         holeArea: 0,
         edges,
         centerline: ids.map((id) => ({ x: doc.nodes[id].x, y: doc.nodes[id].y })),
+        nodeIds: ids,
         nodeKey: ids.slice().sort().join('|'),
       })
     } else {
@@ -293,12 +362,19 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
     if (ring.length < 3) continue
     const area = Math.abs(polygonArea(ring))
     if (area < 1) continue
+    // the innermost face whose centreline loop holds every node of the island. The centrelines, not
+    // the wall faces: an island's wall may overlap the room's wall (a box set against it) or touch a
+    // reflex corner a snapped wall moved by a few mm, and its nodes still lie well inside the loop,
+    // whichever way the plan is turned
+    const pts = c.hes.map((h) => doc.nodes[h.from])
+    // (a level without voids keeps the a56f5f4 rule exactly: one point of the island's wall face)
     const probe = ring[0]
+    const byAxes = (f: Face): boolean => f.centerline.length >= 3 && pts.every((p) => pointInPolygon(p, f.centerline))
     let best: Face | null = null
     for (const f of faces) {
       if (f.cycle.comp === comp) continue
       if (best && f.ringArea >= best.ringArea) continue
-      if (pointInPolygon(probe, f.polygon)) best = f
+      if (voidLevel ? byAxes(f) : pointInPolygon(probe, f.polygon)) best = f
     }
     if (!best) continue
     best.holes.push(ring)
@@ -319,23 +395,133 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
     prepared.push({ face: f, area, labelPoint: polylabel(f.polygon, f.holes) })
   }
   const winner = new Map<Face, Room>()
+  // technical voids follow their walls: a void record knows the nodes of its face (syncRooms) and
+  // takes the face sharing most of them (Jaccard ≥ ½), wherever the walls were dragged and wherever
+  // its anchor was left. A void none of whose faces is left (its walls removed) takes no face: the
+  // void is floor of the room again, not a shaft the size of the room. Nor does a void one wall of
+  // which is removed: its nodes are all still on the room's face that took its floor (4 of the 8
+  // nodes of a rect with a notch), but that face is far larger than the void's own outline was, or
+  // (a room of any size, a 0.9 m² closet) it holds the label of a real room outside that outline: the
+  // room keeps its face and its record, the void none. A void dragged onto a room's label has that
+  // label inside its own outline and keeps its face
+  const realAnchors = records.filter((x) => !x.technical && !!x.anchor && Number.isFinite(x.anchor.x) && Number.isFinite(x.anchor.y))
+  const claimed = new Map<Face, { r: Room; score: number }>()
+  const byNodes = new Set<Room>()
+  const voidRing = new Map<Room, Vec2[]>()
   for (const r of records) {
+    if (!r.technical || !r.voidNodes?.length) continue
+    // node ids of another level or of walls gone long ago (an old copy): the anchor decides
+    if (!r.voidNodes.some((id) => doc.nodes[id]?.levelId === levelId)) continue
+    byNodes.add(r)
+    const want = new Set(r.voidNodes)
+    // the void's outline on the wall axes, where its nodes stand now (a face inside it is smaller)
+    const ring = r.voidNodes.map((id) => doc.nodes[id]).filter((n) => !!n && n.levelId === levelId)
+    const outline = ring.length >= 3 ? Math.abs(polygonArea(ring)) : 0
+    if (ring.length >= 3) voidRing.set(r, ring)
+    let best: { face: Face; area: number; score: number } | null = null
+    for (const p of prepared) {
+      if (outline > 0 && p.face.ringArea > outline * 1.5 + 1e5) continue
+      if (
+        ring.length >= 3 &&
+        realAnchors.some((x) => pointInPolygon(x.anchor, p.face.polygon, p.face.holes) && !pointInPolygon(x.anchor, ring))
+      )
+        continue
+      let common = 0
+      for (const id of p.face.nodeIds) if (want.has(id)) common++
+      if (!common) continue
+      const score = common / (want.size + new Set(p.face.nodeIds).size - common)
+      if (!best || score > best.score + 1e-9 || (Math.abs(score - best.score) <= 1e-9 && p.area < best.area))
+        best = { face: p.face, area: p.area, score }
+    }
+    if (!best || best.score < 0.5) continue
+    const cur = claimed.get(best.face)
+    // two records on one face (a copy pasted over its original): the one whose anchor is in the face
+    const inside = (x: Room) => !!x.anchor && pointInPolygon(x.anchor, best!.face.polygon, best!.face.holes)
+    const tie = !!cur && Math.abs(best.score - cur.score) <= 1e-9
+    if (!cur || best.score > cur.score + 1e-9 || (tie && (inside(r) !== inside(cur.r) ? inside(r) : r.id < cur.r.id)))
+      claimed.set(best.face, { r, score: best.score })
+  }
+  // the closest record of each kind (real room / technical void) per face
+  const mixed = new Map<Face, { real?: Room; tech?: Room }>()
+  const closer = (r: Room, cur: Room | undefined, lp: Vec2): boolean => {
+    if (!cur) return true
+    const dNew = dist(r.anchor, lp)
+    const dCur = dist(cur.anchor, lp)
+    return dNew < dCur - 1e-9 || (Math.abs(dNew - dCur) <= 1e-9 && r.id < cur.id)
+  }
+  // a void that won no face by its nodes (a copy over its original, a void cut in two) is matched by
+  // its anchor like any record; the faces won by nodes are taken
+  const byNodesWon = new Set([...claimed.values()].map((c) => c.r))
+  // records whose anchor a void that follows its walls has covered: matched after all the others
+  const covered: Room[] = []
+  for (const r of records) {
+    if (byNodesWon.has(r)) continue
     if (!r.anchor || !Number.isFinite(r.anchor.x) || !Number.isFinite(r.anchor.y)) continue
     let hit: { face: Face; area: number; labelPoint: Vec2 } | null = null
     for (const p of prepared) {
+      if (claimed.has(p.face)) continue
       if (hit && p.area >= hit.area) continue
       if (pointInPolygon(r.anchor, p.face.polygon, p.face.holes)) hit = p
     }
-    if (!hit) continue
-    const cur = winner.get(hit.face)
-    if (!cur) {
-      winner.set(hit.face, r)
+    // the anchor inside a void that follows its walls (the void was dragged onto the room's label):
+    // the room keeps the smallest free face around the anchor, the one around the void
+    if (!hit && voidLevel)
+      for (const p of prepared) {
+        if (claimed.has(p.face) || (hit && p.area >= hit.area)) continue
+        if (pointInPolygon(r.anchor, p.face.polygon)) hit = p
+      }
+    // (a void at the outline dragged over the anchor has no face around it: the nearest free label,
+    // once every other record has its face)
+    if (
+      !hit &&
+      [...claimed].some(([face, c]) => {
+        const ring = voidRing.get(c.r)
+        return pointInPolygon(r.anchor, face.polygon, face.holes) || (!!ring && pointInPolygon(r.anchor, ring))
+      })
+    ) {
+      covered.push(r)
       continue
     }
-    // two records in one face (rooms merged): the one closest to the label point survives
-    const dNew = dist(r.anchor, hit.labelPoint)
-    const dCur = dist(cur.anchor, hit.labelPoint)
-    if (dNew < dCur - 1e-9 || (Math.abs(dNew - dCur) <= 1e-9 && r.id < cur.id)) winner.set(hit.face, r)
+    if (!hit) continue
+    // two records in one face: the one closest to the label point survives
+    if (closer(r, winner.get(hit.face), hit.labelPoint)) winner.set(hit.face, r)
+    const m = mixed.get(hit.face) ?? {}
+    if (r.technical) {
+      if (closer(r, m.tech, hit.labelPoint)) m.tech = r
+    } else if (closer(r, m.real, hit.labelPoint)) m.real = r
+    mixed.set(hit.face, m)
+  }
+  // a real room and a technical void (one that does not know its nodes yet) in one face. Either the
+  // void's walls were moved as an island
+  // into the room's anchor (the room's face is then the one around the island, left without a
+  // record: the void keeps its face, the room takes the one around it), or the void's walls were
+  // removed (no such face: the void is floor of the room again, not a shaft the size of the room)
+  for (const p of prepared) {
+    const m = mixed.get(p.face)
+    if (!m?.real || !m.tech) continue
+    const anchor = m.real.anchor
+    let around: Face | null = null
+    for (const q of prepared) {
+      if (q.face === p.face || winner.has(q.face) || claimed.has(q.face)) continue
+      if (around && q.face.ringArea >= around.ringArea) continue
+      if (pointInPolygon(anchor, q.face.polygon)) around = q.face
+    }
+    if (around) {
+      winner.set(p.face, m.tech)
+      winner.set(around, m.real)
+    } else winner.set(p.face, m.real)
+  }
+  for (const [face, c] of claimed) winner.set(face, c.r)
+  // a covered record takes the free face nearest its anchor, never a face another record holds: a
+  // void never costs a room its record (real rooms first, then the closest)
+  covered.sort((a, b) => Number(!!a.technical) - Number(!!b.technical) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  for (const r of covered) {
+    let hit: { face: Face; area: number; labelPoint: Vec2 } | null = null
+    for (const p of prepared) {
+      if (winner.has(p.face)) continue
+      if (!hit || dist(p.labelPoint, r.anchor) < dist(hit.labelPoint, r.anchor)) hit = p
+    }
+    if (hit) winner.set(hit.face, r)
   }
 
   for (const p of prepared) {
@@ -358,6 +544,7 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
       polygon: f.polygon,
       holes: f.holes,
       centerline: f.centerline,
+      nodes: f.nodeIds,
       edges: f.edges,
       area: p.area / 1e6,
       perimeter: perimeter / 1000,
@@ -370,4 +557,16 @@ export function detectRooms(doc: Doc, levelId: Id, wallGeoms: Record<Id, WallGeo
 /** true for the temporary ids given to faces that have no Room record */
 export function isAutoRoomId(id: Id): boolean {
   return id.startsWith('auto_')
+}
+
+/**
+ * after nodes were copied under new ids (level copy, paste): point a technical void at the copied
+ * nodes, so the copy stays a void and does not take the original's face. Ids that were not copied
+ * are dropped; with none left the record forgets them and is matched by its anchor
+ */
+export function remapVoidNodes(room: Room, nodeMap: ReadonlyMap<Id, Id>): void {
+  if (!room.voidNodes) return
+  const ids = room.voidNodes.map((id) => nodeMap.get(id)).filter((id): id is Id => !!id)
+  if (ids.length) room.voidNodes = ids
+  else delete room.voidNodes
 }

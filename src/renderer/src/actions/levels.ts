@@ -1,4 +1,4 @@
-import { copyLevelInVariants, newId, remapAccentFace, type LevelCopyMaps } from '@core'
+import { copyLevelInVariants, newId, remapAccentFace, remapVoidNodes, type LevelCopyMaps } from '@core'
 import type { Doc, Id, Level } from '@core/types'
 import { t } from '@/i18n'
 import { docStore } from '@/store/document'
@@ -44,6 +44,7 @@ export function copyLevelInto(src: Doc, srcLevel: Id, draft: Doc, dstLevel: Id, 
     roomMap.set(r.id, id)
     draft.rooms[id] = structuredClone({ ...r, id, levelId: dstLevel, anchor: { x: r.anchor.x + dx, y: r.anchor.y + dy } })
     remapAccentFace(draft.rooms[id], wallMap)
+    remapVoidNodes(draft.rooms[id], nodeMap)
   }
   const itemMap = new Map<Id, Id>()
   const lightMap = new Map<Id, Id>()

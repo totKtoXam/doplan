@@ -137,6 +137,41 @@ interface ValidateOut {
   issues: Issue[]
   metrics?: AreaMetrics
   counts?: { walls: number; openings: number; rooms: number; faces: number }
+  /** what stops `spec build` (without --force) */
+  gate: BuildGate
+}
+
+/**
+ * `spec build` refuses a spec with errors. Area mismatches above the error threshold are errors
+ * unless the author explained them (`rooms[].areaNote`, `source.areaNote`) — an unexplained
+ * mismatch means a misread plan, and building it hides the problem in a finished-looking file.
+ */
+export interface BuildGate {
+  ok: boolean
+  blocking: Issue[]
+  /** --strict: warnings block too */
+  strictBlocking: Issue[]
+}
+
+const AREA_CODES = new Set(['AREA_MISMATCH', 'TOTAL_AREA_MISMATCH', 'LIVING_AREA_MISMATCH'])
+
+export function buildGate(issues: Issue[]): BuildGate {
+  const blocking = issues.filter((i) => i.level === 'error')
+  return { ok: blocking.length === 0, blocking, strictBlocking: issues.filter((i) => i.level === 'warn') }
+}
+
+function gateText(g: BuildGate): string[] {
+  if (g.ok) return ['build gate: open (no errors)']
+  const area = g.blocking.filter((i) => AREA_CODES.has(i.code)).length
+  return [
+    `build gate: CLOSED — ${g.blocking.length} error(s)${area ? `, ${area} of them area mismatches` : ''}`,
+    ...(area
+      ? [
+          '  an area mismatch means a misread plan: re-check dimensions, cutouts (shafts/columns → rooms[].cutouts), steps in walls, BTI coefficients (labelledAreaCoef);',
+          '  if the printed number is itself wrong or the difference is understood, say why in rooms[].areaNote / source.areaNote',
+        ]
+      : []),
+  ]
 }
 
 function runValidate(spec: SpecJson): ValidateOut {
@@ -157,7 +192,7 @@ function runValidate(spec: SpecJson): ValidateOut {
     const lvl = firstLevel(doc)
     try {
       const plan = derivePlan(doc, lvl)
-      const am = areaMetrics(spec, doc, plan, scale)
+      const am = areaMetrics(spec, doc, plan, scale, compiled.roomIds)
       metrics = am.metrics
       extra.push(...am.issues)
       counts = {
@@ -173,7 +208,7 @@ function runValidate(spec: SpecJson): ValidateOut {
   const issues = mergeIssues(compiled.issues, extra)
   const errors = issues.filter((i) => i.level === 'error').length
   const warnings = issues.filter((i) => i.level === 'warn').length
-  return { ok: errors === 0, errors, warnings, issues, metrics, counts }
+  return { ok: errors === 0, errors, warnings, issues, metrics, counts, gate: buildGate(issues) }
 }
 
 function validateText(v: ValidateOut, file: string): string[] {
@@ -189,13 +224,16 @@ function validateText(v: ValidateOut, file: string): string[] {
     for (const r of m.rooms) {
       const comp = r.computed === null ? '   —  ' : r.computed.toFixed(2).padStart(6)
       const lab = r.labelled === undefined ? '   —  ' : r.labelled.toFixed(2).padStart(6)
-      t.push(`  ${r.id.padEnd(w)} ${r.name.padEnd(16)} ${comp} / ${lab}  ${r.status}${r.pct !== undefined ? ` (${r.pct > 0 ? '+' : ''}${r.pct}%)` : ''}`)
+      t.push(
+        `  ${r.id.padEnd(w)} ${r.name.padEnd(16)} ${comp} / ${lab}${r.coef ? ` (label = ×${r.coef})` : ''}  ${r.status}${r.pct !== undefined ? ` (${r.pct > 0 ? '+' : ''}${r.pct}%)` : ''}${r.note ? ' [explained]' : ''}`,
+      )
     }
     t.push(
       `total ${m.totalArea.toFixed(2)} m² (rooms ${m.roomsArea.toFixed(2)})${m.labelledTotalArea !== undefined ? ` vs labelled ${m.labelledTotalArea}` : ''}; ` +
         `living ${m.livingArea.toFixed(2)}${m.labelledLivingArea !== undefined ? ` vs labelled ${m.labelledLivingArea}` : ''}`,
     )
   }
+  t.push(...gateText(v.gate))
   return t
 }
 
@@ -275,7 +313,7 @@ async function runOverlay(
   const image = resolveSourceImage(spec, specFile, o.image)
   const sc = resolveScale(spec)
   if (!sc) throw new DpError('spec has no scale: set source.mmPerPx (+ originPx) or source.calibration', 1, 'pnpm dp spec scale --ref x1,y1,x2,y2 --mm N --spec <spec.json>')
-  const { doc } = compileOrThrow(spec)
+  const { doc, roomIds } = compileOrThrow(spec)
   const lvl = firstLevel(doc)
   const plan = derivePlan(doc, lvl)
   const img = await loadPng(image)
@@ -284,7 +322,7 @@ async function runOverlay(
   const fy = Array.isArray(size) && size[1] > 0 ? img.height / size[1] : fx
   const toPx: ToPx = (x, y) => [(x / sc.sx + sc.ox) * fx, (y / sc.sy + sc.oy) * fy]
 
-  const am = areaMetrics(spec, doc, plan, sc)
+  const am = areaMetrics(spec, doc, plan, sc, roomIds)
   const labels = new Map<string, string[]>()
   for (const [faceId, specId] of am.faceToSpec) {
     const m = am.metrics.rooms.find((r) => r.id === specId)
@@ -420,8 +458,20 @@ export async function specBuild(a: Args): Promise<CommandResult> {
   const out = resolve(outArg.endsWith('.doplan') ? outArg : `${outArg}.doplan`)
   const spec = readSpec(file)
   const v = runValidate(spec)
-  if (a.bool('strict') && !v.ok) {
-    return { data: { ok: false, file, validate: v }, text: [...validateText(v, file), 'not built (--strict and validation errors)'], exitCode: 1 }
+  const force = a.bool('force')
+  const strict = a.bool('strict')
+  const blocked = !v.gate.ok || (strict && v.gate.strictBlocking.length > 0)
+  if (blocked && !force) {
+    return {
+      data: { ok: false, file, built: false, validate: v },
+      text: [
+        ...validateText(v, file),
+        strict && v.gate.ok
+          ? `not built: --strict and ${v.warnings} warning(s)`
+          : 'not built: fix the errors above (or explain known area differences in areaNote); --force builds anyway',
+      ],
+      exitCode: 1,
+    }
   }
   const { doc } = compileOrThrow(spec)
   const name = a.str('name') ?? spec.name ?? basename(file, extname(file))
@@ -435,14 +485,14 @@ export async function specBuild(a: Args): Promise<CommandResult> {
     `built ${out} (${Math.round(bytes / 1024)} KB): ${Object.keys(doc.walls).length} walls, ${Object.keys(doc.openings).length} openings, ${Object.keys(doc.rooms).length} rooms`,
     ...notes,
   ]
-  if (!v.ok) text.push(`WARNING: spec has ${v.errors} validation error(s) — run pnpm dp spec validate ${file}`)
+  if (!v.ok) text.push(`WARNING: built with --force despite ${v.errors} validation error(s) — run pnpm dp spec validate ${file}`)
   let launch: ReturnType<typeof openInApp> | undefined
   if (a.bool('open')) {
     launch = openInApp(out)
     text.push(launch.launched ? `opened in doplan (${launch.how})` : `not opened: ${launch.reason}. File: ${out}`)
   }
   return {
-    data: { ok: true, out, bytes, name, errors: v.errors, warnings: v.warnings, notes, launch },
+    data: { ok: true, out, bytes, name, errors: v.errors, warnings: v.warnings, forced: blocked, notes, launch },
     text,
   }
 }

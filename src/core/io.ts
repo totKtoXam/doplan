@@ -10,7 +10,7 @@ import { normalize, syncRooms, type PinnedNode } from './ops'
 import { parseElectricPoint } from './electrical'
 import { docFormatVersion } from './variants'
 import {
-  DOC_VERSION_V3,
+  DOC_VERSION_V4,
   DOOR_LEAF_STYLES,
   VARIANT_COLLECTIONS,
   type DocVariants,
@@ -816,7 +816,7 @@ export function parseDoc(json: unknown): Doc {
   }
   const version = raw.version === undefined ? 1 : num(raw.version, Number.NaN)
   if (Number.isNaN(version) || version < 1) throw new Error('Файл проекта повреждён: некорректный номер версии')
-  if (version > DOC_VERSION_V3) {
+  if (version > DOC_VERSION_V4) {
     throw new Error(`Проект создан в более новой версии doplan (формат ${version}). Обновите приложение, чтобы открыть его`)
   }
 
@@ -987,6 +987,11 @@ export function parseDoc(json: unknown): Doc {
     room.skirtingMaterialId = sk ?? DEFAULT_MATERIALS.skirting
     const labelledArea = optNum(v.labelledArea, 0, 1e6)
     if (labelledArea !== undefined && labelledArea > 0) room.labelledArea = labelledArea
+    if (v.technical === true) room.technical = true
+    if (room.technical && Array.isArray(v.voidNodes)) {
+      const vn = v.voidNodes.filter((x: unknown): x is string => typeof x === 'string')
+      if (vn.length) room.voidNodes = vn
+    }
     if (isObj(v.design)) {
       const styleId = optStr(v.design.styleId)
       const accentFace = optStr(v.design.accentFace)

@@ -132,7 +132,8 @@ function mergeCoords(slots: Slot[], tol: number): { merged: number; maxShift: nu
   return { merged, maxShift }
 }
 
-const roundTo = (v: number, g: number) => Math.round(v / g) * g
+// `+ 0` turns -0 into 0 (it would print as "-0" in the JSON-looking reports)
+const roundTo = (v: number, g: number) => Math.round(v / g) * g + 0
 
 export function snapThickness(t: number): number {
   let best = t
@@ -189,6 +190,10 @@ export function normalizeSpec(input: SpecJson, o: NormalizeOptions = {}): { spec
         }
         if (Array.isArray(r.polygon)) r.polygon = r.polygon.map((p) => (isPt(p) ? P(p) : p))
         if (isPt(r.at)) r.at = P(r.at)
+        for (const c of cutoutRects(r)) {
+          const [x, y] = pxToMm(scale, [c.rect[0], c.rect[1]])
+          c.rect = [x, y, c.rect[2] * scale.sx, c.rect[3] * scale.sy]
+        }
       }
       for (const w of spec.walls ?? []) if (Array.isArray(w.path)) w.path = w.path.map((p) => (isPt(p) ? P(p) : p))
       for (const op of spec.openings) {
@@ -255,6 +260,8 @@ export function normalizeSpec(input: SpecJson, o: NormalizeOptions = {}): { spec
   for (const r of spec.rooms) {
     if (Array.isArray(r.rect) && r.rect.length === 4) rectSlots(r.rect)
     if (Array.isArray(r.polygon)) for (const p of r.polygon) if (isPt(p)) ptSlots(p)
+    // cutout edges snap to the room edges they sit against
+    for (const c of cutoutRects(r)) rectSlots(c.rect)
   }
   for (const w of spec.walls ?? []) if (Array.isArray(w.path)) for (const p of w.path) if (isPt(p)) ptSlots(p)
   for (const f of fixtureLists(spec)) if (Array.isArray(f.rect) && f.rect.length === 4) rectSlots(f.rect)
@@ -283,6 +290,7 @@ export function normalizeSpec(input: SpecJson, o: NormalizeOptions = {}): { spec
     if (Array.isArray(r.rect) && r.rect.length === 4) rr(r.rect)
     if (Array.isArray(r.polygon)) for (const p of r.polygon) if (isPt(p)) rp(p)
     if (isPt(r.at)) rp(r.at)
+    for (const c of cutoutRects(r)) rr(c.rect)
     if (r.edgeWall && typeof r.edgeWall.thickness === 'number') {
       const t = snapThickness(r.edgeWall.thickness)
       if (t !== r.edgeWall.thickness) report.thicknessSnapped++
@@ -327,6 +335,13 @@ function dedupePts(pts: Pt[], closed: boolean): Pt[] {
     if (isPt(a) && isPt(b) && a[0] === b[0] && a[1] === b[1]) out.pop()
   }
   return out
+}
+
+/** a room's well-formed cutouts (`rect` of 4 numbers) */
+function cutoutRects(r: SpecJson['rooms'][number]): { rect: number[] }[] {
+  return (Array.isArray(r.cutouts) ? r.cutouts : []).filter(
+    (c): c is { rect: number[] } => !!c && Array.isArray(c.rect) && c.rect.length === 4 && c.rect.every((v) => typeof v === 'number'),
+  )
 }
 
 /** `fixtures` plus its alias `furniture` */

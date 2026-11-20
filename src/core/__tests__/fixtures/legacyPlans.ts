@@ -237,7 +237,8 @@ function addExtras(seedIn: number, rooms: Rec[], boxes: Box[], main: P[], T: num
     fixtures.push(x)
   }
   // edge walls of balconies, dimension sources, snap settings
-  const sources = ['plan', 'derived', 'estimated', 'measured', 'drawn']
+  // a measured dimension is stamped with the day it was measured (today when none is given): a fixed one
+  const sources = ['plan', 'derived', 'estimated', { source: 'measured', date: '2026-11-01' }, 'drawn']
   for (const r of out) {
     if ((r.type === 'balcony' || r.type === 'loggia') && rnd() < 0.4) r.edgeWall = { kind: pick(['railing', 'glass', 'parapet']), thickness: pick([50, 100, 150]) }
     if (rnd() < 0.1) r.source = pick(sources)

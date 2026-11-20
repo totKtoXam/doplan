@@ -3,7 +3,7 @@
 // issues. The digests in fixtures/legacyPlans.a56f5f4.json were made by the a56f5f4 tree itself from
 // the same seeded specs. The cutout geometry turns on only with a cutout (or a technical room / cutout
 // wall); such a plan is always built and checked by the cutout compiler, and refused when its check refuses.
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { derivePlan } from '../derive'
 import { compileCutoutSpec, compilePlanSpecDetailed, parsePlanSpec, usesCutoutLogic, validateCutoutSpec, validatePlanSpecDetailed, type PlanSpec } from '../planspec'
 import * as base from '../planspecBase'
@@ -29,6 +29,21 @@ describe('planspec without cutouts: exactly the a56f5f4 build', () => {
       }
     })
   }
+  // a measured dimension is stamped with today's date unless the spec gives one (provenance.ts): the
+  // generator gives it, so the digests do not depend on the day the test runs
+  it('the digests do not depend on the date', { timeout: 120_000 }, () => {
+    const measured = plans.filter((p) => JSON.stringify(legacyPlan(p.seed)).includes('"measured"'))
+    expect(measured.length).toBeGreaterThan(20)
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      for (const day of ['2027-03-05T23:30:00Z', '2031-12-31T12:00:00Z']) {
+        vi.setSystemTime(new Date(day))
+        for (const want of measured) expect(digestPlan(want.seed, legacyPlan(want.seed), PUBLIC), `seed ${want.seed}, ${day}`).toEqual(want)
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 const L: [number, number][] = [[0, 0], [2000, 0], [2000, 1000], [4000, 1000], [4000, 3000], [0, 3000]]

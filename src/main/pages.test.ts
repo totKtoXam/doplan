@@ -29,6 +29,8 @@ interface FakeRepo {
   admin?: boolean
   /** a custom role that may manage Pages: allowed, but the permissions show write access only */
   customPages?: boolean
+  /** GitHub answers turning Pages off with 404 (no site, as far as this account may see) */
+  pagesHidden?: boolean
   /** default 'main'; a repository doplan creates starts empty, so its first branch gh-pages is the default */
   defaultBranch?: string
 }
@@ -126,6 +128,7 @@ vi.mock('./pagesGh', () => ({
   },
   disablePages: async (ref: RepoRef) => {
     gh.calls.push(`nopages ${k(ref)}`)
+    if (repo(k(ref)).pagesHidden) return false
     // what pagesGh.pagesError makes of GitHub's 403 'Must have admin rights to Repository.': translated text, typed kind
     const { PagesGhError } = await import('./pagesError')
     if ((repo(k(ref)).admin ?? repo(k(ref)).push) === false && !repo(k(ref)).customPages)
@@ -471,6 +474,16 @@ describe('the record follows its document', () => {
     expect(repo('acme/plans').branchSha).toBe(sha)
     expect(repo('acme/plans').pages).not.toBeNull()
     expect((await status()).record).toMatchObject({ owner: 'acme', repo: 'plans' })
+
+    // GitHub may answer 404 instead of 403 to an account without the right: also a refusal, nothing touched
+    repo('acme/plans').pagesHidden = true
+    gh.calls = []
+    await expect(unpublishPlan('doc1')).rejects.toThrow(/только его администратор/)
+    expect(gh.calls).toEqual(['nopages acme/plans'])
+    expect(repo('acme/plans').branchSha).toBe(sha)
+    expect(repo('acme/plans').pages).not.toBeNull()
+    expect((await status()).record).toMatchObject({ owner: 'acme', repo: 'plans' })
+    repo('acme/plans').pagesHidden = false
 
     // a custom role that may manage Pages looks like write access: GitHub lets it, and it comes down
     repo('acme/plans').customPages = true

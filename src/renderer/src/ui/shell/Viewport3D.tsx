@@ -124,6 +124,12 @@ function BusyStatus() {
   )
 }
 
+/**
+ * the view of a 3D engine closed while its document stays open (the workspace releases a hidden 3D
+ * view after a while): the next engine for the same document starts from it
+ */
+let keptView: { loadId: number; camera: ReturnType<Engine3DHandle['getCamera']> } | null = null
+
 /** Lazily loads the 3D engine chunk and mounts it. */
 export function Viewport3D({ hidden }: { hidden?: boolean }) {
   const t = useT()
@@ -160,6 +166,8 @@ export function Viewport3D({ hidden }: { hidden?: boolean }) {
           if (s.rendererSwaps !== p.rendererSwaps) uiStore.setState({ backend: h.backend })
         })
         h.setCameraMode(uiStore.getState().cameraMode)
+        if (keptView && keptView.loadId === docStore.getState().loadId) h.setCamera(keptView.camera)
+        keptView = null
         ro = new ResizeObserver((entries) => {
           const r = entries[0]?.contentRect
           if (r && r.width > 0 && r.height > 0) h.resize()
@@ -178,6 +186,11 @@ export function Viewport3D({ hidden }: { hidden?: boolean }) {
       if (handle) {
         if (handles.engine3d === handle) setHandle('engine3d', null)
         uiStore.setState({ backend: null })
+        try {
+          keptView = { loadId: docStore.getState().loadId, camera: handle.getCamera() }
+        } catch {
+          keptView = null
+        }
         try {
           handle.destroy()
         } catch (err) {

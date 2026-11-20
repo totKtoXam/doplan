@@ -10,9 +10,13 @@ import { Viewport3D } from './Viewport3D'
 /** the 2D share limits: each view keeps SPLIT.minPx, inside the range clampRatio stores */
 const ratioLimits = (total: number) => splitLimits(total, SPLIT.minPx)
 
+/** a 3D view hidden behind the plan this long is closed: its GPU memory goes back to the system */
+export const RELEASE_3D_MS = 60_000
+
 /**
- * 2D / 3D / split viewports. The 3D engine is created lazily the first time it is shown and then
- * kept alive (hidden) so switching views is instant.
+ * 2D / 3D / split viewports. The 3D engine is created lazily the first time it is shown and kept
+ * alive (hidden) while the plan alone is shown, so switching back is instant; after RELEASE_3D_MS of
+ * plan only it is closed (the next one starts from the same camera).
  */
 export function Workspace() {
   const t = useT()
@@ -24,8 +28,14 @@ export function Workspace() {
   const drag = useRef<{ startPx: number; total: number; ratio: number } | null>(null)
 
   useEffect(() => {
-    if (mode !== '2d') setUsed3d(true)
-  }, [mode])
+    if (mode !== '2d') {
+      setUsed3d(true)
+      return
+    }
+    if (!used3d) return
+    const timer = window.setTimeout(() => setUsed3d(false), RELEASE_3D_MS)
+    return () => window.clearTimeout(timer)
+  }, [mode, used3d])
 
   const show2d = mode !== '3d'
   const show3d = mode !== '2d'

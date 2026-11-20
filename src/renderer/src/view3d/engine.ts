@@ -942,6 +942,9 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       if (destroyed) return
       destroyed = true
       stop()
+      // the debug handle must not hold the closed scene: only the stores stay reachable
+      const dbg = globalThis as unknown as { __doplan3d?: { engine?: unknown; docStore?: unknown; uiStore?: unknown } }
+      if (dbg.__doplan3d?.engine === handle) dbg.__doplan3d = { docStore, uiStore }
       unmountPerf()
       unsubDoc()
       unsubUi()

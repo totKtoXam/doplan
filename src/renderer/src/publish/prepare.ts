@@ -11,6 +11,9 @@ import { capturePreview, PREVIEW_PATH } from './preview'
 
 /** the optimizer's worker, kept for the session: it caches its results (a quick republish) */
 let worker: Worker | null = null
+/** the optimizer and its results are kept this long after a publish (a quick republish), then let go */
+export const OPTIMIZER_IDLE_MS = 5 * 60_000
+let idleTimer: ReturnType<typeof setTimeout> | undefined
 
 export function assetUrlOf(f: Pick<SiteFile, 'host' | 'rel'>): string {
   return `doplan-asset://${f.host}/${f.rel.split('/').map(encodeURIComponent).join('/')}`
@@ -24,8 +27,17 @@ async function readSource(f: SiteFile): Promise<Uint8Array> {
 
 /** lighter models and textures, worked out in ./optimize.worker so the editor stays responsive */
 function optimizeInWorker(content: SiteContent, onProgress: (done: number, total: number) => void): Promise<{ content: SiteContent; report: OptimizeReport }> {
+  clearTimeout(idleTimer)
   if (!worker) worker = new Worker(new URL('./optimize.worker.ts', import.meta.url), { type: 'module' })
   const w = worker
+  const idle = (): void => {
+    clearTimeout(idleTimer)
+    idleTimer = setTimeout(() => {
+      if (worker !== w) return
+      w.terminate()
+      worker = null
+    }, OPTIMIZER_IDLE_MS)
+  }
   return new Promise((resolve, reject) => {
     const fail = (err: Error): void => {
       w.removeEventListener('message', onMessage)
@@ -47,6 +59,7 @@ function optimizeInWorker(content: SiteContent, onProgress: (done: number, total
       else if (msg?.type === 'done') {
         w.removeEventListener('message', onMessage)
         w.removeEventListener('error', onError)
+        idle()
         resolve({ content: msg.content as SiteContent, report: msg.report as OptimizeReport })
       } else if (msg?.type === 'error') fail(new Error(String(msg.message)))
     }

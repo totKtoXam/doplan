@@ -296,7 +296,9 @@ function averageTint(tex: THREE.Texture, target: THREE.Color): THREE.Color {
 
 // ───────────────────────────── HDRI loading ─────────────────────────────
 
+/** HDRIs by URL, shared by the engines alive at once; emptied when the last of them closes */
 const hdriCache = new Map<string, Promise<THREE.DataTexture>>()
+let liveRigs = 0
 
 function loadHdri(src: string): Promise<THREE.DataTexture> {
   let p = hdriCache.get(src)
@@ -513,6 +515,7 @@ function lightSignature(l: Light): string {
 // ───────────────────────────── the rig ─────────────────────────────
 
 export function createLighting(ctx: EngineContext): LightingRig {
+  liveRigs++
   const renderer = ctx.renderer
   const scene = ctx.scene
   const shared = getShared(ctx)
@@ -1302,8 +1305,12 @@ export function createLighting(ctx: EngineContext): LightingRig {
       if (hdriTexture) {
         if (scene.background === hdriTexture) scene.background = null
         if (scene.environment === hdriTexture) scene.environment = null
-        // cached per URL for the lifetime of the app: other engines may share it
         hdriTexture = null
+      }
+      // the decoded HDRIs stay only while an engine may use them
+      if (--liveRigs === 0) {
+        for (const p of hdriCache.values()) void p.then((t) => t.dispose(), () => undefined)
+        hdriCache.clear()
       }
     },
   }

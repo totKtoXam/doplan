@@ -47,15 +47,16 @@ export class CompiledMaterials {
 
 /**
  * Compiles everything under `roots` (with the lights and the environment of `scene`) for `camera`.
- * `into` is the target the scene is drawn into (the post-processing scene pass): the GPU pipelines
- * are built for its formats. Resolves after `timeoutMs` at the latest: a frame is then drawn anyway.
+ * `viaPass` compiles through the post-processing scene pass (its target, outputs and context), so
+ * the GPU pipelines are the ones its frames use. Resolves after `timeoutMs` at the latest: a frame
+ * is then drawn anyway.
  */
 export async function precompile(
   renderer: any,
   scene: THREE.Scene,
   camera: THREE.Camera,
   roots: THREE.Object3D[],
-  into: { target: THREE.RenderTarget; mrt: unknown } | null = null,
+  viaPass: (() => Promise<void>) | null = null,
   timeoutMs = 15000,
 ): Promise<void> {
   if (!renderer || typeof renderer.compileAsync !== 'function') return
@@ -76,12 +77,9 @@ export async function precompile(
   let timer: ReturnType<typeof setTimeout> | undefined
   const prevTarget = renderer.getRenderTarget?.() ?? null
   const prevMrt = renderer.getMRT?.() ?? null
+  const prevContext = renderer.contextNode
   try {
-    if (into) {
-      renderer.setRenderTarget(into.target)
-      renderer.setMRT?.(into.mrt)
-    }
-    const work = renderer.compileAsync(scene, camera) as Promise<void>
+    const work = viaPass ? viaPass() : (renderer.compileAsync(scene, camera) as Promise<void>)
     const late = new Promise<void>((resolve) => {
       timer = setTimeout(resolve, timeoutMs)
     })
@@ -90,9 +88,12 @@ export async function precompile(
     console.warn('[doplan] shader precompilation failed', err)
   } finally {
     if (timer) clearTimeout(timer)
-    if (into) {
+    // the pass puts them back when its compile ends, which may be after the timeout: a frame drawn
+    // meanwhile must go to the canvas
+    if (viaPass) {
       renderer.setRenderTarget(prevTarget)
       renderer.setMRT?.(prevMrt)
+      renderer.contextNode = prevContext
     }
     for (const o of hidden) o.visible = false
     for (const o of culled) o.frustumCulled = true

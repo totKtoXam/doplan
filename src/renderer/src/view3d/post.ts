@@ -310,11 +310,11 @@ export function createPost(ctx: EngineContext): PostPipeline {
     kick() {
       /* nothing accumulates over frames */
     },
-    sceneTarget() {
+    sceneCompiler() {
       if (disposed) return null
       if (dirty || signature(wantedFeatures()) !== featureSig) rebuild()
       const pass = pipeline ? scenePassNode : null
-      return pass ? { target: pass.renderTarget as THREE.RenderTarget, mrt: pass.getMRT?.() ?? null } : null
+      return pass ? () => pass.compileAsync(renderer) as Promise<void> : null
     },
   }
   shared.post = internals

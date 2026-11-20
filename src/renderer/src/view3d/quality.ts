@@ -195,10 +195,11 @@ export interface PostInternals {
   /** the scene or the view changed (kept for the callers; nothing accumulates over frames) */
   kick(): void
   /**
-   * The target and outputs the scene pass draws into: shaders precompiled for another target (the
-   * canvas) would be built again, on the GPU, in the first frame.
+   * Compiles the scene the way the scene pass draws it (its target, outputs and context): shaders
+   * precompiled for another target (the canvas) would be built again, on the GPU, in the first frame.
+   * Null without a post pipeline (the scene is then drawn straight to the canvas).
    */
-  sceneTarget(): { target: THREE.RenderTarget; mrt: unknown } | null
+  sceneCompiler(): (() => Promise<void>) | null
 }
 
 /** Extra entry points of the camera controls used by interaction and stills. */

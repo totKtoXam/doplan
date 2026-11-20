@@ -664,7 +664,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     const first = !firstCompileDone
     if (first) setPreparing(true)
     const t0 = performance.now()
-    void precompile(renderer, scene, camera, compileRoots(), shared.post?.sceneTarget() ?? null).then(() => {
+    void precompile(renderer, scene, camera, compileRoots(), shared.post?.sceneCompiler() ?? null).then(() => {
       compiled.mark(fresh)
       compiling = false
       perfRecord(first ? '3d.precompile.first' : '3d.precompile', t0)

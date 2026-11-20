@@ -22,7 +22,6 @@ import {
 } from '@shared/pagesSite'
 import type { Catalog } from '@core/types'
 import { addTranslations, useT } from '@/i18n'
-import { prepareSite } from '@/publish/prepare'
 import { api } from '@/store/api'
 import { useDoc } from '@/store/document'
 import { generation, isCurrentGeneration } from '@/store/github'
@@ -282,7 +281,10 @@ export function PublishDialog({ open, onClose }: DialogPropsBase) {
     setError(null)
     setResult(null)
     try {
-      // lighter models and textures, and the picture shown while the 3D loads
+      // lighter models and textures, and the picture shown while the 3D loads. Loaded on demand:
+      // the optimizer's dependencies evaluate strings as code at load, which the app's CSP forbids
+      // (no 'unsafe-eval'), so in the main chunk they left the built app with an empty window.
+      const { prepareSite } = await import('@/publish/prepare')
       const prepared = await prepareSite(
         built,
         {

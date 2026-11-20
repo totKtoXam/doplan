@@ -1,9 +1,9 @@
 /**
- * The render quality a published plan opens with. Desktop with WebGPU: the author's preset, never
- * below `high` (a site is looked at, not edited: the medium preset of the app's iGPU budget made it
- * soft). Without WebGPU (WebGL 2: no TRAA) `medium` to `high`. Phones: `low`, tablets: `medium` at
- * most. A preset the visitor picked is remembered in this browser, but never above the device's cap:
- * one that crashed the tab would otherwise open again on every visit.
+ * The render quality a published plan opens with: light, since the visitor's device is unknown — the
+ * author's preset, but `medium` at most (`low` on phones). A visitor with a strong GPU raises it
+ * (up to `ultra` on a desktop with WebGPU, `high` on WebGL 2, `medium` on a tablet); that choice is
+ * remembered in this browser, but never above the device's cap: one that crashed the tab would
+ * otherwise open again on every visit.
  */
 import type { QualityPreset } from '@core/types'
 
@@ -28,14 +28,16 @@ function deviceCap(device: ViewerDevice): QualityPreset {
   return device.webgpu === false ? 'high' : 'ultra'
 }
 
+/** the most a plan opens with until the visitor asks for more */
+const OPEN_MAX: QualityPreset = 'medium'
+
 const clamp = (q: QualityPreset, lo: QualityPreset, hi: QualityPreset): QualityPreset => (rank(q) < rank(lo) ? lo : rank(q) > rank(hi) ? hi : q)
 
 export function viewerQuality(author: QualityPreset | undefined, device: ViewerDevice, stored: unknown): QualityPreset {
   const cap = deviceCap(device)
   if (isPreset(stored)) return rank(stored) <= rank(cap) ? stored : cap
-  if (device.coarse) return author === 'low' ? 'low' : cap
-  const own = isPreset(author) ? author : 'high'
-  return clamp(own, device.webgpu === false ? 'medium' : 'high', cap)
+  const own = isPreset(author) ? author : OPEN_MAX
+  return clamp(own, 'low', rank(cap) < rank(OPEN_MAX) ? cap : OPEN_MAX)
 }
 
 /**

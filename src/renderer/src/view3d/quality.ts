@@ -3,8 +3,14 @@
  * the rendering sub-modules (lighting / post / controls / interaction) use to
  * talk to each other without widening the public contracts.
  *
- * Target hardware is an Intel Arc class integrated GPU: `low` and `medium` must stay
- * interactive there, `high` is for an idle iGPU or a discrete card, `ultra` is discrete only.
+ * Light by default: the target is any device, a phone or an old integrated GPU included. `medium`
+ * (the default) has one cheap sun shadow, a few live lamps and no screen-space effects; `high` and
+ * `ultra` add sharper shadows, lamp shadows and more lights for a discrete GPU. Ambient occlusion and
+ * bloom are the document's own switches (off unless turned on); a still turns AO on by itself.
+ *
+ * With the published (baked) light on, the walls, floors and ceilings carry their light in a map:
+ * then there is no realtime shadow at all and only a couple of live lamps and window portals for the
+ * furniture (`BAKED_LIGHTS`).
  */
 import type * as THREE from 'three'
 import type { QualityPreset } from '@core/types'
@@ -12,7 +18,6 @@ import type { EngineContext } from '@/contracts'
 import type { BakeLights } from './bake/trace'
 
 export type ShadowKind = 'basic' | 'pcf' | 'vsm'
-export type AntiAliasing = 'fxaa' | 'traa'
 
 export interface QualitySettings {
   preset: QualityPreset
@@ -29,30 +34,19 @@ export interface QualitySettings {
   /** how many fixtures (doc.lights) may cast shadows at once */
   maxShadowLights: number
   fixtureShadowMapSize: number
-  /** how many doc lights are turned into real three lights (brightest first) */
+  /**
+   * how many doc lights are turned into real three lights (brightest first). The count of lights is
+   * part of every lit material's shader: the rig keeps this many slots (dark when unused) so turning
+   * a lamp on or off never recompiles the scene.
+   */
   maxLights: number
   /** how many window "sky portal" area lights are created (largest windows first) */
   maxPortals: number
-  /** ground-truth ambient occlusion */
-  ao: boolean
+  /** ambient occlusion pass, when the document or a still asks for it */
   aoResolutionScale: number
   aoSamples: number
-  /** spatial denoise of the AO buffer when no temporal AA is available */
-  aoDenoise: boolean
-  /** screen-space global illumination (WebGPU backend only) */
-  ssgi: boolean
-  ssgiSlices: number
-  ssgiSteps: number
-  /** screen-space reflections (WebGPU backend only) */
-  ssr: boolean
-  ssrQuality: number
-  ssrResolutionScale: number
-  bloom: boolean
-  antialias: AntiAliasing
-  /** extra hover outline (the selection outline is always on) */
+  /** extra hover outline (the selection outline is always on in the editor) */
   hoverOutline: boolean
-  /** extra frames rendered after the last change so temporal effects converge */
-  temporalTail: number
   /** anisotropic filtering for surface textures (MaterialLibrary reads this) */
   anisotropy: number
   /** longest texture edge the material library should upload, px */
@@ -61,11 +55,33 @@ export interface QualitySettings {
   skyWidth: number
 }
 
+/** live lamps / window portals for the furniture while the baked light shows (no shadows then) */
+export const BAKED_LIGHTS = { lamps: 2, portals: 2 }
+
 export const QUALITY_PRESETS: Record<QualityPreset, QualitySettings> = {
   low: {
     preset: 'low',
     dprCap: 1,
     dprMoving: 0.75,
+    shadowMapSize: 1024,
+    shadowType: 'basic',
+    shadowRadius: 1,
+    sunShadows: false,
+    maxShadowLights: 0,
+    fixtureShadowMapSize: 512,
+    maxLights: 4,
+    maxPortals: 2,
+    aoResolutionScale: 0.5,
+    aoSamples: 8,
+    hoverOutline: false,
+    anisotropy: 2,
+    maxTextureSize: 1024,
+    skyWidth: 512,
+  },
+  medium: {
+    preset: 'medium',
+    dprCap: 1.5,
+    dprMoving: 0.85,
     shadowMapSize: 1024,
     shadowType: 'pcf',
     shadowRadius: 1.5,
@@ -73,51 +89,10 @@ export const QUALITY_PRESETS: Record<QualityPreset, QualitySettings> = {
     maxShadowLights: 0,
     fixtureShadowMapSize: 512,
     maxLights: 8,
-    maxPortals: 3,
-    ao: false,
-    aoResolutionScale: 0.5,
-    aoSamples: 8,
-    aoDenoise: false,
-    ssgi: false,
-    ssgiSlices: 1,
-    ssgiSteps: 8,
-    ssr: false,
-    ssrQuality: 0.3,
-    ssrResolutionScale: 0.5,
-    bloom: false,
-    antialias: 'fxaa',
-    hoverOutline: false,
-    temporalTail: 0,
-    anisotropy: 2,
-    maxTextureSize: 1024,
-    skyWidth: 512,
-  },
-  medium: {
-    preset: 'medium',
-    dprCap: 1.25,
-    dprMoving: 0.85,
-    shadowMapSize: 2048,
-    shadowType: 'pcf',
-    shadowRadius: 2,
-    sunShadows: true,
-    maxShadowLights: 1,
-    fixtureShadowMapSize: 512,
-    maxLights: 16,
-    maxPortals: 6,
-    ao: true,
+    maxPortals: 4,
     aoResolutionScale: 0.5,
     aoSamples: 12,
-    aoDenoise: true,
-    ssgi: false,
-    ssgiSlices: 1,
-    ssgiSteps: 8,
-    ssr: false,
-    ssrQuality: 0.4,
-    ssrResolutionScale: 0.5,
-    bloom: true,
-    antialias: 'fxaa',
     hoverOutline: true,
-    temporalTail: 0,
     anisotropy: 4,
     maxTextureSize: 2048,
     skyWidth: 768,
@@ -126,28 +101,17 @@ export const QUALITY_PRESETS: Record<QualityPreset, QualitySettings> = {
     preset: 'high',
     dprCap: 1.5,
     dprMoving: 1,
-    shadowMapSize: 4096,
+    shadowMapSize: 2048,
     shadowType: 'pcf',
-    shadowRadius: 2.5,
+    shadowRadius: 2,
     sunShadows: true,
-    maxShadowLights: 3,
-    fixtureShadowMapSize: 1024,
-    maxLights: 32,
-    maxPortals: 12,
-    ao: true,
+    maxShadowLights: 1,
+    fixtureShadowMapSize: 512,
+    maxLights: 16,
+    maxPortals: 6,
     aoResolutionScale: 1,
     aoSamples: 16,
-    aoDenoise: false,
-    ssgi: true,
-    ssgiSlices: 2,
-    ssgiSteps: 8,
-    ssr: true,
-    ssrQuality: 0.5,
-    ssrResolutionScale: 0.5,
-    bloom: true,
-    antialias: 'traa',
     hoverOutline: true,
-    temporalTail: 20,
     anisotropy: 8,
     maxTextureSize: 2048,
     skyWidth: 1024,
@@ -158,43 +122,23 @@ export const QUALITY_PRESETS: Record<QualityPreset, QualitySettings> = {
     dprMoving: 1.25,
     shadowMapSize: 4096,
     shadowType: 'pcf',
-    shadowRadius: 3,
+    shadowRadius: 2.5,
     sunShadows: true,
-    maxShadowLights: 6,
+    maxShadowLights: 2,
     fixtureShadowMapSize: 1024,
-    maxLights: 64,
-    maxPortals: 24,
-    ao: true,
+    maxLights: 24,
+    maxPortals: 8,
     aoResolutionScale: 1,
-    aoSamples: 24,
-    aoDenoise: false,
-    ssgi: true,
-    ssgiSlices: 3,
-    ssgiSteps: 12,
-    ssr: true,
-    ssrQuality: 0.7,
-    ssrResolutionScale: 1,
-    bloom: true,
-    antialias: 'traa',
+    aoSamples: 16,
     hoverOutline: true,
-    temporalTail: 28,
     anisotropy: 16,
     maxTextureSize: 4096,
     skyWidth: 1024,
   },
 }
 
-export const QUALITY_ORDER: QualityPreset[] = ['low', 'medium', 'high', 'ultra']
-
 export function getQuality(preset: QualityPreset | undefined | null): QualitySettings {
   return QUALITY_PRESETS[preset ?? 'medium'] ?? QUALITY_PRESETS.medium
-}
-
-/** Pixel ratio the engine should hand to `renderer.setPixelRatio()` for a preset. */
-export function effectiveDpr(preset: QualityPreset, deviceDpr: number, moving = false): number {
-  const q = getQuality(preset)
-  const cap = moving ? q.dprMoving : q.dprCap
-  return Math.max(0.5, Math.min(deviceDpr || 1, cap))
 }
 
 /**
@@ -248,7 +192,7 @@ export interface PostInternals {
    * Synchronous: the drawing buffer and camera aspect are restored before it returns.
    */
   renderToTarget(target: THREE.RenderTarget, width: number, height: number): void
-  /** restart temporal accumulation + keep rendering the convergence tail */
+  /** the scene or the view changed (kept for the callers; nothing accumulates over frames) */
   kick(): void
 }
 
@@ -272,8 +216,7 @@ export interface RenderShared {
   stillBusy: boolean
   /**
    * The walls, floors and ceilings show a baked light map (they ignore the live lights then); the
-   * screen-space occlusion and indirect light are off, they are in the map. The furniture keeps the
-   * live light with its shadows: the walls and ceilings still block the sun and the lamps for it.
+   * occlusion pass is off, it is in the map. The furniture keeps a few live lights without shadows.
    */
   baked: boolean
   onBakedChanged(cb: (on: boolean) => void): () => void
@@ -283,6 +226,12 @@ export interface RenderShared {
    * once the HDRI is loaded; null when the HDRI could not be had
    */
   bakeLights: (() => Promise<BakeLights | null>) | null
+  /**
+   * set by the lighting rig: draw the shadow maps again on the next frame. They are kept while
+   * nothing that casts moves (orbiting costs no shadow pass); the engine calls this when the
+   * cut-away lowers or raises walls.
+   */
+  refreshShadows: (() => void) | null
   onLightingChanged(cb: (c: LightingChange) => void): () => void
   emitLightingChanged(c: LightingChange): void
   onQualityChanged(cb: (q: QualityPreset) => void): () => void
@@ -332,6 +281,7 @@ export function getShared(ctx: EngineContext): RenderShared {
       baked.emit(on)
     },
     bakeLights: null,
+    refreshShadows: null,
     onLightingChanged: lighting.on,
     emitLightingChanged: lighting.emit,
     onQualityChanged: quality.on,

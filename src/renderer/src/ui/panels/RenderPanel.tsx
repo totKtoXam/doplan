@@ -239,14 +239,12 @@ function HdriSection() {
 function EffectsSection() {
   const t = useT()
   const r = useDoc((s) => s.doc.render)
-  const flag = (key: 'ao' | 'ssgi' | 'ssr' | 'bloom' | 'wallCutaway' | 'ceilingVisible' | 'lightsOn', label: string) => (
+  const flag = (key: 'occlusion' | 'bloom' | 'wallCutaway' | 'ceilingVisible' | 'lightsOn', label: string) => (
     <Toggle checked={r[key]} onChange={(v) => setRender(label, { [key]: v } as Partial<RenderSettings>)} label={t(label)} />
   )
   return (
     <Section title={t('Эффекты и вид')} id="render.fx">
-      {flag('ao', 'Затенение углов (AO)')}
-      {flag('ssgi', 'Отражённый свет (SSGI)')}
-      {flag('ssr', 'Отражения (SSR)')}
+      {flag('occlusion', 'Затенение углов (AO)')}
       {flag('bloom', 'Свечение (bloom)')}
       {flag('lightsOn', 'Искусственный свет')}
       {flag('wallCutaway', 'Прятать стены перед камерой')}

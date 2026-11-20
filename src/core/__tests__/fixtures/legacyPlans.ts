@@ -323,7 +323,16 @@ export function digestPlan(seed: number, spec: unknown, api: DigestApi): PlanDig
   const issues = [...v.issues, ...(res.issues as { severity: string; code: string }[])]
   const part = (x: unknown): string => hash(JSON.stringify(canon(x)))
   // meta holds the doc's name, a random id and the time of the build: all else is compared
-  const whole = Object.fromEntries(Object.entries(doc).filter(([k]) => k !== 'meta'))
+  const whole: Record<string, unknown> = Object.fromEntries(Object.entries(doc).filter(([k]) => k !== 'meta'))
+  // the render settings as a56f5f4 wrote them: its always-on `ao` and the screen-space passes since
+  // removed stood where the switch `occlusion` (off by default) stands now
+  if (whole.render) {
+    whole.render = Object.fromEntries(
+      Object.entries(whole.render as Record<string, unknown>).flatMap(([k, v]): [string, unknown][] =>
+        k === 'occlusion' ? [['ao', true], ['ssgi', false], ['ssr', false]] : [[k, v]],
+      ),
+    )
+  }
   const h = {
     walls: part({ walls, openings }),
     faces: part({ rooms, faces: plan.rooms.map((x) => pickOf(x as unknown as Record<string, unknown>, ['roomId', 'levelId', 'polygon', 'holes', 'centerline', 'edges', 'area', 'perimeter', 'labelPoint'])), wallGeoms: plan.wallGeoms, roomIds: res.roomIds }),

@@ -16,12 +16,12 @@ const phone = { coarse: true, screenMin: 390 }
 const tablet = { coarse: true, screenMin: 820 }
 
 describe('viewer quality', () => {
-  it("desktop: the author's preset, never below high, also in a small window", () => {
-    expect(viewerQuality('ultra', desktop, null)).toBe('ultra')
-    expect(viewerQuality('high', desktop, null)).toBe('high')
-    expect(viewerQuality('medium', desktop, null)).toBe('high')
-    expect(viewerQuality('low', desktop, null)).toBe('high')
-    expect(viewerQuality(undefined, desktop, null)).toBe('high')
+  it("desktop: the author's preset, medium at most until the visitor asks for more", () => {
+    expect(viewerQuality('ultra', desktop, null)).toBe('medium')
+    expect(viewerQuality('high', desktop, null)).toBe('medium')
+    expect(viewerQuality('medium', desktop, null)).toBe('medium')
+    expect(viewerQuality('low', desktop, null)).toBe('low')
+    expect(viewerQuality(undefined, desktop, null)).toBe('medium')
   })
 
   it('phones low, tablets medium at most', () => {
@@ -33,7 +33,7 @@ describe('viewer quality', () => {
   it("the viewer's own choice wins; junk in storage is ignored", () => {
     expect(viewerQuality('ultra', desktop, 'medium')).toBe('medium')
     expect(viewerQuality('ultra', tablet, 'low')).toBe('low')
-    expect(viewerQuality('ultra', desktop, 'max')).toBe('ultra')
+    expect(viewerQuality('ultra', desktop, 'max')).toBe('medium')
   })
 
   it('a remembered preset above the device cap is not used (it may be the one that crashed the tab)', () => {
@@ -42,11 +42,11 @@ describe('viewer quality', () => {
     expect(viewerQuality('low', phone, 'low')).toBe('low')
   })
 
-  it('desktop without WebGPU (no TRAA): medium to high, never ultra', () => {
+  it('desktop without WebGPU: opens light too, the visitor may go up to high, never ultra', () => {
     const webgl = { ...desktop, webgpu: false }
-    expect(viewerQuality('ultra', webgl, null)).toBe('high')
-    expect(viewerQuality('high', webgl, null)).toBe('high')
-    expect(viewerQuality('low', webgl, null)).toBe('medium')
+    expect(viewerQuality('ultra', webgl, null)).toBe('medium')
+    expect(viewerQuality('low', webgl, null)).toBe('low')
+    expect(viewerQuality(undefined, webgl, 'high')).toBe('high')
     expect(viewerQuality(undefined, webgl, 'ultra')).toBe('high')
   })
 })

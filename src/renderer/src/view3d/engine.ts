@@ -592,7 +592,10 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       const moving = mods.controls.update(dt) === true
       const ui = uiStore.getState()
       const render = docStore.getState().doc.render
-      if (!shared.stillBusy && arch.updateVisibility(camera, ui.cameraMode as CameraMode, render, bounds)) refreshOutline()
+      if (!shared.stillBusy && arch.updateVisibility(camera, ui.cameraMode as CameraMode, render, bounds)) {
+        refreshOutline()
+        shared.refreshShadows?.()
+      }
       updateDpr(moving, dtMs, now)
       const firstFrame = perfPending('open')
       const frameStart = performance.now()

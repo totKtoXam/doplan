@@ -7,6 +7,8 @@ import { defineConfig } from 'electron-vite'
 import type { Plugin } from 'vite'
 
 const root = fileURLToPath(new URL('.', import.meta.url))
+/** view3d modules the 2D shell imports statically (no three in them) */
+const SHELL_3D = /[\\/]view3d[\\/](status|perf|quality|walkInput|bake[\\/]manifest)\.ts$/
 
 /** `git describe` of the source tree, shown as the app version tooltip ('' outside a git checkout) */
 function gitDescribe(): string {
@@ -106,6 +108,8 @@ export default defineConfig({
     build: {
       outDir: 'out/renderer',
       target: 'chrome140',
+      // less JS to parse at start (errors still map back to the sources)
+      minify: true,
       sourcemap: true,
       assetsInlineLimit: 0,
       chunkSizeWarningLimit: 4000,
@@ -113,15 +117,24 @@ export default defineConfig({
         input: { index: resolve(root, 'src/renderer/index.html') },
         output: {
           codeSplitting: {
+            // a group takes only the modules it names: by default it also pulls in everything they import
+            // (the core, the stores, the UI), and the 2D editor then loads the 3D chunk at start
+            includeDependenciesRecursively: false,
             groups: [
               {
                 name: 'engine3d',
-                test: /[\\/]node_modules[\\/]three[\\/]|[\\/]src[\\/]renderer[\\/]src[\\/]view3d[\\/]/,
+                // three and the engine; the few small view3d modules the shell reads (the 3D status, the
+                // perf marks, the quality presets, the bake manifest, walk input) stay out of the chunk, or
+                // the whole engine would load with the 2D editor
+                test: (id: string) =>
+                  /[\\/]node_modules[\\/](three|three-mesh-bvh)[\\/]/.test(id) || (/[\\/]src[\\/]renderer[\\/]src[\\/]view3d[\\/]/.test(id) && !SHELL_3D.test(id)),
                 priority: 20,
               },
               {
                 name: 'pixi',
-                test: /[\\/]node_modules[\\/](pixi\.js|@pixi)[\\/]/,
+                // with its own dependencies: left in the entry chunk, they would be read before they are
+                // defined (the two chunks import each other) and the 2D canvas fails at start
+                test: /[\\/]node_modules[\\/](pixi\.js|@pixi|tiny-lru|earcut|eventemitter3|colord|@xmldom|gifuct-js|js-binary-schema-parser|ismobilejs|parse-svg-path)[\\/]/,
                 priority: 10,
               },
               {

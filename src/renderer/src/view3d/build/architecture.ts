@@ -1,11 +1,13 @@
 /**
  * Keeps `roots.architecture` in sync with the document: walls, openings and rooms of the
  * active level. Every entity carries a content signature, so a commit only rebuilds what it
- * actually touched. Also owns the orbit-mode wall cut-away and ceiling auto-hide.
+ * actually touched; the signature itself is built only when its inputs are not the very same as
+ * last time (`Deps`), which keeps a drag step on a large plan from serialising every wall.
+ * Also owns the orbit-mode wall cut-away and ceiling auto-hide.
  */
 import * as THREE from 'three'
 import { defaultRoom } from '@core'
-import type { DerivedPlan, DerivedRoom, Doc, EntityRef, Id, Opening, RenderSettings, Room, Wall } from '@core/types'
+import type { DerivedPlan, DerivedRoom, Doc, EntityRef, Id, Opening, RenderSettings, Room, Vec2, Wall } from '@core/types'
 import type { ProceduralFactory } from '@/contracts'
 import type { MaterialLibraryEx } from '../materials'
 import { buildOpening } from './openings'
@@ -18,6 +20,7 @@ export const CUT_HEIGHT = 1000
 
 interface WallRec {
   sig: string
+  deps: Deps
   group: THREE.Group
   full: THREE.Group
   low: THREE.Group | null
@@ -32,12 +35,14 @@ interface WallRec {
 
 interface OpeningRec {
   sig: string
+  deps: Deps
   group: THREE.Group
   wallId: Id
 }
 
 interface RoomRec {
   sig: string
+  deps: Deps
   build: RoomBuild
 }
 
@@ -52,6 +57,31 @@ export interface ArchSyncInput {
 }
 
 const r1 = (_k: string, v: unknown): unknown => (typeof v === 'number' ? Math.round(v * 10) / 10 : v)
+
+/**
+ * The inputs of a signature, flat: records (shared by Immer while untouched) by identity, numbers
+ * to 0.1 mm like `r1`. The same inputs give the same signature, so it is not built again.
+ */
+type Deps = unknown[]
+function sameDeps(a: Deps, b: Deps): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const p = a[i]
+    const q = b[i]
+    if (p === q) continue
+    if (typeof p === 'number' && typeof q === 'number' && Math.round(p * 10) === Math.round(q * 10)) continue
+    return false
+  }
+  return true
+}
+function pushPts(out: Deps, pts: readonly Vec2[]): void {
+  out.push(pts.length)
+  for (const p of pts) out.push(p.x, p.y)
+}
+function pushList(out: Deps, list: readonly unknown[] | null | undefined): void {
+  if (!list) return void out.push(-1)
+  out.push(list.length, ...list)
+}
 
 export class Architecture {
   private walls = new Map<Id, WallRec>()
@@ -135,9 +165,16 @@ export class Architecture {
       const adj = adjacent.get(wall.id) ?? {}
       const floorRoom = adj.left ?? adj.right
       const threshold = floorRoom ? recOf(floorRoom).floor : null
-      const sig = JSON.stringify([epoch, wall, geom.polygon, geom.left, geom.right, geom.a, geom.b, ops, threshold], r1)
+      const deps: Deps = [epoch, wall, threshold]
+      pushList(deps, ops)
+      pushPts(deps, geom.polygon)
+      pushPts(deps, geom.left)
+      pushPts(deps, geom.right)
+      pushPts(deps, [geom.a, geom.b])
       const old = this.walls.get(wall.id)
+      const sig = old && sameDeps(old.deps, deps) ? old.sig : JSON.stringify([epoch, wall, geom.polygon, geom.left, geom.right, geom.a, geom.b, ops, threshold], r1)
       if (old && old.sig === sig) {
+        old.deps = deps
         old.hasLeft = !!adj.left
         old.hasRight = !!adj.right
         continue
@@ -153,6 +190,7 @@ export class Architecture {
       const dy = (geom.b.y - geom.a.y) / L
       const rec: WallRec = {
         sig,
+        deps,
         group,
         full,
         low: null,
@@ -190,15 +228,20 @@ export class Architecture {
         const interior: 'left' | 'right' = adj.left && !adj.right ? 'left' : adj.right && !adj.left ? 'right' : o.swing
         const curtainRoom = o.curtain ? adj[o.curtain.side] : undefined
         const ceilingMm = curtainRoom ? ceilingOf(curtainRoom) : wall.height
-        const sig = JSON.stringify(
-          [epoch, o, wall.thickness, wall.height, wall.kind, geom.a, geom.b, geom.left[0], geom.right[0], interior, ceilingMm],
-          r1,
-        )
+        const deps: Deps = [epoch, o, wall, interior, ceilingMm]
+        pushPts(deps, [geom.a, geom.b, geom.left[0], geom.right[0]])
         const old = this.openings.get(o.id)
-        if (old && old.sig === sig) continue
+        const sig =
+          old && sameDeps(old.deps, deps)
+            ? old.sig
+            : JSON.stringify([epoch, o, wall.thickness, wall.height, wall.kind, geom.a, geom.b, geom.left[0], geom.right[0], interior, ceilingMm], r1)
+        if (old && old.sig === sig) {
+          old.deps = deps
+          continue
+        }
         const group = buildOpening({ opening: o, wall, geom, interior, ceilingMm }, this.lib, this.factory)
         if (old) this.dropGroup(old.group)
-        this.openings.set(o.id, { sig, group, wallId })
+        this.openings.set(o.id, { sig, deps, group, wallId })
         this.root.add(group)
         changed = true
       }
@@ -216,13 +259,30 @@ export class Architecture {
       seenRooms.add(room.roomId)
       const rec = recOf(room)
       const ceilingMm = ceilingOf(room)
-      const edgeInfo = room.edges.map((e) => {
-        const w = doc.walls[e.wallId]
-        return [e, w?.kind, w?.height, holesByWall.get(e.wallId) ?? null]
-      })
-      const sig = JSON.stringify([epoch, room.polygon, room.holes, rec, ceilingMm, edgeInfo], r1)
+      const deps: Deps = [epoch, rec, ceilingMm]
+      pushPts(deps, room.polygon)
+      deps.push(room.holes.length)
+      for (const h of room.holes) pushPts(deps, h)
+      deps.push(room.edges.length)
+      for (const e of room.edges) {
+        deps.push(e.wallId, e.side, doc.walls[e.wallId])
+        pushPts(deps, [e.from, e.to])
+        pushList(deps, holesByWall.get(e.wallId))
+      }
       const old = this.rooms.get(room.roomId)
-      if (old && old.sig === sig) continue
+      let sig: string
+      if (old && sameDeps(old.deps, deps)) sig = old.sig
+      else {
+        const edgeInfo = room.edges.map((e) => {
+          const w = doc.walls[e.wallId]
+          return [e, w?.kind, w?.height, holesByWall.get(e.wallId) ?? null]
+        })
+        sig = JSON.stringify([epoch, room.polygon, room.holes, rec, ceilingMm, edgeInfo], r1)
+      }
+      if (old && old.sig === sig) {
+        old.deps = deps
+        continue
+      }
       const build = buildRoom(
         { room, rec, ceilingMm, walls: doc.walls, wallGeoms: plan.wallGeoms, openingsByWall: holesByWall },
         this.lib,
@@ -231,7 +291,7 @@ export class Architecture {
         build.ceiling.visible = old.build.ceiling.visible
         this.dropGroup(old.build.group)
       }
-      this.rooms.set(room.roomId, { sig, build })
+      this.rooms.set(room.roomId, { sig, deps, build })
       this.root.add(build.group)
       changed = true
     }

@@ -330,7 +330,7 @@ describe('files', () => {
     syncFormatVersion(doc)
     expect(doc.version).toBe(DOC_VERSION)
     expect(JSON.parse(serializeDoc(doc)).version).toBe(DOC_VERSION)
-    expect(() => parseDoc({ ...JSON.parse(text), version: 5 })).toThrow(/новой версии/)
+    expect(() => parseDoc({ ...JSON.parse(text), version: 6 })).toThrow(/новой версии/)
   })
 
   it('sanitises broken records', () => {

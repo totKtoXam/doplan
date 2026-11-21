@@ -842,6 +842,30 @@ export const DOC_VERSION_V3 = 3
  * the flag on save, counting a 2 m² shaft as floor, so they must refuse the file.
  */
 export const DOC_VERSION_V4 = 4
+/**
+ * Format 5: the fixed measurement plan of the technical project (`Doc.techProject.baseline`: walls
+ * and openings before the renovation, the source of the demolition and construction plans).
+ * doplan 0.16 accepts format 4 and would drop it on save, so it must refuse the file. Other
+ * format-5 data of the same release (the estimate, utilities) shares the number.
+ */
+export const DOC_VERSION_V5 = 5
+
+/** The walls and openings as measured before the renovation (обмерный план). */
+export interface TechBaseline {
+  /** ISO time it was fixed */
+  takenAt: string
+  nodes: Record<Id, PlanNode>
+  walls: Record<Id, Wall>
+  openings: Record<Id, Opening>
+  rooms: Record<Id, Room>
+}
+
+/** Technical project album data (core/techproject). */
+export interface DocTechProject {
+  baseline?: TechBaseline
+  /** album settings last used (core/techproject AlbumSettings; validated when read) */
+  album?: Record<string, unknown>
+}
 
 export interface Doc {
   version: number
@@ -882,6 +906,8 @@ export interface Doc {
   groupFlags?: Record<string, GroupFlags>
   /** furnishing variants over the shared apartment (absent = one implicit variant; see core/variants) */
   variants?: DocVariants
+  /** technical project album: the fixed measurement plan and the album settings (core/techproject) */
+  techProject?: DocTechProject
 }
 
 // ───────────────────────────── Furnishing variants ─────────────────────────────

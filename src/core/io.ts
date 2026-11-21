@@ -10,7 +10,7 @@ import { normalize, syncRooms, type PinnedNode } from './ops'
 import { parseElectricPoint } from './electrical'
 import { docFormatVersion } from './variants'
 import {
-  DOC_VERSION_V4,
+  DOC_VERSION_V5,
   DOOR_LEAF_STYLES,
   VARIANT_COLLECTIONS,
   type DocVariants,
@@ -33,6 +33,7 @@ import {
   type Dimension,
   type Doc,
   type DocDesign,
+  type DocTechProject,
   type PaintSpec,
   type PriceUnit,
   type ProductRef,
@@ -787,6 +788,39 @@ function readVariants(v: unknown, ctx: ReadCtx): DocVariants | undefined {
   return { activeId, order, list }
 }
 
+/**
+ * The technical project block. The baseline is a plan of its own (nodes, walls, openings, rooms on
+ * the document's levels): it goes through `parseDoc` as a sub-document, so it gets the same checks.
+ */
+function readTechProject(raw: Obj): DocTechProject | undefined {
+  const v = raw.techProject
+  if (!isObj(v)) return undefined
+  const out: DocTechProject = {}
+  const b = v.baseline
+  if (isObj(b) && (isObj(b.walls) || Array.isArray(b.walls))) {
+    try {
+      const sub = parseDoc({
+        version: 1,
+        meta: { app: 'doplan', name: 'baseline' },
+        settings: raw.settings,
+        levels: raw.levels,
+        levelOrder: raw.levelOrder,
+        nodes: b.nodes,
+        walls: b.walls,
+        openings: b.openings,
+        rooms: b.rooms,
+      })
+      if (Object.keys(sub.walls).length) {
+        out.baseline = { takenAt: str(b.takenAt, new Date(0).toISOString()), nodes: sub.nodes, walls: sub.walls, openings: sub.openings, rooms: sub.rooms }
+      }
+    } catch {
+      // a broken baseline is dropped, the project itself still opens
+    }
+  }
+  if (isObj(v.album)) out.album = JSON.parse(JSON.stringify(v.album)) as Record<string, unknown>
+  return out.baseline || out.album ? out : undefined
+}
+
 /** JSON text of the document (current schema version). */
 export function serializeDoc(doc: Doc): string {
   return JSON.stringify({ ...doc, version: docFormatVersion(doc) })
@@ -816,7 +850,7 @@ export function parseDoc(json: unknown): Doc {
   }
   const version = raw.version === undefined ? 1 : num(raw.version, Number.NaN)
   if (Number.isNaN(version) || version < 1) throw new Error('Файл проекта повреждён: некорректный номер версии')
-  if (version > DOC_VERSION_V4) {
+  if (version > DOC_VERSION_V5) {
     throw new Error(`Проект создан в более новой версии doplan (формат ${version}). Обновите приложение, чтобы открыть его`)
   }
 
@@ -1089,6 +1123,10 @@ export function parseDoc(json: unknown): Doc {
 
   // ── user layers & group flags (layers panel) ──
   readLayers(raw, doc)
+
+  // ── technical project: the fixed measurement plan and the album settings ──
+  const techProject = readTechProject(raw)
+  if (techProject) doc.techProject = techProject
 
   // openings without an offset go to the middle of their wall (clamping happens in normalize)
   for (const id in doc.openings) {

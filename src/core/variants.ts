@@ -20,6 +20,7 @@ import {
   DOC_VERSION,
   DOC_VERSION_V3,
   DOC_VERSION_V4,
+  DOC_VERSION_V5,
   DOC_VERSION_VARIANTS,
   VARIANT_COLLECTIONS,
   VARIANT_OPENING_FIELDS,
@@ -156,6 +157,8 @@ function hasElectrical(doc: Doc): boolean {
  * several variants)
  */
 export function docFormatVersion(doc: Doc): number {
+  // the fixed measurement plan of the technical project: format 5 (0.16 opens format 4 and would drop it)
+  if (doc.techProject?.baseline) return DOC_VERSION_V5
   // technical voids: format 4 (0.13–0.14 open format 3 and would drop the flag on save)
   if (Object.values(doc.rooms).some((r) => r.technical === true)) return DOC_VERSION_V4
   // layers-panel data or electrical points: format 3 (0.12.0 opens format 2 and would drop them on save)

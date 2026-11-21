@@ -158,6 +158,7 @@ export type MenuCommand =
   | 'exportDxf'
   | 'exportGlb'
   | 'exportRender'
+  | 'exportTechProject'
   | 'undo'
   | 'redo'
   | 'delete'

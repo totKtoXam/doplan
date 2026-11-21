@@ -183,6 +183,9 @@ function onMenu(cmd: MenuCommand): void {
     case 'exportGlb':
       void actions.exportGlb()
       break
+    case 'exportTechProject':
+      dialogStore.getState().open('techProject')
+      break
     case 'exportRender':
       dialogStore.getState().open('render')
       break

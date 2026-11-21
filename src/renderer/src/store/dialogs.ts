@@ -2,7 +2,7 @@
 import { createStore } from 'zustand/vanilla'
 import { useStore } from 'zustand'
 
-export type DialogKey = 'bom' | 'importModel' | 'materialEditor' | 'settings' | 'photoPlan' | 'render' | 'about' | 'variants' | 'publish'
+export type DialogKey = 'bom' | 'importModel' | 'materialEditor' | 'settings' | 'photoPlan' | 'render' | 'about' | 'variants' | 'publish' | 'techProject'
 
 export interface DialogState {
   bom: boolean
@@ -16,6 +16,8 @@ export interface DialogState {
   variants: boolean
   /** «Опубликовать для просмотра» (GitHub Pages) */
   publish: boolean
+  /** технический проект: альбом рабочих чертежей */
+  techProject: boolean
   /** model files dropped onto the window, waiting for the import dialog to pick them up */
   pendingModelFiles: { name: string; data: ArrayBuffer }[] | null
   /** image dropped onto the window for photo → plan */
@@ -36,6 +38,7 @@ export const dialogStore = createStore<DialogState>()((set, get) => ({
   about: false,
   variants: false,
   publish: false,
+  techProject: false,
   pendingModelFiles: null,
   pendingPhoto: null,
   open(key) {

@@ -162,6 +162,7 @@ const en: Record<string, string> = {
   'Рендер…': 'Render…',
   Рендер: 'Render',
   'Смета материалов…': 'Bill of materials…',
+  'Технический проект…': 'Technical project…',
   'Смета материалов': 'Bill of materials',
   Смета: 'Estimate',
   План: 'Plan',

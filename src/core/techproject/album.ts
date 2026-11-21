@@ -10,6 +10,7 @@ import { toSvg } from '../export/svg'
 import type { Catalog, DerivedPlan, Doc, Id } from '../types'
 import { activeVariantId, materializeVariant } from '../variants'
 import { constructionSheet, demolitionSheet, measurePages } from './baseline'
+import { roomTitle } from './common'
 import { contributorsFor, hasContribution } from './contrib'
 import { elevationSheets, defaultElevationRooms } from './elevations'
 import './fixtures'
@@ -258,6 +259,28 @@ export function pageFileName(page: AlbumPage, total: number): string {
     .replace(/[<>:"/\\|?*]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+export interface AlbumRoomChoice {
+  id: Id
+  name: string
+  levelId: Id
+  /** draws wall elevations with the current settings */
+  elevations: boolean
+  /** a bathroom, toilet or kitchen: on by default */
+  byDefault: boolean
+}
+
+/** rooms of the drawn levels for the elevations choice (the dialog, the AI) */
+export function albumRooms(doc: Doc, settings: AlbumSettings, catalog?: Catalog): AlbumRoomChoice[] {
+  const ctx = ctxOf(doc, settings, catalog, settings.date || todayIso())
+  const defaults = new Set(defaultElevationRooms(ctx.doc, ctx))
+  const chosen = settings.elevationRooms ? new Set(settings.elevationRooms) : defaults
+  const out: AlbumRoomChoice[] = []
+  for (const lv of ctx.levels)
+    for (const r of ctx.plans[lv]?.rooms ?? [])
+      out.push({ id: r.roomId, name: roomTitle(ctx.doc, r), levelId: lv, elevations: chosen.has(r.roomId), byDefault: defaults.has(r.roomId) })
+  return out
 }
 
 /** what the album contains (the dialog, the AI) */

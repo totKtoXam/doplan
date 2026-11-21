@@ -70,8 +70,43 @@ describe('the «Пометить» tool', () => {
     expect(chip).toMatchObject({ kind: 'annotation', label: 'Пометка ①' })
     expect(aiStore.getState().focusTick).toBe(focus0 + 1)
 
-    // Delete removes the selected mark (the canvas has the keyboard again)
+    // Delete removes the selected mark (the canvas has the keyboard again), and its chip leaves the message
     expect(tool.keyDown?.({ key: 'Delete' } as never)).toBe(true)
     expect(docStore.getState().doc.annotations).toBeUndefined()
+    expect(aiStore.getState().chips.some((c) => c.id === marks[0].id)).toBe(false)
+  })
+
+  it('the marks list lives in the chat box: no floating block on the 2D view', async () => {
+    const fs = await import('node:fs')
+    const path = await import('node:path')
+    const src = (p: string) => fs.readFileSync(path.resolve(__dirname, p), 'utf8')
+    expect(fs.existsSync(path.resolve(__dirname, '../ui/panels/MarksPanel.tsx'))).toBe(false)
+    expect(src('../ui/shell/Viewport2D.tsx')).not.toMatch(/MarksPanel/)
+    expect(src('./ChatPanel.tsx')).toMatch(/<MarksBar \/>/)
+    // the row's own words are translated
+    uiStore.setState({ lang: 'en' })
+    try {
+      for (const k of ['Все в чат', 'Очистить пометки', 'Убрать из сообщения', 'Убрать отправленные пометки', 'Обведите место на плане — пометка с номером попадёт в сообщение'])
+        expect(t(k)).not.toMatch(/[А-Яа-яЁё]/)
+    } finally {
+      uiStore.setState({ lang: 'ru' })
+    }
+  })
+
+  it('a mark taken out of the message stays on the plan and can be added again', async () => {
+    const { addMark } = await import('@/store/marks')
+    const { addMarkToChat, removeMarksFromChat } = await import('./store')
+    const lv = Object.keys(docStore.getState().doc.levels)[0]
+    const id = addMark(lv, 'stroke', [
+      { x: 0, y: 0 },
+      { x: 900, y: 0 },
+    ])
+    await addMarkToChat(id)
+    expect(aiStore.getState().chips.map((c) => c.id)).toContain(id)
+    removeMarksFromChat([id])
+    expect(aiStore.getState().chips.map((c) => c.id)).not.toContain(id)
+    expect(docStore.getState().doc.annotations?.[id]).toBeTruthy()
+    await addMarkToChat(id)
+    expect(aiStore.getState().chips.map((c) => c.id)).toContain(id)
   })
 })

@@ -84,6 +84,24 @@ export function clearMarks(levelId: Id): void {
   if (sel && ids.includes(sel)) marksStore.getState().select(null)
 }
 
+/**
+ * Marks that went to the AI in a message and whose turn finished: they are in the chat now (the chip and
+ * its snapshot), so the plan lets them go — one undoable step, «внесено» ones too. Locked marks stay.
+ * Returns the removed ids.
+ */
+export function removeSentMarks(ids: readonly Id[]): Id[] {
+  const doc = docStore.getState().doc
+  const gone = ids.filter((id) => doc.annotations?.[id] && !isLocked(doc, { kind: 'annotation', id }))
+  if (!gone.length) return []
+  docStore.getState().transact(t('Убрать отправленные пометки'), (d) => {
+    for (const id of gone) if (d.annotations) delete d.annotations[id]
+    if (d.annotations && !Object.keys(d.annotations).length) delete d.annotations
+  })
+  const sel = marksStore.getState().selected
+  if (sel && gone.includes(sel)) marksStore.getState().select(null)
+  return gone
+}
+
 export function marksOnLevel(levelId: Id): Annotation[] {
   return Object.values(docStore.getState().doc.annotations ?? {})
     .filter((m) => m.levelId === levelId)

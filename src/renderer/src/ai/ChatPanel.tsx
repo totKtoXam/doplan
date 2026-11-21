@@ -71,6 +71,7 @@ import {
 import { pluralKey, tAi } from './i18n'
 import { ImageMarkup } from './ImageMarkup'
 import { MarkButton } from './MarkButton'
+import { MarksBar } from './MarksBar'
 import { parseMarkdown } from './markdown'
 import { QuoteButton } from './QuoteButton'
 import { t } from '@/i18n'
@@ -1219,6 +1220,11 @@ function Composer() {
   const [text, setText] = useState('')
   const [marking, setMarking] = useState<number | null>(null)
   const ta = useRef<HTMLTextAreaElement>(null)
+  // while marking, the plan marks of the level are in the marks row: their chips are not repeated
+  const pencil = useUi((s) => s.tool === 'pencil')
+  const levelId = useUi((s) => s.activeLevelId)
+  const annotations = useDoc((s) => s.doc.annotations)
+  const shownChips = pencil ? chips.filter((c) => !(c.kind === 'annotation' && annotations?.[c.id]?.levelId === levelId)) : chips
 
   useEffect(() => {
     if (focusTick) ta.current?.focus()
@@ -1312,7 +1318,8 @@ function Composer() {
             ))}
           </div>
         )}
-        {(chips.length > 0 || images.length > 0) && (
+        <MarksBar />
+        {(shownChips.length > 0 || images.length > 0) && (
           <div className="flex flex-wrap gap-1.5 px-2.5 pt-2.5">
             {images.map((im, i) => (
               <span key={i} className="group relative">
@@ -1337,7 +1344,7 @@ function Composer() {
                 </button>
               </span>
             ))}
-            {chips.map((c) => (
+            {shownChips.map((c) => (
               <span key={c.id} className="flex h-6 max-w-full items-center gap-1 self-end rounded-md border border-border bg-panel-2 pr-1 pl-1.5 text-[11px]" title={c.summary}>
                 <span className="truncate">{t(c.label)}</span>
                 <button type="button" aria-label={t('Убрать')} className="text-muted hover:text-text" onClick={() => removeChip(c.id)}>

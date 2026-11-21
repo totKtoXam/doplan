@@ -15,7 +15,7 @@ import { ensureAiFolderTrust } from '@/actions/project'
 import { isAnyTranslation, t } from '@/i18n'
 import { api } from '@/store/api'
 import { docStore } from '@/store/document'
-import { getMark, marksStore, setMarkNumberFloor } from '@/store/marks'
+import { getMark, marksStore, removeSentMarks, setMarkNumberFloor } from '@/store/marks'
 import { addProjectHook } from '@/store/projectHooks'
 import { uiStore } from '@/store/ui'
 import { chatTranscript } from './history'
@@ -56,7 +56,8 @@ export interface AiState {
   chat: AiChatRecord
   /** the open chat is one of legacyChats (it is saved there and runs in their agent folder) */
   legacy: boolean
-  running: { runId: string; msgId: string } | null
+  /** `marks`: plan marks that went to the agent this turn (the message, an answer); let go when it ends well */
+  running: { runId: string; msgId: string; marks?: Id[] } | null
   /** the agent's open ask_user call (the card above the input box); `draft`: what the user picked so far */
   asking: { callId: string; runId: string; questions: AiQuestion[]; draft: AiQuestionAnswer[] } | null
   status: string
@@ -605,6 +606,7 @@ export async function addMarkToChat(id: Id, focus = true): Promise<void> {
   const plan = derived[m.levelId] ?? derivePlan(doc, m.levelId)
   const chip: AiChip = { kind: 'annotation', id: m.id, label: t('Пометка {n}', { n: markBadge(m.n) }), summary: describeMark(doc, m, markTargets(doc, plan, m)) }
   set({ chips: [...get().chips.filter((c) => c.id !== id), chip] })
+  markSnaps.set(m.id, `пометка-${m.n}`)
   if (focus) focusChat()
   else showChat()
   if (currentProvider()?.images === false) return
@@ -658,6 +660,33 @@ setMarkNumberFloor(() => maxImageMarkNumber())
 export function removeChip(id: string): void {
   set({ chips: get().chips.filter((c) => c.id !== id) })
 }
+
+/** mark id → the name of the snapshot that went into the box with its chip */
+const markSnaps = new Map<Id, string>()
+
+/** takes plan marks out of the message: their chips and the snapshots that came with them (unless drawn on) */
+export function removeMarksFromChat(ids: readonly Id[]): void {
+  const names = new Set(ids.map((id) => markSnaps.get(id)))
+  const chips = get().chips.filter((c) => !(c.kind === 'annotation' && ids.includes(c.id)))
+  const images = get().images.filter((im) => !names.has(im.name) || !!im.markup?.shapes.length)
+  if (chips.length !== get().chips.length || images.length !== get().images.length) set({ chips, images })
+}
+
+const markIds = (chips: readonly AiChip[]): Id[] => chips.filter((c) => c.kind === 'annotation').map((c) => c.id)
+
+/** sent marks leave the plan in one undoable step; a plan-mode draft waiting for «Применить» is not made stale by it */
+function letGoOfSentMarks(ids: Id[]): void {
+  const before = docStore.getState().revision
+  if (!removeSentMarks(ids).length) return
+  if (draft && draft.baseRevision === before) draft.baseRevision = docStore.getState().revision
+}
+
+// a mark deleted from the plan (Delete, «Очистить пометки», undoing it) leaves the message too
+docStore.subscribe((s, prev) => {
+  if (s.doc.annotations === prev.doc.annotations) return
+  const gone = markIds(get().chips).filter((id) => !s.doc.annotations?.[id])
+  if (gone.length) removeMarksFromChat(gone)
+})
 
 const MAX_QUOTE = 4000
 
@@ -952,7 +981,8 @@ async function runTurn(raw: string, editId: string | null): Promise<boolean> {
   })
   rememberImages(userMsg.id, input.images)
   // an edit leaves the input box as it is
-  set({ running: { runId, msgId: asst.id }, ...(editId ? {} : { chips: [], images: [], quotes: [] }), status: t('Запуск…'), showHistory: false })
+  const marks = markIds(input.chips)
+  set({ running: { runId, msgId: asst.id, ...(marks.length ? { marks } : {}) }, ...(editId ? {} : { chips: [], images: [], quotes: [] }), status: t('Запуск…'), showHistory: false })
   const chat = get().chat
   try {
     await api.aiChat.run({
@@ -1082,9 +1112,12 @@ function finishTurn(ev: Extract<AiRunEvent, { type: 'done' }>, save: boolean): v
   patchChat((c) => {
     c.updatedAt = now()
   })
+  const sent = get().running?.marks
   set({ running: null, asking: null, status: '' })
   // a plan-mode turn that proposed nothing leaves no draft
   if (draft?.empty) draft = null
+  // the marks are in the chat now: the plan lets them go (kept when the turn failed or was stopped, to send again)
+  if (sent?.length && ev.ok && !ev.stopped) letGoOfSentMarks(sent)
   if (ev.authRequired) void refreshProviders(false)
   if (save) void persist()
 }
@@ -1337,9 +1370,11 @@ export function answerQuestion(note?: string | null): void {
   if (note === null) return res(null)
   // quotes, chips and a picture in the chat box are part of the answer (a tool result carries one picture:
   // the others stay in the box for the next message, and the user is told so)
-  const { chips, images, quotes } = get()
+  const { chips, images, quotes, running } = get()
   const image = images.find((im) => im.mime === 'image/jpeg' || im.mime === 'image/png')
+  const marks = [...new Set([...(running?.marks ?? []), ...markIds(chips)])]
   set({
+    ...(running && marks.length ? { running: { ...running, marks } } : {}),
     chips: [],
     quotes: [],
     images: image ? images.filter((im) => im !== image) : images,

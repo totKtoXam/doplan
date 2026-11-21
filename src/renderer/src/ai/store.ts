@@ -23,7 +23,7 @@ import { DraftHost, type DraftMark, liveHost } from './hosts'
 import { markSnapshot } from './markSnapshot'
 import type { MarkupShape } from './markup'
 import { chipFor, entityLevel, lookupFor } from './summary'
-import { describeCall, executeTool, isMutating, previewCall } from './tools'
+import { describeCall, executeTool, hostNames, isMutating, previewCall } from './tools'
 
 export type DockTab = 'props' | 'ai'
 
@@ -1192,7 +1192,7 @@ async function onToolCall(call: AiToolCall): Promise<void> {
       origin: 'doc',
       args: call.args,
       status: ask ? 'pending' : 'running',
-      result: ask ? describeCall(call.tool, call.args) : undefined,
+      result: ask ? describeCall(call.tool, call.args, hostNames(liveHost())) : undefined,
     }),
   )
   const setPart = (fn: (p: Extract<AiPart, { type: 'tool' }>) => void) =>
@@ -1246,7 +1246,7 @@ async function onToolCall(call: AiToolCall): Promise<void> {
     if (out.changes) p.changes = out.changes
     if (img) p.image = img
   })
-  if (plan && mutating && out.result.ok && draft) set({ draftCount: draft.count, draftChanges: [...get().draftChanges, ...(out.changes ?? [describeCall(call.tool, call.args)])] })
+  if (plan && mutating && out.result.ok && draft) set({ draftCount: draft.count, draftChanges: [...get().draftChanges, ...(out.changes ?? [describeCall(call.tool, call.args, hostNames(host))])] })
   api.aiChat.toolResult(call.callId, out.result)
   // keep stored chats small: snapshot images are re-encoded as thumbnails
   if (img) {

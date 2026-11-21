@@ -8,31 +8,11 @@ import { uiStore, useUi } from '@/store/ui'
 import { accuracyStore, useAccuracy } from '@/store/accuracy'
 import { DropdownMenu, IconBtn, MiniNumber, MiniSelect, Sep, type MenuEntry } from './primitives'
 import { activateTool, PLAN_ONLY_TOOLS, toolDef, TOOLS } from './tools'
+import { OPENING_NAMES, WALL_KIND_NAMES } from './kindNames'
 import '@/ui/shellI18n'
 
 const DOOR_KINDS: OpeningKind[] = ['door', 'doubleDoor', 'slidingDoor', 'entranceDoor', 'arch', 'opening']
 const WINDOW_KINDS: OpeningKind[] = ['window', 'frenchWindow', 'balconyDoor', 'balconyBlock']
-
-export const OPENING_NAMES: Record<OpeningKind, string> = {
-  door: 'Дверь',
-  doubleDoor: 'Двустворчатая дверь',
-  slidingDoor: 'Раздвижная дверь',
-  entranceDoor: 'Входная дверь',
-  arch: 'Арка',
-  opening: 'Проём',
-  window: 'Окно',
-  frenchWindow: 'Французское окно',
-  balconyDoor: 'Балконная дверь',
-  balconyBlock: 'Балконный блок',
-}
-
-export const WALL_KIND_NAMES: Record<WallKind, string> = {
-  wall: 'Стена',
-  partition: 'Перегородка',
-  parapet: 'Парапет',
-  glazing: 'Остекление',
-  virtual: 'Граница зоны',
-}
 
 /** sensible defaults when switching the wall kind */
 const WALL_KIND_PRESET: Record<WallKind, { thickness?: number; height?: number }> = {

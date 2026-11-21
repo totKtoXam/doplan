@@ -364,12 +364,23 @@ export function sweepProfile(gb: GeoBuilder, o: SweepOptions): void {
 
 // ───────────────────────────── misc ─────────────────────────────
 
-/** disposes every geometry below `root` (materials and textures belong to the MaterialLibrary) */
+/**
+ * tells the renderer that every object below `root` is gone for good: the WebGPU renderer keeps a
+ * render object (pipeline state, uniform buffers) per drawn object until the object, its geometry or
+ * its material is disposed — a mesh sharing a cached geometry and a library material would otherwise
+ * keep its own for the whole session
+ */
+export function releaseObjects(root: THREE.Object3D): void {
+  root.traverse((o) => void o.dispatchEvent({ type: 'dispose' } as never))
+}
+
+/** disposes every geometry below `root` (materials and textures belong to the MaterialLibrary) and releases its objects */
 export function disposeGeometries(root: THREE.Object3D): void {
   root.traverse((o) => {
     const g = (o as THREE.Mesh).geometry as THREE.BufferGeometry | undefined
     if (g && typeof g.dispose === 'function' && !g.userData.shared) g.dispose()
   })
+  releaseObjects(root)
 }
 
 /** marks every mesh below `root` as shadow caster / receiver and stamps `ref` where missing */

@@ -7,6 +7,7 @@
 import * as THREE from 'three'
 import { electricGangs, electricType } from '@core'
 import type { Doc, ElectricPoint, Id } from '@core/types'
+import { releaseObjects } from './util'
 
 const POST = 0.071 // m, post pitch of a modular frame
 const FRAME = 0.086 // m, outer size of a one-post frame
@@ -236,6 +237,7 @@ export class ElectricalBuilder {
       const p = rec[id]
       if (p && p.levelId === levelId && p === b.src) continue
       this.root.remove(b.obj)
+      releaseObjects(b.obj)
       this.built.delete(id)
       changed = true
     }
@@ -255,7 +257,10 @@ export class ElectricalBuilder {
   }
 
   clear(): void {
-    for (const b of this.built.values()) this.root.remove(b.obj)
+    for (const b of this.built.values()) {
+      this.root.remove(b.obj)
+      releaseObjects(b.obj)
+    }
     this.built.clear()
   }
 }

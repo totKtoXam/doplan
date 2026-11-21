@@ -26,6 +26,7 @@ import { docStore } from '@/store/document'
 import { uiStore } from '@/store/ui'
 import { t } from '@/i18n'
 import type { BakeLights, RGB } from './bake/trace'
+import { releaseObjects } from './build/util'
 import { BAKED_LIGHTS, currentQuality, getShared, type QualitySettings } from './quality'
 
 // ───────────────────────────── calibration constants ─────────────────────────────
@@ -880,6 +881,7 @@ export function createLighting(ctx: EngineContext): LightingRig {
 
   function disposeFixtureGroup(group: THREE.Group): void {
     group.removeFromParent()
+    releaseObjects(group)
   }
 
   /** the body of a fixture: meshes only, its light lives in a slot (see the lamp slots) */

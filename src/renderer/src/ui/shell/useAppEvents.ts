@@ -34,6 +34,12 @@ function anyDialogOpen(): boolean {
   return d.bom || d.importModel || d.materialEditor || d.settings || d.photoPlan || d.render || d.about || d.variants || notifyStore.getState().modals.length > 0 || projectStore.getState().dialog !== null
 }
 
+/** text the user selected with the mouse outside the inputs (chat messages, panels) */
+export function hasTextSelection(): boolean {
+  const s = typeof window !== 'undefined' ? window.getSelection() : null
+  return !!s && !s.isCollapsed && s.toString().trim().length > 0
+}
+
 const TOOL_KEYS = new Map<string, ToolId>()
 for (const d of TOOLS) if (d !== 'sep' && d.key) TOOL_KEYS.set(d.key.toLowerCase(), d.id)
 
@@ -69,10 +75,11 @@ function onKeyDown(e: KeyboardEvent): void {
         void actions.newProject()
         break
       case 'c':
-        actions.copySelection()
-        break
       case 'x':
-        actions.cutSelection()
+        // text selected on the page (a chat answer, a code block): the browser copies that text
+        if (hasTextSelection()) return
+        if (key === 'c') actions.copySelection()
+        else actions.cutSelection()
         break
       case 'v':
         actions.paste()
@@ -274,6 +281,14 @@ export function useAppEvents(enabled: boolean): { dragOver: boolean } {
 
     window.addEventListener('keydown', onKeyDown)
     offs.push(() => window.removeEventListener('keydown', onKeyDown))
+
+    // a click into the plan or the 3D view ends a text selection, so Ctrl+C copies objects again
+    // (the canvases cancel the pointer default, which would otherwise keep the old selection)
+    const onPointerDown = (e: PointerEvent): void => {
+      if ((e.target as HTMLElement | null)?.tagName === 'CANVAS' && hasTextSelection()) window.getSelection()?.removeAllRanges()
+    }
+    window.addEventListener('pointerdown', onPointerDown, true)
+    offs.push(() => window.removeEventListener('pointerdown', onPointerDown, true))
 
     offs.push(api.window.onMenu(onMenu))
     offs.push(api.window.onCloseRequest(() => void actions.handleCloseRequest()))

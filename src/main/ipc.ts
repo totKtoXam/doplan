@@ -2,7 +2,7 @@ import { ipcMain, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
 import { planFromImage } from './ai'
 import { downloadEntry, importMaterial, importModel, loadCatalog, removeEntry, saveThumb } from './catalog'
 import { CH } from './channels'
-import { exportPdf, pickFiles, readFileBytes, readFileText, reveal, saveBinary, saveText } from './files'
+import { exportPdf, pickFiles, readFileBytes, readFileText, reveal, saveBinary, saveText, saveTextFiles } from './files'
 import { addProjectAsset, autosave, clearRecovery, openProject, recover, resetProjectAssets, saveProject } from './project'
 import {
   attachProject,
@@ -86,6 +86,7 @@ export function registerIpc(): void {
   handle(CH.filesSaveText, (name: unknown, filters: unknown, content: unknown) => saveText(name, filters, content))
   handle(CH.filesSaveBinary, (name: unknown, filters: unknown, data: unknown) => saveBinary(name, filters, data))
   handle(CH.filesExportPdf, (svg: unknown, opts: unknown) => exportPdf(svg, opts))
+  handle(CH.filesSaveTextFiles, (title: unknown, files: unknown) => saveTextFiles(title, files))
   handle(CH.filesReveal, (path: unknown) => reveal(path))
 
   handle(CH.catalogLoad, () => loadCatalog())

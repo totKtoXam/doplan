@@ -81,11 +81,7 @@ export function toDxf(doc: Doc, levelId: Id, opts: DxfOptions = {}): string {
     scaleBar: false,
     grid: false,
   })
-  const S = dl.scale
-  const dxf = new DxfWriter()
-  dxf.setUnits(Units.Millimeters)
-  dxf.addLType(DASHED, '__ __ __', [3 * S, -1.5 * S])
-  for (const l of LAYERS) dxf.addLayer(l.name, l.color, 'Continuous')
+  const dxf = newWriter(dl.scale)
   // user layers of the objects in the drawing
   const userLayerOf = new Map<string, string | null>()
   const added = new Set(LAYERS.map((l) => l.name))
@@ -106,21 +102,47 @@ export function toDxf(doc: Doc, levelId: Id, opts: DxfOptions = {}): string {
     }
     return name
   }
+  writeItems(dxf, dl.items, 1, (it) => {
+    const category = layerOf(it)
+    return category ? (userLayer(it) ?? category) : null
+  })
+  return dxf.stringify()
+}
 
-  const P = (p: Vec2) => point3d(p.x, -p.y, 0)
+/**
+ * A display list drawn in PAPER mm (an album sheet: scale 1, frame and title block on the 'sheet'
+ * layer) → DXF with every coordinate and text size multiplied by `k` — the sheet's drawing scale,
+ * so the plan comes out in real millimetres (model space) and the frame around it at 1:k.
+ */
+export function sheetToDxf(items: DisplayItem[], k = 1): string {
+  const dxf = newWriter(k)
+  dxf.addLayer('SHEET', 7, 'Continuous')
+  writeItems(dxf, items, k, (it) => (it.layer === 'sheet' || it.layer === 'grid' ? 'SHEET' : layerOf(it)))
+  return dxf.stringify()
+}
+
+function newWriter(dashScale: number): DxfWriter {
+  const dxf = new DxfWriter()
+  dxf.setUnits(Units.Millimeters)
+  dxf.addLType(DASHED, '__ __ __', [3 * dashScale, -1.5 * dashScale])
+  for (const l of LAYERS) dxf.addLayer(l.name, l.color, 'Continuous')
+  return dxf
+}
+
+function writeItems(dxf: DxfWriter, items: DisplayItem[], k: number, layerFor: (it: DisplayItem) => string | null): void {
+  const P = (p: Vec2) => point3d(p.x * k, -p.y * k, 0)
   const lt = (pen?: DlPen) => (pen?.dash && pen.dash.length ? DASHED : undefined)
   const poly = (pts: Vec2[], closed: boolean, layerName: string, pen?: DlPen) => {
     if (pts.length < 2) return
     dxf.addLWPolyline(
-      pts.map((p) => ({ point: { x: p.x, y: -p.y } })),
+      pts.map((p) => ({ point: { x: p.x * k, y: -p.y * k } })),
       { flags: closed ? LWPolylineFlags.Closed : LWPolylineFlags.None, layerName, lineType: lt(pen) },
     )
   }
 
-  for (const it of dl.items) {
-    const category = layerOf(it)
-    if (!category) continue
-    const layerName = userLayer(it) ?? category
+  for (const it of items) {
+    const layerName = layerFor(it)
+    if (!layerName) continue
     switch (it.t) {
       case 'poly': {
         // merged wall outlines are drawn separately in the display list; DXF keeps one closed outline per wall piece
@@ -136,14 +158,14 @@ export function toDxf(doc: Doc, levelId: Id, opts: DxfOptions = {}): string {
       case 'arc': {
         const sweep = it.a1 - it.a0
         if (sweep >= 359.99) {
-          dxf.addCircle(P(it.c), it.r, { layerName, lineType: lt(it.stroke) })
+          dxf.addCircle(P(it.c), it.r * k, { layerName, lineType: lt(it.stroke) })
           break
         }
-        dxf.addArc(P(it.c), it.r, normDeg(-it.a1), normDeg(-it.a0), { layerName, lineType: lt(it.stroke) })
+        dxf.addArc(P(it.c), it.r * k, normDeg(-it.a1), normDeg(-it.a0), { layerName, lineType: lt(it.stroke) })
         break
       }
       case 'circle':
-        dxf.addCircle(P(it.c), it.r, { layerName, lineType: lt(it.stroke) })
+        dxf.addCircle(P(it.c), it.r * k, { layerName, lineType: lt(it.stroke) })
         break
       case 'text': {
         const h = TextHorizontalAlignment
@@ -151,7 +173,7 @@ export function toDxf(doc: Doc, levelId: Id, opts: DxfOptions = {}): string {
         const horizontalAlignment = it.anchor === 'start' ? h.Left : it.anchor === 'end' ? h.Right : h.Center
         const verticalAlignment = it.baseline === 'middle' ? v.Middle : v.BaseLine
         const p = P(it.p)
-        dxf.addText(p, it.size * 0.72, it.text, {
+        dxf.addText(p, it.size * k * 0.72, it.text, {
           layerName,
           rotation: normDeg(-it.rot),
           horizontalAlignment,
@@ -162,5 +184,4 @@ export function toDxf(doc: Doc, levelId: Id, opts: DxfOptions = {}): string {
       }
     }
   }
-  return dxf.stringify()
 }

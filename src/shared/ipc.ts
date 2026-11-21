@@ -260,7 +260,10 @@ export interface DoplanApi {
     saveText(defaultName: string, filters: FileFilter[], content: string): Promise<string | null>
     saveBinary(defaultName: string, filters: FileFilter[], data: ArrayBuffer): Promise<string | null>
     /** renders an SVG string to a to-scale PDF page (mm) with a hidden window + printToPDF */
-    exportPdf(svg: string, opts: { widthMm: number; heightMm: number; defaultName: string }): Promise<string | null>
+    /** one SVG → a single-page PDF; an array → one page per SVG (all pages widthMm × heightMm) */
+    exportPdf(svg: string | string[], opts: { widthMm: number; heightMm: number; defaultName: string }): Promise<string | null>
+    /** asks for a folder and writes the files into it; returns the folder or null */
+    saveTextFiles(title: string, files: { name: string; content: string }[]): Promise<string | null>
     reveal(path: string): Promise<void>
   }
 

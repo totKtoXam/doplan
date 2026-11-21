@@ -231,9 +231,19 @@ function createFallbackApi(): DoplanApi {
       async saveBinary(defaultName: string, filters: FileFilter[], data: ArrayBuffer) {
         return download(defaultName, data, mimeFor(filters))
       },
-      async exportPdf(svg: string, opts: { widthMm: number; heightMm: number; defaultName: string }) {
-        // no printToPDF in a browser: hand out the to-scale SVG instead
-        return download(opts.defaultName.replace(/\.pdf$/i, '.svg'), svg, 'image/svg+xml')
+      async exportPdf(svg: string | string[], opts: { widthMm: number; heightMm: number; defaultName: string }) {
+        // no printToPDF in a browser: hand out the to-scale SVG (page by page) instead
+        const pages = Array.isArray(svg) ? svg : [svg]
+        let last: string | null = null
+        pages.forEach((s, i) => {
+          last = download(opts.defaultName.replace(/\.pdf$/i, pages.length > 1 ? ` ${i + 1}.svg` : '.svg'), s, 'image/svg+xml')
+        })
+        return last
+      },
+      async saveTextFiles(_title: string, files: { name: string; content: string }[]) {
+        let last: string | null = null
+        for (const f of files) last = download(f.name, f.content, 'application/octet-stream')
+        return last
       },
       async reveal() {},
     },

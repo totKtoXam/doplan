@@ -98,6 +98,7 @@ const api: DoplanApi = {
     saveText: (defaultName, filters, content) => invoke(CH.filesSaveText, defaultName, filters, content),
     saveBinary: (defaultName, filters, data) => invoke(CH.filesSaveBinary, defaultName, filters, data),
     exportPdf: (svg, opts) => invoke(CH.filesExportPdf, svg, opts),
+    saveTextFiles: (title, files) => invoke(CH.filesSaveTextFiles, title, files),
     reveal: (path) => invoke(CH.filesReveal, path),
   },
 

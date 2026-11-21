@@ -31,6 +31,7 @@ export const CH = {
   filesSaveText: 'files:saveText',
   filesSaveBinary: 'files:saveBinary',
   filesExportPdf: 'files:exportPdf',
+  filesSaveTextFiles: 'files:saveTextFiles',
   filesReveal: 'files:reveal',
 
   catalogLoad: 'catalog:load',

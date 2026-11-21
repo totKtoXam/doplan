@@ -104,9 +104,13 @@ function htmlToText(html: string): string {
     .trim()
 }
 
-/** a check is pointless (and would restart the flow) while a download runs or one is ready */
+/**
+ * A check is pointless (and would restart the flow) while one runs or a download is under way. A
+ * downloaded update does not block it: a newer release may have come out since (the ready one stays
+ * installable when the check finds nothing newer or fails).
+ */
 export function isBusy(s: UpdateStatus): boolean {
-  return s.kind === 'checking' || s.kind === 'progress' || s.kind === 'downloaded'
+  return s.kind === 'checking' || s.kind === 'progress'
 }
 
 /**

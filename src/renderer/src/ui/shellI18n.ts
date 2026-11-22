@@ -26,6 +26,8 @@ addTranslations('en', {
   'Материалы пола, стен и потолка': 'Floor, wall and ceiling materials',
   'Светильники и освещение': 'Light fixtures and lighting',
   'Все объекты этажа: видимость, блокировка, слои': 'All objects of the level: visibility, lock, layers',
+  'ИИ-ассистент': 'AI assistant',
+  'Чат с ИИ-ассистентом: правки плана, вопросы, пометки': 'Chat with the AI assistant: plan edits, questions, marks',
   'Скрыть панель': 'Hide panel',
   'Щёлкайте по плану, чтобы ставить узлы; во время рисования введите число — длина сегмента. Esc — закончить. Толщина и высота — в строке инструмента над планом.':
     'Click on the plan to place nodes; while drawing, type a number for the segment length. Esc finishes. Thickness and height are in the tool bar above the plan.',

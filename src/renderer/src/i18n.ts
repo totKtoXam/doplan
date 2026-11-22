@@ -401,6 +401,7 @@ const en: Record<string, string> = {
   'Сбросить камеру': 'Reset camera',
   'Граница видов': 'View divider',
   'Ширина каталога': 'Catalogue width',
+  'Ширина чата': 'Chat width',
   'Ширина панели свойств': 'Properties panel width',
   'Ширина панели': 'Panel width',
   'Размер окна': 'Window size',

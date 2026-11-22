@@ -285,6 +285,9 @@ addTranslations('en', {
   'Поставить {asset} в {room}': 'Place {asset} in {room}',
   'Построить план ({mode})': 'Build plan ({mode})',
   'Обмер: {n}': 'Measurements: {n}',
+  'Технический проект: настройки и фиксация обмера': 'Technical project: settings and survey fix',
+  'Технический проект: настройки альбома': 'Technical project: album settings',
+  'Собрать технический проект': 'Build the technical project',
   // what the arguments of a call change (describeCall)
   толщина: 'thickness',
   высота: 'height',

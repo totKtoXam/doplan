@@ -52,6 +52,7 @@ import { uiStore } from '@/store/ui'
 import '@/ui/electricI18n'
 import { OPENING_NAMES, WALL_KIND_NAMES } from '@/ui/shell/kindNames'
 import { entityName, idName, type NameCtx, roomsOfWalls, sideRoom, wallTitle } from './names'
+import { runTechProjectTool } from './techProject'
 import { chipFor, collectionOf, describePlan, entityLevel, entitySummary, findEntity, lookupFor, type Lookup, r0, r1, roomAt, roomName } from './summary'
 
 export interface Snapshot {
@@ -440,6 +441,9 @@ async function run(host: ToolHost, name: AiToolName, a: Record<string, unknown>)
       })
       return ok(`Замеры внесены (одним шагом отмены):\n${lines.join('\n')}`, lines)
     }
+    case 'get_tech_project':
+    case 'build_tech_project':
+      return runTechProjectTool(host, name, a)
     case 'render_snapshot': {
       const args = a as AiToolArgs<'render_snapshot'>
       const lv = levelOf(host, args.levelId)
@@ -970,6 +974,8 @@ export function describeCall(tool: string, args: unknown, names?: NameCtx): stri
         : t('Электроточка {kind} в {at}', { kind: electricKind(a.kind), at: p(a.at) })
     case 'set_electric':
       return `${nm(a.electricId)}: ${keys('electricId')}`
+    case 'build_tech_project':
+      return a.fixSurvey ? t('Технический проект: настройки и фиксация обмера') : t('Технический проект: настройки альбома')
     case 'apply_measurement':
       return t('Обмер: {n}', { n: Array.isArray(a.measurements) ? a.measurements.length : 0 })
     default:

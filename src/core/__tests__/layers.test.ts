@@ -31,7 +31,7 @@ import {
   visibleDoc,
   visiblePlan,
 } from '../layers'
-import { DOC_VERSION, DOC_VERSION_V3, DOC_VERSION_V4, DOC_VERSION_VARIANTS, type Doc, type EntityRef, type Id, type LayerFlags } from '../types'
+import { DOC_VERSION, DOC_VERSION_V3, DOC_VERSION_V4, DOC_VERSION_V5, DOC_VERSION_VARIANTS, type Doc, type EntityRef, type Id, type LayerFlags } from '../types'
 
 /** one 4×3 m room with a door, a sofa and a ceiling light */
 function sample(): { doc: Doc; lv: Id; walls: Id[]; door: Id; sofa: Id; light: Id; room: Id } {
@@ -495,7 +495,7 @@ describe('layers: furnishing variants and the file format', () => {
     // released readers refuse `version > <their max>`: 0.11 knows format 1, 0.12 knows format 2 (variants)
     expect(raw.version).toBeGreaterThan(DOC_VERSION)
     expect(raw.version).toBeGreaterThan(DOC_VERSION_VARIANTS)
-    expect(() => parseDoc({ ...raw, version: DOC_VERSION_V4 + 1 })).toThrow(/более новой версии doplan \(формат 5\)/)
+    expect(() => parseDoc({ ...raw, version: DOC_VERSION_V5 + 1 })).toThrow(/более новой версии doplan \(формат 6\)/)
   })
 
   it('layers data with several variants is format 3; several variants alone stay format 2', () => {

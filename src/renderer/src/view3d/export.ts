@@ -22,9 +22,48 @@ import { drawWhenReady } from './pipelines'
 export async function exportSceneGlb(objects: THREE.Object3D[]): Promise<ArrayBuffer> {
   const exporter = new GLTFExporter()
   for (const o of objects) o.updateMatrixWorld(true)
-  const result = await exporter.parseAsync(objects, { binary: true, onlyVisible: true, maxTextureSize: 2048 })
-  if (result instanceof ArrayBuffer) return result
-  return new TextEncoder().encode(JSON.stringify(result)).buffer as ArrayBuffer
+  const restore = drawableImages(objects)
+  try {
+    const result = await exporter.parseAsync(objects, { binary: true, onlyVisible: true, maxTextureSize: 2048 })
+    if (result instanceof ArrayBuffer) return result
+    return new TextEncoder().encode(JSON.stringify(result)).buffer as ArrayBuffer
+  } finally {
+    restore()
+  }
+}
+
+/**
+ * GLTFExporter draws maps onto a 2D canvas (and merges metalness + roughness there), which takes
+ * no raw pixel data: data textures — the 1×1 stand-ins of maps still loading or failed (materials.ts)
+ * — are handed over as canvases for the export. Returns the undo.
+ */
+function drawableImages(objects: THREE.Object3D[]): () => void {
+  const swapped = new Map<THREE.Texture, unknown>()
+  const visit = (t: unknown): void => {
+    const tex = t as THREE.Texture | null
+    if (!tex?.isTexture || swapped.has(tex)) return
+    const img = tex.image as { data?: ArrayLike<number>; width?: number; height?: number } | null
+    if (!img || !img.data || typeof img.width !== 'number' || typeof img.height !== 'number') return
+    const { data, width, height } = img
+    if (!(data instanceof Uint8Array || data instanceof Uint8ClampedArray) || data.length !== width * height * 4) return
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const c2 = canvas.getContext('2d')
+    if (!c2) return
+    c2.putImageData(new ImageData(new Uint8ClampedArray(data), width, height), 0, 0)
+    swapped.set(tex, tex.image)
+    tex.image = canvas
+  }
+  for (const root of objects)
+    root.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined
+      if (!m) return
+      for (const mat of Array.isArray(m) ? m : [m]) for (const v of Object.values(mat)) visit(v)
+    })
+  return () => {
+    for (const [tex, img] of swapped) tex.image = img
+  }
 }
 
 // ───────────────────────────── model conversion ─────────────────────────────

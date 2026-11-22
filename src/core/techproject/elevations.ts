@@ -6,10 +6,10 @@
  * Elevation coordinates: x = distance along the face from its left end as seen from inside the
  * room, y = −height above the finished floor (y down like the plan), world mm.
  */
-import type { DisplayItem, DlPen } from '../display'
+import type { DisplayItem, DisplayLayer, DlPen } from '../display'
 import { electricType } from '../electrical'
 import type { DerivedRoom, Doc, Id, Item, Material, TilePattern, Vec2 } from '../types'
-import { dimChain, fmtNum, label, marker, tileJoints, type LayoutKind } from './annot'
+import { type Box, dimChain, fmtNum, label, marker, placeText, textWidth, tileJoints, type LayoutKind } from './annot'
 import { itemTitle, lookupMaterial, materialTitle, roomTitle, settingOf } from './common'
 import { contribute } from './contrib'
 import { boundsOfItems, layBlockSheets, type SheetBlock, toPaper, workArea } from './layout'
@@ -83,6 +83,10 @@ interface ElevPoint {
   h: number
   code: string
   color: string
+  /** half size of the mark (world mm) */
+  hw: number
+  hh: number
+  layer: DisplayLayer
 }
 
 function itemCorners(it: Item): Vec2[] {
@@ -157,7 +161,8 @@ export function faceDrawing(ctx: AlbumCtx, levelId: Id, r: DerivedRoom, f: Face,
   // outline of the face (floor and ceiling lines thick)
   items.push({ t: 'poly', layer: 'walls', role: 'elev-outline', pts: [V(0, 0), V(L, 0), V(L, -H), V(0, -H)], closed: true, stroke: thick })
   items.push({ t: 'line', layer: 'walls', role: 'elev-floor', a: V(-4 * S, 0), b: V(L + 4 * S, 0), stroke: thick })
-  // furniture against the face
+  // furniture against the face (names placed after the points, clear of their marks)
+  const names: { u0: number; u1: number; z0: number; z1: number; name: string }[] = []
   for (const it of Object.values(doc.items)) {
     if (it.levelId !== levelId || it.hidden || it.mount === 'ceiling') continue
     const cs = itemCorners(it)
@@ -171,7 +176,7 @@ export function faceDrawing(ctx: AlbumCtx, levelId: Id, r: DerivedRoom, f: Face,
     if (z1 - z0 < 10) continue
     items.push({ t: 'poly', layer: 'furniture', role: 'elev-item', pts: [V(u0, -z0), V(u1, -z0), V(u1, -z1), V(u0, -z1)], closed: true, stroke: { color: '#5a5a5a', width: 0.2, dash: [1.5, 0.8] } })
     const name = itemTitle(doc, catalog, it)
-    if ((u1 - u0) / S > 12) items.push(label(V((u0 + u1) / 2, -(z0 + z1) / 2), name.length > 28 ? `${name.slice(0, 27)}…` : name, 1.8, S, { color: '#5a5a5a' }))
+    if ((u1 - u0) / S > 12) names.push({ u0, u1, z0, z1, name: name.length > 28 ? `${name.slice(0, 27)}…` : name })
   }
   // electrical points and plumbing outlets on the face
   const pts: ElevPoint[] = []
@@ -182,30 +187,53 @@ export function faceDrawing(ctx: AlbumCtx, levelId: Id, r: DerivedRoom, f: Face,
     if (!onFace && !near) continue
     const u = U(p)
     if (u < -10 || u > L + 10) continue
-    pts.push({ u, h: p.elevation, code: electricType(p.kind).code, color: '#b3261e' })
     const n = Math.max(1, p.gangs ?? 1)
     const w = 71 * n
     const vert = p.vertical === true
     const ww = vert ? 71 : w
     const hh = vert ? w : 71
+    pts.push({ u, h: p.elevation, code: electricType(p.kind).code, color: '#b3261e', hw: ww / 2, hh: hh / 2, layer: 'electrical' })
     items.push({ t: 'poly', layer: 'electrical', role: 'elev-electric', pts: [V(u - ww / 2, -p.elevation - hh / 2), V(u + ww / 2, -p.elevation - hh / 2), V(u + ww / 2, -p.elevation + hh / 2), V(u - ww / 2, -p.elevation + hh / 2)], closed: true, stroke: { color: '#b3261e', width: 0.25 } })
-    items.push(label(V(u, -p.elevation - hh / 2 - 2 * S), electricType(p.kind).code, 1.9, S, { color: '#b3261e', layer: 'electrical' }))
   }
   for (const o of outlets) {
     if (Math.abs(D(o)) > 300) continue
     const u = U(o)
     if (u < -10 || u > L + 10) continue
-    pts.push({ u, h: o.h, code: o.code, color: o.color ?? '#1d4e89' })
+    pts.push({ u, h: o.h, code: o.code, color: o.color ?? '#1d4e89', hw: 1.2 * S, hh: 1.2 * S, layer: 'annotations' })
     items.push({ t: 'circle', layer: 'annotations', role: 'elev-outlet', c: V(u, -o.h), r: 1.2 * S, stroke: { color: o.color ?? '#1d4e89', width: 0.25 }, fill: { color: '#ffffff' } })
-    items.push(label(V(u, -o.h - 3 * S), o.code, 1.9, S, { color: o.color ?? '#1d4e89' }))
+  }
+  // codes of the points: above, right, left, below, further out — never over another mark or code
+  const taken: Box[] = pts.map((p) => ({ x0: p.u - p.hw - 0.3 * S, y0: -p.h - p.hh - 0.3 * S, x1: p.u + p.hw + 0.3 * S, y1: -p.h + p.hh + 0.3 * S }))
+  const inFace = (c: Vec2, t: string, size: number) => {
+    const w = textWidth(t, size) / 2
+    return c.x - w > -2 * S && c.x + w < L + 2 * S && c.y + size * 0.6 < -0.3 * S && c.y - size * 0.6 > -H
+  }
+  const order = pts.map((_, i) => i).sort((a, b) => pts[a].u - pts[b].u || pts[b].h - pts[a].h)
+  for (const i of order) {
+    const p = pts[i]
+    const size = 1.9 * S
+    const tw = textWidth(p.code, size) / 2
+    const dy = p.hh + size * 0.6 + 0.5 * S
+    const dx = p.hw + tw + 0.6 * S
+    const y = -p.h
+    const cands = [V(p.u, y - dy), V(p.u + dx, y), V(p.u - dx, y), V(p.u, y + dy), V(p.u + dx, y - dy), V(p.u - dx, y - dy), V(p.u + dx, y + dy), V(p.u - dx, y + dy), V(p.u, y - dy - 2.4 * S), V(p.u + dx + 2 * tw + S, y)].filter((c) => inFace(c, p.code, size))
+    const at = placeText(cands.length ? cands : [V(p.u, y - dy)], p.code, size, taken)
+    items.push(label(at, p.code, 1.9, S, { color: p.color, layer: p.layer }))
+  }
+  for (const nm of names) {
+    const size = 1.8 * S
+    const cu = (nm.u0 + nm.u1) / 2
+    const zs = [0.5, 0.3, 0.7, 0.15, 0.85].map((k) => -(nm.z0 + (nm.z1 - nm.z0) * k))
+    const cands = zs.flatMap((y) => [V(cu, y), V(nm.u0 + (nm.u1 - nm.u0) * 0.3, y), V(nm.u0 + (nm.u1 - nm.u0) * 0.7, y)]).filter((c) => textWidth(nm.name, size) < nm.u1 - nm.u0 || c.x === cu)
+    items.push(label(placeText(cands, nm.name, size, taken), nm.name, 1.8, S, { color: '#5a5a5a' }))
   }
   // ties: along the floor and heights at the right
   const us = [...new Set(pts.map((p) => Math.round(Math.max(0, Math.min(L, p.u)))))].sort((a, b) => a - b).filter((u) => u > 5 && u < L - 5)
-  items.push(...dimChain([0, ...us, L].map((u) => V(u, 0)), -(pts.length ? 12 : 6) * S, S))
-  if (pts.length) items.push(...dimChain([0, L].map((u) => V(u, 0)), -6 * S, S))
+  items.push(...dimChain([0, ...us, L].map((u) => V(u, 0)), -6 * S, S))
+  if (us.length) items.push(...dimChain([0, L].map((u) => V(u, 0)), -13 * S, S))
   const hs = [...new Set(pts.map((p) => Math.round(p.h)))].sort((a, b) => a - b).filter((h) => h > 5 && h < H - 5)
-  items.push(...dimChain([0, ...hs, H].map((h) => V(L, -h)), -(hs.length ? 12 : 6) * S, S))
-  if (hs.length) items.push(...dimChain([0, H].map((h) => V(L, -h)), -18 * S, S))
+  items.push(...dimChain([0, ...hs, H].map((h) => V(L, -h)), -6 * S, S))
+  if (hs.length) items.push(...dimChain([0, H].map((h) => V(L, -h)), -13 * S, S))
   // band heights at the left
   const bh = [...new Set(bands.map((b) => Math.round(b.from)))].filter((h) => h > 5).sort((a, b) => a - b)
   if (bh.length) items.push(...dimChain([0, ...bh, H].map((h) => V(0, -h)), 6 * S, S))

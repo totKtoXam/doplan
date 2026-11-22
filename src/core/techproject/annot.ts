@@ -37,7 +37,13 @@ export function fmtLevel(mm: number): string {
 }
 
 /** Dimension between a and b, the dimension line offset by `off` along the left normal (dy, -dx). */
-export function dim(a: Vec2, b: Vec2, off: number, S: number, opts: { layer?: DisplayLayer; color?: string; text?: string; role?: string } = {}): DisplayItem[] {
+export function dim(
+  a: Vec2,
+  b: Vec2,
+  off: number,
+  S: number,
+  opts: { layer?: DisplayLayer; color?: string; text?: string; role?: string; textAt?: 'before' | 'after'; textRow?: number } = {},
+): DisplayItem[] {
   const out: DisplayItem[] = []
   const L = len(sub(b, a))
   if (L < 1) return out
@@ -61,13 +67,17 @@ export function dim(a: Vec2, b: Vec2, off: number, S: number, opts: { layer?: Di
   let rot = (Math.atan2(d.y, d.x) * 180) / Math.PI
   if (rot > 90.01) rot -= 180
   if (rot <= -90.01) rot += 180
-  const mid = mul(add(a2, b2), 0.5)
+  const text = opts.text ?? fmtMm(L)
+  // a text wider than its segment goes beyond the segment end (and / or one row further out)
+  const half = textWidth(text, size) / 2 + 0.8 * S
+  const mid = opts.textAt === 'before' ? sub(a2, mul(d, over + half)) : opts.textAt === 'after' ? add(b2, mul(d, over + half)) : mul(add(a2, b2), 0.5)
+  if (opts.textAt) out.push({ t: 'line', layer, role, a: opts.textAt === 'before' ? sub(a2, mul(d, over)) : add(b2, mul(d, over)), b: opts.textAt === 'before' ? sub(a2, mul(d, over + 2 * half)) : add(b2, mul(d, over + 2 * half)), stroke: pen })
   out.push({
     t: 'text',
     layer,
     role: `${role}-text`,
-    p: add(mid, mul(n, sg * size * 0.75)),
-    text: opts.text ?? fmtMm(L),
+    p: add(mid, mul(n, sg * size * (0.75 + 1.2 * (opts.textRow ?? 0)))),
+    text,
     size,
     rot,
     anchor: 'middle',
@@ -77,11 +87,74 @@ export function dim(a: Vec2, b: Vec2, off: number, S: number, opts: { layer?: Di
   return out
 }
 
-/** Dimension chain through sorted positions along one axis. */
+/** paper-independent text width estimate (world units of the given text size) */
+export function textWidth(text: string, size: number): number {
+  return text.length * size * 0.62
+}
+
+/**
+ * Dimension chain through sorted positions along one axis. A segment too short for its text gets
+ * the text beyond its end: the first of a run of short segments before it, the last after it, the
+ * ones between one row further out, so no two texts overlap.
+ */
 export function dimChain(points: Vec2[], off: number, S: number, opts: { layer?: DisplayLayer; color?: string } = {}): DisplayItem[] {
   const out: DisplayItem[] = []
-  for (let i = 0; i + 1 < points.length; i++) out.push(...dim(points[i], points[i + 1], off, S, opts))
+  const n = points.length - 1
+  const short = Array.from({ length: Math.max(0, n) }, (_, i) => {
+    const L = len(sub(points[i + 1], points[i]))
+    return L >= 1 && L < textWidth(fmtMm(L), 2 * S) + 1.2 * S
+  })
+  for (let i = 0; i < n; i++) {
+    let place: { textAt?: 'before' | 'after'; textRow?: number } = {}
+    if (short[i]) {
+      const first = i === 0 || !short[i - 1]
+      const last = i === n - 1 || !short[i + 1]
+      if (first && last) place = { textAt: i < n - 1 ? 'after' : 'before' }
+      else if (first) place = { textAt: 'before' }
+      else if (last) place = { textAt: 'after' }
+      else place = { textRow: 1 }
+      // a lone short segment: its text goes over the longer neighbour
+      if (first && last && i > 0 && i < n - 1) {
+        const prev = len(sub(points[i], points[i - 1]))
+        const next = len(sub(points[i + 2], points[i + 1]))
+        place = { textAt: next >= prev ? 'after' : 'before' }
+      }
+    }
+    out.push(...dim(points[i], points[i + 1], off, S, { ...opts, ...place }))
+  }
   return out
+}
+
+/** axis-aligned box (world units) */
+export interface Box {
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+}
+
+export function textBox(p: Vec2, text: string, size: number, anchor: 'start' | 'middle' | 'end' = 'middle'): Box {
+  const w = textWidth(text, size)
+  const x0 = anchor === 'middle' ? p.x - w / 2 : anchor === 'start' ? p.x : p.x - w
+  return { x0, y0: p.y - size * 0.6, x1: x0 + w, y1: p.y + size * 0.6 }
+}
+
+export const boxesOverlap = (a: Box, b: Box): boolean => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1
+
+/**
+ * The first candidate position where the text hits none of the taken boxes (the first candidate
+ * when every one does); the chosen box is added to `taken`.
+ */
+export function placeText(cands: Vec2[], text: string, size: number, taken: Box[]): Vec2 {
+  for (const c of cands) {
+    const b = textBox(c, text, size)
+    if (!taken.some((t) => boxesOverlap(t, b))) {
+      taken.push(b)
+      return c
+    }
+  }
+  taken.push(textBox(cands[0], text, size))
+  return cands[0]
 }
 
 /** A numbered position marker (circle with a number), paper radius 2.2 mm. */

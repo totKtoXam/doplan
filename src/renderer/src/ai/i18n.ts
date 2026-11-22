@@ -290,6 +290,9 @@ addTranslations('en', {
   'Предмет {id}: {fields}': 'Item {id}: {fields}',
   'Построить план ({mode})': 'Build plan ({mode})',
   'Обмер: {n}': 'Measurements: {n}',
+  'Технический проект: настройки и фиксация обмера': 'Technical project: settings and survey fix',
+  'Технический проект: настройки альбома': 'Technical project: album settings',
+  'Собрать технический проект': 'Build the technical project',
 })
 
 /** main-process texts with a name or number inside */

@@ -6,6 +6,7 @@
  * Coordinates are plan millimetres: x → right, y → DOWN; angles in degrees clockwise.
  */
 import { z } from 'zod'
+import { TECH_PROJECT_DESCRIPTIONS, TECH_PROJECT_MUTATING, TECH_PROJECT_SHAPES, TECH_PROJECT_TITLES } from './aiTechProject'
 
 const finite = () => z.number().finite()
 const mm = (what: string) => finite().describe(`${what}, мм`)
@@ -269,6 +270,8 @@ export const AI_TOOL_SHAPES = {
     width: z.number().int().min(256).max(1600).optional(),
     levelId,
   },
+  // технический проект (альбом рабочих чертежей)
+  ...TECH_PROJECT_SHAPES,
 } as const
 
 export type AiToolName = keyof typeof AI_TOOL_SHAPES
@@ -291,9 +294,11 @@ export const MUTATING_TOOLS: ReadonlySet<AiToolName> = new Set<AiToolName>([
   'apply_measurement',
   'place_electric',
   'set_electric',
+  ...TECH_PROJECT_MUTATING,
 ])
 
 export const AI_TOOL_DESCRIPTIONS: Record<AiToolName, string> = {
+  ...TECH_PROJECT_DESCRIPTIONS,
   get_plan:
     'Сводка открытого плана: уровни, комнаты (площадь, тип, отделка), узлы и стены с координатами и толщиной, проёмы, предметы. Вызывай первым делом, чтобы знать id.',
   get_selection: 'Что пользователь сейчас выделил в редакторе (id и краткие данные).',
@@ -327,6 +332,7 @@ export const AI_TOOL_DESCRIPTIONS: Record<AiToolName, string> = {
 }
 
 export const AI_TOOL_TITLES: Record<AiToolName, string> = {
+  ...TECH_PROJECT_TITLES,
   get_plan: 'Чтение плана',
   get_selection: 'Выделение',
   get_entity: 'Данные объекта',

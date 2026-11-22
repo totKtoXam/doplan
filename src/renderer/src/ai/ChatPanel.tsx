@@ -1,5 +1,5 @@
 /**
- * The «ИИ» tab of the right dock: chat with an agent that edits the open plan through doc tools.
+ * The «ИИ» section of the left panel: chat with an agent that edits the open plan through doc tools.
  * Layout follows Claude Desktop: plain assistant text with collapsed tool activity, a rounded
  * composer, and a footer with the mode / model / context popovers.
  */

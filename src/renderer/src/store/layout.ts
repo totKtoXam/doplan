@@ -18,7 +18,9 @@ export interface PanelSpec {
 export const PANELS = {
   /** left dock: the section picked in the activity bar (construction, furniture, …, objects) */
   left: { defaultSize: 300, minSize: 220, maxSize: 640 },
-  /** right dock: «Свойства | ИИ» */
+  /** the left dock while it shows the AI chat («ИИ» section): wider than a catalogue, kept apart */
+  chat: { defaultSize: 420, minSize: 320, maxSize: 900 },
+  /** right dock: «Свойства» */
   right: { defaultSize: 320, minSize: 260, maxSize: 900 },
   /** «Рендер и освещение» drawer */
   render: { defaultSize: 384, minSize: 320, maxSize: 760 },
@@ -42,8 +44,13 @@ export interface BoxSize {
 const BOX_BOUNDS = { min: 80, max: 6000 }
 
 /** sections of the left panel, picked in the activity bar */
-export const LEFT_SECTIONS = ['build', 'furniture', 'materials', 'style', 'lights', 'electric', 'objects'] as const
+export const LEFT_SECTIONS = ['build', 'furniture', 'materials', 'style', 'lights', 'electric', 'ai', 'objects'] as const
 export type LeftSection = (typeof LEFT_SECTIONS)[number]
+
+/** the registered panel whose width the left dock takes for a section: the chat keeps its own */
+export function leftPanelFor(section: LeftSection): PanelId {
+  return section === 'ai' ? 'chat' : 'left'
+}
 
 interface LayoutState {
   /** the section shown in the left panel */
@@ -79,6 +86,23 @@ function read(): Saved {
 }
 
 const saved = read()
+
+/** before the chat moved to the left panel it was the «ИИ» tab of the right dock, remembered here */
+const LEGACY_AI_TAB = 'doplan.ai.dockTab'
+
+/** the chat was left open in the right dock: it opens in the left panel instead (read once, then forgotten) */
+function takeLegacyAiTab(): boolean {
+  try {
+    const v = globalThis.localStorage?.getItem(LEGACY_AI_TAB)
+    if (v == null) return false
+    globalThis.localStorage?.removeItem(LEGACY_AI_TAB)
+    return v === 'ai' && saved.rightOpen !== false
+  } catch {
+    return false
+  }
+}
+
+const chatWasOpen = takeLegacyAiTab()
 
 function initialSizes(): Record<PanelId, number> {
   const out = {} as Record<PanelId, number>
@@ -116,6 +140,7 @@ function isSection(v: unknown): v is LeftSection {
 }
 
 function initialSection(): LeftSection {
+  if (chatWasOpen) return 'ai'
   if (isSection(saved.section)) return saved.section
   // before the activity bar the left panel had tabs, remembered under their own key
   try {
@@ -177,6 +202,7 @@ export function clampRatio(r: unknown): number {
 {
   const patch: Partial<{ leftPanelOpen: boolean; rightPanelOpen: boolean; splitRatio: number }> = {}
   if (typeof saved.leftOpen === 'boolean') patch.leftPanelOpen = saved.leftOpen
+  if (chatWasOpen) patch.leftPanelOpen = true
   if (typeof saved.rightOpen === 'boolean') patch.rightPanelOpen = saved.rightOpen
   if (saved.split !== undefined) patch.splitRatio = clampRatio(saved.split)
   if (Object.keys(patch).length) uiStore.setState(patch)

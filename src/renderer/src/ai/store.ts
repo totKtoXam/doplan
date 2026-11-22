@@ -15,6 +15,7 @@ import { ensureAiFolderTrust } from '@/actions/project'
 import { isAnyTranslation, t } from '@/i18n'
 import { api } from '@/store/api'
 import { docStore } from '@/store/document'
+import { layoutStore } from '@/store/layout'
 import { getMark, marksStore, removeSentMarks, setMarkNumberFloor } from '@/store/marks'
 import { addProjectHook } from '@/store/projectHooks'
 import { uiStore } from '@/store/ui'
@@ -24,8 +25,6 @@ import { markSnapshot } from './markSnapshot'
 import type { MarkupShape } from './markup'
 import { chipFor, entityLevel, lookupFor } from './summary'
 import { describeCall, executeTool, hostNames, isMutating, previewCall } from './tools'
-
-export type DockTab = 'props' | 'ai'
 
 /** an image waiting to be sent; `markup` keeps the clean picture and the pencil marks drawn over it (re-editable) */
 export type PendingImage = AiImage & { url: string; markup?: { base: string; shapes: MarkupShape[] } }
@@ -67,23 +66,12 @@ export interface AiState {
   /** plan mode: number of proposed edits waiting for «Применить» */
   draftCount: number
   draftChanges: string[]
-  dockTab: DockTab
   /** bumped to focus the input (Ctrl+L) */
   focusTick: number
   showHistory: boolean
   login: LoginState | null
   /** text the composer should take in (a pencil-mark note); `send` = send right away */
   composeInsert: { text: string; send: boolean; tick: number } | null
-}
-
-const TAB_KEY = 'doplan.ai.dockTab'
-
-function readTab(): DockTab {
-  try {
-    return localStorage.getItem(TAB_KEY) === 'ai' ? 'ai' : 'props'
-  } catch {
-    return 'props'
-  }
 }
 
 const uid = () => crypto.randomUUID()
@@ -111,7 +99,6 @@ export const aiStore = createStore<AiState>()(() => ({
   quotes: [],
   draftCount: 0,
   draftChanges: [],
-  dockTab: readTab(),
   focusTick: 0,
   showHistory: false,
   login: null,
@@ -514,15 +501,6 @@ async function setProject(gone: string | null): Promise<void> {
   if (settings !== loaded) void api.aiChat.setSettings(ref, settings).catch(() => {})
 }
 
-export function setDockTab(tab: DockTab): void {
-  set({ dockTab: tab })
-  try {
-    localStorage.setItem(TAB_KEY, tab)
-  } catch {
-    /* ignore */
-  }
-}
-
 export function updateSettings(patch: Partial<AiChatSettings>): void {
   const settings = { ...get().settings, ...patch, models: { ...get().settings.models, ...(patch.models ?? {}) } }
   // leaving plan mode keeps a proposal until the user applies or discards it; an empty one goes
@@ -618,10 +596,9 @@ export async function addMarkToChat(id: Id, focus = true): Promise<void> {
   }
 }
 
-/** opens the AI tab without taking the keyboard */
+/** shows the «ИИ» section of the left panel (opening the panel) without taking the keyboard */
 export function showChat(): void {
-  setDockTab('ai')
-  if (!uiStore.getState().rightPanelOpen) uiStore.setState({ rightPanelOpen: true })
+  layoutStore.getState().setSection('ai')
 }
 
 export function focusChat(): void {

@@ -214,6 +214,11 @@ export interface ResizablePanelProps {
   minRest?: number
   /** collapse when dragged below half the minimum (default true) */
   collapsible?: boolean
+  /**
+   * a closed panel keeps its children mounted: laid out at the panel's size but invisible and inert
+   * (the AI chat keeps a typed message and follows a running answer while the panel is hidden)
+   */
+  keepMounted?: boolean
   label: string
   id?: string
   className?: string
@@ -237,6 +242,7 @@ export function ResizablePanel({
   maxSize,
   minRest = 320,
   collapsible = true,
+  keepMounted = false,
   label,
   id,
   className,
@@ -311,8 +317,19 @@ export function ResizablePanel({
       className={cn('relative flex min-h-0', !shown.open && 'w-0')}
       style={shown.open ? { flex: `0 1 ${w}px`, width: w, minWidth: Math.min(w, minSize) } : { flex: '0 0 0px' }}
     >
-      {shown.open && (
-        <aside id={id} aria-label={label} className={cn('flex min-h-0 w-full min-w-0 flex-col overflow-hidden bg-panel', className)}>
+      {(shown.open || keepMounted) && (
+        <aside
+          id={id}
+          aria-label={label}
+          aria-hidden={!shown.open || undefined}
+          inert={!shown.open}
+          className={cn(
+            'flex min-h-0 w-full min-w-0 flex-col overflow-hidden bg-panel',
+            !shown.open && ['invisible absolute inset-y-0', side === 'left' ? 'left-0' : 'right-0'],
+            className,
+          )}
+          style={shown.open ? undefined : { width: w }}
+        >
           {children}
         </aside>
       )}

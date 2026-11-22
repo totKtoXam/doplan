@@ -69,9 +69,12 @@ import {
   useAi,
 } from './store'
 import { pluralKey, tAi } from './i18n'
+import { IdChip, Named, withIdChips } from './IdChip'
 import { ImageMarkup } from './ImageMarkup'
 import { MarkButton } from './MarkButton'
+import { MarksBar } from './MarksBar'
 import { parseMarkdown } from './markdown'
+import { isIdLike } from './names'
 import { QuoteButton } from './QuoteButton'
 import { t } from '@/i18n'
 
@@ -121,16 +124,22 @@ function useDigitKeys(open: boolean, count: number, pick: (i: number) => void): 
 
 // ───────────── message parts ─────────────
 
-/** inline markdown: `code`, **bold** */
-function inlineMd(text: string): ReactNode[] {
+/** inline markdown: `code`, **bold**; `ids`: internal ids become chips with the object's name (the agent's text) */
+function inlineMd(text: string, ids = false): ReactNode[] {
   const out: ReactNode[] = []
   const re = /(`[^`\n]+`|\*\*[^*\n]+\*\*)/g
   let last = 0
   let m: RegExpExecArray | null
   let k = 0
+  const plain = (s: string) => (ids ? out.push(...withIdChips(s, k++)) : out.push(s))
   while ((m = re.exec(text))) {
-    if (m.index > last) out.push(text.slice(last, m.index))
+    if (m.index > last) plain(text.slice(last, m.index))
     const s = m[0]
+    if (ids && s.startsWith('`') && isIdLike(s.slice(1, -1))) {
+      out.push(<IdChip key={k++} id={s.slice(1, -1)} />)
+      last = m.index + s.length
+      continue
+    }
     out.push(
       s.startsWith('`') ? (
         <code key={k++} className="rounded bg-[color-mix(in_srgb,var(--text)_10%,transparent)] px-1 font-mono text-[11px]">
@@ -138,13 +147,13 @@ function inlineMd(text: string): ReactNode[] {
         </code>
       ) : (
         <strong key={k++} className="font-semibold">
-          {s.slice(2, -2)}
+          {ids ? withIdChips(s.slice(2, -2), k++) : s.slice(2, -2)}
         </strong>
       ),
     )
     last = m.index + s.length
   }
-  if (last < text.length) out.push(text.slice(last))
+  if (last < text.length) plain(text.slice(last))
   return out
 }
 
@@ -157,18 +166,18 @@ const CELL = 'max-w-[15rem] [overflow-wrap:break-word]'
  * tables and code scroll sideways inside the message; long words and links wrap — nothing runs past
  * the panel edge.
  */
-function RichText({ text, className }: { text: string; className?: string }) {
+function RichText({ text, className, ids }: { text: string; className?: string; ids?: boolean }) {
   const blocks = useMemo(() => parseMarkdown(text), [text])
   return (
     <div data-ai-text className={cn('min-w-0 text-[12.5px] leading-relaxed [overflow-wrap:anywhere] select-text', className)}>
       {blocks.map((b, i) =>
         b.type === 'text' ? (
           <div key={i} className="my-1 whitespace-pre-wrap first:mt-0 last:mb-0">
-            {inlineMd(b.text)}
+            {inlineMd(b.text, ids)}
           </div>
         ) : b.type === 'heading' ? (
           <div key={i} className={cn('mt-2 mb-1 font-semibold first:mt-0', b.level <= 2 ? 'text-[13.5px]' : 'text-[12.5px]')}>
-            {inlineMd(b.text)}
+            {inlineMd(b.text, ids)}
           </div>
         ) : b.type === 'code' ? (
           <pre
@@ -184,7 +193,7 @@ function RichText({ text, className }: { text: string; className?: string }) {
                 <tr className="bg-panel-2">
                   {b.head.map((c, k) => (
                     <th key={k} className={cn('border-b border-border px-2 py-1 align-bottom font-semibold', ALIGN[b.align[k] ?? 'left'])}>
-                      <div className={CELL}>{inlineMd(c)}</div>
+                      <div className={CELL}>{inlineMd(c, ids)}</div>
                     </th>
                   ))}
                 </tr>
@@ -194,7 +203,7 @@ function RichText({ text, className }: { text: string; className?: string }) {
                   <tr key={ri} className="border-b border-border last:border-b-0">
                     {r.map((c, k) => (
                       <td key={k} className={cn('px-2 py-0.5 align-top', ALIGN[b.align[k] ?? 'left'])}>
-                        <div className={CELL}>{inlineMd(c)}</div>
+                        <div className={CELL}>{inlineMd(c, ids)}</div>
                       </td>
                     ))}
                   </tr>
@@ -303,7 +312,7 @@ function QuestionCard() {
             <div key={qi}>
               <div className="mb-1 leading-snug">
                 {q.header && <span className="mr-1.5 rounded bg-panel-3 px-1.5 py-px text-[10px] text-muted">{q.header}</span>}
-                <span className="text-text">{q.question}</span>
+                <span className="text-text">{withIdChips(q.question)}</span>
                 {q.multiSelect && <span className="ml-1 text-[10px] text-faint">{t('(можно несколько)')}</span>}
               </div>
               <div className="flex flex-col gap-1">
@@ -330,8 +339,14 @@ function QuestionCard() {
                         {on && <Check size={9} strokeWidth={3} />}
                       </span>
                       <span className="min-w-0">
-                        <span className="block">{o.label}</span>
-                        {o.description && <span className="block text-[10.5px] leading-snug text-muted">{o.description}</span>}
+                        <span className="block">
+                          <Named text={o.label} />
+                        </span>
+                        {o.description && (
+                          <span className="block text-[10.5px] leading-snug text-muted">
+                            <Named text={o.description} />
+                          </span>
+                        )}
                       </span>
                     </button>
                   )
@@ -390,8 +405,15 @@ function QuestionRecord({ part }: { part: QuestionPart }) {
           const ans = [...(a?.picked ?? []), ...(a?.other ? [a.other] : [])].join('; ')
           return (
             <li key={i} className="leading-snug">
-              <span className="text-muted">{q.header || q.question}</span>
-              {ans && <span className="text-text"> — {ans}</span>}
+              <span className="text-muted">
+                <Named text={q.header || q.question} />
+              </span>
+              {ans && (
+                <span className="text-text">
+                  {' — '}
+                  <Named text={ans} />
+                </span>
+              )}
             </li>
           )
         })}
@@ -637,7 +659,7 @@ function Message({ m, live }: { m: AiMessage; live: boolean }) {
         b.kind === 'group' ? (
           <ActivityGroup key={i} items={b.items} live={live} />
         ) : b.part.type === 'text' ? (
-          <RichText key={i} text={b.part.text} className="my-1" />
+          <RichText key={i} text={b.part.text} className="my-1" ids />
         ) : b.part.type === 'notice' ? (
           <Notice key={i} part={b.part} />
         ) : b.part.type === 'question' ? (
@@ -1219,6 +1241,11 @@ function Composer() {
   const [text, setText] = useState('')
   const [marking, setMarking] = useState<number | null>(null)
   const ta = useRef<HTMLTextAreaElement>(null)
+  // while marking, the plan marks of the level are in the marks row: their chips are not repeated
+  const pencil = useUi((s) => s.tool === 'pencil')
+  const levelId = useUi((s) => s.activeLevelId)
+  const annotations = useDoc((s) => s.doc.annotations)
+  const shownChips = pencil ? chips.filter((c) => !(c.kind === 'annotation' && annotations?.[c.id]?.levelId === levelId)) : chips
 
   useEffect(() => {
     if (focusTick) ta.current?.focus()
@@ -1312,7 +1339,8 @@ function Composer() {
             ))}
           </div>
         )}
-        {(chips.length > 0 || images.length > 0) && (
+        <MarksBar />
+        {(shownChips.length > 0 || images.length > 0) && (
           <div className="flex flex-wrap gap-1.5 px-2.5 pt-2.5">
             {images.map((im, i) => (
               <span key={i} className="group relative">
@@ -1337,7 +1365,7 @@ function Composer() {
                 </button>
               </span>
             ))}
-            {chips.map((c) => (
+            {shownChips.map((c) => (
               <span key={c.id} className="flex h-6 max-w-full items-center gap-1 self-end rounded-md border border-border bg-panel-2 pr-1 pl-1.5 text-[11px]" title={c.summary}>
                 <span className="truncate">{t(c.label)}</span>
                 <button type="button" aria-label={t('Убрать')} className="text-muted hover:text-text" onClick={() => removeChip(c.id)}>

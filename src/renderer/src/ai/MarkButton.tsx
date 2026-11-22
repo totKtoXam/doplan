@@ -1,6 +1,6 @@
 /**
  * «Пометить» in the chat input row: starts (or ends) marking on the plan; the small arrow opens the
- * shape choice — Линия / Лассо / Рамка. The marks themselves: editor2d/tools/pencil, MarksPanel.
+ * shape choice — Линия / Лассо / Рамка. The marks themselves: editor2d/tools/pencil; their list: MarksBar.
  */
 import { Check, ChevronDown, Highlighter, Lasso, Pencil, Square } from 'lucide-react'
 import { useRef, useState } from 'react'

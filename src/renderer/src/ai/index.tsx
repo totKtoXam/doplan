@@ -1,16 +1,15 @@
 /**
- * AI chat entry points used by the shell: the right dock with «Свойства | ИИ» tabs, the
- * «Добавить в чат» button, the 3D right-click menu and the Ctrl+L shortcut.
+ * AI chat entry points used by the shell: the chat shown in the «ИИ» section of the left panel,
+ * the always-mounted host (chat setup, Ctrl+L), the «Добавить в чат» button and the 3D right-click menu.
  */
 import { type RefObject, useCallback, useEffect, useState } from 'react'
-import { t, useT } from '@/i18n'
-import { RightPanel } from '@/ui/panels'
+import { t } from '@/i18n'
 import { useUi } from '@/store/ui'
 import { cn } from '@/ui/kit'
 import { ContextMenu } from '@/ui/shell/primitives'
 import { ChatPanel } from './ChatPanel'
 import './i18n'
-import { addSelectionToChat, focusChat, initAi, setDockTab, useAi } from './store'
+import { addSelectionToChat, focusChat, initAi } from './store'
 
 export { addRefsToChat, addSelectionToChat, focusChat } from './store'
 export { AddToChatButton } from './AddToChatButton'
@@ -35,32 +34,30 @@ function useChatShortcut(): void {
   }, [])
 }
 
-export function RightDock() {
-  const tab = useAi((s) => s.dockTab)
-  const running = useAi((s) => !!s.running)
-  const tr = useT()
+/**
+ * Mounted once for the whole window (the chat itself comes and goes with the left panel): connects
+ * the chat to main and the open document, and listens for Ctrl+L.
+ */
+export function AiHost() {
   useEffect(() => initAi(), [])
   useChatShortcut()
-  const tabBtn = (id: 'props' | 'ai', label: string) => (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={tab === id}
-      className={cn('relative px-3 py-1.5 text-xs', tab === id ? 'font-medium text-text' : 'text-muted hover:text-text')}
-      onClick={() => setDockTab(id)}
-    >
-      {label}
-      {id === 'ai' && running && <span className="absolute top-1.5 right-1 size-1.5 rounded-full bg-accent" />}
-      {tab === id && <span className="absolute inset-x-2 bottom-0 h-0.5 rounded bg-accent" />}
-    </button>
-  )
+  return null
+}
+
+/**
+ * The chat in the «ИИ» section of the left panel. `hidden`: another section is shown — the chat stays
+ * mounted and laid out underneath (a typed message, the scroll position and popovers' anchors survive,
+ * the feed keeps following a running answer), but it cannot be seen, focused or clicked.
+ */
+export function ChatSection({ hidden = false }: { hidden?: boolean }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col" data-ai-dock>
-      <div role="tablist" className="flex shrink-0 border-b border-border">
-        {tabBtn('props', tr('Свойства'))}
-        {tabBtn('ai', tr('ИИ'))}
-      </div>
-      {tab === 'props' ? <RightPanel /> : <ChatPanel />}
+    <div
+      className={cn('flex min-h-0 flex-1 flex-col', hidden && 'invisible absolute inset-0')}
+      aria-hidden={hidden || undefined}
+      inert={hidden}
+      data-ai-dock
+    >
+      <ChatPanel />
     </div>
   )
 }

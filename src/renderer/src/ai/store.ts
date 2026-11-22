@@ -15,7 +15,8 @@ import { ensureAiFolderTrust } from '@/actions/project'
 import { isAnyTranslation, t } from '@/i18n'
 import { api } from '@/store/api'
 import { docStore } from '@/store/document'
-import { getMark, marksStore, setMarkNumberFloor } from '@/store/marks'
+import { layoutStore } from '@/store/layout'
+import { getMark, marksStore, removeSentMarks, setMarkNumberFloor } from '@/store/marks'
 import { addProjectHook } from '@/store/projectHooks'
 import { uiStore } from '@/store/ui'
 import { chatTranscript } from './history'
@@ -23,9 +24,7 @@ import { DraftHost, type DraftMark, liveHost } from './hosts'
 import { markSnapshot } from './markSnapshot'
 import type { MarkupShape } from './markup'
 import { chipFor, entityLevel, lookupFor } from './summary'
-import { describeCall, executeTool, isMutating, previewCall } from './tools'
-
-export type DockTab = 'props' | 'ai'
+import { describeCall, executeTool, hostNames, isMutating, previewCall } from './tools'
 
 /** an image waiting to be sent; `markup` keeps the clean picture and the pencil marks drawn over it (re-editable) */
 export type PendingImage = AiImage & { url: string; markup?: { base: string; shapes: MarkupShape[] } }
@@ -56,7 +55,8 @@ export interface AiState {
   chat: AiChatRecord
   /** the open chat is one of legacyChats (it is saved there and runs in their agent folder) */
   legacy: boolean
-  running: { runId: string; msgId: string } | null
+  /** `marks`: plan marks that went to the agent this turn (the message, an answer); let go when it ends well */
+  running: { runId: string; msgId: string; marks?: Id[] } | null
   /** the agent's open ask_user call (the card above the input box); `draft`: what the user picked so far */
   asking: { callId: string; runId: string; questions: AiQuestion[]; draft: AiQuestionAnswer[] } | null
   status: string
@@ -66,23 +66,12 @@ export interface AiState {
   /** plan mode: number of proposed edits waiting for «Применить» */
   draftCount: number
   draftChanges: string[]
-  dockTab: DockTab
   /** bumped to focus the input (Ctrl+L) */
   focusTick: number
   showHistory: boolean
   login: LoginState | null
   /** text the composer should take in (a pencil-mark note); `send` = send right away */
   composeInsert: { text: string; send: boolean; tick: number } | null
-}
-
-const TAB_KEY = 'doplan.ai.dockTab'
-
-function readTab(): DockTab {
-  try {
-    return localStorage.getItem(TAB_KEY) === 'ai' ? 'ai' : 'props'
-  } catch {
-    return 'props'
-  }
 }
 
 const uid = () => crypto.randomUUID()
@@ -110,7 +99,6 @@ export const aiStore = createStore<AiState>()(() => ({
   quotes: [],
   draftCount: 0,
   draftChanges: [],
-  dockTab: readTab(),
   focusTick: 0,
   showHistory: false,
   login: null,
@@ -513,15 +501,6 @@ async function setProject(gone: string | null): Promise<void> {
   if (settings !== loaded) void api.aiChat.setSettings(ref, settings).catch(() => {})
 }
 
-export function setDockTab(tab: DockTab): void {
-  set({ dockTab: tab })
-  try {
-    localStorage.setItem(TAB_KEY, tab)
-  } catch {
-    /* ignore */
-  }
-}
-
 export function updateSettings(patch: Partial<AiChatSettings>): void {
   const settings = { ...get().settings, ...patch, models: { ...get().settings.models, ...(patch.models ?? {}) } }
   // leaving plan mode keeps a proposal until the user applies or discards it; an empty one goes
@@ -605,6 +584,7 @@ export async function addMarkToChat(id: Id, focus = true): Promise<void> {
   const plan = derived[m.levelId] ?? derivePlan(doc, m.levelId)
   const chip: AiChip = { kind: 'annotation', id: m.id, label: t('Пометка {n}', { n: markBadge(m.n) }), summary: describeMark(doc, m, markTargets(doc, plan, m)) }
   set({ chips: [...get().chips.filter((c) => c.id !== id), chip] })
+  markSnaps.set(m.id, `пометка-${m.n}`)
   if (focus) focusChat()
   else showChat()
   if (currentProvider()?.images === false) return
@@ -616,10 +596,9 @@ export async function addMarkToChat(id: Id, focus = true): Promise<void> {
   }
 }
 
-/** opens the AI tab without taking the keyboard */
+/** shows the «ИИ» section of the left panel (opening the panel) without taking the keyboard */
 export function showChat(): void {
-  setDockTab('ai')
-  if (!uiStore.getState().rightPanelOpen) uiStore.setState({ rightPanelOpen: true })
+  layoutStore.getState().setSection('ai')
 }
 
 export function focusChat(): void {
@@ -658,6 +637,33 @@ setMarkNumberFloor(() => maxImageMarkNumber())
 export function removeChip(id: string): void {
   set({ chips: get().chips.filter((c) => c.id !== id) })
 }
+
+/** mark id → the name of the snapshot that went into the box with its chip */
+const markSnaps = new Map<Id, string>()
+
+/** takes plan marks out of the message: their chips and the snapshots that came with them (unless drawn on) */
+export function removeMarksFromChat(ids: readonly Id[]): void {
+  const names = new Set(ids.map((id) => markSnaps.get(id)))
+  const chips = get().chips.filter((c) => !(c.kind === 'annotation' && ids.includes(c.id)))
+  const images = get().images.filter((im) => !names.has(im.name) || !!im.markup?.shapes.length)
+  if (chips.length !== get().chips.length || images.length !== get().images.length) set({ chips, images })
+}
+
+const markIds = (chips: readonly AiChip[]): Id[] => chips.filter((c) => c.kind === 'annotation').map((c) => c.id)
+
+/** sent marks leave the plan in one undoable step; a plan-mode draft waiting for «Применить» is not made stale by it */
+function letGoOfSentMarks(ids: Id[]): void {
+  const before = docStore.getState().revision
+  if (!removeSentMarks(ids).length) return
+  if (draft && draft.baseRevision === before) draft.baseRevision = docStore.getState().revision
+}
+
+// a mark deleted from the plan (Delete, «Очистить пометки», undoing it) leaves the message too
+docStore.subscribe((s, prev) => {
+  if (s.doc.annotations === prev.doc.annotations) return
+  const gone = markIds(get().chips).filter((id) => !s.doc.annotations?.[id])
+  if (gone.length) removeMarksFromChat(gone)
+})
 
 const MAX_QUOTE = 4000
 
@@ -952,7 +958,8 @@ async function runTurn(raw: string, editId: string | null): Promise<boolean> {
   })
   rememberImages(userMsg.id, input.images)
   // an edit leaves the input box as it is
-  set({ running: { runId, msgId: asst.id }, ...(editId ? {} : { chips: [], images: [], quotes: [] }), status: t('Запуск…'), showHistory: false })
+  const marks = markIds(input.chips)
+  set({ running: { runId, msgId: asst.id, ...(marks.length ? { marks } : {}) }, ...(editId ? {} : { chips: [], images: [], quotes: [] }), status: t('Запуск…'), showHistory: false })
   const chat = get().chat
   try {
     await api.aiChat.run({
@@ -1082,9 +1089,12 @@ function finishTurn(ev: Extract<AiRunEvent, { type: 'done' }>, save: boolean): v
   patchChat((c) => {
     c.updatedAt = now()
   })
+  const sent = get().running?.marks
   set({ running: null, asking: null, status: '' })
   // a plan-mode turn that proposed nothing leaves no draft
   if (draft?.empty) draft = null
+  // the marks are in the chat now: the plan lets them go (kept when the turn failed or was stopped, to send again)
+  if (sent?.length && ev.ok && !ev.stopped) letGoOfSentMarks(sent)
   if (ev.authRequired) void refreshProviders(false)
   if (save) void persist()
 }
@@ -1159,7 +1169,7 @@ async function onToolCall(call: AiToolCall): Promise<void> {
       origin: 'doc',
       args: call.args,
       status: ask ? 'pending' : 'running',
-      result: ask ? describeCall(call.tool, call.args) : undefined,
+      result: ask ? describeCall(call.tool, call.args, hostNames(liveHost())) : undefined,
     }),
   )
   const setPart = (fn: (p: Extract<AiPart, { type: 'tool' }>) => void) =>
@@ -1213,7 +1223,7 @@ async function onToolCall(call: AiToolCall): Promise<void> {
     if (out.changes) p.changes = out.changes
     if (img) p.image = img
   })
-  if (plan && mutating && out.result.ok && draft) set({ draftCount: draft.count, draftChanges: [...get().draftChanges, ...(out.changes ?? [describeCall(call.tool, call.args)])] })
+  if (plan && mutating && out.result.ok && draft) set({ draftCount: draft.count, draftChanges: [...get().draftChanges, ...(out.changes ?? [describeCall(call.tool, call.args, hostNames(host))])] })
   api.aiChat.toolResult(call.callId, out.result)
   // keep stored chats small: snapshot images are re-encoded as thumbnails
   if (img) {
@@ -1337,9 +1347,11 @@ export function answerQuestion(note?: string | null): void {
   if (note === null) return res(null)
   // quotes, chips and a picture in the chat box are part of the answer (a tool result carries one picture:
   // the others stay in the box for the next message, and the user is told so)
-  const { chips, images, quotes } = get()
+  const { chips, images, quotes, running } = get()
   const image = images.find((im) => im.mime === 'image/jpeg' || im.mime === 'image/png')
+  const marks = [...new Set([...(running?.marks ?? []), ...markIds(chips)])]
   set({
+    ...(running && marks.length ? { running: { ...running, marks } } : {}),
     chips: [],
     quotes: [],
     images: image ? images.filter((im) => im !== image) : images,

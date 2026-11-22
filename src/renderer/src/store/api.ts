@@ -14,7 +14,7 @@ import { setItemMakingRoom, WEB_RECENT_PREFIX, webRecent } from './webRecent'
 const webSync: GithubSyncStatus = { state: 'unavailable', reason: 'GitHub sync is available in the doplan desktop app', ahead: 0, behind: 0 }
 
 /** version shown by the web build (no Electron); keep in step with package.json */
-const WEB_VERSION = '0.16.2-web'
+const WEB_VERSION = '0.16.4-web'
 
 const SETTINGS_KEY = 'doplan.settings'
 

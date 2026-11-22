@@ -75,7 +75,8 @@ export interface DraftMark {
 
 /** Plan mode: changes go to a private copy; `apply()` replays them on the live document. */
 export class DraftHost implements ToolHost {
-  readonly baseRevision: number
+  /** the live revision the draft was taken from; moved on by changes that cannot clash with it (sent marks let go) */
+  baseRevision: number
   private cur: Doc
   private patches: Patch[] = []
   private cache = new Map<Id, DerivedPlan>()
@@ -151,7 +152,10 @@ export class DraftHost implements ToolHost {
   /** Applies the draft as one undoable step. Returns false if the document changed meanwhile and patching failed. */
   apply(label = 'ИИ: применить план'): { ok: boolean; stale: boolean } {
     const stale = docStore.getState().revision !== this.baseRevision
-    const patches = this.patches
+    // a mark the draft touched («внесено») may be gone from the plan by now (sent marks are let go when
+    // the turn ends, or the user deleted it): that part has nothing to land on and is skipped
+    const live = docStore.getState().doc.annotations
+    const patches = this.patches.filter((p) => !(p.path[0] === 'annotations' && p.path.length > 2 && !live?.[String(p.path[1])]))
     try {
       docStore.getState().transact(label, (d) => {
         applyPatches(d, patches)

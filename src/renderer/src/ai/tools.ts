@@ -12,9 +12,7 @@ import {
   applyMeasuredLength,
   applyNodeDistance,
   derivePlan,
-  findRun,
   markBadge,
-  roomDisplayName,
   compilePlanSpecDetailed,
   moveNode,
   parsePlanSpec,
@@ -44,6 +42,7 @@ import {
   isMountableWall,
   wallHidden,
   remapVoidNodes,
+  ROOM_TYPE_NAMES,
 } from '@core'
 import type { Catalog, DerivedPlan, Doc, ElectricKind, ElectricPoint, EntityRef, Id, Vec2 } from '@core/types'
 import type { AiToolResult } from '@shared/aiChat'
@@ -51,6 +50,8 @@ import { AI_TOOL_TITLES, type AiToolArgs, type AiToolName, isAiToolName, MUTATIN
 import { t } from '@/i18n'
 import { uiStore } from '@/store/ui'
 import '@/ui/electricI18n'
+import { OPENING_NAMES, WALL_KIND_NAMES } from '@/ui/shell/kindNames'
+import { entityName, idName, type NameCtx, roomsOfWalls, sideRoom, wallTitle } from './names'
 import { runTechProjectTool } from './techProject'
 import { chipFor, collectionOf, describePlan, entityLevel, entitySummary, findEntity, lookupFor, type Lookup, r0, r1, roomAt, roomName } from './summary'
 
@@ -90,6 +91,34 @@ const en = () => uiStore.getState().lang === 'en'
 const named = (x: { name: string; nameRu?: string }) => (en() ? x.name : (x.nameRu ?? x.name))
 const SURFACE: Record<string, string> = { floor: 'пол', ceiling: 'потолок', walls: 'стены', left: 'левая сторона', right: 'правая сторона', both: 'обе стороны' }
 const surfaceName = (s: string) => (SURFACE[s] ? t(SURFACE[s]) : s)
+const lang = (): 'ru' | 'en' => (en() ? 'en' : 'ru')
+
+/** names objects in the lines the user reads (kind, size, room — never internal ids), on the host's document */
+export function hostNames(host: Pick<ToolHost, 'doc' | 'derived' | 'catalog'>): NameCtx {
+  const doc = host.doc()
+  return { doc, plan: (lv) => (doc.levels[lv] ? host.derived(lv) : undefined), lk: lookupFor(doc, host.catalog()), lang: lang() }
+}
+
+/** the same on a document being changed (a copy or a draft inside a transaction) */
+function docNames(d: Doc): NameCtx {
+  return { doc: d, plan: (lv) => (d.levels[lv] ? derivePlan(d, lv) : undefined), lk: { asset: (id) => d.assets[id], material: (id) => d.materials[id] }, lang: lang() }
+}
+
+const wallKindName = (k: string) => t(WALL_KIND_NAMES[k as keyof typeof WALL_KIND_NAMES] ?? k)
+const openingName = (k: string) => t(OPENING_NAMES[k as keyof typeof OPENING_NAMES] ?? k)
+const roomTypeName = (k: string) => {
+  const n = ROOM_TYPE_NAMES[k as keyof typeof ROOM_TYPE_NAMES]
+  return n ? (en() ? n.en : n.ru) : k
+}
+const matLabel = (lk: Lookup, id: Id) => {
+  const m = lk.material(id)
+  return m ? named(m) : id
+}
+/** a side of a wall as the user sees it: the room it faces */
+function sideLabel(c: NameCtx, wallId: Id, side: 'left' | 'right'): string {
+  const room = sideRoom(c, wallId, side)
+  return room ? t('сторона «{room}»', { room }) : surfaceName(side)
+}
 
 export function txLabel(tool: AiToolName): string {
   return `ИИ: ${AI_TOOL_TITLES[tool].toLowerCase()}`
@@ -191,31 +220,33 @@ export function applyMeasurements(d: Doc, lv: Id, args: AiToolArgs<'apply_measur
       if (!w) return { ok: false, error: `${no}стена ${wallId} не найдена` }
       if (w.levelId !== lv) return { ok: false, error: `${no}стена ${wallId} на другом уровне` }
       const end = m.moveEnd ?? 'b'
+      const names = docNames(d)
+      const wallTxt = wallTitle(names, wallId)
+      const sideTxt = sideLabel(names, wallId, side)
       const res = applyMeasuredLength(d, lv, m.side, m.length, end, { date, note: args.note })
       if (!res.ok) return { ok: false, error: `${no}${m.side}: ${res.error}` }
-      const run = findRun(derivePlan(d, lv), m.side)
-      const roomTxt = run ? t('«{room}» ', { room: t(roomDisplayName(d, run.roomId)) }) : ''
       lines.push(
-        t('{room}{side} ({sideName}): {before} → {after} мм ({delta}), двигается конец {end}, узлов сдвинуто: {moved}', {
-          room: roomTxt,
-          side: m.side,
-          sideName: surfaceName(side),
+        t('{wall}, {side}: {before} → {after} мм ({delta}), узлов сдвинуто: {moved}', {
+          wall: wallTxt,
+          side: sideTxt,
           before: r0(res.before),
           after: r0(res.after),
           delta: signed(res.delta),
-          end,
           moved: res.moved.length,
         }),
       )
       for (const c of res.conflicts)
-        lines.push(t('⚠ изменился ранее замеренный размер «{room}» {key}: {before} → {after} мм', { room: t(c.roomName), key: c.key, before: r0(c.before), after: r0(c.after) }))
+        lines.push(t('⚠ изменился ранее замеренный размер «{room}»: {before} → {after} мм', { room: t(c.roomName), before: r0(c.before), after: r0(c.after) }))
     } else if (m.nodes) {
-      const res = applyNodeDistance(d, lv, m.nodes.fixed, m.nodes.move, m.length)
+      const { fixed, move } = m.nodes
+      const names = docNames(d)
+      const between = Object.values(d.walls).find((w) => (w.a === fixed && w.b === move) || (w.a === move && w.b === fixed))
+      const what = between ? wallTitle(names, between.id) : t('Расстояние: {from} → {to}', { from: entityName(names, { kind: 'node', id: fixed }), to: entityName(names, { kind: 'node', id: move }) })
+      const res = applyNodeDistance(d, lv, fixed, move, m.length)
       if (!res.ok) return { ok: false, error: `${no}${m.nodes.fixed}–${m.nodes.move}: ${res.error}` }
       lines.push(
-        t('Расстояние {fixed} → {move}: {before} → {after} мм ({delta}), сдвигается {move}, узлов сдвинуто: {moved}', {
-          fixed: m.nodes.fixed,
-          move: m.nodes.move,
+        t('{what}: {before} → {after} мм ({delta}), узлов сдвинуто: {moved}', {
+          what,
           before: r0(res.before),
           after: r0(res.after),
           delta: signed(res.delta),
@@ -432,7 +463,7 @@ async function run(host: ToolHost, name: AiToolName, a: Record<string, unknown>)
         ids = addWall(d, lv, p1, p2, { thickness: args.thickness, height: args.height, kind: args.kind })
       })
       if (!ids.length) return ok('Стена совпадает с существующей — ничего не добавлено.')
-      return ok(`Добавлено стен: ${ids.length} (${ids.join(', ')}) от ${pt(p1)} до ${pt(p2)}, длина ${r0(len)} мм.`, [t('Стена {from} → {to}, {len} мм', { from: pt(p1), to: pt(p2), len: r0(len) })])
+      return ok(`Добавлено стен: ${ids.length} (${ids.join(', ')}) от ${pt(p1)} до ${pt(p2)}, длина ${r0(len)} мм.`, [t('Добавлено: {what}', { what: `${wallKindName(args.kind ?? 'wall')} ${r0(len)} ${t('мм')}${roomsOfWalls(hostNames(host), ids)}` })])
     }
     case 'add_rect_room': {
       const args = a as AiToolArgs<'add_rect_room'>
@@ -459,8 +490,9 @@ async function run(host: ToolHost, name: AiToolName, a: Record<string, unknown>)
       const args = a as AiToolArgs<'move_node'>
       const n = doc.nodes[args.nodeId]
       if (!n) throw new ToolError(`Узел ${args.nodeId} не найден`)
+      const nodeName = entityName(hostNames(host), { kind: 'node', id: args.nodeId })
       host.mutate(label, (d) => moveNode(d, args.nodeId, args.x, args.y))
-      return ok(`Узел ${args.nodeId}: ${pt(n)} → ${pt(args)}.`, [t('Узел {from} → {to}', { from: pt(n), to: pt(args) })])
+      return ok(`Узел ${args.nodeId}: ${pt(n)} → ${pt(args)}.`, [`${nodeName}: ${pt(n)} → ${pt(args)}`])
     }
     case 'set_wall': {
       const args = a as AiToolArgs<'set_wall'>
@@ -469,9 +501,10 @@ async function run(host: ToolHost, name: AiToolName, a: Record<string, unknown>)
       const ch: string[] = []
       if (args.thickness !== undefined) ch.push(t('толщина {from} → {to}', { from: r0(w.thickness), to: r0(args.thickness) }))
       if (args.height !== undefined) ch.push(t('высота {from} → {to}', { from: r0(w.height), to: r0(args.height) }))
-      if (args.kind !== undefined) ch.push(t('тип {from} → {to}', { from: w.kind, to: args.kind }))
+      if (args.kind !== undefined) ch.push(t('тип {from} → {to}', { from: wallKindName(w.kind), to: wallKindName(args.kind) }))
       if (args.length !== undefined) ch.push(t('длина → {to}', { to: r0(args.length) }))
       if (!ch.length) throw new ToolError('Нечего менять: укажи thickness, height, kind или length')
+      const wallName = entityName(hostNames(host), { kind: 'wall', id: args.wallId })
       host.mutate(label, (d) => {
         const dw = d.walls[args.wallId]
         if (args.thickness !== undefined) dw.thickness = args.thickness
@@ -479,7 +512,7 @@ async function run(host: ToolHost, name: AiToolName, a: Record<string, unknown>)
         if (args.kind !== undefined) dw.kind = args.kind
         if (args.length !== undefined) setWallLength(d, args.wallId, args.length, args.anchor ?? 'a')
       })
-      return ok(`Стена ${args.wallId}: ${ch.join(', ')}.`, [t('Стена {id}: {changes}', { id: args.wallId, changes: ch.join(', ') })])
+      return ok(`Стена ${args.wallId}: ${ch.join(', ')}.`, [`${wallName}: ${ch.join(', ')}`])
     }
     case 'delete': {
       const args = a as AiToolArgs<'delete'>
@@ -492,8 +525,10 @@ async function run(host: ToolHost, name: AiToolName, a: Record<string, unknown>)
       }
       if (!refs.length) throw new ToolError(`Не найдены: ${missing.join(', ')}`)
       const desc = refs.map((r) => `${r.kind} ${r.id}`)
+      const names = hostNames(host)
+      const shown = refs.map((r) => entityName(names, r))
       host.mutate(label, (d) => removeEntities(d, refs))
-      return ok(`Удалено: ${desc.join(', ')}${missing.length ? `. Не найдены: ${missing.join(', ')}` : ''}.`, [t('Удалено: {list}', { list: desc.join(', ') })])
+      return ok(`Удалено: ${desc.join(', ')}${missing.length ? `. Не найдены: ${missing.join(', ')}` : ''}.`, [t('Удалено: {list}', { list: shown.join(', ') })])
     }
     case 'add_opening': {
       const args = a as AiToolArgs<'add_opening'>
@@ -517,7 +552,7 @@ async function run(host: ToolHost, name: AiToolName, a: Record<string, unknown>)
         if (args.sill !== undefined) patch.sill = args.sill
         id = addOpening(d, args.wallId, args.kind, offset!, patch)
       })
-      return ok(`Проём ${id} (${args.kind}) на ${args.wallId}, offset ${r0(offset)} мм от узла ${w.a} (длина стены ${r0(len)}).`, [t('{kind} на стене {wall}', { kind: args.kind, wall: args.wallId })])
+      return ok(`Проём ${id} (${args.kind}) на ${args.wallId}, offset ${r0(offset)} мм от узла ${w.a} (длина стены ${r0(len)}).`, [t('Добавлено: {what}', { what: entityName(hostNames(host), { kind: 'opening', id }) })])
     }
     case 'set_room': {
       const args = a as AiToolArgs<'set_room'>
@@ -528,10 +563,10 @@ async function run(host: ToolHost, name: AiToolName, a: Record<string, unknown>)
       if (args.wallMaterialId && !dr) throw new ToolError('Контур комнаты не найден — стены не покрасить')
       const ch: string[] = []
       if (args.name) ch.push(t('название «{name}»', { name: args.name }))
-      if (args.type) ch.push(t('тип {type}', { type: args.type }))
-      if (args.floorMaterialId) ch.push(t('пол {m}', { m: args.floorMaterialId }))
-      if (args.ceilingMaterialId) ch.push(t('потолок {m}', { m: args.ceilingMaterialId }))
-      if (args.wallMaterialId) ch.push(t('стены {m}', { m: args.wallMaterialId }))
+      if (args.type) ch.push(t('тип {type}', { type: roomTypeName(args.type) }))
+      if (args.floorMaterialId) ch.push(t('пол {m}', { m: matLabel(lk, args.floorMaterialId) }))
+      if (args.ceilingMaterialId) ch.push(t('потолок {m}', { m: matLabel(lk, args.ceilingMaterialId) }))
+      if (args.wallMaterialId) ch.push(t('стены {m}', { m: matLabel(lk, args.wallMaterialId) }))
       if (args.ceilingHeight !== undefined) ch.push(t('высота потолка {h}', { h: r0(args.ceilingHeight) }))
       if (args.skirting !== undefined) ch.push(t('плинтус {h}', { h: r0(args.skirting) }))
       if (!ch.length) throw new ToolError('Нечего менять')
@@ -664,7 +699,7 @@ async function run(host: ToolHost, name: AiToolName, a: Record<string, unknown>)
       })
       const p = host.doc().electrical?.[id]
       if (!p) throw new ToolError('Точка не создана')
-      const where = p.wallId ? ` — ${p.wallId}, h ${r0(p.elevation)}` : ` — ${pt(p)}`
+      const where = p.wallId ? `${roomsOfWalls(hostNames(host), [p.wallId])}, h ${r0(p.elevation)}` : ` — ${pt(p)}`
       const ceilNote = p.mount === 'ceiling' && args.elevation !== undefined ? ` elevation не применена: потолочная точка стоит на потолке комнаты (h ${r0(p.elevation)}).` : ''
       return ok(`Поставлена ${electricInfo(host.doc(), host.derived(lv), p)}.${ceilNote}`, [t('Электроточка «{name}»{where}', { name: electricName(p, en() ? 'en' : 'ru'), where })])
     }
@@ -693,7 +728,10 @@ async function run(host: ToolHost, name: AiToolName, a: Record<string, unknown>)
       if (args.gangs !== undefined) ch.push(t('постов {n}', { n: args.gangs }))
       if (args.vertical !== undefined) ch.push(args.vertical ? t('вертикально') : t('горизонтально'))
       if (args.comment !== undefined) ch.push(t('комментарий'))
-      if (spot) ch.push(t('на {wall}, offset {t}', { wall: `${spot.wallId}:${spot.side}`, t: r0(spot.t) }))
+      if (spot) {
+        const names = hostNames(host)
+        ch.push(t('на {wall}, offset {t}', { wall: `${wallTitle(names, spot.wallId)}, ${sideLabel(names, spot.wallId, spot.side)}`, t: r0(spot.t) }))
+      }
       else if (args.at) ch.push(`→ ${pt(args.at)}`)
       if (args.rotation !== undefined && !spot && !p.wallId) ch.push(t('поворот {from}° → {to}°', { from: r0(p.rotation), to: normDeg(args.rotation) }))
       if (!ch.length) {
@@ -778,11 +816,13 @@ async function run(host: ToolHost, name: AiToolName, a: Record<string, unknown>)
       if (ref.kind === 'wall') {
         const surface = args.surface ?? 'both'
         if (!['left', 'right', 'both'].includes(surface)) throw new ToolError('surface для стены: left | right | both')
+        const names = hostNames(host)
+        const wallTxt = `${wallTitle(names, ref.id)}, ${surface === 'both' ? surfaceName(surface) : sideLabel(names, ref.id, surface as 'left' | 'right')}`
         host.mutate(label, (d) => {
           if (surface !== 'right') applyFinishToWallSide(d, ref.id, 'left', args.materialId)
           if (surface !== 'left') applyFinishToWallSide(d, ref.id, 'right', args.materialId)
         })
-        return ok(`Стена ${ref.id} (${surface}) → ${mName}.`, [t('Стена {id} ({surface}): {material}', { id: ref.id, surface: surfaceName(surface), material: named(m) })])
+        return ok(`Стена ${ref.id} (${surface}) → ${mName}.`, [`${wallTxt}: ${named(m)}`])
       }
       if (ref.kind === 'item') {
         const it = doc.items[ref.id]
@@ -856,12 +896,52 @@ export function isMutating(tool: string): boolean {
   return isAiToolName(tool) && MUTATING_TOOLS.has(tool)
 }
 
-/** Short human description of a call (approval cards, plan-mode list), in the UI language. */
-export function describeCall(tool: string, args: unknown): string {
+/** what the arguments of a call change, in words ('' = not shown) */
+const FIELD_NAMES: Record<string, string> = {
+  thickness: 'толщина',
+  height: 'высота',
+  kind: 'тип',
+  type: 'тип',
+  length: 'длина',
+  anchor: '',
+  levelId: '',
+  name: 'название',
+  floorMaterialId: 'пол',
+  ceilingMaterialId: 'потолок',
+  wallMaterialId: 'стены',
+  ceilingHeight: 'высота потолка',
+  skirting: 'плинтус',
+  x: 'положение',
+  y: 'положение',
+  at: 'положение',
+  offset: 'положение',
+  side: 'положение',
+  wallId: 'положение',
+  rotation: 'поворот',
+  elevation: 'высота',
+  size: 'размер',
+  gangs: 'постов',
+  vertical: 'ориентация',
+  comment: 'комментарий',
+}
+
+/** Short human description of a call (approval cards, plan-mode list), in the UI language; `names` puts the ids it carries into words. */
+export function describeCall(tool: string, args: unknown, names?: NameCtx): string {
   const a = (args ?? {}) as Record<string, unknown>
-  const p = (v: unknown) => (typeof v === 'string' ? v : v && typeof v === 'object' ? pt(v as Vec2) : '?')
   const s = (v: unknown) => String(v ?? '')
-  const keys = (skip: string) => Object.keys(a).filter((k) => k !== skip).join(', ')
+  // an object the call names, by its kind, size and room (an id only when no document is at hand)
+  const nm = (v: unknown) => (typeof v === 'string' && names ? idName(names, v) : s(v))
+  const p = (v: unknown) => (typeof v === 'string' ? nm(v) : v && typeof v === 'object' ? pt(v as Vec2) : '?')
+  const keys = (skip: string) => [...new Set(Object.keys(a).filter((k) => k !== skip && FIELD_NAMES[k] !== '').map((k) => (FIELD_NAMES[k] ? t(FIELD_NAMES[k]) : k)))].join(', ')
+  const assetName = (v: unknown) => {
+    const x = typeof v === 'string' ? names?.lk.asset(v) : undefined
+    return x ? named(x) : s(v)
+  }
+  const matName = (v: unknown) => (typeof v === 'string' && names ? matLabel(names.lk, v) : s(v))
+  const electricKind = (v: unknown) => {
+    const ty = ELECTRIC_TYPES.find((x) => x.kind === v)
+    return ty ? (en() ? ty.en : ty.ru) : s(v)
+  }
   switch (tool) {
     case 'add_wall':
       return t('Стена от {from} до {to}', { from: p(a.from), to: p(a.to) })
@@ -870,30 +950,30 @@ export function describeCall(tool: string, args: unknown): string {
       return a.name ? t('Комната {w}×{h} в ({x}, {y}) «{name}»', v) : t('Комната {w}×{h} в ({x}, {y})', v)
     }
     case 'move_node':
-      return t('Узел {id} → ({x}, {y})', { id: s(a.nodeId), x: s(a.x), y: s(a.y) })
+      return `${nm(a.nodeId)} → (${s(a.x)}, ${s(a.y)})`
     case 'set_wall':
-      return t('Стена {id}: {changes}', { id: s(a.wallId), changes: keys('wallId') })
+      return `${nm(a.wallId)}: ${keys('wallId')}`
     case 'delete':
-      return t('Удалить {ids}', { ids: Array.isArray(a.ids) ? a.ids.join(', ') : '' })
+      return t('Удалить {ids}', { ids: Array.isArray(a.ids) ? a.ids.map(nm).join(', ') : '' })
     case 'add_opening':
-      return t('{kind} на стене {wall}', { kind: s(a.kind), wall: s(a.wallId) })
+      return t('{kind} на стене {wall}', { kind: openingName(s(a.kind)), wall: nm(a.wallId) })
     case 'set_room':
-      return t('Комната {id}: {fields}', { id: s(a.roomId), fields: keys('roomId') })
+      return `${nm(a.roomId)}: ${keys('roomId')}`
     case 'place_item':
-      if (a.x !== undefined) return t('Поставить {asset} в ({x}, {y})', { asset: s(a.assetId), x: s(a.x), y: s(a.y) })
-      return a.roomId ? t('Поставить {asset} в {room}', { asset: s(a.assetId), room: s(a.roomId) }) : t('Поставить {asset}', { asset: s(a.assetId) })
+      if (a.x !== undefined) return t('Поставить {asset} в ({x}, {y})', { asset: assetName(a.assetId), x: s(a.x), y: s(a.y) })
+      return a.roomId ? t('Поставить {asset} в {room}', { asset: assetName(a.assetId), room: nm(a.roomId) }) : t('Поставить {asset}', { asset: assetName(a.assetId) })
     case 'move_item':
-      return t('Предмет {id}: {fields}', { id: s(a.itemId), fields: keys('itemId') })
+      return `${nm(a.itemId)}: ${keys('itemId')}`
     case 'set_material':
-      return `${s(a.targetId)}${a.surface ? ` (${surfaceName(s(a.surface))})` : ''} → ${s(a.materialId)}`
+      return `${nm(a.targetId)}${a.surface ? ` (${surfaceName(s(a.surface))})` : ''} → ${matName(a.materialId)}`
     case 'apply_planspec':
       return t('Построить план ({mode})', { mode: s(a.mode ?? 'replace') })
     case 'place_electric':
       return a.wallId
-        ? t('Электроточка {kind} на {wall}', { kind: s(a.kind), wall: s(a.wallId) })
-        : t('Электроточка {kind} в {at}', { kind: s(a.kind), at: p(a.at) })
+        ? t('Электроточка {kind} на {wall}', { kind: electricKind(a.kind), wall: nm(a.wallId) })
+        : t('Электроточка {kind} в {at}', { kind: electricKind(a.kind), at: p(a.at) })
     case 'set_electric':
-      return t('Электроточка {id}: {fields}', { id: s(a.electricId), fields: keys('electricId') })
+      return `${nm(a.electricId)}: ${keys('electricId')}`
     case 'build_tech_project':
       return a.fixSurvey ? t('Технический проект: настройки и фиксация обмера') : t('Технический проект: настройки альбома')
     case 'apply_measurement':

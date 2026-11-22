@@ -62,6 +62,8 @@ const log = {
 
 /** the installer electron-updater will run (from 'update-downloaded') */
 let downloadedFile: string | undefined
+/** the last update downloaded and ready to install (kept across later checks) */
+let ready: Extract<UpdateStatus, { kind: 'downloaded' }> | null = null
 
 let state: UpdateState = { mode: 'disabled', current: '0.0.0', status: { kind: 'idle' } }
 let updater: AppUpdater | null = null
@@ -130,7 +132,8 @@ function wire(up: AppUpdater, mode: UpdateState['mode']): void {
 
   up.on('checking-for-update', () => setStatus({ kind: 'checking' }))
   up.on('update-available', (info: UpdateInfo) => setStatus({ kind: 'available', ...infoFields(info) }))
-  up.on('update-not-available', (info: UpdateInfo) => setStatus({ kind: 'not-available', version: info?.version ?? state.current }))
+  // a re-check while an update is downloaded: nothing newer keeps the ready one installable
+  up.on('update-not-available', (info: UpdateInfo) => setStatus(ready ?? { kind: 'not-available', version: info?.version ?? state.current }))
   up.on('download-progress', (p: ProgressInfo) => {
     const s = state.status
     const version = s.kind === 'available' || s.kind === 'progress' ? s.version : ''
@@ -145,9 +148,11 @@ function wire(up: AppUpdater, mode: UpdateState['mode']): void {
   })
   up.on('update-downloaded', (info: UpdateDownloadedEvent) => {
     downloadedFile = info.downloadedFile
-    setStatus({ kind: 'downloaded', ...infoFields(info) })
+    ready = { kind: 'downloaded', ...infoFields(info) }
+    setStatus(ready)
   })
   up.on('error', (err: Error) => {
+    const failedInstall = installing
     if (installing) {
       installing = false
       allowQuitWithoutPrompt(false)
@@ -155,7 +160,9 @@ function wire(up: AppUpdater, mode: UpdateState['mode']): void {
     const next = errorStatus(state.status, err)
     if (next.kind === 'error' && next.offline) log.warn('нет связи:', next.message)
     else log.error(err)
-    setStatus(next)
+    // a failed re-check (or a failed download of a newer release) leaves the downloaded one installable
+    // (an installer that did not start is still reported)
+    setStatus(ready && !failedInstall ? ready : next)
   })
 }
 

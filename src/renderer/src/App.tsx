@@ -7,7 +7,7 @@ import { api } from '@/store/api'
 import { dialogStore, type DialogKey, useDialogs } from '@/store/dialogs'
 import { prepareStartup } from '@/ui/welcome/startup'
 import { WelcomeScreen } from '@/ui/welcome/WelcomeScreen'
-import { usePanelSize } from '@/store/layout'
+import { leftPanelFor, useLayout, usePanelSize } from '@/store/layout'
 import { uiStore, useUi } from '@/store/ui'
 import { ResizablePanel } from '@/ui/kit/Sash'
 import {
@@ -18,9 +18,10 @@ import {
   MaterialEditorDialog,
   PhotoPlanDialog,
   RenderPanel,
+  RightPanel,
   SettingsDialog,
 } from '@/ui/panels'
-import { RightDock } from '@/ai' // ai-chat: «Свойства | ИИ» tabs
+import { AiHost } from '@/ai' // ai-chat: set up once; the chat itself is the «ИИ» section of the left panel
 import { LevelTabs } from '@/ui/shell/LevelTabs'
 import { VariantCompareDialog } from '@/ui/variants/VariantCompareDialog'
 import { ProjectFolderDialogs } from '@/ui/panels/ProjectFolderDialogs'
@@ -135,7 +136,10 @@ export function App() {
   const booted = useUi((s) => s.booted)
   const leftOpen = useUi((s) => s.leftPanelOpen)
   const rightOpen = useUi((s) => s.rightPanelOpen)
-  const leftSize = usePanelSize('left')
+  // the chat needs more room than a catalogue: the «ИИ» section keeps a width of its own
+  const leftPanel = useLayout((s) => leftPanelFor(s.section))
+  const chatShown = leftPanel === 'chat'
+  const leftSize = usePanelSize(leftPanel)
   const rightSize = usePanelSize('right')
   const [recoveryChecked, setRecoveryChecked] = useState(false)
   const { dragOver } = useAppEvents(booted)
@@ -161,10 +165,13 @@ export function App() {
         <ResizablePanel
           side="left"
           id="dp-left-panel"
-          label={tr('Ширина каталога')}
-          className="border-r border-border"
+          label={chatShown ? tr('Ширина чата') : tr('Ширина каталога')}
+          // chat images and wide content never spill past the panel edge, whatever the width
+          className={chatShown ? 'border-r border-border [&_img]:max-w-full' : 'border-r border-border'}
           open={leftOpen}
           onOpenChange={(v) => uiStore.setState({ leftPanelOpen: v })}
+          // the AI chat keeps a typed message and follows a running answer while the panel is hidden
+          keepMounted
           {...leftSize}
         >
           <Boundary name={tr('Каталог')}>
@@ -193,17 +200,17 @@ export function App() {
           side="right"
           id="dp-right-panel"
           label={tr('Ширина панели свойств')}
-          // chat images and wide content never spill past the panel edge, whatever the width
-          className="border-l border-border [&_img]:max-w-full"
+          className="border-l border-border"
           open={rightOpen}
           onOpenChange={(v) => uiStore.setState({ rightPanelOpen: v })}
           {...rightSize}
         >
           <Boundary name={tr('Свойства')}>
-            <RightDock />
+            <RightPanel />
           </Boundary>
         </ResizablePanel>
       </div>
+      <AiHost />
       <StatusBar />
       <WelcomeScreen />
       <Dialogs />

@@ -84,9 +84,9 @@ describe('status logic', () => {
   const available: UpdateStatus = { kind: 'available', version: '0.6.0', notes: '', releaseUrl: '' }
   const downloaded: UpdateStatus = { kind: 'downloaded', version: '0.6.0', notes: '', releaseUrl: '' }
 
-  it('busy while a check, a download or an installed-on-quit update is pending', () => {
+  it('busy while a check or a download runs; a downloaded update still lets a newer one be found', () => {
     expect(isBusy({ kind: 'checking' })).toBe(true)
-    expect(isBusy(downloaded)).toBe(true)
+    expect(isBusy(downloaded)).toBe(false)
     expect(isBusy(available)).toBe(false)
     expect(isBusy({ kind: 'error', offline: true, message: '' })).toBe(false)
   })

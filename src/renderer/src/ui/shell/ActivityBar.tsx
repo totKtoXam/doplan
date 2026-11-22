@@ -1,9 +1,10 @@
 /**
- * The activity bar at the left edge: labelled section buttons (Строить, Мебель, …, Объекты). A click
+ * The activity bar at the left edge: labelled section buttons (Строить, Мебель, …, ИИ, Объекты). A click
  * shows the section in the left panel; a click on the section already shown hides or shows the panel.
  */
 import type { LucideIcon } from 'lucide-react'
-import { BrickWall, Lightbulb, ListTree, Palette, Plug, Sofa, SwatchBook } from 'lucide-react'
+import { BrickWall, Lightbulb, ListTree, Palette, Plug, Sofa, Sparkles, SwatchBook } from 'lucide-react'
+import { useAi } from '@/ai/store'
 import { useT } from '@/i18n'
 import { layoutStore, useLayout, type LeftSection } from '@/store/layout'
 import { uiStore, useUi } from '@/store/ui'
@@ -30,10 +31,14 @@ export const SECTIONS: SectionDef[] = [
   { id: 'electric', icon: Plug, label: 'Электрика', heading: 'Электрика', title: 'Розетки, выключатели, слаботочка' },
 ]
 
+/** the AI chat, at the bottom of the bar above the objects */
+export const AI_SECTION: SectionDef = { id: 'ai', icon: Sparkles, label: 'ИИ', heading: 'ИИ-ассистент', title: 'Чат с ИИ-ассистентом: правки плана, вопросы, пометки' }
+
 /** the layers tree, pinned to the bottom of the bar */
 export const OBJECTS_SECTION: SectionDef = { id: 'objects', icon: ListTree, label: 'Объекты', heading: 'Объекты', title: 'Все объекты этажа: видимость, блокировка, слои' }
 
 export function sectionDef(id: LeftSection): SectionDef {
+  if (id === 'ai') return AI_SECTION
   return SECTIONS.find((s) => s.id === id) ?? OBJECTS_SECTION
 }
 
@@ -43,7 +48,8 @@ function pick(id: LeftSection): void {
   else layoutStore.getState().setSection(id)
 }
 
-function SectionBtn({ def, active }: { def: SectionDef; active: boolean }) {
+/** `busy`: a dot on the icon while its section is not shown — the AI is answering ('run') or waits for the user ('ask') */
+function SectionBtn({ def, active, busy = null }: { def: SectionDef; active: boolean; busy?: 'run' | 'ask' | null }) {
   const t = useT()
   const Icon = def.icon
   return (
@@ -60,6 +66,7 @@ function SectionBtn({ def, active }: { def: SectionDef; active: boolean }) {
         )}
       >
         {active && <span className="absolute top-1.5 bottom-1.5 -left-1 w-0.5 rounded bg-accent" />}
+        {busy && <span data-busy={busy} className={cn('absolute top-1 right-4 size-1.5 rounded-full', busy === 'ask' ? 'bg-warning' : 'bg-accent')} />}
         <Icon size={18} strokeWidth={1.75} />
         <span className="w-full truncate text-center">{t(def.label)}</span>
       </button>
@@ -71,6 +78,8 @@ export function ActivityBar() {
   const t = useT()
   const section = useLayout((s) => s.section)
   const open = useUi((s) => s.leftPanelOpen)
+  const aiShown = open && section === 'ai'
+  const aiBusy = useAi((s) => (!s.running ? null : s.asking ? 'ask' : 'run'))
   return (
     <nav className="flex w-[72px] shrink-0 flex-col gap-0.5 border-r border-border bg-panel px-1 py-1.5" aria-label={t('Разделы')}>
       {SECTIONS.map((d) => (
@@ -78,6 +87,7 @@ export function ActivityBar() {
       ))}
       <div className="flex-1" />
       <div className="mx-2 mb-0.5 h-px bg-border" />
+      <SectionBtn def={AI_SECTION} active={aiShown} busy={aiShown ? null : aiBusy} />
       <SectionBtn def={OBJECTS_SECTION} active={open && section === 'objects'} />
     </nav>
   )

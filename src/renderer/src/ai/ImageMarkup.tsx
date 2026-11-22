@@ -1,7 +1,7 @@
 /**
  * Editor for drawing pencil marks on a chat image before it is sent: lines, frames, arrows in a few
  * colours, each numbered (the numbers run on from the plan marks, so «③» is never ambiguous).
- * It covers the work area only — the chat stays open on the right. Marks go into the attached
+ * It covers the work area only — the chat stays open beside it. Marks go into the attached
  * picture at once (the clean one is kept for re-editing); a mini field next to each new mark
  * takes a note for it, like replying to a text selection.
  */
@@ -54,12 +54,17 @@ function bake(img: HTMLImageElement, base: string, shapes: MarkupShape[], prev: 
   return { mime, data: url.slice(url.indexOf(',') + 1), url, name: prev.name, markup: { base, shapes } }
 }
 
-/** the screen area left of the chat dock (the editor must not hide the chat) */
-function workArea(): { right: number; w: number; h: number } {
+/** the screen area beside the chat dock (the editor must not hide the chat), whichever side the dock is on */
+function workArea(): { left: number; right: number; w: number; h: number } {
   const dock = document.querySelector<HTMLElement>('[data-ai-dock]')
   const r = dock?.getBoundingClientRect()
-  const right = r && r.width > 0 ? Math.max(0, window.innerWidth - r.left) : 0
-  return { right, w: window.innerWidth - right, h: window.innerHeight }
+  let left = 0
+  let right = 0
+  if (r && r.width > 0) {
+    if (r.left + r.width / 2 < window.innerWidth / 2) left = Math.max(0, r.right)
+    else right = Math.max(0, window.innerWidth - r.left)
+  }
+  return { left, right, w: window.innerWidth - left - right, h: window.innerHeight }
 }
 
 const isTyping = (t: EventTarget | null) => t instanceof HTMLElement && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.isContentEditable)
@@ -205,8 +210,8 @@ export function ImageMarkup({ image, onChange, onClose }: { image: PendingImage;
     <div
       ref={root}
       tabIndex={-1}
-      className="fixed top-0 bottom-0 left-0 z-[200] flex flex-col bg-black/80 text-xs text-text outline-none"
-      style={{ right: area.right }}
+      className="fixed top-0 bottom-0 z-[200] flex flex-col bg-black/80 text-xs text-text outline-none"
+      style={{ left: area.left, right: area.right }}
       role="dialog"
       aria-label={tr('Пометки на картинке')}
     >

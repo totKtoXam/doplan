@@ -84,14 +84,19 @@ export function clearMarks(levelId: Id): void {
   if (sel && ids.includes(sel)) marksStore.getState().select(null)
 }
 
+/** a mark that anchors an estimate defect (`defectId`, the estimate's field) stays on the plan */
+function anchorsDefect(m: Annotation): boolean {
+  return !!(m as Annotation & { defectId?: unknown }).defectId
+}
+
 /**
  * Marks that went to the AI in a message and whose turn finished: they are in the chat now (the chip and
- * its snapshot), so the plan lets them go — one undoable step, «внесено» ones too. Locked marks stay.
- * Returns the removed ids.
+ * its snapshot), so the plan lets them go — one undoable step, «внесено» ones too. Locked marks and marks
+ * anchoring an estimate defect stay. Returns the removed ids.
  */
 export function removeSentMarks(ids: readonly Id[]): Id[] {
   const doc = docStore.getState().doc
-  const gone = ids.filter((id) => doc.annotations?.[id] && !isLocked(doc, { kind: 'annotation', id }))
+  const gone = ids.filter((id) => doc.annotations?.[id] && !anchorsDefect(doc.annotations[id]) && !isLocked(doc, { kind: 'annotation', id }))
   if (!gone.length) return []
   docStore.getState().transact(t('Убрать отправленные пометки'), (d) => {
     for (const id of gone) if (d.annotations) delete d.annotations[id]

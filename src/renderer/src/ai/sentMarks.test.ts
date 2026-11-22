@@ -182,6 +182,17 @@ it('a mark sent with an answer to the agent’s question goes too', async () => 
   expect(marks()).toEqual([])
 })
 
+it('a mark anchoring an estimate defect stays on the plan when its turn ends', async () => {
+  const anchor = await sentMark(0)
+  const plain = await sentMark(2000)
+  docStore.getState().transact('defect', (d) => void ((d.annotations![anchor] as { defectId?: string }).defectId = 'df_1'))
+  await send('что здесь не так?')
+  expect(aiStore.getState().running?.marks).toEqual([anchor, plain])
+  await end()
+  expect(marks()).toEqual([anchor])
+  docStore.getState().transact('clean', (d) => void delete d.annotations)
+})
+
 it('plan mode: the «внесено» of a mark let go is skipped on «Применить», and the draft is not taken for stale', async () => {
   updateSettings({ planMode: true })
   const m = await sentMark()

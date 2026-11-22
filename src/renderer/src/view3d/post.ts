@@ -126,14 +126,14 @@ export function createPost(ctx: EngineContext): PostPipeline {
     const q = currentQuality(ctx)
     const scenePass = track(T.pass(scene, camera, { samples: 0 }))
     scenePassNode = scenePass
-    if (f.ao) scenePass.setMRT(T.mrt({ output: T.output, normal: T.directionToColor(T.normalView) }))
-
     let hdr: any = scenePass.getTextureNode('output')
 
     if (f.ao) {
+      // Normals are rebuilt from depth instead of a second MRT output of the scene pass: an MRT
+      // changes every material's shader, so turning AO on (and every still, which turns it on)
+      // would rebuild all materials of the scene in one frame — seconds of a frozen window.
       const depth = scenePass.getTextureNode('depth')
-      const encoded = scenePass.getTextureNode('normal')
-      const normal = T.sample((uv: any) => T.colorToDirection(encoded.sample(uv)))
+      const normal = null
       const aoNode: any = track((gtao as any)(depth, normal, camera))
       aoNode.resolutionScale = q.aoResolutionScale
       aoNode.samples.value = q.aoSamples

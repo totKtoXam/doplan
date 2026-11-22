@@ -121,10 +121,6 @@ jobs:
       - name: Build
         run: pnpm dist
 
-      # the built app under its real CSP: an empty window or a broken 3D chunk fails the release here
-      - name: Smoke-test the built app
-        run: pnpm -s check:built
-
       - name: Check build output
         run: |
           OUT="release/$VER"

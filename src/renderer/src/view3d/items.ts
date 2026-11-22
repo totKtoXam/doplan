@@ -142,6 +142,9 @@ function keepFirstVariant(scene: THREE.Object3D): void {
   for (const o of [...roots]) if (!kept.has(o)) scene.remove(o)
 }
 
+/** main-thread time one scene sync spends building procedural items before leaving the rest to later frames */
+const SYNC_BUDGET_MS = 12
+
 export class ItemsLayer {
   private records = new Map<Id, ItemRec>()
   private templates = new Map<string, Promise<ModelTemplate>>()
@@ -152,6 +155,14 @@ export class ItemsLayer {
   private disposed = false
   /** assets already reported for a catalog size that contradicts the model */
   private warnedSize = new Set<string>()
+  /**
+   * Procedural items left for later frames: a sync that rebuilds many (opening 3D, a variant or a
+   * level switch, a quality change) builds for SYNC_BUDGET_MS and leaves the rest to `pump`, so the
+   * window keeps answering; one edited item is always built at once (no flicker while dragging).
+   */
+  private deferred = new Set<ItemRec>()
+  /** end of this sync's build time, 0 outside a sync */
+  private budgetEnd = 0
 
   constructor(
     private readonly ctx: EngineContext,
@@ -253,6 +264,7 @@ export class ItemsLayer {
   }
 
   private fill(rec: ItemRec): void {
+    this.deferred.delete(rec)
     const { item, asset, root } = rec
     const ref: EntityRef = { kind: 'item', id: item.id }
     const token = rec.token
@@ -269,6 +281,11 @@ export class ItemsLayer {
       return
     }
     if (asset.kind === 'procedural') {
+      // the old content (if any) stays until the new one is built
+      if (this.budgetEnd && performance.now() > this.budgetEnd) {
+        this.deferred.add(rec)
+        return
+      }
       try {
         setContent(this.factory.build(asset, item, this.lib))
       } catch (err) {
@@ -304,6 +321,42 @@ export class ItemsLayer {
 
   /** returns true when the scene graph changed (not for pure moves) */
   sync(doc: Doc, levelId: Id, epoch: number): { changed: boolean; moved: boolean } {
+    this.budgetEnd = performance.now() + SYNC_BUDGET_MS
+    try {
+      return this.syncInner(doc, levelId, epoch)
+    } finally {
+      this.budgetEnd = 0
+    }
+  }
+
+  /** whether procedural items wait to be built */
+  get hasDeferred(): boolean {
+    return this.deferred.size > 0
+  }
+
+  /** builds waiting procedural items for about `ms`; true when something was built */
+  pump(ms = SYNC_BUDGET_MS): boolean {
+    if (!this.deferred.size) return false
+    const end = performance.now() + ms
+    let built = false
+    for (const rec of Array.from(this.deferred)) {
+      if (built && performance.now() > end) break
+      this.deferred.delete(rec)
+      if (rec.token < 0 || this.records.get(rec.item.id) !== rec) continue
+      this.fill(rec)
+      built = true
+    }
+    return built
+  }
+
+  /** builds every waiting item now (stills, export, baking need the whole scene) */
+  drain(): boolean {
+    let built = false
+    while (this.deferred.size) built = this.pump(Infinity) || built
+    return built
+  }
+
+  private syncInner(doc: Doc, levelId: Id, epoch: number): { changed: boolean; moved: boolean } {
     const ui = uiStore.getState()
     let changed = false
     let moved = false
@@ -342,6 +395,7 @@ export class ItemsLayer {
     for (const [id, rec] of Array.from(this.records)) {
       if (seen.has(id)) continue
       rec.token = -1
+      this.deferred.delete(rec)
       rec.root.removeFromParent()
       disposeGeometries(rec.root)
       this.records.delete(id)
@@ -388,10 +442,12 @@ export class ItemsLayer {
       disposeGeometries(rec.root)
     }
     this.records.clear()
+    this.deferred.clear()
   }
 
   dispose(): void {
     this.disposed = true
+    this.deferred.clear()
     this.clear()
     for (const p of this.templates.values()) {
       p.then((tpl) => {

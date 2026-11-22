@@ -15,6 +15,7 @@ import type { Asset, Material } from '@core/types'
 import type { EngineContext } from '@/contracts'
 import { type ItemsLayer, createGltfLoader } from './items'
 import type { MaterialLibraryEx } from './materials'
+import { drawWhenReady } from './pipelines'
 
 // ───────────────────────────── GLB export ─────────────────────────────
 
@@ -325,7 +326,8 @@ export async function imageToBlob(
   const src = document.createElement('canvas')
   src.width = image.width
   src.height = image.height
-  const sctx = src.getContext('2d')
+  // CPU-backed canvases: encoding a GPU canvas reads it back and waits behind the GPU process
+  const sctx = src.getContext('2d', { willReadFrequently: true })
   if (!sctx) throw new Error('2D canvas unavailable')
   if (opts.opaque) {
     const d = image.data
@@ -335,7 +337,7 @@ export async function imageToBlob(
   const dst = document.createElement('canvas')
   dst.width = width
   dst.height = height
-  const ctx = dst.getContext('2d')
+  const ctx = dst.getContext('2d', { willReadFrequently: true })
   if (!ctx) throw new Error('2D canvas unavailable')
   if (opts.background) {
     if (Array.isArray(opts.background)) {
@@ -453,18 +455,22 @@ export class ThumbRenderer {
     camera.updateMatrixWorld(true)
 
     const target = new THREE.RenderTarget(px * ss, px * ss, { type: THREE.HalfFloatType, depthBuffer: true })
-    const prevTarget = renderer.getRenderTarget()
-    const prevColor = renderer.getClearColor(new THREE.Color())
-    const prevAlpha = renderer.getClearAlpha()
-    try {
-      renderer.setRenderTarget(target)
-      renderer.setClearColor(0x000000, 0)
-      renderer.render(scene, camera)
-    } finally {
-      renderer.setRenderTarget(prevTarget)
-      renderer.setClearColor(prevColor, prevAlpha)
+    const draw = (): void => {
+      const prevTarget = renderer.getRenderTarget()
+      const prevColor = renderer.getClearColor(new THREE.Color())
+      const prevAlpha = renderer.getClearAlpha()
+      try {
+        renderer.setRenderTarget(target)
+        renderer.setClearColor(0x000000, 0)
+        renderer.render(scene, camera)
+      } finally {
+        renderer.setRenderTarget(prevTarget)
+        renderer.setClearColor(prevColor, prevAlpha)
+      }
     }
     try {
+      // a model met for the first time compiles its pipelines first (pipelines.ts)
+      await drawWhenReady(renderer, draw)
       const image = await readTarget(renderer, target, true, true)
       return await imageToBlob(image, px, px, { background: ['#f2f3f4', '#d8dadd'] })
     } finally {

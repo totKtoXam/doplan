@@ -31,6 +31,7 @@ import { Architecture } from './build/architecture'
 import { ElectricalBuilder } from './build/electrical'
 import { createControls } from './controls'
 import { ThumbRenderer, convertModel, exportSceneGlb, imageToBlob, readTarget } from './export'
+import { drawWhenReady, useAsyncPipelines } from './pipelines'
 import { createInteraction } from './interaction'
 import { ItemsLayer } from './items'
 import { createLighting } from './lighting'
@@ -259,7 +260,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       const doc = visibleDoc(docStore.getState().doc)
       return { doc, levelId: activeLevel(doc) }
     },
-    flush: () => flushSync(),
+    flush: () => flushAll(),
     ceilingsShown: () => arch.ceilingsShown(),
     whenIdle: () => lib.whenIdle(8000),
     withFullScene(ceilings, fn) {
@@ -361,6 +362,12 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     compiled.reset()
     compileCheck = true
     invalidate()
+  }
+
+  /** flushSync, and every item built: for what reads the whole scene at once (stills, export, baking) */
+  function flushAll(): void {
+    flushSync()
+    if (!destroyed && items.drain()) afterSceneChange()
   }
 
   /** applies pending document / ui changes to the scene graph */
@@ -623,6 +630,8 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
         stop()
         return
       }
+      // procedural items a large sync left for later frames, a slice per frame
+      if (items.hasDeferred && items.pump()) afterSceneChange()
       // the first picture does not wait for what arrived while the first compile ran (models, their
       // finishes): it is drawn without them, and they are compiled right after and show up then
       let later: THREE.Material[] = []
@@ -818,6 +827,12 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     }
   }
   function hookRenderer(r: any): void {
+    // new pipelines compile off the GPU process main thread; finished ones redraw the view and shadows
+    useAsyncPipelines(r, () => {
+      if (destroyed || r !== renderer) return
+      shared.refreshShadows?.()
+      invalidate()
+    })
     const original = typeof r.onDeviceLost === 'function' ? r.onDeviceLost.bind(r) : null
     r.onDeviceLost = (info: { reason?: string | null }) => {
       try {
@@ -879,7 +894,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     const h = Math.max(16, Math.min(8192, Math.round(opts.height)))
     const ss = w * 2 <= 4096 && h * 2 <= 4096 ? 2 : 1
     const type = opts.format === 'jpeg' ? 'image/jpeg' : 'image/png'
-    flushSync()
+    flushAll()
     await lib.whenIdle(5000)
     if (opts.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     if (!mods) throw new Error('3D view is not ready')
@@ -889,7 +904,8 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       if (shared.post) {
         const target = new THREE.RenderTarget(w * ss, h * ss, { type: THREE.UnsignedByteType, depthBuffer: true })
         try {
-          shared.post.renderToTarget(target, w * ss, h * ss)
+          const post = shared.post
+          await drawWhenReady(renderer, () => post.renderToTarget(target, w * ss, h * ss))
           const image = await readTarget(renderer, target, false)
           return await imageToBlob(image, w, h, { type, opaque: true })
         } finally {
@@ -897,6 +913,9 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
         }
       }
       // fallback without post internals: draw into the canvas at the requested size and copy it out
+      // pipelines do not depend on the canvas size: compile them first, then draw and copy in one task
+      const m = mods
+      await drawWhenReady(renderer, () => m.post.render())
       const helpers = roots.helpers.visible
       roots.helpers.visible = false
       try {
@@ -904,8 +923,8 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
         renderer.setSize(w * ss, h * ss, false)
         camera.aspect = w / h
         camera.updateProjectionMatrix()
-        mods.post.setSize(w * ss, h * ss, 1)
-        for (let i = 0; i < 4; i++) mods.post.render()
+        m.post.setSize(w * ss, h * ss, 1)
+        for (let i = 0; i < 4; i++) m.post.render()
         const out = document.createElement('canvas')
         out.width = w
         out.height = h
@@ -988,7 +1007,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
     },
     focusSelection() {
       if (!mods) return
-      flushSync()
+      flushAll()
       const box = new THREE.Box3()
       for (const ref of uiStore.getState().selection) for (const o of objectsFor(ref)) box.expandByObject(o)
       mods.controls.fit(box.isEmpty() ? bounds.clone() : box)
@@ -1031,7 +1050,7 @@ export async function createEngine(container: HTMLElement): Promise<Engine3DHand
       return renderRealtimeStill(opts)
     },
     async exportGlb() {
-      flushSync()
+      flushAll()
       await lib.whenIdle(8000)
       const release = baked.hold()
       // full-height walls, ceilings and everything a cut-away pass has hidden

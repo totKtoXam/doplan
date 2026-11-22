@@ -7,7 +7,7 @@
  */
 import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
-import { mergeGeometries, mergeVertices, toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js'
+import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js'
 import { BUILTIN_MATERIALS } from '@core'
 import type { Asset, Id, Item, Material, MaterialCategory } from '@core/types'
 import type { MaterialLibrary } from '@/contracts'
@@ -690,9 +690,108 @@ export function extrudeSide(key: string, shape: () => THREE.Shape, width: number
 export function crease(g: THREE.BufferGeometry, angle = 0.7): THREE.BufferGeometry {
   for (const name of Object.keys(g.attributes)) if (name !== 'position') g.deleteAttribute(name)
   g.clearGroups()
-  const out = toCreasedNormals(g, angle)
+  const out = creasedNormals(g, angle)
   if (out !== g) g.dispose()
   return out
+}
+
+/**
+ * `toCreasedNormals` of three, with vertices matched at 0.1 mm instead of 1 cm. three's 1 cm cells
+ * gather thousands of corners of small bevelled profiles (picture and mirror frames) into one cell
+ * and compare every face there with every other — seconds of main thread for one wall of pictures.
+ * Only faces that really share a corner are compared here.
+ */
+function creasedNormals(geometry: THREE.BufferGeometry, creaseAngle: number): THREE.BufferGeometry {
+  const g = geometry.index ? geometry.toNonIndexed() : geometry
+  const pos = g.getAttribute('position')
+  const count = pos.count
+  const p = new Float64Array(count * 3)
+  for (let i = 0; i < count; i++) {
+    p[3 * i] = pos.getX(i)
+    p[3 * i + 1] = pos.getY(i)
+    p[3 * i + 2] = pos.getZ(i)
+  }
+  const faces = Math.floor(count / 3)
+  const fn = new Float64Array(faces * 3)
+  for (let f = 0; f < faces; f++) {
+    const o = 9 * f
+    const v1x = p[o + 6] - p[o + 3]
+    const v1y = p[o + 7] - p[o + 4]
+    const v1z = p[o + 8] - p[o + 5]
+    const v2x = p[o] - p[o + 3]
+    const v2y = p[o + 1] - p[o + 4]
+    const v2z = p[o + 2] - p[o + 5]
+    const nx = v1y * v2z - v1z * v2y
+    const ny = v1z * v2x - v1x * v2z
+    const nz = v1x * v2y - v1y * v2x
+    const inv = 1 / (Math.sqrt(nx * nx + ny * ny + nz * nz) || 1)
+    fn[3 * f] = nx * inv
+    fn[3 * f + 1] = ny * inv
+    fn[3 * f + 2] = nz * inv
+  }
+  // one id per position (0.1 mm grid), open addressing; slots hold id + 1
+  const ids = new Int32Array(count)
+  const q = new Float64Array(count * 3)
+  let size = 1
+  while (size < count * 2) size <<= 1
+  const mask = size - 1
+  const table = new Int32Array(size)
+  let unique = 0
+  for (let i = 0; i < count; i++) {
+    const qx = Math.round(p[3 * i] * 1e4)
+    const qy = Math.round(p[3 * i + 1] * 1e4)
+    const qz = Math.round(p[3 * i + 2] * 1e4)
+    let slot = (Math.imul(qx | 0, 73856093) ^ Math.imul(qy | 0, 19349663) ^ Math.imul(qz | 0, 83492791)) & mask
+    for (;;) {
+      const id = table[slot]
+      if (id === 0) {
+        q[3 * unique] = qx
+        q[3 * unique + 1] = qy
+        q[3 * unique + 2] = qz
+        table[slot] = unique + 1
+        ids[i] = unique++
+        break
+      }
+      const k = 3 * (id - 1)
+      if (q[k] === qx && q[k + 1] === qy && q[k + 2] === qz) {
+        ids[i] = id - 1
+        break
+      }
+      slot = (slot + 1) & mask
+    }
+  }
+  // the faces around each position
+  const offsets = new Int32Array(unique + 1)
+  for (let i = 0; i < faces * 3; i++) offsets[ids[i] + 1]++
+  for (let i = 0; i < unique; i++) offsets[i + 1] += offsets[i]
+  const around = new Int32Array(faces * 3)
+  const cursor = offsets.slice(0, unique)
+  for (let i = 0; i < faces * 3; i++) around[cursor[ids[i]]++] = Math.floor(i / 3)
+  const creaseDot = Math.cos(creaseAngle)
+  const normals = new Float32Array(count * 3)
+  for (let i = 0; i < faces * 3; i++) {
+    const f = Math.floor(i / 3)
+    const nx = fn[3 * f]
+    const ny = fn[3 * f + 1]
+    const nz = fn[3 * f + 2]
+    let sx = 0
+    let sy = 0
+    let sz = 0
+    for (let k = offsets[ids[i]], end = offsets[ids[i] + 1]; k < end; k++) {
+      const o = 3 * around[k]
+      if (nx * fn[o] + ny * fn[o + 1] + nz * fn[o + 2] > creaseDot) {
+        sx += fn[o]
+        sy += fn[o + 1]
+        sz += fn[o + 2]
+      }
+    }
+    const inv = 1 / (Math.sqrt(sx * sx + sy * sy + sz * sz) || 1)
+    normals[3 * i] = sx * inv
+    normals[3 * i + 1] = sy * inv
+    normals[3 * i + 2] = sz * inv
+  }
+  g.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
+  return g
 }
 
 function flipWindingIfNeeded(g: THREE.BufferGeometry): void {

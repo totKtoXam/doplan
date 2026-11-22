@@ -67,7 +67,7 @@ export async function capturePreview(): Promise<Uint8Array | null> {
     if (prevCamMode !== 'orbit') engine.setCameraMode('orbit')
     engine.resetCamera()
     await settled(engine, 3000)
-    const blob = await engine.renderStill({ width: 1600, height: 1000, mode: 'realtime', format: 'png' })
+    const blob = await engine.renderStill({ width: 1600, height: 1000, format: 'png' })
     const fitted = await browserCodec.fit(new Uint8Array(await blob.arrayBuffer()), 'image/png', 1600, 'color')
     return fitted?.data ?? null
   } catch (err) {

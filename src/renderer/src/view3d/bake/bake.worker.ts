@@ -1,15 +1,14 @@
 /**
- * Texels traced off the main thread. The scene's BVH arrives serialized with the first chunk of a
- * bake and is kept; every chunk then brings its texels and gets their light back.
+ * Texels traced off the main thread. The casters' triangles arrive with the first chunk of a bake;
+ * the worker builds their tree itself (the editor would stop for seconds building it) and keeps it;
+ * every chunk then brings its texels and gets their light back.
  */
-import * as THREE from 'three'
-import { MeshBVH, type SerializedBVH } from 'three-mesh-bvh'
-import { type BakeLights, type TraceOptions, traceTexels } from './trace'
+import type { MeshBVH } from 'three-mesh-bvh'
+import { type BakeLights, sceneBvh, type TraceOptions, traceTexels } from './trace'
 
 export interface BakeChunk {
-  /** the scene, with the first chunk only: its tree and its triangles (9 numbers each) */
-  bvh?: SerializedBVH
-  positions?: Float32Array
+  /** the casters, with the first chunk only: world-space triangles (9 numbers each) */
+  casters?: Float32Array
   points: Float32Array
   lights: BakeLights
   opts: TraceOptions
@@ -25,11 +24,7 @@ let bvh: MeshBVH | null = null
 scope.onmessage = (e) => {
   try {
     const { points, lights, opts, seed } = e.data
-    if (e.data.bvh && e.data.positions) {
-      const g = new THREE.BufferGeometry()
-      g.setAttribute('position', new THREE.BufferAttribute(e.data.positions, 3))
-      bvh = MeshBVH.deserialize(e.data.bvh, g, { setIndex: true })
-    }
+    if (e.data.casters) bvh = sceneBvh(e.data.casters)
     if (!bvh) throw new Error('no scene')
     let last = 0
     const r = traceTexels(bvh, points, lights, opts, seed, (k) => {

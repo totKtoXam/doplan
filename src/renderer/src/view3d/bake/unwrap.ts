@@ -278,6 +278,9 @@ export interface Texels {
  * centre falls just outside the chart's triangles (an edge) takes the nearest point on them, so the
  * edges of a surface are lit, not left to be filled in.
  */
+/** the farthest a texel centre may be from a chart's triangles and still stand for them, texels */
+const NEAR = 0.75
+
 export function texelsOf(meshes: UnwrapMesh[], layout: Layout): Texels {
   const pts: number[] = []
   const idx: number[] = []
@@ -289,7 +292,12 @@ export function texelsOf(meshes: UnwrapMesh[], layout: Layout): Texels {
     const tri2 = c.tris.map((t) => {
       const q = [0, 1, 2].map((i) => corner(p, t, i))
       const xy = q.map((w) => [c.x + pad + (dot(w, c.u) - c.minU) * density, c.y + pad + (dot(w, c.v) - c.minV) * density])
-      return { q, xy, n: norm(faceCross(p, t)) }
+      // its box grown by the farthest a texel may be from it: a texel outside cannot take it
+      const x0 = Math.min(xy[0][0], xy[1][0], xy[2][0]) - NEAR
+      const x1 = Math.max(xy[0][0], xy[1][0], xy[2][0]) + NEAR
+      const y0 = Math.min(xy[0][1], xy[1][1], xy[2][1]) - NEAR
+      const y1 = Math.max(xy[0][1], xy[1][1], xy[2][1]) + NEAR
+      return { q, xy, n: norm(faceCross(p, t)), x0, x1, y0, y1 }
     })
     for (let ty = c.y; ty < c.y + c.h; ty++)
       for (let tx = c.x; tx < c.x + c.w; tx++) {
@@ -297,8 +305,9 @@ export function texelsOf(meshes: UnwrapMesh[], layout: Layout): Texels {
         const py = ty + 0.5
         let best: { d: number; q: V3; n: V3 } | null = null
         for (const t of tri2) {
+          if (px < t.x0 || px > t.x1 || py < t.y0 || py > t.y1) continue
           const r = closestBary(px, py, t.xy)
-          if (r.d > 0.75 || (best && r.d >= best.d)) continue
+          if (r.d > NEAR || (best && r.d >= best.d)) continue
           const q = t.q
           best = {
             d: r.d,

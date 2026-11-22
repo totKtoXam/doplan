@@ -125,7 +125,6 @@ export interface UiState {
   /** status-bar hint text */
   hint: string
   cameraMode: 'orbit' | 'walk' | 'top'
-  pathTracing: { active: boolean; samples: number; target: number }
   setMode(m: ViewMode): void
   setTool(t: ToolId): void
   select(refs: EntityRef[], additive?: boolean): void
@@ -174,9 +173,6 @@ export type CreateEditor2D = (container: HTMLElement) => Promise<Editor2DHandle>
 export interface StillOptions {
   width: number
   height: number
-  /** 'realtime' = current post stack supersampled; 'pathtraced' = three-gpu-pathtracer */
-  mode: 'realtime' | 'pathtraced'
-  samples?: number
   format?: 'png' | 'jpeg'
   onProgress?(samples: number, total: number): void
   signal?: AbortSignal
@@ -193,9 +189,6 @@ export interface Engine3DHandle {
   getCamera(): { position: [number, number, number]; target: [number, number, number]; fov: number }
   setCamera(c: { position: [number, number, number]; target: [number, number, number]; fov?: number }): void
   setQuality(q: QualityPreset): void
-  /** interactive progressive path tracing in the viewport */
-  startPathTracing(targetSamples: number): void
-  stopPathTracing(): void
   renderStill(opts: StillOptions): Promise<Blob>
   exportGlb(): Promise<ArrayBuffer>
   /** viewer: the object and the (snapped) surface point under a client point */
@@ -281,11 +274,11 @@ export interface EngineContext {
     items: THREE.Group // one child per Item, userData.ref = {kind:'item', id}
     lights: THREE.Group // fixtures + THREE lights from doc.lights
     electrical: THREE.Group // sockets, switches, outlets from doc.electrical, userData.ref = {kind:'electric', id}
-    helpers: THREE.Group // gizmos, outlines — excluded from stills/path tracing/export
+    helpers: THREE.Group // gizmos, outlines — excluded from stills/export
   }
   /** request a frame (on-demand rendering). Pass true while something animates. */
   invalidate(): void
-  /** fired after the scene graph was rebuilt from the document (path tracer must reset) */
+  /** fired after the scene graph was rebuilt from the document (shadows, outlines and precompilation follow) */
   onSceneChanged(cb: () => void): () => void
   /** fired every rendered frame before render; dt seconds */
   onBeforeRender(cb: (dt: number) => void): () => void
@@ -319,7 +312,7 @@ export interface ProceduralFactory {
   ): THREE.Object3D
 }
 
-/** view3d/lighting.ts, post.ts, controls.ts, interaction.ts, pathtracer.ts (implementer: 3D-rendering) */
+/** view3d/lighting.ts, post.ts, controls.ts, interaction.ts (implementer: 3D-rendering) */
 export interface LightingRig {
   /** (re)build sun, sky/HDRI environment, window portals and doc lights from doc.render + doc.lights */
   sync(): void
@@ -338,14 +331,5 @@ export interface CameraControls {
   update(dt: number): boolean // true while moving
   fit(box: THREE.Box3): void
   get target(): THREE.Vector3
-  dispose(): void
-}
-export interface PathTracerHandle {
-  start(targetSamples: number, onProgress: (s: number) => void): void
-  stop(): void
-  readonly active: boolean
-  /** render one progressive sample to screen; returns current sample count */
-  step(): number
-  renderStill(opts: StillOptions): Promise<Blob>
   dispose(): void
 }

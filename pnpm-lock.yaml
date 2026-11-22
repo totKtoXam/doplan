@@ -42,9 +42,6 @@ importers:
       '@tarikjabiri/dxf':
         specifier: ^2.10.0
         version: 2.10.0
-      '@types/earcut':
-        specifier: ^3.2.4
-        version: 3.2.4
       '@types/node':
         specifier: ^26.6.6
         version: 26.6.6
@@ -66,9 +63,6 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
-      earcut:
-        specifier: ^3.2.4
-        version: 3.2.4
       electron:
         specifier: 45.3.1
         version: 45.3.1
@@ -111,18 +105,12 @@ importers:
       sharp:
         specifier: ^0.35.5
         version: 0.35.5(@types/node@26.6.6)
-      svg2pdf.js:
-        specifier: ^2.9.0
-        version: 2.9.0(jspdf@4.2.1)
       tailwindcss:
         specifier: ^4.3.5
         version: 4.3.5
       three:
         specifier: 0.187.0
         version: 0.187.0
-      three-gpu-pathtracer:
-        specifier: 0.0.28
-        version: 0.0.28(three-mesh-bvh@0.9.18(three@0.187.0))(three@0.187.0)(xatlas-web@0.1.0)
       three-mesh-bvh:
         specifier: ^0.9.18
         version: 0.9.18(three@0.187.0)
@@ -1613,11 +1601,6 @@ packages:
   css-line-break@2.1.0:
     resolution: {integrity: sha512-FHcKFCZcAha3LwfVBhCQbW2nCNbkZXn7KVUJcsT5/P8YmfsVja0FMPJr0B903j/E69HUphKiV9iQArX8SDYA4w==}
 
-  cssesc@3.0.0:
-    resolution: {integrity: sha512-/Tb/JcjK111nNScGob5MNtsntNM1aCNUDipB/TkwZFhyDrrE47SOx/18wF2bbjgc3ZzCSKW1T5nt5EbFoAz/Vg==}
-    engines: {node: '>=4'}
-    hasBin: true
-
   csstype@3.2.3:
     resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
 
@@ -1864,9 +1847,6 @@ packages:
   finalhandler@2.1.1:
     resolution: {integrity: sha512-S8KoZgRZN+a5rNwqTxlZZePjT/4cnm0ROV70LedRHZ0p8u9fRID0hJUZQpkKLzro8LfmC8sx23bY6tVNxv8pQA==}
     engines: {node: '>= 18.0.0'}
-
-  font-family-papandreou@0.2.0-patch2:
-    resolution: {integrity: sha512-l/YiRdBSH/eWv6OF3sLGkwErL+n0MqCICi9mppTZBOCL5vixWGDqCYvRcuxB2h7RGCTzaTKOHT2caHvCXQPRlw==}
 
   form-data@4.0.6:
     resolution: {integrity: sha512-vKatAh4SlVfgbv+YtmhiRjhEMJsYpsG1Y2rMQtR+SVSbytsSD1YGzDIcrAJmdFec88u/+VoGmxnl+80gL1tRCQ==}
@@ -2691,10 +2671,6 @@ packages:
     resolution: {integrity: sha512-UjgapumWlbMhkBgzT7Ykc5YXUT46F0iKu8SGXq0bcwP5dz/h0Plj6enJqjz1Zbq2l5WaqYnrVbwWOWMyF3F47g==}
     engines: {node: '>=0.10.0'}
 
-  specificity@0.4.1:
-    resolution: {integrity: sha512-1klA3Gi5PD1Wv9Q0wUoOQN1IWAuPu0D1U03ThXTr0cJ20+/iq2tHSDnK7Kk/0LXJ1ztUB2/1Os0wKmfyNgUQfg==}
-    hasBin: true
-
   sprintf-js@1.1.3:
     resolution: {integrity: sha512-Oo+0REFV59/rz3gfJNKQiBlwfHaSESl1pcGyABQsnnIfWOFt6JNj5gCog2U6MLZ//IGYD+nA8nI+mTShREReaA==}
 
@@ -2739,14 +2715,6 @@ packages:
     resolution: {integrity: sha512-qsjeeq5YjBZ5eMdFuUa4ZosMLxgr5RZ+F+Y1OrDhuOCEInRMA3x74XdBtggJcj9kOeInz0WE+LgCPDkZFlBYJw==}
     engines: {node: '>=12.0.0'}
 
-  svg2pdf.js@2.9.0:
-    resolution: {integrity: sha512-rjxgZ4k4JlgPqAvdBPFU+GMUVIEJm7AeSGAFysKUrmbF2FhKw2pdhgcwb8CinA3Gc8o84aQMpQsGeMNzqA1YyQ==}
-    peerDependencies:
-      jspdf: ^4.0.0 || ^3.0.0 || ^2.0.0
-
-  svgpath@2.6.0:
-    resolution: {integrity: sha512-OIWR6bKzXvdXYyO4DK/UWa1VA1JeKq8E+0ug2DG98Y/vOmMpfZNj+TIG988HjfYSqtcy/hFOtZq/n/j5GSESNg==}
-
   tailwindcss@4.3.5:
     resolution: {integrity: sha512-FcQk9BuffmEHJP2G0XmB2SplU1aLTI7j07Kunk+U74Ny+XiWOtzXz9aujFZ/avntw1e2cOv/3PkgzflQ7gX2vQ==}
 
@@ -2767,13 +2735,6 @@ packages:
 
   text-segmentation@1.0.3:
     resolution: {integrity: sha512-iOiPUo/BGnZ6+54OsWxZidGCsdU8YbE4PSpdPinp7DeMtUJNJBoJ/ouUSTJjHkh1KntHaltHl/gDs2FC4i5+Nw==}
-
-  three-gpu-pathtracer@0.0.28:
-    resolution: {integrity: sha512-Ybfa6qpRIU2QP4EXQJaawYZzVN4raSFqsr9qhXXVSiCi59fjef0pyyXztYYWqAnX7bweKmD70p2xMEWehl019A==}
-    peerDependencies:
-      three: '>=0.187.0'
-      three-mesh-bvh: '>=0.9.17'
-      xatlas-web: ^0.1.0
 
   three-mesh-bvh@0.9.18:
     resolution: {integrity: sha512-S76hOBnsSG4jsuEyCu98K63klONG4NwJANabPY1LUD5l7oUgu2xtKC0IwnX/XyPzo4YZ1D7ZU+gHVA479UdQmA==}
@@ -4355,8 +4316,6 @@ snapshots:
       utrie: 1.0.2
     optional: true
 
-  cssesc@3.0.0: {}
-
   csstype@3.2.3: {}
 
   cwise-compiler@1.1.3:
@@ -4694,8 +4653,6 @@ snapshots:
       statuses: 2.0.2
     transitivePeerDependencies:
       - supports-color
-
-  font-family-papandreou@0.2.0-patch2: {}
 
   form-data@4.0.6:
     dependencies:
@@ -5559,8 +5516,6 @@ snapshots:
 
   source-map@0.6.1: {}
 
-  specificity@0.4.1: {}
-
   sprintf-js@1.1.3:
     optional: true
 
@@ -5605,16 +5560,6 @@ snapshots:
   svg-pathdata@6.0.3:
     optional: true
 
-  svg2pdf.js@2.9.0(jspdf@4.2.1):
-    dependencies:
-      cssesc: 3.0.0
-      font-family-papandreou: 0.2.0-patch2
-      jspdf: 4.2.1
-      specificity: 0.4.1
-      svgpath: 2.6.0
-
-  svgpath@2.6.0: {}
-
   tailwindcss@4.3.5: {}
 
   tapable@2.3.3: {}
@@ -5641,12 +5586,6 @@ snapshots:
     dependencies:
       utrie: 1.0.2
     optional: true
-
-  three-gpu-pathtracer@0.0.28(three-mesh-bvh@0.9.18(three@0.187.0))(three@0.187.0)(xatlas-web@0.1.0):
-    dependencies:
-      three: 0.187.0
-      three-mesh-bvh: 0.9.18(three@0.187.0)
-      xatlas-web: 0.1.0
 
   three-mesh-bvh@0.9.18(three@0.187.0):
     dependencies:

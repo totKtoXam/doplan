@@ -103,7 +103,7 @@ export async function planPdf(doc: Doc, levelId: Id, title: string): Promise<Blo
 export function scenePng(engine: Engine3DHandle, host: HTMLElement): Promise<Blob> {
   const r = host.getBoundingClientRect()
   const k = Math.min(2, 3840 / Math.max(r.width, 1), 2160 / Math.max(r.height, 1))
-  return engine.renderStill({ width: Math.max(16, Math.round(r.width * k)), height: Math.max(16, Math.round(r.height * k)), mode: 'realtime', format: 'png' })
+  return engine.renderStill({ width: Math.max(16, Math.round(r.width * k)), height: Math.max(16, Math.round(r.height * k)), format: 'png' })
 }
 
 export async function sceneGlb(engine: Engine3DHandle): Promise<Blob> {

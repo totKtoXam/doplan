@@ -51,7 +51,7 @@ export interface BakedLight {
   set(src: BakedLightSource | null): void
   /** after the scene or the shown document changed */
   refresh(): void
-  /** live materials until the returned function is called (path tracing, export) */
+  /** live materials until the returned function is called (export) */
   hold(): () => void
   bake(opts?: { onProgress?(done: number, total: number): void; signal?: AbortSignal }): Promise<BakeOutput | null>
   dispose(): void
@@ -329,14 +329,21 @@ export function createBakedLight(ctx: EngineContext, shared: RenderShared, deps:
           return cached.out
         }
         const cores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 4 : 4
-        const { bakeLightMap } = await import('./run')
+        const { bakeLightMap, bakeSurface } = await import('./run')
+        const surface = bakeSurface(receivers, DEFAULT_LAYOUT)
         const pass = async (casters: Float32Array, part: number) =>
-          bakeLightMap(receivers, casters, lights, {
-            layout: DEFAULT_LAYOUT,
-            workers: Math.max(1, Math.min(8, cores - 1)),
-            onProgress: opts.onProgress && ((done, total) => opts.onProgress?.(part * total + done, 2 * total)),
-            signal: opts.signal,
-          })
+          bakeLightMap(
+            receivers,
+            casters,
+            lights,
+            {
+              layout: DEFAULT_LAYOUT,
+              workers: Math.max(1, Math.min(8, cores - 1)),
+              onProgress: opts.onProgress && ((done, total) => opts.onProgress?.(part * total + done, 2 * total)),
+              signal: opts.signal,
+            },
+            surface,
+          )
         const c = await pass(closed, 0)
         const o = await pass(open, 1)
         const out: BakeOutput = {

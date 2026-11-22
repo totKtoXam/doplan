@@ -6,14 +6,6 @@ import { createStore } from 'zustand/vanilla'
 import { useStore } from 'zustand'
 
 /**
- * Path tracer stage:
- *  - 'idle': nothing slow running (realtime frame, or the traced image is shown)
- *  - 'preparing': shaders / BVH / scene upload before the first sample
- *  - 'tracing': first samples accumulate behind the realtime frame
- */
-export type PtStage = 'idle' | 'preparing' | 'tracing'
-
-/**
  * The published light of the walls, floors and ceilings (viewer):
  *  - 'none': the plan was published without it;
  *  - 'loading': its picture is on the way;
@@ -25,7 +17,8 @@ export type PtStage = 'idle' | 'preparing' | 'tracing'
 export type BakedState = 'none' | 'loading' | 'on' | 'live' | 'mismatch'
 
 interface Status3D {
-  ptStage: PtStage
+  /** shaders of the scene are compiled ahead of the first frame (or of newly loaded models) */
+  preparing: boolean
   /** item models still loading / started since the last time none was loading */
   modelsPending: number
   modelsTotal: number
@@ -43,7 +36,7 @@ interface Status3D {
   baked: BakedState
 }
 
-export const status3dStore = createStore<Status3D>()(() => ({ ptStage: 'idle', modelsPending: 0, modelsTotal: 0, struggling: 0, rendererSwaps: 0, baked: 'none' }))
+export const status3dStore = createStore<Status3D>()(() => ({ preparing: false, modelsPending: 0, modelsTotal: 0, struggling: 0, rendererSwaps: 0, baked: 'none' }))
 
 export function markStruggling(): void {
   status3dStore.setState({ struggling: status3dStore.getState().struggling + 1 })
@@ -57,8 +50,8 @@ export function setBakedState(baked: BakedState): void {
   if (status3dStore.getState().baked !== baked) status3dStore.setState({ baked })
 }
 
-export function setPtStage(stage: PtStage): void {
-  if (status3dStore.getState().ptStage !== stage) status3dStore.setState({ ptStage: stage })
+export function setPreparing(preparing: boolean): void {
+  if (status3dStore.getState().preparing !== preparing) status3dStore.setState({ preparing })
 }
 
 export function modelLoadStarted(): void {

@@ -60,7 +60,7 @@ function frameRing(kind: Outline, w: number, h: number, fw: number, depth: numbe
     },
     depth,
     bevel,
-    48,
+    kind === 'rect' ? 4 : 48,
   )
 }
 

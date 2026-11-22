@@ -774,9 +774,11 @@ export interface RenderSettings {
   hdriRotation: number
   exposure: number
   toneMapping: 'agx' | 'aces' | 'neutral'
-  ao: boolean
-  ssgi: boolean
-  ssr: boolean
+  /**
+   * screen-space ambient occlusion, off by default (a cost every frame; stills turn it on by
+   * themselves). Files of earlier versions kept the old always-on `ao`, which is not read.
+   */
+  occlusion: boolean
   bloom: boolean
   /** auto-hide walls facing the camera in orbit mode */
   wallCutaway: boolean

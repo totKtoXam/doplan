@@ -23,7 +23,8 @@ import {
 import type { Catalog } from '@core/types'
 import { addTranslations, useT } from '@/i18n'
 import { api } from '@/store/api'
-import { useDoc } from '@/store/document'
+import { docStore, useDoc } from '@/store/document'
+import { perfEnabled } from '@/view3d/perf'
 import { generation, isCurrentGeneration } from '@/store/github'
 import { movedKeys } from '@/store/pagesKeys'
 import { confirmDialog, toast } from '@/store/notify'
@@ -132,6 +133,21 @@ function builtinIds(): Set<string> {
   for (const e of b.assets) if (same(cat.assets, e)) ids.add(e.id)
   return ids
 }
+
+// timing runs only (localStorage doplan.perf = 1): prepares the open plan's site as «Опубликовать»
+// does — models, textures, preview, baked light — and sends nothing anywhere
+if (perfEnabled())
+  (globalThis as unknown as { __doplanPreparePublish?: unknown }).__doplanPreparePublish = async (bake = true) => {
+    const t0 = performance.now()
+    const content = planSite(viewDoc(docStore.getState().doc, { underlays: false }), uiStore.getState().catalog, builtinIds())
+    const { prepareSite } = await import('@/publish/prepare')
+    const steps: Record<string, number> = {}
+    const mark = (name: string) => {
+      steps[name] ??= Math.round(performance.now() - t0)
+    }
+    const out = await prepareSite(content, { optimize: () => mark('optimize'), preview: () => mark('preview'), bake: () => mark('bake') }, { bake })
+    return { ms: Math.round(performance.now() - t0), steps, files: out.content.files.length, report: out.report }
+  }
 
 type CatalogKind = 'asset' | 'material' | 'hdri'
 

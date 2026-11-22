@@ -26,7 +26,8 @@ import { docStore } from '@/store/document'
 import { uiStore } from '@/store/ui'
 import { t } from '@/i18n'
 import type { BakeLights, RGB } from './bake/trace'
-import { currentQuality, getShared, type QualitySettings } from './quality'
+import { releaseObjects } from './build/util'
+import { BAKED_LIGHTS, currentQuality, getShared, type QualitySettings } from './quality'
 
 // ───────────────────────────── calibration constants ─────────────────────────────
 
@@ -40,8 +41,6 @@ const SUN_BASE = 3.2
 const PORTAL_RADIANCE = 3
 /** share of the environment used as (unoccluded) image-based light in the raster path */
 const ENV_RASTER = 0.3
-/** window portal lights while path tracing (the traced sky already comes through the openings) */
-const PORTAL_TRACED = 0.35
 const HEMI_DAY = 0.35
 const HEMI_NIGHT = 0.035
 /** latitude / declination used by the time-of-day model (mid latitudes, late spring) */
@@ -173,7 +172,7 @@ function skyTint(sun: SunState, target: THREE.Color): THREE.Color {
 
 /**
  * Analytic gradient sky with a sun glow, written as an equirectangular half-float texture so
- * the very same image feeds the background, the PMREM environment and the path tracer.
+ * the very same image feeds the background and the PMREM environment.
  */
 function buildSkyTexture(width: number, sun: SunState): THREE.DataTexture {
   const w = Math.max(64, Math.floor(width))
@@ -298,7 +297,9 @@ function averageTint(tex: THREE.Texture, target: THREE.Color): THREE.Color {
 
 // ───────────────────────────── HDRI loading ─────────────────────────────
 
+/** HDRIs by URL, shared by the engines alive at once; emptied when the last of them closes */
 const hdriCache = new Map<string, Promise<THREE.DataTexture>>()
+let liveRigs = 0
 
 function loadHdri(src: string): Promise<THREE.DataTexture> {
   let p = hdriCache.get(src)
@@ -491,6 +492,23 @@ function createFixtureGeoms(): FixtureGeoms {
   }
 }
 
+const SPOT_HALF = 38 * DEG
+
+function panelSize(l: Light): { w: number; d: number } {
+  return {
+    w: Math.max(0.03, (l.size?.w ?? (l.kind === 'strip' ? 1000 : 600)) / 1000),
+    d: Math.max(0.01, (l.size?.d ?? (l.kind === 'strip' ? 40 : 600)) / 1000),
+  }
+}
+
+/** straight down, or tilted 30° from the vertical towards the plan direction `rotation` (0 = +x, clockwise) */
+function spotDirection(l: Light, out: THREE.Vector3): THREE.Vector3 {
+  if (l.rotation === undefined || l.rotation === null) return out.set(0, -1, 0)
+  const a = l.rotation * DEG
+  const tilt = 30 * DEG
+  return out.set(Math.cos(a) * Math.sin(tilt), -Math.cos(tilt), Math.sin(a) * Math.sin(tilt))
+}
+
 function lightSignature(l: Light): string {
   return [l.id, l.kind, l.x, l.y, l.elevation, l.temperature, l.lumens, l.on ? 1 : 0, l.rotation ?? '', l.size?.w ?? '', l.size?.d ?? ''].join(',')
 }
@@ -498,6 +516,7 @@ function lightSignature(l: Light): string {
 // ───────────────────────────── the rig ─────────────────────────────
 
 export function createLighting(ctx: EngineContext): LightingRig {
+  liveRigs++
   const renderer = ctx.renderer
   const scene = ctx.scene
   const shared = getShared(ctx)
@@ -511,6 +530,9 @@ export function createLighting(ctx: EngineContext): LightingRig {
   const sun = new THREE.DirectionalLight(0xffffff, 0)
   sun.name = 'doplan-sun'
   sun.castShadow = false
+  // the shadow maps are drawn again only when something that casts moved (refreshShadows), not
+  // every frame: orbiting a still scene costs no shadow pass
+  sun.shadow.autoUpdate = false
   rig.add(sun)
   rig.add(sun.target)
 
@@ -521,6 +543,34 @@ export function createLighting(ctx: EngineContext): LightingRig {
   const portalGroup = new THREE.Group()
   portalGroup.name = 'doplan-window-portals'
   rig.add(portalGroup)
+
+  // ── live lamp slots ──
+  // Every lit material's shader is built for the set of lights in the scene (each light, its kind
+  // and whether it casts a shadow): a light added, removed, hidden or switched to casting compiles
+  // every material again — a pause of seconds on a weak device. So the lamps are a pool that only
+  // grows: a lamp turned off, moved or left out (the baked light shows) just gets no intensity.
+  type SlotKind = 'point' | 'spot' | 'area'
+  type SlotLight = THREE.PointLight | THREE.SpotLight | THREE.RectAreaLight
+  interface Slot {
+    light: SlotLight
+    casts: boolean
+  }
+  interface LampSpec {
+    kind: SlotKind
+    casts: boolean
+    position: THREE.Vector3
+    color: THREE.Color
+    intensity: number
+    /** spot: unit direction; area: rotation about Y */
+    direction?: THREE.Vector3
+    rotationY?: number
+    width?: number
+    depth?: number
+  }
+  const slotGroup = new THREE.Group()
+  slotGroup.name = 'doplan-lamp-slots'
+  rig.add(slotGroup)
+  const slots: Record<SlotKind, Slot[]> = { point: [], spot: [], area: [] }
 
   const geoms = createFixtureGeoms()
   const fixtureMaterials = new Map<string, THREE.MeshStandardMaterial>()
@@ -541,6 +591,7 @@ export function createLighting(ctx: EngineContext): LightingRig {
   const hdriTint = new THREE.Color(1, 1, 1)
   let portalSig = ''
   let fixtureSig = ''
+  let lampsSig = ''
   let shadowSig = ''
   let shadowTypeApplied: number | null = null
   let scheduled = 0
@@ -602,7 +653,7 @@ export function createLighting(ctx: EngineContext): LightingRig {
       tmpBox.min.x.toFixed(2), tmpBox.min.y.toFixed(2), tmpBox.min.z.toFixed(2),
       tmpBox.max.x.toFixed(2), tmpBox.max.y.toFixed(2), tmpBox.max.z.toFixed(2),
       s.direction.x.toFixed(4), s.direction.y.toFixed(4), s.direction.z.toFixed(4),
-      q.shadowMapSize, q.shadowRadius, q.sunShadows ? 1 : 0, s.intensity > 0 ? 1 : 0,
+      q.shadowMapSize, q.shadowRadius, q.sunShadows ? 1 : 0, shared.baked ? 1 : 0,
     ].join(',')
     if (sig === shadowSig) return false
     shadowSig = sig
@@ -619,7 +670,9 @@ export function createLighting(ctx: EngineContext): LightingRig {
     sun.updateMatrixWorld(true)
     sun.target.updateMatrixWorld(true)
 
-    const casts = q.sunShadows && s.intensity > 0
+    // not tied to the sun's height: a sun that sets would change the light set (a recompile); the
+    // baked light holds the shadows of the walls itself, the furniture goes without
+    const casts = q.sunShadows && !shared.baked
     sun.castShadow = casts
     if (casts) {
       setShadowMapSize(sun, q.shadowMapSize)
@@ -664,7 +717,7 @@ export function createLighting(ctx: EngineContext): LightingRig {
   function applyEnvironmentLevels(r: RenderSettings, usingHdri: boolean): void {
     const k = clamp(r.hdriIntensity ?? 1, 0, 8)
     scene.backgroundIntensity = k
-    scene.environmentIntensity = (shared.pathTracing ? 1 : ENV_RASTER) * k
+    scene.environmentIntensity = ENV_RASTER * k
     const rot = usingHdri ? (r.hdriRotation || 0) * DEG : 0
     scene.backgroundRotation.set(0, rot, 0)
     scene.environmentRotation.set(0, rot, 0)
@@ -743,7 +796,7 @@ export function createLighting(ctx: EngineContext): LightingRig {
       skyTexture = null
       skySig = ''
     }
-    const sig = [usingHdri ? hdriSrc : 'sky', r.hdriIntensity, r.hdriRotation, shared.pathTracing ? 1 : 0].join('|')
+    const sig = [usingHdri ? hdriSrc : 'sky', r.hdriIntensity, r.hdriRotation].join('|')
     if (sig !== envSig) {
       envSig = sig
       applyEnvironmentLevels(r, usingHdri)
@@ -761,35 +814,33 @@ export function createLighting(ctx: EngineContext): LightingRig {
     hemi.color.copy(tmpColor)
     hemi.groundColor.setRGB(0.42, 0.4, 0.37).multiplyScalar(0.6 + 0.4 * day)
     hemi.intensity = (HEMI_NIGHT + (HEMI_DAY - HEMI_NIGHT) * day) * Math.max(0.15, k)
-    const radiance = PORTAL_RADIANCE * day * k * (shared.pathTracing ? PORTAL_TRACED : 1)
+    const radiance = PORTAL_RADIANCE * day * k
     for (const child of portalGroup.children) {
       const light = child as THREE.RectAreaLight
       light.color.copy(tmpColor)
+      // an unused portal stays in the scene, dark (see the lamp slots)
       light.intensity = radiance * (light.userData.share ?? 1)
-      light.visible = light.intensity > 1e-4
     }
   }
 
+  /** whether a portal light was added (the light set changed) */
   function syncPortals(doc: Doc, levelId: Id, plan: DerivedPlan | undefined, q: QualitySettings): boolean {
-    const specs = collectPortals(doc, levelId, plan, q.maxPortals)
+    const max = shared.baked ? Math.min(q.maxPortals, BAKED_LIGHTS.portals) : q.maxPortals
+    const specs = collectPortals(doc, levelId, plan, max)
     const sig = specs
       .map((p) => `${p.key}@${p.position.map((v) => v.toFixed(3)).join(',')}/${p.inward[0].toFixed(3)},${p.inward[1].toFixed(3)}/${p.width.toFixed(3)}x${p.height.toFixed(3)}/${p.share}`)
       .join(';')
     if (sig === portalSig) return false
     portalSig = sig
-    while (portalGroup.children.length > specs.length) {
-      const last = portalGroup.children[portalGroup.children.length - 1] as THREE.RectAreaLight
-      portalGroup.remove(last)
-      last.dispose()
-    }
+    let added = false
+    for (let i = specs.length; i < portalGroup.children.length; i++) portalGroup.children[i].userData.share = 0
     specs.forEach((p, i) => {
       let light = portalGroup.children[i] as THREE.RectAreaLight | undefined
       if (!light) {
         light = new THREE.RectAreaLight(0xffffff, 0, 1, 1)
         light.name = 'doplan-window-portal'
-        // the path tracer samples it but the camera must not see a glowing rectangle
-        ;(light as any).visibleToCameraRays = false
         portalGroup.add(light)
+        added = true
       }
       light.width = p.width
       light.height = p.height
@@ -799,7 +850,7 @@ export function createLighting(ctx: EngineContext): LightingRig {
       light.userData.share = p.share
       light.updateMatrixWorld(true)
     })
-    return true
+    return added
   }
 
   // ── fixtures ──
@@ -825,54 +876,31 @@ export function createLighting(ctx: EngineContext): LightingRig {
     const mesh = new THREE.Mesh(geometry, material)
     mesh.castShadow = false
     mesh.receiveShadow = false
-    // a shade around a bulb must not swallow the path tracer's shadow rays
-    ;(mesh as any).visibleToShadowRays = false
     return mesh
   }
 
   function disposeFixtureGroup(group: THREE.Group): void {
-    group.traverse((o) => {
-      const l = o as THREE.Light & { dispose?: () => void; shadow?: any }
-      if ((l as any).isLight) {
-        if (l.shadow?.map) {
-          l.shadow.map.dispose()
-          l.shadow.map = null
-        }
-        l.dispose?.()
-      }
-    })
     group.removeFromParent()
+    releaseObjects(group)
   }
 
-  function buildFixture(l: Light, on: boolean, castShadow: boolean, withLight: boolean, ceilingMm: number, q: QualitySettings): THREE.Group {
+  /** the body of a fixture: meshes only, its light lives in a slot (see the lamp slots) */
+  function buildFixture(l: Light, on: boolean, ceilingMm: number): THREE.Group {
     const group = new THREE.Group()
     group.name = `light:${l.id}`
     group.userData.ref = { kind: 'light', id: l.id }
     group.userData.isLightFixture = true
     const p = toWorld(l.x, l.y, l.elevation)
     group.position.set(p[0], p[1], p[2])
-    const color = kelvinToColor(l.temperature)
     const glow = emissiveMaterial(l.temperature, on)
-    const lumens = Math.max(0, l.lumens || 0)
-    let light: (THREE.Light & { shadow?: any }) | null = null
 
     if (l.kind === 'strip' || l.kind === 'area') {
-      const w = Math.max(0.03, (l.size?.w ?? (l.kind === 'strip' ? 1000 : 600)) / 1000)
-      const d = Math.max(0.01, (l.size?.d ?? (l.kind === 'strip' ? 40 : 600)) / 1000)
+      const { w, d } = panelSize(l)
       group.rotation.y = -((l.rotation ?? 0) * DEG)
       const body = fixtureMesh(geoms.box, glow)
       body.scale.set(w, 0.014, d)
       body.position.y = -0.007
       group.add(body)
-      if (withLight && on && lumens > 0) {
-        const nits = lumens / (Math.PI * w * d)
-        // keep very thin strips from producing absurd radiance values
-        const area = new THREE.RectAreaLight(color, Math.min(nits * LUMEN_SCALE, 4000), w, d)
-        area.position.y = -0.02
-        area.rotation.x = -Math.PI / 2
-        ;(area as any).visibleToCameraRays = false
-        light = area
-      }
     } else if (l.kind === 'spot') {
       const can = fixtureMesh(geoms.can, housingMaterial)
       can.position.y = -0.03
@@ -880,82 +908,137 @@ export function createLighting(ctx: EngineContext): LightingRig {
       const lens = fixtureMesh(geoms.lens, glow)
       lens.position.y = -0.062
       group.add(lens)
-      const half = 38 * DEG
-      if (withLight && on && lumens > 0) {
-        const candela = lumens / (2 * Math.PI * (1 - Math.cos(half)))
-        const spot = new THREE.SpotLight(color, candela * LUMEN_SCALE * SPOT_SCALE, 14, half, 0.55, 2)
-        spot.position.y = -0.07
-        const target = spot.target
-        if (l.rotation === undefined || l.rotation === null) {
-          target.position.set(0, -1, 0)
-        } else {
-          // tilted 30° from the vertical towards the plan direction `rotation` (0 = +x, clockwise)
-          const a = l.rotation * DEG
-          const tilt = 30 * DEG
-          target.position.set(Math.cos(a) * Math.sin(tilt), -Math.cos(tilt), Math.sin(a) * Math.sin(tilt))
-          const dir = target.position.clone().normalize()
-          const q4 = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir)
-          can.quaternion.copy(q4)
-          lens.quaternion.copy(q4)
-          lens.position.copy(dir).multiplyScalar(0.062)
-          can.position.copy(dir).multiplyScalar(0.03)
-        }
-        target.position.add(spot.position)
-        group.add(target)
-        light = spot
+      if (l.rotation !== undefined && l.rotation !== null) {
+        const dir = spotDirection(l, new THREE.Vector3())
+        const q4 = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir)
+        can.quaternion.copy(q4)
+        lens.quaternion.copy(q4)
+        lens.position.copy(dir).multiplyScalar(0.062)
+        can.position.copy(dir).multiplyScalar(0.03)
+      }
+    } else if (l.kind === 'ceiling') {
+      const disc = fixtureMesh(geoms.disc, glow)
+      disc.position.y = -0.0175
+      group.add(disc)
+    } else if (l.kind === 'pendant') {
+      group.add(fixtureMesh(geoms.shade, glow))
+      const cordLen = Math.max(0, (ceilingMm - l.elevation) / 1000 - 0.11)
+      if (cordLen > 0.02) {
+        const cord = fixtureMesh(geoms.cord, cordMaterial)
+        cord.scale.y = cordLen
+        cord.position.y = 0.11 + cordLen / 2
+        group.add(cord)
       }
     } else {
-      // ceiling / pendant / point → PointLight
-      let offsetY = 0
-      let candela = lumens / (4 * Math.PI)
-      if (l.kind === 'ceiling') {
-        const disc = fixtureMesh(geoms.disc, glow)
-        disc.position.y = -0.0175
-        group.add(disc)
-        offsetY = -0.1
-        // a flush fixture radiates into the lower hemisphere only
-        candela = lumens / (2 * Math.PI)
-      } else if (l.kind === 'pendant') {
-        const shade = fixtureMesh(geoms.shade, glow)
-        group.add(shade)
-        const cordLen = Math.max(0, (ceilingMm - l.elevation) / 1000 - 0.11)
-        if (cordLen > 0.02) {
-          const cord = fixtureMesh(geoms.cord, cordMaterial)
-          cord.scale.y = cordLen
-          cord.position.y = 0.11 + cordLen / 2
-          group.add(cord)
-        }
-      } else {
-        group.add(fixtureMesh(geoms.bulb, glow))
-      }
-      if (withLight && on && lumens > 0) {
-        const point = new THREE.PointLight(color, candela * LUMEN_SCALE, 16, 2)
-        point.position.y = offsetY
-        light = point
-      }
-    }
-
-    if (light) {
-      light.name = `light-source:${l.id}`
-      const canCast = castShadow && !(light as any).isRectAreaLight
-      light.castShadow = canCast
-      if (canCast && light.shadow) {
-        setShadowMapSize(light, q.fixtureShadowMapSize)
-        light.shadow.bias = (light as any).isPointLight ? -0.004 : -0.0015
-        light.shadow.normalBias = 0.03
-        light.shadow.radius = 2
-        if (light.shadow.camera) {
-          light.shadow.camera.near = 0.08
-          light.shadow.camera.far = 14
-          light.shadow.camera.updateProjectionMatrix?.()
-        }
-      }
-      group.add(light)
+      group.add(fixtureMesh(geoms.bulb, glow))
     }
     return group
   }
 
-  function syncFixtures(doc: Doc, levelId: Id, q: QualitySettings): boolean {
+  /** the live light of a fixture (the same numbers the bake uses) */
+  function lampSpec(l: Light, casts: boolean): LampSpec {
+    const p = toWorld(l.x, l.y, l.elevation)
+    const color = kelvinToColor(l.temperature)
+    const lumens = Math.max(0, l.lumens || 0)
+    if (l.kind === 'strip' || l.kind === 'area') {
+      const { w, d } = panelSize(l)
+      const nits = lumens / (Math.PI * w * d)
+      // keep very thin strips from producing absurd radiance values
+      return { kind: 'area', casts: false, position: new THREE.Vector3(p[0], p[1] - 0.02, p[2]), color, intensity: Math.min(nits * LUMEN_SCALE, 4000), rotationY: -((l.rotation ?? 0) * DEG), width: w, depth: d }
+    }
+    if (l.kind === 'spot') {
+      const candela = lumens / (2 * Math.PI * (1 - Math.cos(SPOT_HALF)))
+      return { kind: 'spot', casts, position: new THREE.Vector3(p[0], p[1] - 0.07, p[2]), color, intensity: candela * LUMEN_SCALE * SPOT_SCALE, direction: spotDirection(l, new THREE.Vector3()) }
+    }
+    // a flush ceiling fixture radiates into the lower hemisphere only
+    const candela = l.kind === 'ceiling' ? lumens / (2 * Math.PI) : lumens / (4 * Math.PI)
+    return { kind: 'point', casts, position: new THREE.Vector3(p[0], p[1] + (l.kind === 'ceiling' ? -0.1 : 0), p[2]), color, intensity: candela * LUMEN_SCALE }
+  }
+
+  function createSlot(kind: SlotKind, casts: boolean, q: QualitySettings): Slot {
+    let light: SlotLight
+    if (kind === 'area') light = new THREE.RectAreaLight(0xffffff, 0, 1, 1)
+    else if (kind === 'spot') {
+      const spot = new THREE.SpotLight(0xffffff, 0, 14, SPOT_HALF, 0.55, 2)
+      slotGroup.add(spot.target)
+      light = spot
+    } else light = new THREE.PointLight(0xffffff, 0, 16, 2)
+    light.name = `lamp-slot:${kind}${casts ? ':shadow' : ''}`
+    if (casts && kind !== 'area') {
+      const l = light as THREE.PointLight | THREE.SpotLight
+      l.castShadow = true
+      setShadowMapSize(l, q.fixtureShadowMapSize)
+      l.shadow.bias = kind === 'point' ? -0.004 : -0.0015
+      l.shadow.normalBias = 0.03
+      l.shadow.radius = 2
+      l.shadow.camera.near = 0.08
+      l.shadow.camera.far = 14
+      l.shadow.camera.updateProjectionMatrix()
+      l.shadow.autoUpdate = false
+      l.shadow.needsUpdate = true
+    }
+    slotGroup.add(light)
+    return { light, casts }
+  }
+
+  function disposeSlots(which: (s: Slot) => boolean): void {
+    for (const kind of Object.keys(slots) as SlotKind[]) {
+      slots[kind] = slots[kind].filter((slot) => {
+        if (!which(slot)) return true
+        const l = slot.light as SlotLight & { shadow?: any }
+        if (l.shadow?.map) {
+          l.shadow.map.dispose()
+          l.shadow.map = null
+        }
+        if ((l as THREE.SpotLight).isSpotLight) (l as THREE.SpotLight).target.removeFromParent()
+        l.removeFromParent()
+        l.dispose()
+        return false
+      })
+    }
+  }
+
+  /** puts the lamps into the slots; whether a slot was added (the light set changed) */
+  function assignSlots(specs: LampSpec[], q: QualitySettings): boolean {
+    let added = false
+    const used = new Set<Slot>()
+    for (const spec of specs) {
+      let slot = slots[spec.kind].find((s) => s.casts === spec.casts && !used.has(s))
+      if (!slot) {
+        slot = createSlot(spec.kind, spec.casts, q)
+        slots[spec.kind].push(slot)
+        added = true
+      }
+      used.add(slot)
+      const light = slot.light
+      light.color.copy(spec.color)
+      light.intensity = spec.intensity
+      light.position.copy(spec.position)
+      if (spec.kind === 'spot') {
+        const spot = light as THREE.SpotLight
+        spot.target.position.copy(spec.position).add(spec.direction!)
+        spot.target.updateMatrixWorld(true)
+      } else if (spec.kind === 'area') {
+        const area = light as THREE.RectAreaLight
+        area.width = spec.width!
+        area.height = spec.depth!
+        area.rotation.set(-Math.PI / 2, spec.rotationY ?? 0, 0, 'YXZ')
+      }
+      light.updateMatrixWorld(true)
+    }
+    for (const kind of Object.keys(slots) as SlotKind[]) for (const slot of slots[kind]) if (!used.has(slot)) slot.light.intensity = 0
+    return added
+  }
+
+  /** draws the shadow maps again on the next frame (they are kept while nothing moves) */
+  function refreshShadows(): void {
+    if (sun.castShadow) sun.shadow.needsUpdate = true
+    for (const kind of Object.keys(slots) as SlotKind[])
+      for (const slot of slots[kind]) if (slot.casts) (slot.light as THREE.PointLight | THREE.SpotLight).shadow.needsUpdate = true
+  }
+
+  /** whether the scene changed; `structure` when a light was added (every lit material compiles again) */
+  function syncFixtures(doc: Doc, levelId: Id, q: QualitySettings): { changed: boolean; structure: boolean } {
     const list: Light[] = []
     for (const id in doc.lights) {
       const l = doc.lights[id]
@@ -963,14 +1046,6 @@ export function createLighting(ctx: EngineContext): LightingRig {
     }
     const globalOn = doc.render.lightsOn !== false
     const ceilingMm = doc.levels[levelId]?.height ?? doc.settings.wallHeight ?? 2700
-    const byPower = list.filter((l) => globalOn && l.on && l.lumens > 0).sort((a, b) => b.lumens - a.lumens)
-    const lit = new Set(byPower.slice(0, q.maxLights).map((l) => l.id))
-    const shadowed = new Set(
-      byPower
-        .filter((l) => l.kind !== 'strip' && l.kind !== 'area')
-        .slice(0, q.maxShadowLights)
-        .map((l) => l.id),
-    )
     const root = ctx.roots.lights
     // the engine may have emptied the root while rebuilding the scene
     let detached = false
@@ -980,23 +1055,39 @@ export function createLighting(ctx: EngineContext): LightingRig {
         break
       }
     }
-    const sig =
-      list
-        .map((l) => `${lightSignature(l)}|${lit.has(l.id) ? 1 : 0}${shadowed.has(l.id) ? 1 : 0}`)
-        .sort()
-        .join(';') + `#${globalOn ? 1 : 0}#${ceilingMm}#${q.fixtureShadowMapSize}`
-    if (sig === fixtureSig && !detached) return false
-    fixtureSig = sig
-    for (const g of fixtureGroups.values()) disposeFixtureGroup(g)
-    fixtureGroups.clear()
-    for (const l of list) {
-      const on = globalOn && l.on
-      const group = buildFixture(l, on, shadowed.has(l.id), lit.has(l.id), ceilingMm, q)
-      fixtureGroups.set(l.id, group)
-      root.add(group)
+    const sig = list.map(lightSignature).sort().join(';') + `#${globalOn ? 1 : 0}#${ceilingMm}`
+    let changed = false
+    if (sig !== fixtureSig || detached) {
+      fixtureSig = sig
+      changed = true
+      for (const g of fixtureGroups.values()) disposeFixtureGroup(g)
+      fixtureGroups.clear()
+      for (const l of list) {
+        const group = buildFixture(l, globalOn && l.on, ceilingMm)
+        fixtureGroups.set(l.id, group)
+        root.add(group)
+      }
+      root.updateMatrixWorld(true)
     }
-    root.updateMatrixWorld(true)
-    return true
+
+    // the live lamps: the brightest ones; under the baked light only a couple, for the furniture
+    const maxLive = shared.baked ? Math.min(q.maxLights, BAKED_LIGHTS.lamps) : q.maxLights
+    const maxShadows = shared.baked ? 0 : q.maxShadowLights
+    const byPower = list.filter((l) => globalOn && l.on && l.lumens > 0).sort((x, y) => y.lumens - x.lumens || (x.id < y.id ? -1 : 1))
+    let shadows = 0
+    const specs = byPower.slice(0, maxLive).map((l) => {
+      const casts = shadows < maxShadows && l.kind !== 'strip' && l.kind !== 'area'
+      if (casts) shadows++
+      return lampSpec(l, casts)
+    })
+    const lampSig = specs
+      .map((x) => `${x.kind}${x.casts ? '*' : ''}@${x.position.toArray().map((v) => v.toFixed(3))}/${x.color.getHexString()}/${x.intensity.toFixed(3)}/${x.direction?.toArray().map((v) => v.toFixed(3)) ?? ''}/${x.rotationY ?? ''}/${x.width ?? ''}x${x.depth ?? ''}`)
+      .join(';')
+    if (lampSig === lampsSig) return { changed, structure: false }
+    lampsSig = lampSig
+    const structure = assignSlots(specs, q)
+    if (specs.some((x) => x.casts)) refreshShadows()
+    return { changed: true, structure }
   }
 
   /**
@@ -1057,14 +1148,9 @@ export function createLighting(ctx: EngineContext): LightingRig {
           color: [c.r * nits, c.g * nits, c.b * nits],
         })
       } else if (l.kind === 'spot') {
-        const half = 38 * DEG
+        const half = SPOT_HALF
         const I = (lumens / (2 * Math.PI * (1 - Math.cos(half)))) * LUMEN_SCALE * SPOT_SCALE
-        let dir: [number, number, number] = [0, -1, 0]
-        if (l.rotation !== undefined && l.rotation !== null) {
-          const a = l.rotation * DEG
-          const tilt = 30 * DEG
-          dir = [Math.cos(a) * Math.sin(tilt), -Math.cos(tilt), Math.sin(a) * Math.sin(tilt)]
-        }
+        const dir = spotDirection(l, tmpV).toArray() as [number, number, number]
         out.points.push({
           pos: [p[0], p[1] - 0.07, p[2]],
           color: [c.r * I, c.g * I, c.b * I],
@@ -1101,7 +1187,6 @@ export function createLighting(ctx: EngineContext): LightingRig {
       sun.color.copy(s.color)
       changed = true
     }
-    sun.visible = s.intensity > 0
     changed = fitSunShadow(s, q) || changed
 
     let structure = false
@@ -1115,10 +1200,9 @@ export function createLighting(ctx: EngineContext): LightingRig {
     syncFill(r, s, usingHdri)
     if (fillSig !== `${hemi.intensity}|${hemi.color.getHex()}|${(portalGroup.children[0] as THREE.RectAreaLight | undefined)?.intensity ?? 0}`) changed = true
 
-    if (syncFixtures(doc, levelId, q)) {
-      structure = true
-      changed = true
-    }
+    const fixtures = syncFixtures(doc, levelId, q)
+    if (fixtures.changed) changed = true
+    if (fixtures.structure) structure = true
 
     if (changed) {
       shared.emitLightingChanged({ structure })
@@ -1164,27 +1248,24 @@ export function createLighting(ctx: EngineContext): LightingRig {
     // bounds may have moved and the lights root may have been emptied
     shadowSig = ''
     sync()
+    // something that casts may have moved
+    refreshShadows()
   })
   const unsubQuality = shared.onQualityChanged(() => {
+    // new shadow map sizes and light counts: the pool starts over
+    disposeSlots(() => true)
     shadowSig = ''
+    lampsSig = ''
     sync()
   })
-  shared.rasterLook = () => {
-    const env = scene.environmentIntensity
-    scene.environmentIntensity = env * ENV_RASTER
-    const lights = portalGroup.children as THREE.RectAreaLight[]
-    const saved = lights.map((l) => l.intensity)
-    for (const l of lights) l.intensity /= PORTAL_TRACED
-    return () => {
-      scene.environmentIntensity = env
-      lights.forEach((l, i) => (l.intensity = saved[i]))
-    }
-  }
-  const unsubTracing = shared.onPathTracingChanged(() => {
-    envSig = ''
+  const unsubBaked = shared.onBakedChanged(() => {
+    // the baked light holds the shadows: the lamps that cast them go (one recompile per switch)
+    if (shared.baked) disposeSlots((slot) => slot.casts)
+    lampsSig = ''
     sync()
   })
   shared.bakeLights = lightsForBake
+  shared.refreshShadows = refreshShadows
 
   return {
     sync,
@@ -1196,12 +1277,13 @@ export function createLighting(ctx: EngineContext): LightingRig {
       unsubUi()
       unsubScene()
       unsubQuality()
-      unsubTracing()
-      shared.rasterLook = null
+      unsubBaked()
       if (shared.bakeLights === lightsForBake) shared.bakeLights = null
+      if (shared.refreshShadows === refreshShadows) shared.refreshShadows = null
       hdriToken++
       for (const g of fixtureGroups.values()) disposeFixtureGroup(g)
       fixtureGroups.clear()
+      disposeSlots(() => true)
       for (const m of fixtureMaterials.values()) m.dispose()
       fixtureMaterials.clear()
       housingMaterial.dispose()
@@ -1225,8 +1307,12 @@ export function createLighting(ctx: EngineContext): LightingRig {
       if (hdriTexture) {
         if (scene.background === hdriTexture) scene.background = null
         if (scene.environment === hdriTexture) scene.environment = null
-        // cached per URL for the lifetime of the app: other engines may share it
         hdriTexture = null
+      }
+      // the decoded HDRIs stay only while an engine may use them
+      if (--liveRigs === 0) {
+        for (const p of hdriCache.values()) void p.then((t) => t.dispose(), () => undefined)
+        hdriCache.clear()
       }
     },
   }

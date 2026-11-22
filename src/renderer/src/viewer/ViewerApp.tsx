@@ -10,10 +10,8 @@ import {
   LoaderCircle,
   Map as MapIcon,
   Orbit,
-  Pause,
   RotateCcw,
   Scan,
-  Sparkles,
   SquareDashed,
   TriangleExclamationPoint,
   X,
@@ -60,9 +58,6 @@ addTranslations('en', {
   Среднее: 'Medium',
   Высокое: 'High',
   Ультра: 'Ultra',
-  Трассировка: 'Path tracing',
-  'Фотореалистичный кадр (трассировка путей)': 'Photoreal frame (path tracing)',
-  'Остановить трассировку': 'Stop path tracing',
   'Скопировать ссылку на этот вид': 'Copy a link to this view',
   'Ссылка скопирована': 'Link copied',
   'О плане': 'About the plan',
@@ -85,7 +80,6 @@ addTranslations('en', {
 
 const QUALITY: QualityPreset[] = ['low', 'medium', 'high', 'ultra']
 const QUALITY_NAMES: Record<QualityPreset, string> = { low: 'Низкое', medium: 'Среднее', high: 'Высокое', ultra: 'Ультра' }
-const PT_TARGET = 256
 
 
 interface Booted {
@@ -599,8 +593,6 @@ function Toolbar3D({ engine, cam, onCam, onToggleLight }: { engine: Engine3DHand
   const quality = useDoc((s) => s.doc.render.quality)
   const cutaway = useDoc((s) => s.doc.render.wallCutaway)
   const ceiling = useDoc((s) => s.doc.render.ceilingVisible)
-  const pt = useUi((s) => s.pathTracing)
-  const canTrace = engine.backend === 'webgpu'
 
   const toggle = (key: 'wallCutaway') =>
     viewerEdit(() =>
@@ -612,14 +604,6 @@ function Toolbar3D({ engine, cam, onCam, onToggleLight }: { engine: Engine3DHand
     viewerEdit(() => uiStore.getState().setQuality(q))
     engine.setQuality(q)
     rememberQuality(q)
-  }
-  const startPt = () => {
-    uiStore.getState().set({ pathTracing: { active: true, samples: 0, target: PT_TARGET } })
-    engine.startPathTracing(PT_TARGET)
-  }
-  const stopPt = () => {
-    engine.stopPathTracing()
-    uiStore.getState().set({ pathTracing: { ...uiStore.getState().pathTracing, active: false } })
   }
 
   return (
@@ -648,30 +632,6 @@ function Toolbar3D({ engine, cam, onCam, onToggleLight }: { engine: Engine3DHand
       </div>
       <div className="pointer-events-auto ml-auto flex items-center gap-1 rounded-lg border border-border bg-panel/90 p-1 shadow-pop backdrop-blur">
         <MiniSelect title={t('Качество')} value={quality} options={QUALITY.map((q) => ({ value: q, label: t(QUALITY_NAMES[q]) }))} onChange={setQuality} />
-        {canTrace &&
-          (pt.active ? (
-            <button
-              type="button"
-              title={t('Остановить трассировку')}
-              onClick={stopPt}
-              className="inline-flex h-6 items-center gap-1 rounded-md border border-border bg-panel-2 px-2 text-[11px] hover:bg-panel-3"
-            >
-              {pt.samples >= pt.target ? <Check size={12} className="text-accent" /> : <Pause size={12} />}
-              <span className="font-mono">
-                {Math.min(pt.samples, pt.target)}/{pt.target}
-              </span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              title={t('Фотореалистичный кадр (трассировка путей)')}
-              onClick={startPt}
-              className="inline-flex h-6 items-center gap-1 rounded-md border border-border bg-panel-2 px-2 text-[11px] hover:bg-panel-3"
-            >
-              <Sparkles size={12} />
-              {t('Трассировка')}
-            </button>
-          ))}
       </div>
     </div>
   )

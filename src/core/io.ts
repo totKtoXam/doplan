@@ -858,9 +858,8 @@ export function parseDoc(json: unknown): Doc {
     hdriRotation: num(r.hdriRotation, dr.hdriRotation),
     exposure: num(r.exposure, dr.exposure, 0, 100),
     toneMapping: oneOf(r.toneMapping, ['agx', 'aces', 'neutral'] as const, dr.toneMapping),
-    ao: bool(r.ao, dr.ao),
-    ssgi: bool(r.ssgi, dr.ssgi),
-    ssr: bool(r.ssr, dr.ssr),
+    // the old `ao` (on by default), `ssgi` and `ssr` are not read: the 3D view is light by default
+    occlusion: bool(r.occlusion, dr.occlusion),
     bloom: bool(r.bloom, dr.bloom),
     wallCutaway: bool(r.wallCutaway, dr.wallCutaway),
     ceilingVisible: bool(r.ceilingVisible, dr.ceilingVisible),

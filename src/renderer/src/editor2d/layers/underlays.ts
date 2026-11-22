@@ -10,12 +10,27 @@ interface Entry {
   token: number
 }
 
+/** a traced image is decoded to this many pixels at most (a phone photo fits; a big scan is resampled) */
+export const UNDERLAY_MAX_PIXELS = 16 * 2 ** 20
+
+/** the decoded size of a w × h picture: as is, or scaled down to UNDERLAY_MAX_PIXELS */
+export function underlayDecodeSize(w: number, h: number): { w: number; h: number } | null {
+  if (!(w > 0 && h > 0) || w * h <= UNDERLAY_MAX_PIXELS) return null
+  const k = Math.sqrt(UNDERLAY_MAX_PIXELS / (w * h))
+  return { w: Math.max(1, Math.floor(w * k)), h: Math.max(1, Math.floor(h * k)) }
+}
+
 async function loadImage(src: string): Promise<ImageBitmap | HTMLImageElement> {
   try {
     const res = await fetch(src)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const blob = await res.blob()
-    return await createImageBitmap(blob)
+    const full = await createImageBitmap(blob)
+    const fit = underlayDecodeSize(full.width, full.height)
+    if (!fit) return full
+    // the sprite scales by the document's widthPx/heightPx, so a smaller bitmap covers the same area
+    full.close()
+    return await createImageBitmap(blob, { resizeWidth: fit.w, resizeHeight: fit.h, resizeQuality: 'high' })
   } catch {
     const img = new Image()
     img.crossOrigin = 'anonymous'

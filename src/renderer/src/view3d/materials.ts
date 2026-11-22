@@ -8,7 +8,7 @@
  *  - cache keyed by material content + finish; unused entries are swept and their textures released
  *
  * Only standard physical-material properties and plain textures are used, so the same materials
- * feed the rasteriser, the path tracer and the GLB exporter.
+ * feed the rasteriser, the light bake and the GLB exporter.
  */
 import * as THREE from 'three'
 import type { Id, Material, SurfaceFinish, TilePattern } from '@core/types'
@@ -26,7 +26,7 @@ import {
   patternOffset,
   roughnessFromArm,
 } from './patterns'
-import { type SharedImage, type TexImage, TextureStore, applyTextureParams, makeTexture } from './textures'
+import { type SharedImage, type TexImage, TextureStore, applyTextureParams, makeTexture, placeholderTexture } from './textures'
 
 export interface PlainSpec {
   color: string
@@ -294,7 +294,13 @@ export function createMaterialLibrary(ctx: EngineContext): MaterialLibrary {
     } else if (maps) {
       // ── plain textured material ──
       const repeat: [number, number] = [1000 / sizeMm[0], 1000 / sizeMm[1]]
-      const bind = (src: string | undefined, srgb: boolean, apply: (t: THREE.Texture) => void): void => {
+      const rough = Math.round(m.roughness * 255)
+      const metal = Math.round(m.metalness * 255)
+      // A map that is still on its way gets a 1×1 stand-in with the same sampling (the colour, the
+      // flat normal, the material's own roughness and metalness): which maps a material has is part
+      // of its shader, so a map arriving later only swaps a texture instead of compiling the shader
+      // again (a long frame per map on a weak device).
+      const bind = (src: string | undefined, srgb: boolean, fill: [number, number, number], apply: (t: THREE.Texture) => void): void => {
         const shared = acquire(src)
         if (!shared) return
         const use = (img: TexImage | null): void => {
@@ -306,6 +312,9 @@ export function createMaterialLibrary(ctx: EngineContext): MaterialLibrary {
         }
         if (shared.image) use(shared.image)
         else {
+          const stand = placeholderTexture(fill, { srgb, repeat, anisotropy })
+          entry.textures.push(stand)
+          apply(stand)
           pendingApply++
           shared.ready.then((img) => {
             use(img)
@@ -313,33 +322,36 @@ export function createMaterialLibrary(ctx: EngineContext): MaterialLibrary {
           })
         }
       }
-      bind(maps.color, true, (t) => {
+      // the swatch colour, as sRGB bytes
+      const hex = def.custom ? 0xffffff : baseColor.getHex()
+      bind(maps.color, true, [(hex >> 16) & 255, (hex >> 8) & 255, hex & 255], (t) => {
         m.map = t
         setColor(mapTint)
       })
-      bind(maps.normal, false, (t) => {
+      bind(maps.normal, false, [128, 128, 255], (t) => {
         m.normalMap = t
       })
       if (maps.arm && !(maps.roughness && maps.ao)) {
-        bind(maps.arm, false, (t) => {
+        const withMetal = def.metalness > 0 || def.category === 'metal'
+        bind(maps.arm, false, [255, rough, withMetal ? metal : 0], (t) => {
           m.aoMap = t
           m.roughnessMap = t
           m.roughness = 1
-          if (def.metalness > 0 || def.category === 'metal') {
+          if (withMetal) {
             m.metalnessMap = t
             m.metalness = 1
           }
         })
       } else {
-        bind(maps.roughness, false, (t) => {
+        bind(maps.roughness, false, [rough, rough, rough], (t) => {
           m.roughnessMap = t
           m.roughness = 1
         })
-        bind(maps.ao, false, (t) => {
+        bind(maps.ao, false, [255, 255, 255], (t) => {
           m.aoMap = t
         })
       }
-      bind(maps.metalness, false, (t) => {
+      bind(maps.metalness, false, [metal, metal, metal], (t) => {
         m.metalnessMap = t
         m.metalness = 1
       })

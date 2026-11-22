@@ -33,8 +33,12 @@ export function VariantTabs() {
 
   const variants = useMemo(() => listVariants({ variants: variantsRec } as Doc), [variantsRec])
 
-  // furniture outside the rooms, per variant (depends on the shared geometry and each variant's furniture)
+  const transient = useDoc((s) => s.transientActive)
+  const lastStray = useRef<Map<Id, number> | null>(null)
+  // furniture outside the rooms, per variant (depends on the shared geometry and each variant's furniture);
+  // a drag keeps the last counts (the toast below waits for the commit too), so no frame of it pays
   const stray = useMemo(() => {
+    if (transient && lastStray.current) return lastStray.current
     const out = new Map<Id, number>()
     for (const v of variants) {
       try {
@@ -43,15 +47,15 @@ export function VariantTabs() {
         out.set(v.id, 0)
       }
     }
+    lastStray.current = out
     return out
     // `doc` changes on every edit; the result only depends on these
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [variants, items, lights, derived, catalog])
+  }, [variants, items, lights, derived, catalog, transient])
 
   // a geometry edit (the derived plan changed) that pushed furniture out of the rooms: say so.
   // Drag previews (transient) are skipped and compared against the last committed state, so one
   // gesture gives at most one toast; variants that just appeared (copy, undo of a delete) are not "grown".
-  const transient = useDoc((s) => s.transientActive)
   const prev = useRef<{ loadId: number; derived: unknown; counts: Map<Id, number> } | null>(null)
   useEffect(() => {
     if (transient) return

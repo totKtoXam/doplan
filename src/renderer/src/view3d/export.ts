@@ -15,15 +15,55 @@ import type { Asset, Material } from '@core/types'
 import type { EngineContext } from '@/contracts'
 import { type ItemsLayer, createGltfLoader } from './items'
 import type { MaterialLibraryEx } from './materials'
+import { drawWhenReady } from './pipelines'
 
 // ───────────────────────────── GLB export ─────────────────────────────
 
 export async function exportSceneGlb(objects: THREE.Object3D[]): Promise<ArrayBuffer> {
   const exporter = new GLTFExporter()
   for (const o of objects) o.updateMatrixWorld(true)
-  const result = await exporter.parseAsync(objects, { binary: true, onlyVisible: true, maxTextureSize: 2048 })
-  if (result instanceof ArrayBuffer) return result
-  return new TextEncoder().encode(JSON.stringify(result)).buffer as ArrayBuffer
+  const restore = drawableImages(objects)
+  try {
+    const result = await exporter.parseAsync(objects, { binary: true, onlyVisible: true, maxTextureSize: 2048 })
+    if (result instanceof ArrayBuffer) return result
+    return new TextEncoder().encode(JSON.stringify(result)).buffer as ArrayBuffer
+  } finally {
+    restore()
+  }
+}
+
+/**
+ * GLTFExporter draws maps onto a 2D canvas (and merges metalness + roughness there), which takes
+ * no raw pixel data: data textures — the 1×1 stand-ins of maps still loading or failed (materials.ts)
+ * — are handed over as canvases for the export. Returns the undo.
+ */
+function drawableImages(objects: THREE.Object3D[]): () => void {
+  const swapped = new Map<THREE.Texture, unknown>()
+  const visit = (t: unknown): void => {
+    const tex = t as THREE.Texture | null
+    if (!tex?.isTexture || swapped.has(tex)) return
+    const img = tex.image as { data?: ArrayLike<number>; width?: number; height?: number } | null
+    if (!img || !img.data || typeof img.width !== 'number' || typeof img.height !== 'number') return
+    const { data, width, height } = img
+    if (!(data instanceof Uint8Array || data instanceof Uint8ClampedArray) || data.length !== width * height * 4) return
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const c2 = canvas.getContext('2d')
+    if (!c2) return
+    c2.putImageData(new ImageData(new Uint8ClampedArray(data), width, height), 0, 0)
+    swapped.set(tex, tex.image)
+    tex.image = canvas
+  }
+  for (const root of objects)
+    root.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined
+      if (!m) return
+      for (const mat of Array.isArray(m) ? m : [m]) for (const v of Object.values(mat)) visit(v)
+    })
+  return () => {
+    for (const [tex, img] of swapped) tex.image = img
+  }
 }
 
 // ───────────────────────────── model conversion ─────────────────────────────
@@ -325,7 +365,8 @@ export async function imageToBlob(
   const src = document.createElement('canvas')
   src.width = image.width
   src.height = image.height
-  const sctx = src.getContext('2d')
+  // CPU-backed canvases: encoding a GPU canvas reads it back and waits behind the GPU process
+  const sctx = src.getContext('2d', { willReadFrequently: true })
   if (!sctx) throw new Error('2D canvas unavailable')
   if (opts.opaque) {
     const d = image.data
@@ -335,7 +376,7 @@ export async function imageToBlob(
   const dst = document.createElement('canvas')
   dst.width = width
   dst.height = height
-  const ctx = dst.getContext('2d')
+  const ctx = dst.getContext('2d', { willReadFrequently: true })
   if (!ctx) throw new Error('2D canvas unavailable')
   if (opts.background) {
     if (Array.isArray(opts.background)) {
@@ -453,18 +494,22 @@ export class ThumbRenderer {
     camera.updateMatrixWorld(true)
 
     const target = new THREE.RenderTarget(px * ss, px * ss, { type: THREE.HalfFloatType, depthBuffer: true })
-    const prevTarget = renderer.getRenderTarget()
-    const prevColor = renderer.getClearColor(new THREE.Color())
-    const prevAlpha = renderer.getClearAlpha()
-    try {
-      renderer.setRenderTarget(target)
-      renderer.setClearColor(0x000000, 0)
-      renderer.render(scene, camera)
-    } finally {
-      renderer.setRenderTarget(prevTarget)
-      renderer.setClearColor(prevColor, prevAlpha)
+    const draw = (): void => {
+      const prevTarget = renderer.getRenderTarget()
+      const prevColor = renderer.getClearColor(new THREE.Color())
+      const prevAlpha = renderer.getClearAlpha()
+      try {
+        renderer.setRenderTarget(target)
+        renderer.setClearColor(0x000000, 0)
+        renderer.render(scene, camera)
+      } finally {
+        renderer.setRenderTarget(prevTarget)
+        renderer.setClearColor(prevColor, prevAlpha)
+      }
     }
     try {
+      // a model met for the first time compiles its pipelines first (pipelines.ts)
+      await drawWhenReady(renderer, draw)
       const image = await readTarget(renderer, target, true, true)
       return await imageToBlob(image, px, px, { background: ['#f2f3f4', '#d8dadd'] })
     } finally {

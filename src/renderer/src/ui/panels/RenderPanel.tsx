@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Bookmark, Camera, Check, Download, Pencil, Play, Square, Trash, X } from 'lucide-react'
+import { Bookmark, Camera, Check, Download, Pencil, Trash, X } from 'lucide-react'
 import type { CameraBookmark, Hdri, QualityPreset, RenderSettings } from '@core/types'
 import { newId } from '@core'
 import { useDoc } from '@/store/document'
@@ -239,14 +239,12 @@ function HdriSection() {
 function EffectsSection() {
   const t = useT()
   const r = useDoc((s) => s.doc.render)
-  const flag = (key: 'ao' | 'ssgi' | 'ssr' | 'bloom' | 'wallCutaway' | 'ceilingVisible' | 'lightsOn', label: string) => (
+  const flag = (key: 'occlusion' | 'bloom' | 'wallCutaway' | 'ceilingVisible' | 'lightsOn', label: string) => (
     <Toggle checked={r[key]} onChange={(v) => setRender(label, { [key]: v } as Partial<RenderSettings>)} label={t(label)} />
   )
   return (
     <Section title={t('Эффекты и вид')} id="render.fx">
-      {flag('ao', 'Затенение углов (AO)')}
-      {flag('ssgi', 'Отражённый свет (SSGI)')}
-      {flag('ssr', 'Отражения (SSR)')}
+      {flag('occlusion', 'Затенение углов (AO)')}
       {flag('bloom', 'Свечение (bloom)')}
       {flag('lightsOn', 'Искусственный свет')}
       {flag('wallCutaway', 'Прятать стены перед камерой')}
@@ -354,11 +352,8 @@ function BookmarksSection() {
 function StillSection({ onBusy }: { onBusy(b: boolean): void }) {
   const t = useT()
   const ready = useEngineReady()
-  const pt = useUi((s) => s.pathTracing)
   const [res, setRes] = useState('fhd')
   const [custom, setCustom] = useState({ w: 1920, h: 1080 })
-  const [mode, setMode] = useState<'realtime' | 'pathtraced'>('pathtraced')
-  const [samples, setSamples] = useState(256)
   const [format, setFormat] = useState<'png' | 'jpeg'>('png')
   const [progress, setProgress] = useState<{ s: number; total: number } | null>(null)
   const [error, setError] = useState('')
@@ -387,14 +382,12 @@ function StillSection({ onBusy }: { onBusy(b: boolean): void }) {
     setResult(null)
     const ac = new AbortController()
     abort.current = ac
-    setProgress({ s: 0, total: mode === 'pathtraced' ? samples : 1 })
+    setProgress({ s: 0, total: 1 })
     onBusy(true)
     try {
       const blob = await e.renderStill({
         width: w,
         height: h,
-        mode,
-        samples: mode === 'pathtraced' ? samples : undefined,
         format,
         signal: ac.signal,
         onProgress: (s, total) => setProgress({ s, total }),
@@ -423,25 +416,6 @@ function StillSection({ onBusy }: { onBusy(b: boolean): void }) {
 
   return (
     <Section title={t('Изображение')} id="render.still">
-      <div className="flex items-center gap-1.5 rounded-md bg-[var(--bg)] p-1.5">
-        <span className="flex-1 text-[11px]">
-          {t('Прогрессивная трассировка в окне')}
-          {pt.active && (
-            <span className="ml-1 tabular-nums text-[var(--muted)]">
-              {pt.samples}/{pt.target}
-            </span>
-          )}
-        </span>
-        {pt.active ? (
-          <Button size="sm" icon={<Square className="size-3" />} onClick={() => handles.engine3d?.stopPathTracing()}>
-            {t('Стоп')}
-          </Button>
-        ) : (
-          <Button size="sm" icon={<Play className="size-3" />} disabled={!ready} onClick={() => handles.engine3d?.startPathTracing(samples)}>
-            {t('Старт')}
-          </Button>
-        )}
-      </div>
       <Row label={t('Разрешение')}>
         <Select value={res} onChange={setRes} options={[...RESOLUTIONS.map((r) => ({ value: r.id, label: r.label })), { value: 'custom', label: t('Своё…') }]} />
       </Row>
@@ -450,21 +424,6 @@ function StillSection({ onBusy }: { onBusy(b: boolean): void }) {
           <NumberInput label="W" value={custom.w} min={64} max={8192} step={16} round={1} suffix="px" onChange={(v) => setCustom((c) => ({ ...c, w: v }))} />
           <NumberInput label="H" value={custom.h} min={64} max={8192} step={16} round={1} suffix="px" onChange={(v) => setCustom((c) => ({ ...c, h: v }))} />
         </div>
-      )}
-      <Row label={t('Метод')}>
-        <Segmented<typeof mode>
-          value={mode}
-          onChange={setMode}
-          options={[
-            { value: 'realtime', label: t('Быстрый'), title: t('Текущая картинка 3D со сглаживанием') },
-            { value: 'pathtraced', label: t('Фотореализм'), title: t('Трассировка путей: точный свет и отражения, дольше') },
-          ]}
-        />
-      </Row>
-      {mode === 'pathtraced' && (
-        <Row label={t('Сэмплы')}>
-          <NumberInput value={samples} min={16} max={8192} step={16} round={1} onChange={(v) => setSamples(v)} />
-        </Row>
       )}
       <Row label={t('Формат')}>
         <Segmented<typeof format>

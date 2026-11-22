@@ -59,6 +59,16 @@ describe('light-map layout', () => {
     expect(fingerprint(meshes[0].positions)).not.toBe(fingerprint(floor(0, 0, 30, 31)))
   })
 
+  it('a surface cut into many triangles covers the same texels with the same points', () => {
+    const fine = new THREE.PlaneGeometry(2, 1, 12, 7).rotateX(-Math.PI / 2).translate(1, 0, 0.5).toNonIndexed()
+    const many = [{ key: 'f', positions: new Float32Array(fine.getAttribute('position').array) }]
+    const two = [{ key: 'f', positions: floor(0, 0, 2, 1) }]
+    const a = texelsOf(many, unwrap(many, { density: 10, pad: 1 }))
+    const b = texelsOf(two, unwrap(two, { density: 10, pad: 1 }))
+    expect(Array.from(a.index)).toEqual(Array.from(b.index))
+    for (let i = 0; i < a.points.length; i++) expect(a.points[i]).toBeCloseTo(b.points[i], 5)
+  })
+
   it('gives every covered texel the surface point and normal it stands for', () => {
     const meshes = [{ key: 'f', positions: floor(0, 0, 2, 1) }]
     const l = unwrap(meshes, { density: 10, pad: 1 })

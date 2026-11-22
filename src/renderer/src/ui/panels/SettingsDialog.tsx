@@ -127,7 +127,7 @@ export function SettingsDialog({ open, onClose }: DialogPropsBase) {
                 hint={
                   backendChanged
                     ? t('Изменение вступит в силу после перезапуска приложения.')
-                    : t('WebGPU быстрее и нужен для трассировки пути; WebGL — запасной вариант для старых видеокарт.')
+                    : t('WebGPU быстрее; WebGL — запасной вариант для старых видеокарт.')
                 }
               >
                 <Segmented<AppSettings['backend']>
